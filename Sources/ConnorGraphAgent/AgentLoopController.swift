@@ -132,6 +132,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     public var contextBuilder: AgentContextBuilder?
     public var environmentProvider: AnyAgentEnvironmentProvider?
     public var environmentStore: AgentEnvironmentSnapshotStore?
+    public var externalKnowledgeSources: [AnyAgentExternalKnowledgeSource]
     private let streamCompleteHandler: (@Sendable (Provider, AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error>)?
     private let automaticallySynthesizesProgressUpdates: Bool
     private let cancellationRegistry: AgentLoopCancellationRegistry
@@ -147,6 +148,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         contextBuilder: AgentContextBuilder? = nil,
         environmentProvider: AnyAgentEnvironmentProvider? = nil,
         environmentStore: AgentEnvironmentSnapshotStore? = nil,
+        externalKnowledgeSources: [AnyAgentExternalKnowledgeSource] = [],
         automaticallySynthesizesProgressUpdates: Bool,
         streamComplete: (@Sendable (Provider, AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error>)? = nil
     ) {
@@ -158,6 +160,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         self.contextBuilder = contextBuilder
         self.environmentProvider = environmentProvider
         self.environmentStore = environmentStore
+        self.externalKnowledgeSources = externalKnowledgeSources
         self.automaticallySynthesizesProgressUpdates = automaticallySynthesizesProgressUpdates
         self.streamCompleteHandler = streamComplete
         self.cancellationRegistry = AgentLoopCancellationRegistry()
@@ -173,6 +176,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         contextBuilder: AgentContextBuilder? = nil,
         environmentProvider: AnyAgentEnvironmentProvider? = nil,
         environmentStore: AgentEnvironmentSnapshotStore? = nil,
+        externalKnowledgeSources: [AnyAgentExternalKnowledgeSource] = [],
         streamComplete: @escaping @Sendable (Provider, AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error>
     ) {
         self.init(
@@ -184,6 +188,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             contextBuilder: contextBuilder,
             environmentProvider: environmentProvider,
             environmentStore: environmentStore,
+            externalKnowledgeSources: externalKnowledgeSources,
             automaticallySynthesizesProgressUpdates: false,
             streamComplete: streamComplete
         )
@@ -197,7 +202,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         eventRecorder: AgentEventRecorder = AgentEventRecorder(),
         contextBuilder: AgentContextBuilder? = nil,
         environmentProvider: AnyAgentEnvironmentProvider? = nil,
-        environmentStore: AgentEnvironmentSnapshotStore? = nil
+        environmentStore: AgentEnvironmentSnapshotStore? = nil,
+        externalKnowledgeSources: [AnyAgentExternalKnowledgeSource] = []
     ) {
         self.init(
             modelProvider: modelProvider,
@@ -208,6 +214,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             contextBuilder: contextBuilder,
             environmentProvider: environmentProvider,
             environmentStore: environmentStore,
+            externalKnowledgeSources: externalKnowledgeSources,
             automaticallySynthesizesProgressUpdates: false,
             streamComplete: nil
         )
@@ -271,18 +278,38 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         .compactMap { $0.value.first }
                         .sorted { $0.name < $1.name }
                 }()
+                let externalSourceDescriptors = usesPhasedRetrieval
+                    ? phasedExternalSourceDescriptors(availableToolDefinitions: availableToolDefinitions)
+                    : []
+                if usesPhasedRetrieval {
+                    let capabilities = AgentPromptCapabilityResolver.capabilities(for: Set(availableToolDefinitions.map(\.name)))
+                    phasedState.activeModuleIDs = AgentPromptModuleCatalog.activatedModuleIDs(requested: [], capabilities: capabilities)
+                }
                 let promptAssembly = await buildPromptAssembly(
                     for: request,
                     environmentSnapshot: environmentSnapshot,
                     availableToolDefinitions: availableToolDefinitions,
                     retrievalPlan: retrievalPlan,
-                    runtimeContext: usesPhasedRetrieval ? runtimeContext : nil
+                    runtimeContext: usesPhasedRetrieval ? runtimeContext : nil,
+                    activeModuleIDs: usesPhasedRetrieval ? phasedState.activeModuleIDs : nil
                 )
                 let promptProjector = AgentTranscriptProjector(projectionMode: configuration.promptProjectionMode)
                 let toolResultGate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
                     maxResultCharacters: configuration.maxToolResultBytes
                 ))
                 var modelRequest = promptProjector.project(promptAssembly, tools: availableToolDefinitions)
+                if usesPhasedRetrieval {
+                    let environmentText = environmentSnapshot.map(AgentEnvironmentPromptRenderer.render) ?? ""
+                    let sourceText = externalSourceDescriptors.map {
+                        "- \($0.id) [\($0.kind.rawValue)]: \($0.summary)"
+                    }.joined(separator: "\n")
+                    let dynamicRuntime = [
+                        runtimeContext.trustedPrompt,
+                        environmentText,
+                        "Available read-only external knowledge sources for Strategy Research:\n\(sourceText.isEmpty ? "- none" : sourceText)"
+                    ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")
+                    modelRequest.messages.insert(AgentModelMessage(role: .system, content: dynamicRuntime), at: min(1, modelRequest.messages.count))
+                }
                 var messages = modelRequest.messages
                 let evidencePolicy = AgentEvidenceValidationPolicy()
                 var memoryCitations: [String] = []
@@ -355,7 +382,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 phase: phasedState.phase,
                                 promptVersion: "agent-loop-phased-v1",
                                 stableToolBundleVersion: stableToolBundle,
-                                explicitBreakpointIndex: 1
+                                explicitBreakpointIndex: modelProvider.capabilities.supportsExplicitPromptCacheBreakpoints ? 1 : nil
                             )
                             modelRequest.auditContext.metadata["agent_loop_phase"] = phasedState.phase.rawValue
                         }
@@ -394,7 +421,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 modelRequest,
                                 promptAssembly: promptAssembly,
                                 iterationCount: iterationCount,
-                                maximumEstimatedTokens: recoveryTarget
+                                maximumEstimatedTokens: recoveryTarget,
+                                recoveryState: usesPhasedRetrieval ? phasedState.recoveryState : nil
                             )
                             guard AgentModelContextGuard().estimatedInputTokens(recoveredRequest) < originalEstimate else {
                                 throw error
@@ -707,21 +735,48 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 case AgentPhaseToolContract.commitStrategyName:
                                     do {
                                         let plan = try AgentStrategyPlanDecoder.decode(argumentsJSON: batchResult.call.argumentsJSON)
-                                        let memoryAvailable = availableToolDefinitions.contains { $0.name.hasPrefix("memory_os_") }
+                                        let availableToolNames = Set(availableToolDefinitions.map(\.name))
+                                        let memoryAvailable = availableToolNames.contains("memory_os_recent_context")
+                                            && availableToolNames.contains("memory_os_knowledge_context")
+                                        if !externalSourceDescriptors.isEmpty {
+                                            guard !phasedState.evidenceState.references.isEmpty else {
+                                                throw AgentToolError.invalidArguments("Strategy Research must use at least one available external source before commit")
+                                            }
+                                            let knownEvidence = Set(phasedState.evidenceState.references.flatMap { [$0.id, $0.uri].compactMap { $0 } })
+                                            guard !plan.evidenceReferences.isEmpty,
+                                                  plan.evidenceReferences.allSatisfy({ knownEvidence.contains($0.id) || $0.uri.map(knownEvidence.contains) == true }) else {
+                                                throw AgentToolError.invalidArguments("evidenceReferences must cite evidence read in the current Strategy Research phase")
+                                            }
+                                        }
+                                        let capabilities = AgentPromptCapabilityResolver.capabilities(for: availableToolNames)
+                                        let invalidModules = AgentPromptModuleCatalog.invalidRequestedModuleIDs(plan.requestedModuleIDs, capabilities: capabilities)
+                                        guard invalidModules.isEmpty else {
+                                            throw AgentToolError.invalidArguments("Unavailable Prompt Module IDs: \(invalidModules.map(\.rawValue).joined(separator: ", "))")
+                                        }
                                         try phasedState.commitStrategy(plan, memoryCapabilityAvailable: memoryAvailable)
-                                        let capabilities = AgentPromptCapabilityResolver.capabilities(for: Set(availableToolDefinitions.map(\.name)))
-                                        phasedState.activeModuleIDs = AgentPromptModuleCatalog.activatedModuleIDs(
-                                            requested: plan.requestedModuleIDs,
-                                            capabilities: capabilities
+                                        phasedState.evidenceState.merge(AgentEvidenceState(
+                                            conclusions: [plan.recommendedApproach],
+                                            references: plan.evidenceReferences,
+                                            conflicts: [],
+                                            unresolvedQuestions: plan.unresolvedQuestions
+                                        ))
+                                        promotePromptModuleIDs(
+                                            plan.requestedModuleIDs,
+                                            state: &phasedState,
+                                            capabilities: capabilities,
+                                            messages: &messages
                                         )
                                         messages.append(AgentModelMessage(role: .system, content: "Trusted phase transition: strategy committed. Current phase: \(phasedState.phase.rawValue). Execute the committed plan; perform only LLM-authored Memory queries during Memory Preparation."))
                                     } catch {
                                         messages.append(AgentModelMessage(role: .system, content: "Strategy commit was rejected by runtime validation: \(String(describing: error)). Correct the structured plan and call agent_commit_strategy again."))
                                     }
                                 case AgentPhaseToolContract.memoryQueryName:
+                                    if phasedState.phase == .finalSynthesis { phasedState.resumeMemoryPreparation() }
                                     phasedState.completeMemoryPreparation()
                                 case AgentPhaseToolContract.prepareFinalOutputName:
                                     phasedState.prepareFinalOutput()
+                                    requiredCurrentUserProfilePage = nil
+                                    isFinalResponseProfileComplete = true
                                 case AgentPhaseToolContract.activateModuleName:
                                     promotePromptModules(from: batchResult.call, state: &phasedState, availableToolDefinitions: availableToolDefinitions, messages: &messages)
                                 default:
@@ -791,6 +846,24 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     webEvidenceCitations.append(citation)
                                 }
                             }
+                            if usesPhasedRetrieval,
+                               batchResult.result.error == nil,
+                               batchResult.call.name == AgentPhaseToolContract.externalSearchBatchName
+                                    || batchResult.call.name == AgentPhaseToolContract.externalReadBatchName {
+                                let payload = batchResult.result.contentJSON ?? batchResult.result.contentText
+                                let added = phasedState.evidenceState.ingestExternalResearchPayload(payload)
+                                _ = phasedState.evidenceState.recordQuery(
+                                    "\(batchResult.call.name):\(batchResult.call.argumentsJSON)",
+                                    producedNewEvidence: added > 0
+                                )
+                                if added == 0 {
+                                    messages.append(AgentModelMessage(role: .system, content: "This research batch added no new evidence. Do not repeat or paraphrase it; refine the research target or commit the strategy."))
+                                }
+                                if phasedState.phase == .finalSynthesis {
+                                    phasedState.resumeResearch()
+                                    messages.append(AgentModelMessage(role: .system, content: "Final preferences triggered renewed Strategy Research. Reassess the approach and call agent_commit_strategy again before further task execution."))
+                                }
+                            }
                             if batchResult.result.error == nil {
                                 consecutiveToolResultErrors = 0
                             } else if batchResult.call.name != AgentCurrentTimePreflightPolicy.requiredToolName {
@@ -845,6 +918,18 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             remainingModelContentPartDemand = max(
                                 0,
                                 remainingModelContentPartDemand - modelContentPartTokenDemands[batchIndex]
+                            )
+                        }
+
+                        if usesPhasedRetrieval,
+                           calls.contains(where: {
+                               $0.name == AgentPhaseToolContract.externalSearchBatchName
+                                   || $0.name == AgentPhaseToolContract.externalReadBatchName
+                           }) {
+                            compressResearchToolHistory(
+                                messages: &messages,
+                                preservingToolCallIDs: Set(calls.map(\.id)),
+                                evidenceState: phasedState.evidenceState
                             )
                         }
 
@@ -984,7 +1069,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         _ request: AgentModelRequest,
         promptAssembly: AgentPromptAssembly,
         iterationCount: Int,
-        maximumEstimatedTokens: Int
+        maximumEstimatedTokens: Int,
+        recoveryState: AgentLoopRecoveryState? = nil
     ) async throws -> AgentModelRequest {
         let contextGuard = AgentModelContextGuard()
         if iterationCount == 1 {
@@ -1002,7 +1088,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 projectionMode: configuration.promptProjectionMode
             ).project(recoveredAssembly, tools: request.tools)
             recovered.temperature = request.temperature
-            return recovered
+            let dynamicRuntimeMessages = request.messages.filter {
+                $0.role == .system && $0.content.contains("Runtime Context (trusted, captured once for this user run)")
+            }
+            recovered.messages.insert(contentsOf: dynamicRuntimeMessages, at: min(1, recovered.messages.count))
+            return applyingRecoveryState(recoveryState, to: recovered)
         }
 
         var recovered = request
@@ -1040,7 +1130,40 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 estimator: contextGuard.estimator
             )
         }
+        return applyingRecoveryState(recoveryState, to: recovered)
+    }
+
+    private func applyingRecoveryState(
+        _ state: AgentLoopRecoveryState?,
+        to request: AgentModelRequest
+    ) -> AgentModelRequest {
+        guard let state else { return request }
+        var recovered = request
+        let marker = "## Agent Loop Recovery State"
+        recovered.messages.removeAll { $0.role == .system && $0.content.contains(marker) }
+        recovered.messages.insert(
+            AgentModelMessage(role: .system, content: "\(marker)\n\(state.trustedPrompt)"),
+            at: min(2, recovered.messages.count)
+        )
         return recovered
+    }
+
+    private func compressResearchToolHistory(
+        messages: inout [AgentModelMessage],
+        preservingToolCallIDs: Set<String>,
+        evidenceState: AgentEvidenceState
+    ) {
+        let researchNames = Set([AgentPhaseToolContract.externalSearchBatchName, AgentPhaseToolContract.externalReadBatchName])
+        let oldIndices = messages.indices.filter {
+            messages[$0].role == .tool
+                && researchNames.contains(messages[$0].name ?? "")
+                && !preservingToolCallIDs.contains(messages[$0].toolCallID ?? "")
+        }
+        for (offset, index) in oldIndices.enumerated() {
+            messages[index].content = offset == 0
+                ? evidenceState.compactPrompt
+                : "[Older research batch compressed into AgentEvidenceState.]"
+        }
     }
 
     private static func isProviderContextOverflow(_ error: Error) -> Bool {
@@ -1095,7 +1218,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         policy: AgentPolicyEngine,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> [AgentToolBatchResult] {
-        if configuration.allowParallelToolCalls && canExecuteInParallel(calls) {
+        if (configuration.allowParallelToolCalls || configuration.executionMode == .phasedRetrieval),
+           canExecuteInParallel(calls) {
             return try await executeToolBatchInParallel(
                 calls: calls,
                 request: request,
@@ -1232,6 +1356,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         context: AgentToolExecutionContext,
         run: AgentRun
     ) async throws -> AgentToolResult {
+        if call.name == AgentPhaseToolContract.activateModuleName {
+            let arguments = try AgentToolArguments(json: call.argumentsJSON)
+            let requested = (arguments.array("moduleIDs") ?? []).compactMap(\.stringValue).map { AgentPromptModuleID(rawValue: $0) }
+            let capabilities = AgentPromptCapabilityResolver.capabilities(for: Set(toolRegistry.definitions.map(\.name)))
+            let invalid = AgentPromptModuleCatalog.invalidRequestedModuleIDs(requested, capabilities: capabilities)
+            guard invalid.isEmpty else {
+                throw AgentToolError.invalidArguments("Unknown or unavailable Prompt Module IDs: \(invalid.map(\.rawValue).joined(separator: ", "))")
+            }
+        }
         if call.name == AgentPhaseToolContract.prepareFinalOutputName {
             guard toolRegistry.definition(named: AgentContinuityPreflightPolicy.currentUserProfileToolName) != nil else {
                 return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id, toolName: call.name, contentText: "Final Synthesis prepared; Profile capability is unavailable.", contentJSON: #"{"profileAvailable":false,"success":true}"#)
@@ -1242,6 +1375,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             var citations: [String] = []
             let paginationPolicy = AgentContinuityPreflightPolicy()
             while seenPages.insert(page).inserted {
+                guard seenPages.count <= configuration.maxToolIterations else {
+                    throw AgentLoopError.maxToolIterationsReached
+                }
                 let argumentsJSON = "{\"page\":\(page),\"pageSize\":500,\"purpose\":\"final_response\",\"view\":\"compressed\"}"
                 let nestedCall = AgentToolCall(id: "\(call.id)-profile-\(page)", runID: run.id, sessionID: run.sessionID, name: AgentContinuityPreflightPolicy.currentUserProfileToolName, argumentsJSON: argumentsJSON)
                 let result = try await toolRegistry.execute(nestedCall, context: context)
@@ -1262,85 +1398,137 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id, toolName: call.name, contentText: gated, contentJSON: json, citations: citations)
         }
         if call.name == AgentPhaseToolContract.externalSearchBatchName || call.name == AgentPhaseToolContract.externalReadBatchName {
-            guard let data = call.argumentsJSON.data(using: .utf8),
-                  let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let requests = object["requests"] as? [[String: Any]]
-            else { throw AgentToolError.invalidArguments("requests must be an array") }
-            let nestedCalls: [AgentToolCall] = requests.enumerated().compactMap { index, item in
-                guard let sourceID = item["sourceID"] as? String,
+            guard let data = call.argumentsJSON.data(using: .utf8) else { throw AgentToolError.invalidArguments("requests must be an array") }
+            let requests = try JSONDecoder().decode(AgentExternalBatchArguments.self, from: data).requests
+            let sourceByID = Dictionary(uniqueKeysWithValues: externalKnowledgeSources.map { ($0.id, $0) })
+            let isSearch = call.name == AgentPhaseToolContract.externalSearchBatchName
+            let nested = await AgentToolBatchScheduler(maximumConcurrency: 4).run(Array(requests.enumerated())) { indexed -> [AgentExternalKnowledgeItem] in
+                let (index, item) = indexed
+                let sourceID = item.sourceID
+                if let source = sourceByID[sourceID], source.isReadOnly {
+                    do {
+                        if isSearch {
+                            return try await source.search(.init(
+                                id: "\(call.id)-\(index)",
+                                sourceID: sourceID,
+                                query: item.query ?? "",
+                                cursor: item.cursor
+                            ))
+                        }
+                        let uri = item.uri ?? ""
+                        return [try await source.read(.init(
+                            id: "\(call.id)-\(index)",
+                            sourceID: sourceID,
+                            uri: uri,
+                            selection: item.selection
+                        ))]
+                    } catch {
+                        return [.init(id: "\(call.id)-\(index)", sourceID: sourceID, uri: item.uri, title: "Source failed", summary: "", error: String(describing: error))]
+                    }
+                }
+                guard let definition = toolRegistry.definition(named: sourceID),
                       let permission = toolRegistry.permission(named: sourceID),
-                      permission.isSafeForParallelNativeToolExecution else { return nil }
-                var arguments: [String: Any] = [:]
-                if let query = item["query"] as? String { arguments["query"] = query }
-                if let uri = item["uri"] as? String { arguments["url"] = uri; arguments["uri"] = uri }
-                if let cursor = item["cursor"] { arguments["cursor"] = cursor }
-                if let selection = item["selection"] { arguments["selection"] = selection }
-                guard let nestedData = try? JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys]),
-                      let nestedJSON = String(data: nestedData, encoding: .utf8) else { return nil }
-                return AgentToolCall(id: "\(call.id)-\(index)", runID: run.id, sessionID: run.sessionID, name: sourceID, argumentsJSON: nestedJSON)
+                      permission.isSafeForParallelNativeToolExecution else {
+                    return [.init(id: "\(call.id)-\(index)", sourceID: sourceID, uri: item.uri, title: "Unavailable source", summary: "", error: "Unknown or non-read-only source")]
+                }
+                let argumentsJSON = Self.externalToolArgumentsJSON(item: item, schema: definition.inputSchema, isSearch: isSearch)
+                let nestedCall = AgentToolCall(id: "\(call.id)-\(index)", runID: run.id, sessionID: run.sessionID, name: sourceID, argumentsJSON: argumentsJSON)
+                do {
+                    let result = try await toolRegistry.execute(nestedCall, context: context)
+                    return [.init(
+                        id: result.toolCallID,
+                        sourceID: sourceID,
+                        uri: result.citations.first ?? item.uri,
+                        title: sourceID,
+                        summary: result.contentText,
+                        selectedContent: isSearch ? nil : result.contentText,
+                        nextPage: Self.externalNextPage(from: result),
+                        error: result.error
+                    )]
+                } catch {
+                    return [.init(id: nestedCall.id, sourceID: sourceID, uri: item.uri, title: "Source failed", summary: "", error: String(describing: error))]
+                }
             }
-            let results = await AgentToolBatchScheduler(maximumConcurrency: 4).run(nestedCalls) { nestedCall -> AgentToolResult in
-                do { return try await toolRegistry.execute(nestedCall, context: context) }
-                catch { return errorToolResult(for: nestedCall, run: run, message: String(describing: error)) }
-            }
-            var seen = Set<String>()
-            let resultObjects: [[String: Any]] = results.compactMap { result in
-                let identity = result.citations.first ?? result.contentText
-                guard seen.insert(identity).inserted else { return nil }
-                var value: [String: Any] = [
-                    "id": result.toolCallID,
-                    "summary": String(result.contentText.prefix(call.name == AgentPhaseToolContract.externalSearchBatchName ? 2_000 : 8_000)),
-                    "citations": result.citations
-                ]
-                if let error = result.error { value["error"] = error }
+            let reduced = AgentToolBatchResultReducer(
+                perItemTokenLimit: isSearch ? 800 : 2_500,
+                batchTokenLimit: isSearch ? 4_000 : 10_000
+            ).reduce(nested.flatMap { $0 }, includeSelectedContent: !isSearch)
+            let resultObjects: [[String: Any]] = reduced.map { item in
+                var value: [String: Any] = ["id": item.id, "sourceID": item.sourceID, "title": item.title, "summary": item.summary]
+                if let uri = item.uri { value["uri"] = uri }
+                if let content = item.selectedContent { value["selectedContent"] = content }
+                if let nextPage = item.nextPage { value["nextPage"] = nextPage }
+                if let error = item.error { value["error"] = error }
                 return value
             }
             let encoded = try JSONSerialization.data(withJSONObject: ["results": resultObjects], options: [.sortedKeys])
             let json = String(data: encoded, encoding: .utf8) ?? "{}"
-            return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id, toolName: call.name, contentText: json, contentJSON: json, citations: results.flatMap(\.citations))
+            return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id, toolName: call.name, contentText: json, contentJSON: json, citations: reduced.compactMap(\.uri))
         }
         if call.name == AgentPhaseToolContract.memoryQueryName {
             let arguments = try AgentToolArguments(json: call.argumentsJSON)
             let query = arguments.string("query") ?? ""
             let pageSize = min(100, max(1, arguments.int("pageSize") ?? 20))
-            let page = max(1, arguments.int("page") ?? 1)
-            let calls = ["memory_os_recent_context", "memory_os_knowledge_context"].enumerated().map { index, name in
+            let suppliedCursor = arguments.string("page")
+            let cursor: AgentMemoryToolCursor
+            if let suppliedCursor {
+                guard let decoded = AgentMemoryToolCursor.decode(suppliedCursor) else {
+                    throw AgentToolError.invalidArguments("page must be the exact opaque nextPage token returned by memory_query")
+                }
+                cursor = decoded
+            } else {
+                cursor = .initial
+            }
+            let pendingPartitions: [(AgentMemoryPartition, (String, Int)?)] = [
+                (AgentMemoryPartition.recent, cursor.recentPage.map { ("memory_os_recent_context", $0) }),
+                (AgentMemoryPartition.longTerm, cursor.longTermPage.map { ("memory_os_knowledge_context", $0) })
+            ]
+            let partitionCalls: [(AgentMemoryPartition, AgentToolCall)] = pendingPartitions.enumerated().compactMap { index, entry in
+                let (partition, nested) = entry
+                guard let (name, page) = nested else { return nil }
                 let json = "{\"page\":\(page),\"pageSize\":\(pageSize),\"query\":\(Self.jsonStringLiteral(query))}"
-                return AgentToolCall(id: "\(call.id)-\(index)", runID: run.id, sessionID: run.sessionID, name: name, argumentsJSON: json)
+                return (partition, AgentToolCall(id: "\(call.id)-\(index)", runID: run.id, sessionID: run.sessionID, name: name, argumentsJSON: json))
             }
-            let results = await AgentToolBatchScheduler(maximumConcurrency: 2).run(calls) { nestedCall -> AgentToolResult in
-                do { return try await toolRegistry.execute(nestedCall, context: context) }
-                catch { return errorToolResult(for: nestedCall, run: run, message: String(describing: error)) }
+            let partitionResults = await AgentToolBatchScheduler(maximumConcurrency: 2).run(partitionCalls) { entry -> (AgentMemoryPartition, AgentToolResult) in
+                let (partition, nestedCall) = entry
+                do { return (partition, try await toolRegistry.execute(nestedCall, context: context)) }
+                catch { return (partition, errorToolResult(for: nestedCall, run: run, message: String(describing: error))) }
             }
-            let payloads = results.map { result -> [String: Any] in
+            let payloads = partitionResults.map { partition, result -> (AgentMemoryPartition, [String: Any]) in
                 guard let json = result.contentJSON,
                       let data = json.data(using: .utf8),
                       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                else { return ["content": result.contentText, "error": result.error as Any] }
-                return object
+                else { return (partition, ["content": result.contentText, "error": result.error as Any]) }
+                return (partition, object)
             }
             var seen = Set<String>()
             let mergedRecords = payloads
-                .flatMap { $0["records"] as? [[String: Any]] ?? [] }
+                .flatMap { $0.1["records"] as? [[String: Any]] ?? [] }
                 .sorted { lhs, rhs in
                     let left = Self.memoryRecordEventTime(lhs)
                     let right = Self.memoryRecordEventTime(rhs)
                     return left == right ? Self.memoryRecordIdentity(lhs) < Self.memoryRecordIdentity(rhs) : left > right
                 }
                 .filter { seen.insert(Self.memoryRecordIdentity($0)).inserted }
-            let hasNextPage = payloads.contains { payload in
-                guard let next = payload["nextPage"] else { return false }
-                return !(next is NSNull)
+            var nextCursor = AgentMemoryToolCursor(recentPage: nil, longTermPage: nil)
+            for (partition, payload) in payloads {
+                let next = Self.integerNextPage(payload["nextPage"])
+                switch partition {
+                case .recent: nextCursor.recentPage = next
+                case .longTerm: nextCursor.longTermPage = next
+                }
             }
+            let nextPage = nextCursor.isComplete ? nil : nextCursor.encoded
             let data = try JSONSerialization.data(withJSONObject: [
                 "query": query,
-                "page": page,
+                "page": suppliedCursor ?? "initial",
                 "pageSize": pageSize,
                 "records": Array(mergedRecords.prefix(pageSize)),
-                "nextPage": hasNextPage ? page + 1 : NSNull()
+                "nextPage": nextPage ?? NSNull(),
+                "errors": partitionResults.compactMap { $0.1.error }
             ], options: [.sortedKeys])
             let json = String(data: data, encoding: .utf8) ?? "{}"
-            return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id, toolName: call.name, contentText: json, contentJSON: json, citations: results.flatMap(\.citations))
+            return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id, toolName: call.name, contentText: json, contentJSON: json, citations: partitionResults.flatMap { $0.1.citations })
         }
         return AgentToolResult(
             runID: run.id,
@@ -1358,6 +1546,41 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         return String(encoded.dropFirst().dropLast())
     }
 
+    private static func externalToolArgumentsJSON(
+        item: AgentExternalBatchItem,
+        schema: AgentToolInputSchema,
+        isSearch: Bool
+    ) -> String {
+        let accepted: Set<String>
+        switch schema {
+        case .object(let properties, _), .closedObject(let properties, _): accepted = Set(properties.keys)
+        default: accepted = []
+        }
+        var arguments: [String: Any] = [:]
+        if isSearch, let query = item.query {
+            for key in ["query", "searchQuery", "text"] where accepted.contains(key) { arguments[key] = query; break }
+        }
+        if !isSearch, let uri = item.uri {
+            for key in ["url", "uri", "resourceURI", "id"] where accepted.contains(key) { arguments[key] = uri; break }
+        }
+        if let cursor = item.cursor {
+            for key in ["cursor", "page"] where accepted.contains(key) { arguments[key] = cursor; break }
+        }
+        if let selection = item.selection, accepted.contains("selection") { arguments["selection"] = selection }
+        guard let data = try? JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys]) else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func externalNextPage(from result: AgentToolResult) -> String? {
+        guard let json = result.contentJSON,
+              let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let next = object["nextPage"], !(next is NSNull) else { return nil }
+        if let string = next as? String { return string }
+        if let number = next as? NSNumber { return number.stringValue }
+        return nil
+    }
+
     private static func memoryRecordIdentity(_ record: [String: Any]) -> String {
         for key in ["recordID", "recordId", "id", "uri", "citation"] {
             if let value = record[key] as? String, !value.isEmpty { return value }
@@ -1371,6 +1594,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             if let value = record[key] as? String, let date = AgentToolTimestampParser.parse(value) { return date }
         }
         return .distantPast
+    }
+
+    private static func integerNextPage(_ value: Any?) -> Int? {
+        guard let value, !(value is NSNull) else { return nil }
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber { return number.intValue }
+        if let string = value as? String { return Int(string) }
+        return nil
     }
 
     private func executeToolWithApprovalIfNeeded(
@@ -1437,9 +1668,43 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         case .taskExecution:
             names = Set(definitions.map(\.name)).subtracting([AgentPhaseToolContract.commitStrategyName])
         case .finalSynthesis:
-            names = Set(definitions.map(\.name)).subtracting([AgentPhaseToolContract.commitStrategyName])
+            names = Set(definitions.map(\.name))
         }
         return definitions.filter { names.contains($0.name) }
+    }
+
+    private func phasedExternalSourceDescriptors(
+        availableToolDefinitions: [AgentToolDefinition]
+    ) -> [AgentExternalKnowledgeSourceDescriptor] {
+        var byID = Dictionary(uniqueKeysWithValues: externalKnowledgeSources.filter(\.isReadOnly).map {
+            ($0.id, AgentExternalKnowledgeSourceDescriptor(id: $0.id, kind: $0.kind, summary: "Registered read-only knowledge provider"))
+        })
+        for definition in availableToolDefinitions {
+            guard let permission = toolRegistry.permission(named: definition.name),
+                  permission.isSafeForParallelNativeToolExecution,
+                  Self.isExternalKnowledgeToolName(definition.name) else { continue }
+            byID[definition.name] = AgentExternalKnowledgeSourceDescriptor(
+                id: definition.name,
+                kind: Self.externalKnowledgeKind(toolName: definition.name),
+                summary: definition.description
+            )
+        }
+        return byID.values.sorted { $0.id < $1.id }
+    }
+
+    private static func isExternalKnowledgeToolName(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        guard !lower.hasPrefix("memory_os_") else { return false }
+        return lower.contains("web") || lower.contains("mcp") || lower.hasPrefix("cloud_kb_")
+            || lower.contains("knowledge") || lower == "browser_fetch"
+    }
+
+    private static func externalKnowledgeKind(toolName: String) -> AgentExternalKnowledgeSourceKind {
+        let lower = toolName.lowercased()
+        if lower.contains("mcp") { return .mcp }
+        if lower.hasPrefix("cloud_kb_") || lower.contains("knowledge") { return .knowledgeBase }
+        if lower.contains("web") || lower == "browser_fetch" { return .web }
+        return .otherReadOnly
     }
 
     private func shouldConsiderAutomaticProgressUpdate(for calls: [AgentToolCall]) -> Bool {
@@ -1534,20 +1799,27 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         environmentSnapshot: AgentEnvironmentSnapshot?,
         availableToolDefinitions: [AgentToolDefinition],
         retrievalPlan: AgentRunRetrievalPlan,
-        runtimeContext: AgentRuntimeContext? = nil
+        runtimeContext: AgentRuntimeContext? = nil,
+        activeModuleIDs: [AgentPromptModuleID]? = nil
     ) async -> AgentPromptAssembly {
         var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
-        var instructionDocument = AgentInstructionCapabilityProjector().projectedDocument(
-            assembly.instruction.text,
-            availableToolNames: Set(availableToolDefinitions.map(\.name))
-        )
+        let availableToolNames = Set(availableToolDefinitions.map(\.name))
+        var instructionDocument = if let activeModuleIDs {
+            AgentInstructionCapabilityProjector().phasedDocument(
+                assembly.instruction.text,
+                availableToolNames: availableToolNames,
+                activeModuleIDs: activeModuleIDs
+            )
+        } else {
+            AgentInstructionCapabilityProjector().projectedDocument(
+                assembly.instruction.text,
+                availableToolNames: availableToolNames
+            )
+        }
         instructionDocument.append(AgentPromptModule(
             id: .runtimeRetrievalPlan,
             content: runtimeContext == nil ? retrievalPlan.instruction : Self.phasedRetrievalInstruction
         ))
-        if let runtimeContext {
-            instructionDocument.append(AgentPromptModule(id: "runtime_current_time", content: runtimeContext.trustedPrompt))
-        }
         let progressUpdateToolIsAvailable = availableToolDefinitions.contains {
             $0.name == ShareProgressUpdateTool.toolName
         }
@@ -1561,7 +1833,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         if !appendix.isEmpty {
             instructionDocument.append(AgentPromptModule(id: .instructionAppendix, content: appendix))
         }
-        if let environmentSnapshot {
+        if runtimeContext == nil, let environmentSnapshot {
             let environmentSection = AgentEnvironmentPromptRenderer.render(environmentSnapshot)
             if !environmentSection.isEmpty {
                 instructionDocument.append(AgentPromptModule(
@@ -1638,10 +1910,21 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
               let rawIDs = object["moduleIDs"] as? [String]
         else { return }
         let capabilities = AgentPromptCapabilityResolver.capabilities(for: Set(availableToolDefinitions.map(\.name)))
-        let resolved = AgentPromptModuleCatalog.activatedModuleIDs(
-            requested: rawIDs.map { AgentPromptModuleID(rawValue: $0) },
-            capabilities: capabilities
+        promotePromptModuleIDs(
+            rawIDs.map { AgentPromptModuleID(rawValue: $0) },
+            state: &state,
+            capabilities: capabilities,
+            messages: &messages
         )
+    }
+
+    private func promotePromptModuleIDs(
+        _ requested: [AgentPromptModuleID],
+        state: inout AgentPhasedLoopState,
+        capabilities: Set<AgentPromptCapability>,
+        messages: inout [AgentModelMessage]
+    ) {
+        let resolved = AgentPromptModuleCatalog.activatedModuleIDs(requested: requested, capabilities: capabilities)
         let additions = resolved.filter { !state.activeModuleIDs.contains($0) }
         guard !additions.isEmpty else { return }
         state.activeModuleIDs.append(contentsOf: additions)
@@ -1687,6 +1970,37 @@ public enum AgentLoopError: Error, Sendable, Equatable {
 private struct AgentToolBatchResult: Sendable, Equatable {
     var call: AgentToolCall
     var result: AgentToolResult
+}
+
+private struct AgentMemoryToolCursor: Codable, Sendable, Equatable {
+    var recentPage: Int?
+    var longTermPage: Int?
+
+    static let initial = AgentMemoryToolCursor(recentPage: 1, longTermPage: 1)
+    var isComplete: Bool { recentPage == nil && longTermPage == nil }
+
+    var encoded: String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(self))?.base64EncodedString() ?? ""
+    }
+
+    static func decode(_ value: String) -> Self? {
+        guard let data = Data(base64Encoded: value) else { return nil }
+        return try? JSONDecoder().decode(Self.self, from: data)
+    }
+}
+
+private struct AgentExternalBatchArguments: Codable, Sendable, Equatable {
+    var requests: [AgentExternalBatchItem]
+}
+
+private struct AgentExternalBatchItem: Codable, Sendable, Equatable {
+    var sourceID: String
+    var query: String?
+    var uri: String?
+    var cursor: String?
+    var selection: String?
 }
 
 private extension AgentPermissionCapability {
