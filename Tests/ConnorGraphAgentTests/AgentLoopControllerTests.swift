@@ -1676,6 +1676,7 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(calendar.contains("## Calendar Retrieval Rules"))
     #expect(calendar.contains("## Native Personal Source Tools"))
     #expect(calendar.contains("## Calendar Tool Workflow"))
+    #expect(!calendar.contains("## Programming and Precision Work"))
     #expect(!calendar.contains("## Mail Retrieval Rules"))
     #expect(!calendar.contains("## Mail Tool Workflow"))
     #expect(!calendar.contains("## RSS Tool Workflow"))
@@ -1688,7 +1689,11 @@ private struct InstructionPromotionTool: AgentTool {
     )
     #expect(browserHistory.contains("## Browser History Tool Workflow"))
     #expect(browserHistory.contains("## Native Source Evidence Rules"))
+    #expect(!browserHistory.contains("## Programming and Precision Work"))
     #expect(!browserHistory.contains("## Web Research Rules"))
+
+    let noTools = projector.project(instruction, availableToolNames: [])
+    #expect(!noTools.contains("## Programming and Precision Work"))
 }
 
 @Test func agentLoopAttemptsCurrentTimeFirstAndContinuesAfterFailure() async throws {

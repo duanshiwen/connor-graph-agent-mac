@@ -156,7 +156,7 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
     private static let environmentSignals = ["天气", "位置", "地点", "气温", "下雨", "weather", "location", "temperature", "rain"]
     private static let multiStepSignals = ["系统地", "完整", "全面", "逐步", "多步骤", "重构", "实现", "调研", "systematically", "comprehensive", "multi-step", "multi step", "step by step", "refactor", "implement", "research"]
     private static let sessionSignals = ["会话状态", "停止", "取消", "继续运行", "session status", "cancel", "stop", "continue"]
-    private static let localToolNames: Set<String> = ["Read", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Bash"]
+    fileprivate static let localToolNames: Set<String> = ["Read", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Bash"]
 }
 
 public struct AgentInstructionCapabilityProjector: Sendable, Equatable {
@@ -176,7 +176,13 @@ public struct AgentInstructionCapabilityProjector: Sendable, Equatable {
         let hasCloudKnowledge = availableToolNames.contains(where: { $0.hasPrefix("cloud_kb_") })
         let hasWeb = availableToolNames.contains(where: { $0.hasPrefix("web_") || $0 == "browser_fetch" })
         let hasImages = availableToolNames.contains(where: { ["generate_image", "edit_image", "image_search", "present_image"].contains($0) })
+        let hasWorkspaceTools = availableToolNames.contains(where: {
+            AgentRunTokenPolicy.localToolNames.contains($0)
+                || $0.hasPrefix("local_")
+                || $0.hasPrefix("workspace_")
+        })
         let omittedHeadings = Set([
+            hasWorkspaceTools ? nil : "Programming and Precision Work",
             hasCurrentTime ? nil : "Current Time Retrieval Rules",
             hasMemory ? nil : "Memory OS Architecture",
             hasMemory ? nil : "Memory Retrieval Rules",
