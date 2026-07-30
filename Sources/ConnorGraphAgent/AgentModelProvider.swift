@@ -250,6 +250,11 @@ public enum CurrentModelMediaCapabilityGate {
     }
 }
 
+public enum AgentModelToolChoice: String, Sendable, Equatable {
+    case auto
+    case required
+}
+
 public struct AgentModelRequest: Sendable, Equatable {
     public var messages: [AgentModelMessage]
     public var tools: [AgentToolDefinition]
@@ -258,6 +263,7 @@ public struct AgentModelRequest: Sendable, Equatable {
     public var instructionPlacement: AgentInstructionPlacement
     public var auditContext: AgentLLMRequestAuditContext
     public var promptCacheContext: AgentPromptCacheContext?
+    public var toolChoice: AgentModelToolChoice
 
     public init(
         messages: [AgentModelMessage],
@@ -266,7 +272,8 @@ public struct AgentModelRequest: Sendable, Equatable {
         promptDiagnostics: AgentPromptDiagnostics? = nil,
         instructionPlacement: AgentInstructionPlacement = .systemMessage,
         auditContext: AgentLLMRequestAuditContext = .init(),
-        promptCacheContext: AgentPromptCacheContext? = nil
+        promptCacheContext: AgentPromptCacheContext? = nil,
+        toolChoice: AgentModelToolChoice = .auto
     ) {
         self.messages = messages
         self.tools = tools
@@ -275,6 +282,7 @@ public struct AgentModelRequest: Sendable, Equatable {
         self.instructionPlacement = instructionPlacement
         self.auditContext = auditContext
         self.promptCacheContext = promptCacheContext
+        self.toolChoice = toolChoice
     }
 }
 

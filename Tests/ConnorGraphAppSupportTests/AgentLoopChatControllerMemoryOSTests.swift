@@ -11,7 +11,8 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
     let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
-        AgentModelResponse(text: "Memory OS assistant answer", usage: AgentModelUsage(promptTokens: 10, completionTokens: 5))
+        let final = AgentModelResponse(text: "Memory OS assistant answer", usage: AgentModelUsage(promptTokens: 10, completionTokens: 5))
+        return appSupportAutomaticPhaseResponse(for: request, nextResponse: final) ?? final
     }
 }
 

@@ -17,10 +17,11 @@ private actor NativeSessionFinalAnswerProvider: AgentModelProvider {
     )
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
-        AgentModelResponse(
+        let final = AgentModelResponse(
             text: "Connor-owned assistant response",
             usage: AgentModelUsage(promptTokens: 8, completionTokens: 4)
         )
+        return appSupportAutomaticPhaseResponse(for: request, nextResponse: final) ?? final
     }
 }
 
@@ -36,11 +37,15 @@ private actor NativeSessionPromptRecordingProvider: AgentModelProvider {
     private var requests: [AgentModelRequest] = []
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
-        requests.append(request)
-        return AgentModelResponse(
+        let final = AgentModelResponse(
             text: "Recorded response",
             usage: AgentModelUsage(promptTokens: 8, completionTokens: 4)
         )
+        if let automatic = appSupportAutomaticPhaseResponse(for: request, nextResponse: final) {
+            return automatic
+        }
+        requests.append(request)
+        return final
     }
 
     func lastRequest() -> AgentModelRequest? { requests.last }
@@ -58,19 +63,24 @@ private actor NativeSessionTwoTurnToolProvider: AgentModelProvider {
     private var requests: [AgentModelRequest] = []
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
-        requests.append(request)
         let content = request.messages.map(\.content).joined(separator: "\n")
+        let nextResponse: AgentModelResponse
         if content.contains("SECOND_USER_TURN") {
-            return AgentModelResponse(text: "SECOND_ASSISTANT_FINAL")
+            nextResponse = AgentModelResponse(text: "SECOND_ASSISTANT_FINAL")
+        } else if request.messages.contains(where: { $0.role == .tool && $0.name == "continuity_probe" }) {
+            nextResponse = AgentModelResponse(text: "FIRST_ASSISTANT_FINAL")
+        } else {
+            nextResponse = AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(id: "first-turn-tool-call", name: "continuity_probe", argumentsJSON: #"{}"#)],
+                finishReason: .toolCalls
+            )
         }
-        if request.messages.contains(where: { $0.role == .tool }) {
-            return AgentModelResponse(text: "FIRST_ASSISTANT_FINAL")
+        if let automatic = appSupportAutomaticPhaseResponse(for: request, nextResponse: nextResponse) {
+            return automatic
         }
-        return AgentModelResponse(
-            text: nil,
-            toolCalls: [AgentToolCall(id: "first-turn-tool-call", name: "continuity_probe", argumentsJSON: #"{}"#)],
-            finishReason: .toolCalls
-        )
+        requests.append(request)
+        return nextResponse
     }
 
     func recordedRequests() -> [AgentModelRequest] { requests }
@@ -128,7 +138,10 @@ private actor NativeSessionScriptedProvider: AgentModelProvider {
     }
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
-        responses.removeFirst()
+        if let automatic = appSupportAutomaticPhaseResponse(for: request, nextResponse: responses.first) {
+            return automatic
+        }
+        return responses.removeFirst()
     }
 }
 
@@ -402,8 +415,12 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(!secondTurnContent.contains("FIRST_TURN_TOOL_RESULT_MUST_NOT_CROSS_ROUNDS"))
     #expect(!secondTurnContent.contains("first-turn-tool-call"))
     #expect(!secondTurnContent.contains("LEGACY_SYSTEM_MUST_NOT_CROSS_ROUNDS"))
-    #expect(!secondTurnRequest.messages.contains { $0.role == .tool })
-    #expect(!secondTurnRequest.messages.contains { !($0.toolCalls ?? []).isEmpty })
+    #expect(!secondTurnRequest.messages.contains {
+        $0.role == .tool && $0.name == "continuity_probe"
+    })
+    #expect(!secondTurnRequest.messages.contains {
+        ($0.toolCalls ?? []).contains { $0.name == "continuity_probe" }
+    })
 
     let persisted = try #require(try repository.loadSession(id: session.id))
     #expect(persisted.messages.filter { $0.role == .user }.map(\.content) == ["FIRST_USER_TURN", "SECOND_USER_TURN"])
@@ -546,6 +563,14 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(recoveryContent.contains("This must be durable even if the backend fails"))
     #expect(recoveryContent.contains("已完成边界：本轮用户消息已保存"))
     #expect(recoveryContent.contains("Continue from the saved boundary"))
-    #expect(!recoveryRequest.messages.contains { $0.role == .tool })
-    #expect(!recoveryRequest.messages.contains { !(($0.toolCalls ?? []).isEmpty) })
+    let phaseToolNames = Set([
+        AgentPhaseToolContract.commitStrategyName,
+        AgentPhaseToolContract.prepareFinalOutputName
+    ])
+    #expect(!recoveryRequest.messages.contains {
+        $0.role == .tool && !phaseToolNames.contains($0.name ?? "")
+    })
+    #expect(!recoveryRequest.messages.contains {
+        ($0.toolCalls ?? []).contains { !phaseToolNames.contains($0.name) }
+    })
 }

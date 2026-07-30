@@ -4,12 +4,10 @@ import ConnorGraphSearch
 import os.log
 
 public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
-    public var executionMode: AgentLoopExecutionMode
     public var maxToolIterations: Int
     public var maxToolCallsPerIteration: Int
     public var maxRunDurationSeconds: Int
     public var maxToolResultBytes: Int
-    public var allowParallelToolCalls: Bool
     public var maxConsecutiveToolResultErrors: Int
     public var stopAfterTurnWhenBudgetExceeded: Bool
     public var preflightMode: AgentPreflightMode
@@ -23,12 +21,10 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var budget: AgentBudgetConfiguration
 
     public init(
-        executionMode: AgentLoopExecutionMode = .legacy,
         maxToolIterations: Int = 24,
         maxToolCallsPerIteration: Int = 4,
         maxRunDurationSeconds: Int = 1800,
         maxToolResultBytes: Int = 32 * 1_024,
-        allowParallelToolCalls: Bool = false,
         maxConsecutiveToolResultErrors: Int = 3,
         stopAfterTurnWhenBudgetExceeded: Bool = true,
         preflightMode: AgentPreflightMode = .contextual,
@@ -41,12 +37,10 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         instructionAppendix: String = "",
         budget: AgentBudgetConfiguration = AgentBudgetConfiguration()
     ) {
-        self.executionMode = executionMode
         self.maxToolIterations = maxToolIterations
         self.maxToolCallsPerIteration = maxToolCallsPerIteration
         self.maxRunDurationSeconds = maxRunDurationSeconds
         self.maxToolResultBytes = maxToolResultBytes
-        self.allowParallelToolCalls = allowParallelToolCalls
         self.maxConsecutiveToolResultErrors = maxConsecutiveToolResultErrors
         self.stopAfterTurnWhenBudgetExceeded = stopAfterTurnWhenBudgetExceeded
         self.preflightMode = preflightMode
@@ -61,12 +55,10 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case executionMode
         case maxToolIterations
         case maxToolCallsPerIteration
         case maxRunDurationSeconds
         case maxToolResultBytes
-        case allowParallelToolCalls
         case maxConsecutiveToolResultErrors
         case stopAfterTurnWhenBudgetExceeded
         case preflightMode
@@ -82,12 +74,10 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.executionMode = try container.decodeIfPresent(AgentLoopExecutionMode.self, forKey: .executionMode) ?? .legacy
         self.maxToolIterations = try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 24
         self.maxToolCallsPerIteration = try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 4
         self.maxRunDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800
         self.maxToolResultBytes = try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1_024
-        self.allowParallelToolCalls = try container.decodeIfPresent(Bool.self, forKey: .allowParallelToolCalls) ?? false
         self.maxConsecutiveToolResultErrors = try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 3
         self.stopAfterTurnWhenBudgetExceeded = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded) ?? true
         self.preflightMode = try container.decodeIfPresent(AgentPreflightMode.self, forKey: .preflightMode) ?? .contextual
@@ -103,12 +93,10 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(executionMode, forKey: .executionMode)
         try container.encode(maxToolIterations, forKey: .maxToolIterations)
         try container.encode(maxToolCallsPerIteration, forKey: .maxToolCallsPerIteration)
         try container.encode(maxRunDurationSeconds, forKey: .maxRunDurationSeconds)
         try container.encode(maxToolResultBytes, forKey: .maxToolResultBytes)
-        try container.encode(allowParallelToolCalls, forKey: .allowParallelToolCalls)
         try container.encode(maxConsecutiveToolResultErrors, forKey: .maxConsecutiveToolResultErrors)
         try container.encode(stopAfterTurnWhenBudgetExceeded, forKey: .stopAfterTurnWhenBudgetExceeded)
         try container.encode(preflightMode, forKey: .preflightMode)
@@ -259,12 +247,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     environmentSnapshot = nil
                 }
                 let tokenPolicy = AgentRunTokenPolicy()
-                let usesPhasedRetrieval = configuration.executionMode == .phasedRetrieval
                 let runtimeContext = AgentRuntimeContext.capture()
                 var phasedState = AgentPhasedLoopState()
-                let retrievalPlan = usesPhasedRetrieval
-                    ? AgentRunRetrievalPlan(requiresCurrentTime: false, requiresContinuity: false, requiresNoteSearch: false, requiresFinalProfile: false)
-                    : tokenPolicy.retrievalPlan(for: request, mode: configuration.preflightMode)
+                let retrievalPlan = AgentRunRetrievalPlan(
+                    requiresCurrentTime: false,
+                    requiresContinuity: false,
+                    requiresNoteSearch: false,
+                    requiresFinalProfile: false
+                )
                 let routedToolDefinitions = tokenPolicy.exposedTools(
                     from: toolRegistry.definitions,
                     request: request,
@@ -272,44 +262,37 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     mode: configuration.toolExposureMode
                 )
                 let availableToolDefinitions: [AgentToolDefinition] = {
-                    guard usesPhasedRetrieval else { return routedToolDefinitions }
                     let merged = routedToolDefinitions + AgentPhaseToolContract.definitions
                     return Dictionary(grouping: merged, by: \.name)
                         .compactMap { $0.value.first }
                         .sorted { $0.name < $1.name }
                 }()
-                let externalSourceDescriptors = usesPhasedRetrieval
-                    ? phasedExternalSourceDescriptors(availableToolDefinitions: availableToolDefinitions)
-                    : []
-                if usesPhasedRetrieval {
-                    let capabilities = AgentPromptCapabilityResolver.capabilities(for: Set(availableToolDefinitions.map(\.name)))
-                    phasedState.activeModuleIDs = AgentPromptModuleCatalog.activatedModuleIDs(requested: [], capabilities: capabilities)
-                }
+                let externalSourceDescriptors = phasedExternalSourceDescriptors(availableToolDefinitions: availableToolDefinitions)
+                let promptCapabilities = AgentPromptCapabilityResolver.capabilities(for: Set(availableToolDefinitions.map(\.name)))
+                phasedState.activeModuleIDs = AgentPromptModuleCatalog.activatedModuleIDs(requested: [], capabilities: promptCapabilities)
                 let promptAssembly = await buildPromptAssembly(
                     for: request,
                     environmentSnapshot: environmentSnapshot,
                     availableToolDefinitions: availableToolDefinitions,
                     retrievalPlan: retrievalPlan,
-                    runtimeContext: usesPhasedRetrieval ? runtimeContext : nil,
-                    activeModuleIDs: usesPhasedRetrieval ? phasedState.activeModuleIDs : nil
+                    runtimeContext: runtimeContext,
+                    activeModuleIDs: phasedState.activeModuleIDs
                 )
                 let promptProjector = AgentTranscriptProjector(projectionMode: configuration.promptProjectionMode)
                 let toolResultGate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
                     maxResultCharacters: configuration.maxToolResultBytes
                 ))
                 var modelRequest = promptProjector.project(promptAssembly, tools: availableToolDefinitions)
-                if usesPhasedRetrieval {
-                    let environmentText = environmentSnapshot.map(AgentEnvironmentPromptRenderer.render) ?? ""
-                    let sourceText = externalSourceDescriptors.map {
-                        "- \($0.id) [\($0.kind.rawValue)]: \($0.summary)"
-                    }.joined(separator: "\n")
-                    let dynamicRuntime = [
-                        runtimeContext.trustedPrompt,
-                        environmentText,
-                        "Available read-only external knowledge sources for Strategy Research:\n\(sourceText.isEmpty ? "- none" : sourceText)"
-                    ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")
-                    modelRequest.messages.insert(AgentModelMessage(role: .system, content: dynamicRuntime), at: min(1, modelRequest.messages.count))
-                }
+                let environmentText = environmentSnapshot.map(AgentEnvironmentPromptRenderer.render) ?? ""
+                let sourceText = externalSourceDescriptors.map {
+                    "- \($0.id) [\($0.kind.rawValue)]: \($0.summary)"
+                }.joined(separator: "\n")
+                let dynamicRuntime = [
+                    runtimeContext.trustedPrompt,
+                    environmentText,
+                    "Available read-only external knowledge sources for Strategy Research:\n\(sourceText.isEmpty ? "- none" : sourceText)"
+                ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")
+                modelRequest.messages.insert(AgentModelMessage(role: .system, content: dynamicRuntime), at: min(1, modelRequest.messages.count))
                 var messages = modelRequest.messages
                 let evidencePolicy = AgentEvidenceValidationPolicy()
                 var memoryCitations: [String] = []
@@ -376,25 +359,26 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             operation: "AgentLoopController.completeModelRequest",
                             initiator: .foreground
                         )
-                        if usesPhasedRetrieval {
-                            let stableToolBundle = availableToolDefinitions.map(\.name).joined(separator: "\u{1F}")
-                            modelRequest.promptCacheContext = AgentPromptCacheContext(
-                                phase: phasedState.phase,
-                                promptVersion: "agent-loop-phased-v1",
-                                stableToolBundleVersion: stableToolBundle,
-                                explicitBreakpointIndex: modelProvider.capabilities.supportsExplicitPromptCacheBreakpoints ? 1 : nil
-                            )
-                            modelRequest.auditContext.metadata["agent_loop_phase"] = phasedState.phase.rawValue
-                        }
-                        let phaseVisibleTools = usesPhasedRetrieval
-                            ? phasedToolDefinitions(from: availableToolDefinitions, phase: phasedState.phase)
-                            : availableToolDefinitions
+                        let stableToolBundle = availableToolDefinitions.map(\.name).joined(separator: "\u{1F}")
+                        modelRequest.promptCacheContext = AgentPromptCacheContext(
+                            phase: phasedState.phase,
+                            promptVersion: "agent-loop-phased-v1",
+                            stableToolBundleVersion: stableToolBundle,
+                            explicitBreakpointIndex: modelProvider.capabilities.supportsExplicitPromptCacheBreakpoints ? 1 : nil
+                        )
+                        modelRequest.auditContext.metadata["agent_loop_phase"] = phasedState.phase.rawValue
+                        let phaseVisibleTools = phasedToolDefinitions(
+                            from: availableToolDefinitions,
+                            phase: phasedState.phase,
+                            hasExternalKnowledgeSources: !externalSourceDescriptors.isEmpty
+                        )
                         modelRequest.tools = phaseVisibleTools.filter { definition in
                             if definition.name == AgentCurrentTimePreflightPolicy.requiredToolName, didAttemptCurrentTime {
                                 return false
                             }
                             return true
                         }
+                        modelRequest.toolChoice = phasedState.phase == .finalSynthesis ? .auto : .required
                         try AgentModelContextGuard().validate(
                             modelRequest,
                             currentUserInput: request.userMessage,
@@ -422,7 +406,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 promptAssembly: promptAssembly,
                                 iterationCount: iterationCount,
                                 maximumEstimatedTokens: recoveryTarget,
-                                recoveryState: usesPhasedRetrieval ? phasedState.recoveryState : nil
+                                recoveryState: phasedState.recoveryState
                             )
                             guard AgentModelContextGuard().estimatedInputTokens(recoveredRequest) < originalEstimate else {
                                 throw error
@@ -467,8 +451,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
 
                         if modelResponse.toolCalls.isEmpty {
-                            if usesPhasedRetrieval,
-                               phasedState.phase != .finalSynthesis,
+                            if phasedState.phase != .finalSynthesis,
                                phasedState.strategy?.taskMode != .mechanical {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 let required = phasedState.phase == .strategyResearch ? AgentPhaseToolContract.commitStrategyName : AgentPhaseToolContract.prepareFinalOutputName
@@ -654,7 +637,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }
                             calls = incrementalCalls
                         }
-                        if usesPhasedRetrieval, phasedState.phase == .strategyResearch {
+                        if phasedState.phase == .strategyResearch {
                             let researchCalls = calls.filter {
                                 $0.name == AgentPhaseToolContract.externalSearchBatchName
                                     || $0.name == AgentPhaseToolContract.externalReadBatchName
@@ -729,15 +712,23 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             continuation: continuation
                         )
 
-                        if usesPhasedRetrieval {
-                            for batchResult in batchResults where batchResult.result.error == nil {
+                        for batchResult in batchResults where batchResult.result.error == nil {
                                 switch batchResult.call.name {
                                 case AgentPhaseToolContract.commitStrategyName:
                                     do {
                                         let plan = try AgentStrategyPlanDecoder.decode(argumentsJSON: batchResult.call.argumentsJSON)
                                         let availableToolNames = Set(availableToolDefinitions.map(\.name))
-                                        let memoryAvailable = availableToolNames.contains("memory_os_recent_context")
-                                            && availableToolNames.contains("memory_os_knowledge_context")
+                                        let memoryAvailable = toolRegistry.definition(named: "memory_os_recent_context") != nil
+                                            && toolRegistry.definition(named: "memory_os_knowledge_context") != nil
+                                        let memoryDirective = Self.memoryDirective(in: request.userMessage)
+                                        if case .skip(let reason) = plan.memoryDecision {
+                                            if memoryDirective.requiresQuery, memoryAvailable {
+                                                throw AgentToolError.invalidArguments("The user explicitly requires Memory; memoryDecision must be query")
+                                            }
+                                            if reason == .userExplicitlyDisabled, !memoryDirective.explicitlyDisabled {
+                                                throw AgentToolError.invalidArguments("userExplicitlyDisabled is valid only when the user explicitly disables Memory")
+                                            }
+                                        }
                                         if !externalSourceDescriptors.isEmpty {
                                             guard !phasedState.evidenceState.references.isEmpty else {
                                                 throw AgentToolError.invalidArguments("Strategy Research must use at least one available external source before commit")
@@ -782,7 +773,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 default:
                                     break
                                 }
-                            }
                         }
 
                         let contextGuard = AgentModelContextGuard()
@@ -846,8 +836,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     webEvidenceCitations.append(citation)
                                 }
                             }
-                            if usesPhasedRetrieval,
-                               batchResult.result.error == nil,
+                            if batchResult.result.error == nil,
                                batchResult.call.name == AgentPhaseToolContract.externalSearchBatchName
                                     || batchResult.call.name == AgentPhaseToolContract.externalReadBatchName {
                                 let payload = batchResult.result.contentJSON ?? batchResult.result.contentText
@@ -921,8 +910,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             )
                         }
 
-                        if usesPhasedRetrieval,
-                           calls.contains(where: {
+                        if calls.contains(where: {
                                $0.name == AgentPhaseToolContract.externalSearchBatchName
                                    || $0.name == AgentPhaseToolContract.externalReadBatchName
                            }) {
@@ -1218,8 +1206,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         policy: AgentPolicyEngine,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> [AgentToolBatchResult] {
-        if (configuration.allowParallelToolCalls || configuration.executionMode == .phasedRetrieval),
-           canExecuteInParallel(calls) {
+        if canExecuteInParallel(calls) {
             return try await executeToolBatchInParallel(
                 calls: calls,
                 request: request,
@@ -1650,23 +1637,32 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
     private func phasedToolDefinitions(
         from definitions: [AgentToolDefinition],
-        phase: AgentLoopPhase
+        phase: AgentLoopPhase,
+        hasExternalKnowledgeSources: Bool
     ) -> [AgentToolDefinition] {
         let names: Set<String>
         switch phase {
         case .strategyResearch:
-            names = Set(definitions.compactMap { definition in
-                if [AgentPhaseToolContract.commitStrategyName, AgentPhaseToolContract.activateModuleName, AgentPhaseToolContract.externalSearchBatchName, AgentPhaseToolContract.externalReadBatchName].contains(definition.name) {
-                    return definition.name
-                }
-                guard let permission = toolRegistry.permission(named: definition.name), permission.isSafeForParallelNativeToolExecution else { return nil }
-                let lower = definition.name.lowercased()
-                return lower.contains("web") || lower.contains("search") || lower.contains("read") || lower.contains("knowledge") || lower.contains("mcp") ? definition.name : nil
-            })
+            var strategyNames: Set<String> = [
+                AgentPhaseToolContract.commitStrategyName,
+                AgentPhaseToolContract.activateModuleName
+            ]
+            if hasExternalKnowledgeSources {
+                strategyNames.formUnion([
+                    AgentPhaseToolContract.externalSearchBatchName,
+                    AgentPhaseToolContract.externalReadBatchName
+                ])
+            }
+            names = strategyNames
         case .memoryPreparation:
             names = [AgentPhaseToolContract.memoryQueryName, AgentPhaseToolContract.activateModuleName]
         case .taskExecution:
-            names = Set(definitions.map(\.name)).subtracting([AgentPhaseToolContract.commitStrategyName])
+            names = Set(definitions.map(\.name)).subtracting([
+                AgentPhaseToolContract.commitStrategyName,
+                AgentPhaseToolContract.externalSearchBatchName,
+                AgentPhaseToolContract.externalReadBatchName,
+                AgentPhaseToolContract.memoryQueryName
+            ])
         case .finalSynthesis:
             names = Set(definitions.map(\.name))
         }
@@ -1707,11 +1703,34 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         return .otherReadOnly
     }
 
+    private static func memoryDirective(in userMessage: String) -> (requiresQuery: Bool, explicitlyDisabled: Bool) {
+        let normalized = userMessage.lowercased()
+        let explicitlyDisabled = [
+            "不使用 memory", "不要使用 memory", "不用 memory", "不查询 memory", "不要查询 memory", "跳过 memory",
+            "不使用记忆", "不要使用记忆", "不用记忆", "不查询记忆", "不要查询记忆", "跳过记忆",
+            "do not use memory", "don't use memory", "skip memory"
+        ].contains(where: normalized.contains)
+        guard !explicitlyDisabled else { return (false, true) }
+
+        let mentionsMemory = normalized.contains("memory") || normalized.contains("记忆")
+        let explicitlyRequires = mentionsMemory && [
+            "必须", "务必", "需要查询", "请查询", "查询相关", "读取相关",
+            "must", "required", "require", "query", "read"
+        ].contains(where: normalized.contains)
+        return (explicitlyRequires, false)
+    }
+
     private func shouldConsiderAutomaticProgressUpdate(for calls: [AgentToolCall]) -> Bool {
         guard automaticallySynthesizesProgressUpdates else { return false }
         let backgroundToolNames = Set(AgentContinuityPreflightPolicy.requiredToolNames).union([
             AgentCurrentTimePreflightPolicy.requiredToolName,
             AgentNoteSearchPreflightPolicy.requiredToolName,
+            AgentPhaseToolContract.commitStrategyName,
+            AgentPhaseToolContract.prepareFinalOutputName,
+            AgentPhaseToolContract.activateModuleName,
+            AgentPhaseToolContract.memoryQueryName,
+            AgentPhaseToolContract.externalSearchBatchName,
+            AgentPhaseToolContract.externalReadBatchName,
             ShareProgressUpdateTool.toolName,
             "connor_skill_list",
             "connor_skill_activate",

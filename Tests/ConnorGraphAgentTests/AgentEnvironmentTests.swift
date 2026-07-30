@@ -28,6 +28,28 @@ private actor EnvironmentLoopModelProvider: AgentModelProvider {
     private(set) var requests: [AgentModelRequest] = []
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        if request.promptCacheContext?.phase == .strategyResearch {
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(
+                    id: "environment-strategy",
+                    name: AgentPhaseToolContract.commitStrategyName,
+                    argumentsJSON: #"{"provisionalApproach":"inspect environment","recommendedApproach":"inspect environment","taskMode":"coding","memoryDecision":{"action":"skip","reason":"historyIndependentMechanicalOrCodingTask"}}"#
+                )],
+                finishReason: .toolCalls
+            )
+        }
+        if request.promptCacheContext?.phase == .taskExecution, !requests.isEmpty {
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(
+                    id: "environment-final",
+                    name: AgentPhaseToolContract.prepareFinalOutputName,
+                    argumentsJSON: #"{"reason":"environment test complete"}"#
+                )],
+                finishReason: .toolCalls
+            )
+        }
         requests.append(request)
         if requests.count == 1 {
             return AgentModelResponse(
