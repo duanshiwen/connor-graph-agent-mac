@@ -1324,6 +1324,21 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             policyEngine: policy,
             currentUserMessageID: request.currentUserMessageID
         )
+        let auditCapability: AgentPermissionCapability? = switch call.name {
+        case AgentPhaseToolContract.memoryQueryName, AgentPhaseToolContract.prepareFinalOutputName:
+            .readGraph
+        default:
+            toolRegistry.permission(named: call.name)
+        }
+        let auditPayload = "{\"toolCallID\":\(Self.jsonStringLiteral(call.id))}"
+        await auditLog.record(AgentAuditEvent(
+            runID: run.id,
+            sessionID: run.sessionID,
+            eventType: .toolStarted,
+            capability: auditCapability,
+            toolName: call.name,
+            payloadJSON: auditPayload
+        ))
         do {
             let result: AgentToolResult
             if AgentPhaseToolContract.definitions.contains(where: { $0.name == call.name }) {
@@ -1338,12 +1353,36 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             }
             try Task.checkCancellation()
             logger.info("Tool \(call.name) completed. Result: \(result.contentText.prefix(200))")
+            await auditLog.record(AgentAuditEvent(
+                runID: run.id,
+                sessionID: run.sessionID,
+                eventType: .toolFinished,
+                capability: auditCapability,
+                toolName: call.name,
+                payloadJSON: auditPayload
+            ))
             yield(.toolFinished(result), to: continuation, recorder: eventRecorder)
             return result
         } catch is CancellationError {
+            await auditLog.record(AgentAuditEvent(
+                runID: run.id,
+                sessionID: run.sessionID,
+                eventType: .toolFailed,
+                capability: auditCapability,
+                toolName: call.name,
+                payloadJSON: "{\"status\":\"cancelled\",\"toolCallID\":\(Self.jsonStringLiteral(call.id))}"
+            ))
             throw CancellationError()
         } catch {
             logger.error("Tool \(call.name) failed: \(error.localizedDescription)")
+            await auditLog.record(AgentAuditEvent(
+                runID: run.id,
+                sessionID: run.sessionID,
+                eventType: .toolFailed,
+                capability: auditCapability,
+                toolName: call.name,
+                payloadJSON: auditPayload
+            ))
             let result = errorToolResult(for: call, run: run, message: String(describing: error))
             yield(.toolFailed(AgentToolFailure(
                 runID: run.id,

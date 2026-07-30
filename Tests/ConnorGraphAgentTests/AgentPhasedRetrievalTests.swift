@@ -455,13 +455,18 @@ private struct PhasedConcurrentReadTool: AgentTool {
 }
 
 @Test func phasedLoopKeepsUnifiedMemoryToolAvailableWithoutConfiguredBackend() async throws {
+    let auditLog = InMemoryAgentAuditLog()
     let provider = PhasedLoopModelProvider(responses: [
         .init(text: nil, toolCalls: [.init(id: "strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"general","memoryDecision":{"action":"query"},"memoryQueries":["preference"]}"#)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "memory", name: AgentPhaseToolContract.memoryQueryName, argumentsJSON: #"{"query":"preference"}"#)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
         .init(text: "done")
     ])
-    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        auditLog: auditLog
+    )
     for try await _ in loop.run(.init(sessionID: "missing-memory-backend", userMessage: "Give me a personalized answer")) {}
 
     let requests = await provider.capturedRequests()
@@ -469,6 +474,10 @@ private struct PhasedConcurrentReadTool: AgentTool {
     let memoryResult = try #require(requests[2].messages.last { $0.toolCallID == "memory" })
     #expect(memoryResult.content.contains("Memory backend dependency is not configured"))
     #expect(requests[2].promptCacheContext?.phase == .taskExecution)
+    let memoryAuditEvents = await auditLog.events.filter { $0.toolName == AgentPhaseToolContract.memoryQueryName }
+    #expect(memoryAuditEvents.map(\.eventType) == [.toolStarted, .toolFinished])
+    #expect(memoryAuditEvents.allSatisfy { $0.capability == .readGraph })
+    #expect(memoryAuditEvents.allSatisfy { !$0.payloadJSON.contains("preference") })
 }
 
 @Test func phasedLoopUsesRegisteredExternalSourceAndCompressesOlderResearch() async throws {
