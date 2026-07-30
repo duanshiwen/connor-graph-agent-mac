@@ -8,17 +8,44 @@ public struct MemoryOSBackgroundToolLoopConfiguration: Codable, Sendable, Equata
     public var maxToolCallsPerIteration: Int
     public var maxRunDurationSeconds: Int
     public var maxToolResultBytes: Int
+    public var maxTotalTokens: Int
+    public var retainedDetailedMessageCount: Int
 
     public init(
-        maxToolIterations: Int = 256,
-        maxToolCallsPerIteration: Int = 4,
+        maxToolIterations: Int = 24,
+        maxToolCallsPerIteration: Int = 8,
         maxRunDurationSeconds: Int = 1800,
-        maxToolResultBytes: Int = 32 * 1024
+        maxToolResultBytes: Int = 16 * 1024,
+        maxTotalTokens: Int = 300_000,
+        retainedDetailedMessageCount: Int = 8
     ) {
         self.maxToolIterations = maxToolIterations
         self.maxToolCallsPerIteration = maxToolCallsPerIteration
         self.maxRunDurationSeconds = maxRunDurationSeconds
         self.maxToolResultBytes = maxToolResultBytes
+        self.maxTotalTokens = max(1, maxTotalTokens)
+        self.retainedDetailedMessageCount = max(2, retainedDetailedMessageCount)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case maxToolIterations
+        case maxToolCallsPerIteration
+        case maxRunDurationSeconds
+        case maxToolResultBytes
+        case maxTotalTokens
+        case retainedDetailedMessageCount
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            maxToolIterations: try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 24,
+            maxToolCallsPerIteration: try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 8,
+            maxRunDurationSeconds: try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1_800,
+            maxToolResultBytes: try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 16 * 1_024,
+            maxTotalTokens: try container.decodeIfPresent(Int.self, forKey: .maxTotalTokens) ?? 300_000,
+            retainedDetailedMessageCount: try container.decodeIfPresent(Int.self, forKey: .retainedDetailedMessageCount) ?? 8
+        )
     }
 }
 
@@ -74,11 +101,13 @@ public protocol MemoryOSBackgroundToolLoopModel: Sendable {
 public enum MemoryOSHeadlessKnowledgeLoopError: Error, Sendable, Equatable, CustomStringConvertible {
     case exceededMaxIterations(Int)
     case exceededMaxRunDuration(Int)
+    case exceededTokenBudget(Int)
 
     public var description: String {
         switch self {
         case .exceededMaxIterations(let value): "exceededMaxIterations: \(value)"
         case .exceededMaxRunDuration(let value): "exceededMaxRunDuration: \(value)"
+        case .exceededTokenBudget(let value): "exceededTokenBudget: \(value)"
         }
     }
 }
@@ -144,6 +173,7 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
         var mergedMetadata = request.metadata
         var sequence = messages.count
         var toolCallCount = 0
+        var totalTokens = 0
 
         do {
             for iteration in 1...configuration.maxToolIterations {
@@ -153,6 +183,7 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                 log("--- Iteration \(iteration) ---")
                 log("Sending \(messages.count) messages to model...")
                 let response = try model.complete(MemoryOSBackgroundLoopModelRequest(runID: runID, job: request, messages: messages, availableTools: request.availableTools))
+                totalTokens += Int(response.metadata["total_tokens"] ?? "0") ?? 0
                 mergedMetadata.merge(response.metadata) { _, new in new }
                 let calls = Array(response.toolCalls.prefix(configuration.maxToolCallsPerIteration))
 
@@ -173,6 +204,9 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                         "tool_trace_count": String(toolCallCount),
                         "stateless_batch": "true"
                     ]) { _, new in new })
+                }
+                if totalTokens >= configuration.maxTotalTokens {
+                    throw MemoryOSHeadlessKnowledgeLoopError.exceededTokenBudget(configuration.maxTotalTokens)
                 }
 
                 let joinedToolNames = calls.map(\.name).joined(separator: ",")
@@ -212,6 +246,7 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                         throw error
                     }
                 }
+                messages = compactedHistory(messages)
             }
             throw MemoryOSHeadlessKnowledgeLoopError.exceededMaxIterations(configuration.maxToolIterations)
         } catch {
@@ -270,6 +305,28 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
         if value.count <= configuration.maxToolResultBytes { return value }
         let index = value.index(value.startIndex, offsetBy: configuration.maxToolResultBytes)
         return String(value[..<index])
+    }
+
+    private func compactedHistory(_ messages: [MemoryOSBackgroundLoopMessage]) -> [MemoryOSBackgroundLoopMessage] {
+        let retained = configuration.retainedDetailedMessageCount
+        guard messages.count > retained + 1 else { return messages }
+        let detailedStart = messages.count - retained
+        return messages.enumerated().map { index, message in
+            guard index > 0, index < detailedStart else { return message }
+            var compacted = message
+            switch message.role {
+            case .tool:
+                compacted.content = "Earlier successful tool result omitted from detailed context: \(message.toolName ?? "tool")."
+            case .assistant:
+                compacted.content = String(message.content.prefix(256))
+                compacted.toolCalls = message.toolCalls?.map {
+                    MemoryOSBackgroundToolCall(id: $0.id, name: $0.name, argumentsJSON: "{}")
+                }
+            case .system, .user:
+                break
+            }
+            return compacted
+        }
     }
 
     private func log(_ message: String) {

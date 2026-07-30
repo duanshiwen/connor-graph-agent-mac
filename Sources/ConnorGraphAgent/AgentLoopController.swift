@@ -11,6 +11,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var allowParallelToolCalls: Bool
     public var maxConsecutiveToolResultErrors: Int
     public var stopAfterTurnWhenBudgetExceeded: Bool
+    public var preflightMode: AgentPreflightMode
+    public var toolExposureMode: AgentToolExposureMode
     public var promptProjectionMode: AgentPromptProjectionMode
     public var promptMaxEstimatedTokens: Int
     public var modelContextWindowTokens: Int?
@@ -20,15 +22,17 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var budget: AgentBudgetConfiguration
 
     public init(
-        maxToolIterations: Int = 2_048,
+        maxToolIterations: Int = 24,
         maxToolCallsPerIteration: Int = 4,
         maxRunDurationSeconds: Int = 1800,
-        maxToolResultBytes: Int = 1_000_000,
+        maxToolResultBytes: Int = 32 * 1_024,
         allowParallelToolCalls: Bool = false,
-        maxConsecutiveToolResultErrors: Int = 0,
-        stopAfterTurnWhenBudgetExceeded: Bool = false,
+        maxConsecutiveToolResultErrors: Int = 3,
+        stopAfterTurnWhenBudgetExceeded: Bool = true,
+        preflightMode: AgentPreflightMode = .contextual,
+        toolExposureMode: AgentToolExposureMode = .contextual,
         promptProjectionMode: AgentPromptProjectionMode = .legacySingleUserMessage,
-        promptMaxEstimatedTokens: Int = 1_000_000,
+        promptMaxEstimatedTokens: Int = 200_000,
         modelContextWindowTokens: Int? = nil,
         reservedOutputTokens: Int = 8_192,
         permissionMode: AgentPermissionMode = .askToWrite,
@@ -42,6 +46,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.allowParallelToolCalls = allowParallelToolCalls
         self.maxConsecutiveToolResultErrors = maxConsecutiveToolResultErrors
         self.stopAfterTurnWhenBudgetExceeded = stopAfterTurnWhenBudgetExceeded
+        self.preflightMode = preflightMode
+        self.toolExposureMode = toolExposureMode
         self.promptProjectionMode = promptProjectionMode
         self.promptMaxEstimatedTokens = promptMaxEstimatedTokens
         self.modelContextWindowTokens = modelContextWindowTokens
@@ -59,6 +65,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         case allowParallelToolCalls
         case maxConsecutiveToolResultErrors
         case stopAfterTurnWhenBudgetExceeded
+        case preflightMode
+        case toolExposureMode
         case promptProjectionMode
         case promptMaxEstimatedTokens
         case modelContextWindowTokens
@@ -70,15 +78,17 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.maxToolIterations = try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 2_048
+        self.maxToolIterations = try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 24
         self.maxToolCallsPerIteration = try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 4
         self.maxRunDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800
-        self.maxToolResultBytes = try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 1_000_000
+        self.maxToolResultBytes = try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1_024
         self.allowParallelToolCalls = try container.decodeIfPresent(Bool.self, forKey: .allowParallelToolCalls) ?? false
-        self.maxConsecutiveToolResultErrors = try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 0
-        self.stopAfterTurnWhenBudgetExceeded = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded) ?? false
+        self.maxConsecutiveToolResultErrors = try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 3
+        self.stopAfterTurnWhenBudgetExceeded = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded) ?? true
+        self.preflightMode = try container.decodeIfPresent(AgentPreflightMode.self, forKey: .preflightMode) ?? .contextual
+        self.toolExposureMode = try container.decodeIfPresent(AgentToolExposureMode.self, forKey: .toolExposureMode) ?? .contextual
         self.promptProjectionMode = try container.decodeIfPresent(AgentPromptProjectionMode.self, forKey: .promptProjectionMode) ?? .legacySingleUserMessage
-        self.promptMaxEstimatedTokens = try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 1_000_000
+        self.promptMaxEstimatedTokens = try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 200_000
         self.modelContextWindowTokens = try container.decodeIfPresent(Int.self, forKey: .modelContextWindowTokens)
         self.reservedOutputTokens = max(1, try container.decodeIfPresent(Int.self, forKey: .reservedOutputTokens) ?? 8_192)
         self.permissionMode = try container.decodeIfPresent(AgentPermissionMode.self, forKey: .permissionMode) ?? .askToWrite
@@ -95,6 +105,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         try container.encode(allowParallelToolCalls, forKey: .allowParallelToolCalls)
         try container.encode(maxConsecutiveToolResultErrors, forKey: .maxConsecutiveToolResultErrors)
         try container.encode(stopAfterTurnWhenBudgetExceeded, forKey: .stopAfterTurnWhenBudgetExceeded)
+        try container.encode(preflightMode, forKey: .preflightMode)
+        try container.encode(toolExposureMode, forKey: .toolExposureMode)
         try container.encode(promptProjectionMode, forKey: .promptProjectionMode)
         try container.encode(promptMaxEstimatedTokens, forKey: .promptMaxEstimatedTokens)
         try container.encodeIfPresent(modelContextWindowTokens, forKey: .modelContextWindowTokens)
@@ -233,11 +245,19 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 } else {
                     environmentSnapshot = nil
                 }
-                let availableToolDefinitions = toolRegistry.definitions
+                let tokenPolicy = AgentRunTokenPolicy()
+                let retrievalPlan = tokenPolicy.retrievalPlan(for: request, mode: configuration.preflightMode)
+                let availableToolDefinitions = tokenPolicy.exposedTools(
+                    from: toolRegistry.definitions,
+                    request: request,
+                    retrievalPlan: retrievalPlan,
+                    mode: configuration.toolExposureMode
+                )
                 let promptAssembly = await buildPromptAssembly(
                     for: request,
                     environmentSnapshot: environmentSnapshot,
-                    availableToolDefinitions: availableToolDefinitions
+                    availableToolDefinitions: availableToolDefinitions,
+                    retrievalPlan: retrievalPlan
                 )
                 let promptProjector = AgentTranscriptProjector(projectionMode: configuration.promptProjectionMode)
                 let toolResultGate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
@@ -259,7 +279,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var invokedContinuityToolNames = Set<String>()
                 let noteSearchPreflightPolicy = AgentNoteSearchPreflightPolicy()
                 var didAttemptNoteSearch = false
-                let hasCurrentUserProfileTool = toolRegistry.definitions.contains {
+                let hasCurrentUserProfileTool = availableToolDefinitions.contains {
                     $0.name == AgentContinuityPreflightPolicy.currentUserProfileToolName
                 }
                 var requiredCurrentUserProfilePage: Int?
@@ -386,25 +406,27 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
 
                         if modelResponse.toolCalls.isEmpty {
-                            if currentTimePreflightPolicy.requiresAttempt(
-                                availableTools: toolRegistry.definitions,
+                            if retrievalPlan.requiresCurrentTime, currentTimePreflightPolicy.requiresAttempt(
+                                availableTools: availableToolDefinitions,
                                 didAttempt: didAttemptCurrentTime
                             ) {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 messages.append(AgentModelMessage(role: .system, content: currentTimePreflightPolicy.correctionInstruction()))
                                 continue
                             }
-                            let missingContinuityTools = continuityPreflightPolicy.missingToolNames(
-                                availableTools: toolRegistry.definitions,
-                                invokedToolNames: invokedContinuityToolNames
-                            )
+                            let missingContinuityTools = retrievalPlan.requiresContinuity
+                                ? continuityPreflightPolicy.missingToolNames(
+                                    availableTools: availableToolDefinitions,
+                                    invokedToolNames: invokedContinuityToolNames
+                                )
+                                : []
                             if let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools) {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 messages.append(AgentModelMessage(role: .system, content: correction))
                                 continue
                             }
-                            if noteSearchPreflightPolicy.requiresAttempt(
-                                availableTools: toolRegistry.definitions,
+                            if retrievalPlan.requiresNoteSearch, noteSearchPreflightPolicy.requiresAttempt(
+                                availableTools: availableToolDefinitions,
                                 didAttempt: didAttemptNoteSearch
                             ) {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
@@ -433,8 +455,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(role: .system, content: "Memory claim-evidence check (\(claimValidation.status.rawValue)): \(correction) Correct once, then answer conservatively."))
                                 continue
                             }
-                            if continuityPreflightPolicy.requiresFinalResponseProfile(
-                                availableTools: toolRegistry.definitions,
+                            if retrievalPlan.requiresFinalProfile, continuityPreflightPolicy.requiresFinalResponseProfile(
+                                availableTools: availableToolDefinitions,
                                 isComplete: isFinalResponseProfileComplete
                             ) {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
@@ -481,8 +503,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                         var calls = Array(modelResponse.toolCalls.prefix(configuration.maxToolCallsPerIteration))
                         var isCurrentTimePreflightBatch = false
-                        if currentTimePreflightPolicy.requiresAttempt(
-                            availableTools: toolRegistry.definitions,
+                        if retrievalPlan.requiresCurrentTime, currentTimePreflightPolicy.requiresAttempt(
+                            availableTools: availableToolDefinitions,
                             didAttempt: didAttemptCurrentTime
                         ) {
                             guard let currentTimeCall = calls.first(where: {
@@ -498,14 +520,17 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             isCurrentTimePreflightBatch = true
                             calls = [currentTimeCall]
                         }
-                        let missingContinuityTools = continuityPreflightPolicy.missingToolNames(
-                            availableTools: toolRegistry.definitions,
-                            invokedToolNames: invokedContinuityToolNames
-                        )
-                        let requiresNoteSearchAttempt = noteSearchPreflightPolicy.requiresAttempt(
-                            availableTools: toolRegistry.definitions,
-                            didAttempt: didAttemptNoteSearch
-                        )
+                        let missingContinuityTools = retrievalPlan.requiresContinuity
+                            ? continuityPreflightPolicy.missingToolNames(
+                                availableTools: availableToolDefinitions,
+                                invokedToolNames: invokedContinuityToolNames
+                            )
+                            : []
+                        let requiresNoteSearchAttempt = retrievalPlan.requiresNoteSearch
+                            && noteSearchPreflightPolicy.requiresAttempt(
+                                availableTools: availableToolDefinitions,
+                                didAttempt: didAttemptNoteSearch
+                            )
                         if !isCurrentTimePreflightBatch && !missingContinuityTools.isEmpty {
                             let continuityCalls = calls.filter {
                                 AgentContinuityPreflightPolicy.requiredToolNames.contains($0.name)
@@ -751,10 +776,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             yield(.assistantMessageCreated(progressMessage), to: continuation, recorder: eventRecorder)
                         }
 
-                        let stillMissingContinuityTools = continuityPreflightPolicy.missingToolNames(
-                            availableTools: toolRegistry.definitions,
-                            invokedToolNames: invokedContinuityToolNames
-                        )
+                        let stillMissingContinuityTools = retrievalPlan.requiresContinuity
+                            ? continuityPreflightPolicy.missingToolNames(
+                                availableTools: availableToolDefinitions,
+                                invokedToolNames: invokedContinuityToolNames
+                            )
+                            : []
                         if let correction = continuityPreflightPolicy.correctionInstruction(for: stillMissingContinuityTools) {
                             messages.append(AgentModelMessage(role: .system, content: correction))
                         } else if let requiredCurrentUserProfilePage {
@@ -764,8 +791,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     requiredPage: requiredCurrentUserProfilePage
                                 )
                             ))
-                        } else if noteSearchPreflightPolicy.requiresAttempt(
-                            availableTools: toolRegistry.definitions,
+                        } else if retrievalPlan.requiresNoteSearch, noteSearchPreflightPolicy.requiresAttempt(
+                            availableTools: availableToolDefinitions,
                             didAttempt: didAttemptNoteSearch
                         ) {
                             messages.append(AgentModelMessage(
@@ -1245,9 +1272,16 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     private func buildPromptAssembly(
         for request: AgentChatRequest,
         environmentSnapshot: AgentEnvironmentSnapshot?,
-        availableToolDefinitions: [AgentToolDefinition]
+        availableToolDefinitions: [AgentToolDefinition],
+        retrievalPlan: AgentRunRetrievalPlan
     ) async -> AgentPromptAssembly {
         var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
+        assembly.instruction.text = AgentInstructionCapabilityProjector().project(
+            assembly.instruction.text,
+            availableToolNames: Set(availableToolDefinitions.map(\.name))
+        )
+        assembly.instruction.text = [assembly.instruction.text, retrievalPlan.instruction]
+            .joined(separator: "\n\n")
         let progressUpdateToolIsAvailable = availableToolDefinitions.contains {
             $0.name == ShareProgressUpdateTool.toolName
         }

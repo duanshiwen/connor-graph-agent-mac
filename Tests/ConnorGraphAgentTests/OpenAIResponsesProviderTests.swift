@@ -80,11 +80,41 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
     #expect(object["model"] as? String == "gpt-test")
     #expect(object["store"] as? Bool == false)
+    #expect((object["prompt_cache_key"] as? String)?.hasPrefix("connor:") == true)
     #expect(object["messages"] == nil)
     let input = try #require(object["input"] as? [[String: Any]])
     #expect(input.count == 2)
     #expect(input[0]["role"] as? String == "system")
     #expect(input[1]["role"] as? String == "user")
+}
+
+@Test func openAIResponsesProviderParsesPromptCacheUsageDetails() async throws {
+    let body = """
+    {
+      "id": "resp_cache",
+      "output": [{"type":"message","content":[{"type":"output_text","text":"Cached"}]}],
+      "usage": {
+        "input_tokens": 2006,
+        "output_tokens": 30,
+        "total_tokens": 2036,
+        "input_tokens_details": {"cached_tokens": 1920, "cache_write_tokens": 64}
+      }
+    }
+    """.data(using: .utf8)!
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: ResponsesCapturingHTTPClient(responseBody: body)
+    )
+
+    let response = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(role: .system, content: "Stable prefix"),
+        AgentModelMessage(role: .user, content: "Hello")
+    ]))
+
+    #expect(response.usage?.promptTokens == 2006)
+    #expect(response.usage?.completionTokens == 30)
+    #expect(response.usage?.cacheReadInputTokens == 1920)
+    #expect(response.usage?.cacheCreationInputTokens == 64)
 }
 
 @Test func openAIResponsesProviderPreservesSanitizedHTTPErrorMessage() async throws {
