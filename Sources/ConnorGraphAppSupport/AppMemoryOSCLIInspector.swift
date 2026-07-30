@@ -307,7 +307,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     public func hasRunnableBackgroundAIJob(kind: String? = nil, limit: Int = 1, now: Date = Date()) throws -> Bool {
         let effectiveLimit = safeLimit(limit)
-        let executableKinds = kind.map { [$0] } ?? MemoryOSBackgroundJobKind.l1ExecutableRawValues
+        let executableKinds = kind.map { [$0] } ?? MemoryOSBackgroundJobKind.executableRawValues
         for executableKind in executableKinds where try !store.runnableQueueItems(kind: executableKind, limit: effectiveLimit, now: now).isEmpty {
             return true
         }
@@ -330,7 +330,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     public func debugRunNextBackgroundAI<Model: MemoryOSBackgroundToolLoopModel>(kind: String? = nil, limit: Int = 1, model: Model, configuration: MemoryOSBackgroundToolLoopConfiguration = MemoryOSBackgroundToolLoopConfiguration(), now: Date = Date(), logHandler: MemoryOSLoopLogHandler? = nil) throws -> MemoryOSCLIDebugAIRunResult {
         let effectiveLimit = safeLimit(limit)
-        let executableKinds = kind.map { [$0] } ?? MemoryOSBackgroundJobKind.l1ExecutableRawValues
+        let executableKinds = kind.map { [$0] } ?? MemoryOSBackgroundJobKind.executableRawValues
         let plannedCandidates = try executableKinds.flatMap { executableKind in
             try store.runnableQueueItems(kind: executableKind, limit: effectiveLimit, now: now)
         }.sorted { lhs, rhs in

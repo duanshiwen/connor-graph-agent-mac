@@ -75,6 +75,7 @@ public struct AppProviderCapabilityDiscoveryService: Sendable {
     public var openAIResponsesProbe: AppOpenAIResponsesProbe
     public var functionCallingProbe: AppFunctionCallingProbe
     public var hostedImageGenerationProbe: AppHostedImageGenerationProbe
+    public var auditRecorder: (any LLMUsageAuditRecording)?
 
     public init(
         settingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
@@ -103,7 +104,8 @@ public struct AppProviderCapabilityDiscoveryService: Sendable {
                 }
             }
             return false
-        }
+        },
+        auditRecorder: (any LLMUsageAuditRecording)? = nil
     ) {
         self.settingsRepository = settingsRepository
         self.evidenceRepository = evidenceRepository
@@ -111,6 +113,7 @@ public struct AppProviderCapabilityDiscoveryService: Sendable {
         self.openAIResponsesProbe = openAIResponsesProbe
         self.functionCallingProbe = functionCallingProbe
         self.hostedImageGenerationProbe = hostedImageGenerationProbe
+        self.auditRecorder = auditRecorder
     }
 
     public func discoverHostedImageGeneration(
@@ -244,12 +247,27 @@ public struct AppProviderCapabilityDiscoveryService: Sendable {
         operation: () async throws -> Void
     ) async -> AppProviderCapabilityEvidence {
         let outcome: AppProviderCapabilityProbeOutcome
+        let startedAt = Date()
+        var probeError: Error?
         do {
             try await operation()
             outcome = .verified("Verified")
         } catch {
+            probeError = error
             outcome = Self.classify(error)
         }
+        LLMUsageAuditProbeRecorder.record(
+            recorder: auditRecorder,
+            kind: .providerCapabilityProbe,
+            modelID: connection.effectiveModel,
+            providerMode: connection.providerMode.rawValue,
+            connectionID: connection.id,
+            operation: "AppProviderCapabilityDiscoveryService.\(capability.rawValue)",
+            executionMode: capability == .hostedImageGeneration ? .generatedMedia : .completion,
+            startedAt: startedAt,
+            error: probeError,
+            metadata: ["capability": capability.rawValue, "endpoint_family": family]
+        )
         let status: AppProviderCapabilityStatus
         let diagnostic: String
         switch outcome {

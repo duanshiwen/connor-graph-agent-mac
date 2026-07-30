@@ -120,6 +120,8 @@ struct AgentChatView: View {
                     model: model.workspaceExplorer.previewModel,
                     isLoading: model.workspaceExplorer.isLoadingPreview,
                     onLoadMore: model.workspaceExplorer.loadMorePreview,
+                    onCopyFullText: copyWorkspaceFileText,
+                    onShare: shareWorkspaceFile,
                     onClose: model.workspaceExplorer.closePreview
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
@@ -149,6 +151,41 @@ struct AgentChatView: View {
                 systemImage: "xmark.circle"
             )
             return
+        }
+    }
+
+    private func shareWorkspaceFile(fileURL: URL) {
+        guard AgentAttachmentSharingService.share(fileURL: fileURL) else {
+            chatActions.composer.showAttachmentToast(
+                title: "分享失败",
+                message: "文件不存在或当前无法打开系统分享面板。",
+                systemImage: "xmark.circle"
+            )
+            return
+        }
+    }
+
+    private func copyWorkspaceFileText(fileURL: URL) {
+        Task {
+            do {
+                let text = try await Task.detached(priority: .userInitiated) {
+                    try WorkspaceFileFullTextReader().read(fileURL: fileURL)
+                }.value
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
+                chatActions.composer.showAttachmentToast(
+                    title: "已复制全文",
+                    message: "已复制文件内的全部文字。",
+                    systemImage: "doc.on.doc"
+                )
+            } catch {
+                chatActions.composer.showAttachmentToast(
+                    title: "复制失败",
+                    message: "无法读取完整文件文字：\(error.localizedDescription)",
+                    systemImage: "xmark.circle"
+                )
+            }
         }
     }
 }

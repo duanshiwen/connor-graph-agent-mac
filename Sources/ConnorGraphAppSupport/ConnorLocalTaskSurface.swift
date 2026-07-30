@@ -69,6 +69,10 @@ public enum ConnorTaskCLICommandID: String, Codable, Sendable, Equatable, Hashab
     case knowledgeMarketSource
     case knowledgeMarketPrompt
     case knowledgeMarketDebugExtract
+    case llmAuditSummary
+    case llmAuditList
+    case llmAuditShow
+    case llmAuditTop
 
     public var id: String { rawValue }
 }
@@ -197,6 +201,10 @@ public enum ConnorLocalTaskSurfaceCatalog {
         .init(id: .sessionTaskRestore, name: "tasks session restore", usage: "connor tasks session restore <session-id> <task-id>", summary: "Restore a session-scoped background task intent.", riskLevel: .stateChanging, examples: ["connor tasks session restore session-1 session.session-1.background.task-1"], apiRoute: .sessionTaskRestore),
         .init(id: .knowledgeMarketSource, name: "knowledge-market source", usage: "connor knowledge-market source <session-id>", summary: "Preview the completed conversation turns used for knowledge extraction.", examples: ["connor knowledge-market source session-1"]),
         .init(id: .knowledgeMarketPrompt, name: "knowledge-market prompt", usage: "connor knowledge-market prompt <session-id>", summary: "Preview the exact initial extraction messages and character counts.", examples: ["connor knowledge-market prompt session-1"]),
-        .init(id: .knowledgeMarketDebugExtract, name: "knowledge-market debug-extract", usage: "connor knowledge-market debug-extract <session-id> --knowledge-base <id> --publication-run <id>", summary: "Run extraction with complete per-iteration model and tool traces.", riskLevel: .stateChanging, examples: ["connor knowledge-market debug-extract session-1 --knowledge-base kb-1 --publication-run run-1 --format text"])
+        .init(id: .knowledgeMarketDebugExtract, name: "knowledge-market debug-extract", usage: "connor knowledge-market debug-extract <session-id> --knowledge-base <id> --publication-run <id>", summary: "Run extraction with complete per-iteration model and tool traces.", riskLevel: .stateChanging, examples: ["connor knowledge-market debug-extract session-1 --knowledge-base kb-1 --publication-run run-1 --format text"]),
+        .init(id: .llmAuditSummary, name: "llm-audit summary", usage: "connor llm-audit summary [--since 24h] [--json]", summary: "Summarize LLM calls, success rate, tokens, cache usage, request kinds, models, and operations.", examples: ["connor llm-audit", "connor llm-audit summary --since 7d"], outputFormat: "text|json"),
+        .init(id: .llmAuditList, name: "llm-audit list", usage: "connor llm-audit list [--kind <kind>] [--model <model>] [--status <status>] [--since 24h] [--limit N] [--json]", summary: "List and filter individual LLM usage audit records.", examples: ["connor llm-audit list --kind memory_l1_extraction --since 24h"], outputFormat: "text|json"),
+        .init(id: .llmAuditShow, name: "llm-audit show", usage: "connor llm-audit show <record-id> [--json]", summary: "Show one LLM call without prompt or response bodies.", examples: ["connor llm-audit show 1234abcd"], outputFormat: "text|json"),
+        .init(id: .llmAuditTop, name: "llm-audit top", usage: "connor llm-audit top --group-by operation|kind|model|tool [--since 24h] [--limit N] [--json]", summary: "Rank the operations, request kinds, models, or related tools consuming the most tokens.", examples: ["connor llm-audit top --group-by operation --since 7d", "connor llm-audit top --group-by tool"], outputFormat: "text|json")
     ]
 }

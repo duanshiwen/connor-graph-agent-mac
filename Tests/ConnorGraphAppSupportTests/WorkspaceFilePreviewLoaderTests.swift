@@ -61,6 +61,20 @@ struct WorkspaceFilePreviewLoaderTests {
         #expect(model.message?.contains("继续加载") == true)
     }
 
+    @Test("Full text reader ignores the preview byte limit")
+    func fullTextReaderIgnoresPreviewLimit() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("preview-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try "preview plus complete file text".write(to: url, atomically: true, encoding: .utf8)
+
+        let preview = await WorkspaceFilePreviewLoader(maximumTextByteCount: 7).load(node(for: url, byteCount: 31))
+        let fullText = try WorkspaceFileFullTextReader().read(fileURL: url)
+
+        #expect(preview.isTruncated)
+        #expect(preview.body == "preview")
+        #expect(fullText == "preview plus complete file text")
+    }
+
     private func node(for url: URL, byteCount: Int64) -> WorkspaceFileNode {
         WorkspaceFileNode(
             id: "root:\(url.lastPathComponent)",

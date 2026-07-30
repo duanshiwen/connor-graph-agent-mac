@@ -137,6 +137,7 @@ public struct AgentGeneratedMediaRequest: Sendable, Equatable {
     public var inputImages: [AgentGeneratedMediaInputImage]
     public var options: [String: String]
     public var imageAction: AgentGeneratedImageAction
+    public var auditContext: AgentLLMRequestAuditContext
 
     public init(
         kind: AgentGeneratedMediaKind,
@@ -144,7 +145,8 @@ public struct AgentGeneratedMediaRequest: Sendable, Equatable {
         inputAttachments: [AgentMessageAttachmentRef] = [],
         inputImages: [AgentGeneratedMediaInputImage] = [],
         options: [String: String] = [:],
-        imageAction: AgentGeneratedImageAction = .generate
+        imageAction: AgentGeneratedImageAction = .generate,
+        auditContext: AgentLLMRequestAuditContext = .init(requestKind: .generatedMedia)
     ) {
         self.kind = kind
         self.prompt = prompt
@@ -152,6 +154,7 @@ public struct AgentGeneratedMediaRequest: Sendable, Equatable {
         self.inputImages = inputImages
         self.options = options
         self.imageAction = imageAction
+        self.auditContext = auditContext
     }
 }
 
@@ -248,19 +251,22 @@ public struct AgentModelRequest: Sendable, Equatable {
     public var temperature: Double
     public var promptDiagnostics: AgentPromptDiagnostics?
     public var instructionPlacement: AgentInstructionPlacement
+    public var auditContext: AgentLLMRequestAuditContext
 
     public init(
         messages: [AgentModelMessage],
         tools: [AgentToolDefinition] = [],
         temperature: Double = 0.2,
         promptDiagnostics: AgentPromptDiagnostics? = nil,
-        instructionPlacement: AgentInstructionPlacement = .systemMessage
+        instructionPlacement: AgentInstructionPlacement = .systemMessage,
+        auditContext: AgentLLMRequestAuditContext = .init()
     ) {
         self.messages = messages
         self.tools = tools
         self.temperature = temperature
         self.promptDiagnostics = promptDiagnostics
         self.instructionPlacement = instructionPlacement
+        self.auditContext = auditContext
     }
 }
 

@@ -23,6 +23,7 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
     let controller = factory.makeAgentLoopController()
 
     #expect(controller.modelProvider.modelID == "claude-sonnet-4-5")
+    #expect(!controller.toolRegistry.definitions.contains { $0.name == ShareProgressUpdateTool.toolName })
     #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
 }
 
@@ -41,6 +42,7 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
     let controller = factory.makeAgentLoopController()
 
     #expect(controller.modelProvider.modelID == "gpt-5.6")
+    #expect(controller.toolRegistry.definitions.contains { $0.name == ShareProgressUpdateTool.toolName })
     #expect(!controller.modelProvider.capabilities.generatedMediaCapabilities.contains(.imageGeneration))
     #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
     #expect(controller.toolRegistry.definitions.contains { $0.name == "edit_image" })

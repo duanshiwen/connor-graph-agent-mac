@@ -29,6 +29,9 @@ struct ConnorCLI {
         if args.first == "mail" {
             return try await routeMail(args: Array(args.dropFirst()), encoder: encoder)
         }
+        if args.first == "llm-audit" {
+            return try LLMUsageAuditCLIRouter.route(args: Array(args.dropFirst()), storagePaths: AppStoragePaths.live(), encoder: encoder)
+        }
         let error: [String: String] = ["error": "unknown_command", "usage": "connor commands"]
         return try encode(error, encoder: encoder)
     }

@@ -314,7 +314,20 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         for iterationIndex in 0..<maximumIterations {
             try Task.checkCancellation()
             let iteration = iterationIndex + 1
-            let request = AgentModelRequest(messages: messages, tools: registry.definitions, temperature: 0.1)
+            let request = AgentModelRequest(
+                messages: messages,
+                tools: registry.definitions,
+                temperature: 0.1,
+                auditContext: AgentLLMRequestAuditContext(
+                    requestKind: .cloudKnowledgeGeneration,
+                    sessionID: session.id,
+                    runID: publicationRunID,
+                    correlationID: clientRunID,
+                    iteration: iteration,
+                    operation: "CloudKnowledgeLLMGenerationRunner.generate",
+                    initiator: .background
+                )
+            )
             let tracedTools = request.tools.map(CloudKnowledgeExtractionToolDefinitionTrace.init)
             emit(CloudKnowledgeExtractionTraceEvent(
                 sequence: traceSequence,
