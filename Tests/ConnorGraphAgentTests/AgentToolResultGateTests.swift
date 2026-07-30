@@ -16,8 +16,8 @@ import ConnorGraphAgent
     #expect(!gated.contains("klmnopqrstuvwxyz"))
     #expect(gated.contains("...[truncated tool result:"))
     #expect(gated.contains("tool=readWorkspaceFile"))
-    #expect(gated.contains("kept=10 chars"))
-    #expect(gated.contains("original=26 chars"))
+    #expect(gated.contains("kept=10 bytes"))
+    #expect(gated.contains("original=26 bytes"))
 }
 
 @Test func toolResultGateKeepsSmallResultsUnchanged() {
@@ -110,8 +110,8 @@ import ConnorGraphAgent
     #expect(gated.hasPrefix("abcde"))
     #expect(!gated.contains("fghijklmnopqrstuvwxyz"))
     #expect(gated.contains("tool=Bash"))
-    #expect(gated.contains("kept=5 chars"))
-    #expect(gated.contains("original=26 chars"))
+    #expect(gated.contains("kept=5 bytes"))
+    #expect(gated.contains("original=26 bytes"))
 }
 
 @Test func toolResultGateFitsResultToRemainingTokenBudget() {
@@ -221,4 +221,20 @@ import ConnorGraphAgent
     let gate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(maxResultCharacters: 1_024))
 
     #expect(gate.gatedContent(for: result) == result.contentText)
+}
+
+@Test func toolResultGateAppliesLimitAsUTF8BytesWithoutSplittingCharacters() {
+    let result = AgentToolResult(
+        toolCallID: "call-unicode-bytes",
+        toolName: "unicode_result",
+        contentText: "你好吗ab"
+    )
+    let gate = AgentToolResultGate(configuration: .init(maxResultCharacters: 7))
+
+    let gated = gate.gatedContent(for: result)
+
+    #expect(gated.hasPrefix("你好"))
+    #expect(!gated.hasPrefix("你好吗"))
+    #expect(gated.contains("kept=6 bytes"))
+    #expect(gated.contains("original=11 bytes"))
 }
