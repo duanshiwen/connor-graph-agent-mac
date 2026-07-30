@@ -30,7 +30,6 @@ public struct AgentRunRetrievalPlan: Sendable, Equatable {
 
     public var instruction: String {
         let startup = [
-            requiresCurrentTime ? "get_current_time first" : nil,
             requiresContinuity ? "memory_os_recent_context and memory_os_knowledge_context" : nil,
             requiresNoteSearch ? "one initial note_search" : nil
         ].compactMap { $0 }
@@ -56,7 +55,7 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
     ) -> AgentRunRetrievalPlan {
         guard mode == .contextual else {
             return AgentRunRetrievalPlan(
-                requiresCurrentTime: true,
+                requiresCurrentTime: false,
                 requiresContinuity: true,
                 requiresNoteSearch: true,
                 requiresFinalProfile: true
@@ -64,12 +63,11 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
         }
 
         let context = routingContext(for: request)
-        let timeRelevant = containsAny(context, signals: Self.timeSignals)
         let memoryRelevant = containsAny(context, signals: Self.memorySignals)
         let noteRelevant = containsAny(context, signals: Self.noteSignals)
         let profileRelevant = memoryRelevant || containsAny(context, signals: Self.profileSignals)
         return AgentRunRetrievalPlan(
-            requiresCurrentTime: timeRelevant,
+            requiresCurrentTime: false,
             requiresContinuity: memoryRelevant,
             requiresNoteSearch: noteRelevant,
             requiresFinalProfile: profileRelevant
@@ -82,6 +80,7 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
         retrievalPlan: AgentRunRetrievalPlan,
         mode: AgentToolExposureMode
     ) -> [AgentToolDefinition] {
+        let definitions = definitions.filter { $0.name != AgentCurrentTimePreflightPolicy.requiredToolName }
         guard mode == .contextual else { return definitions }
         let context = routingContext(for: request)
         return definitions.filter { definition in
@@ -95,7 +94,7 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
         request: AgentChatRequest,
         retrievalPlan: AgentRunRetrievalPlan
     ) -> Bool {
-        if name == AgentCurrentTimePreflightPolicy.requiredToolName { return retrievalPlan.requiresCurrentTime }
+        if name == AgentCurrentTimePreflightPolicy.requiredToolName { return false }
         if AgentContinuityPreflightPolicy.requiredToolNames.contains(name) { return retrievalPlan.requiresContinuity }
         if name == AgentNoteSearchPreflightPolicy.requiredToolName { return retrievalPlan.requiresNoteSearch }
         if name == AgentContinuityPreflightPolicy.currentUserProfileToolName { return retrievalPlan.requiresFinalProfile }

@@ -9,6 +9,20 @@ private func automaticPhaseResponse(
     nextResponse: AgentModelResponse? = nil
 ) -> AgentModelResponse? {
     guard request.auditContext.operation == "AgentLoopController.completeModelRequest" else { return nil }
+    let startupNames = Set(AgentContinuityPreflightPolicy.requiredToolNames + [AgentNoteSearchPreflightPolicy.requiredToolName])
+    let startupTools = request.tools.filter { startupNames.contains($0.name) }
+    if request.promptCacheContext?.phase == .strategyResearch, !startupTools.isEmpty {
+        return AgentModelResponse(
+            text: nil,
+            toolCalls: startupTools.map { definition in
+                let arguments = definition.name == AgentNoteSearchPreflightPolicy.requiredToolName
+                    ? #"{"query":""}"#
+                    : "{}"
+                return AgentToolCall(id: "automatic-startup-\(definition.name)", name: definition.name, argumentsJSON: arguments)
+            },
+            finishReason: .toolCalls
+        )
+    }
     switch request.promptCacheContext?.phase {
     case .strategyResearch:
         let arguments = #"{"provisionalApproach":"test fixture approach","recommendedApproach":"test fixture approach","taskMode":"coding","memoryDecision":{"action":"skip","reason":"historyIndependentMechanicalOrCodingTask"}}"#
@@ -181,6 +195,36 @@ private actor SuspendingModelProvider: AgentModelProvider {
     }
 }
 
+private actor ContextualPreflightProvider: AgentModelProvider {
+    let modelID = "contextual-preflight"
+    let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+    private(set) var requests: [AgentModelRequest] = []
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        requests.append(request)
+        if request.promptCacheContext?.phase == .strategyResearch,
+           request.tools.contains(where: { $0.name == AgentNoteSearchPreflightPolicy.requiredToolName }) {
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [.init(id: "contextual-note-search", name: AgentNoteSearchPreflightPolicy.requiredToolName, argumentsJSON: #"{"query":"today"}"#)],
+                finishReason: .toolCalls
+            )
+        }
+        switch request.promptCacheContext?.phase {
+        case .strategyResearch:
+            return automaticPhaseResponse(for: request)!
+        case .taskExecution:
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [.init(id: "contextual-prepare-final", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"ready"}"#)],
+                finishReason: .toolCalls
+            )
+        default:
+            return AgentModelResponse(text: "done")
+        }
+    }
+}
+
 private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     let modelID = "streaming-final"
     let capabilities = AgentModelCapabilities(supportsStreaming: true, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
@@ -252,6 +296,34 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(configuration.maxToolResultBytes == 4096)
     #expect(configuration.budget.maxTotalTokens == 10_000)
     #expect(configuration.maxConsecutiveToolResultErrors == 3)
+}
+
+@Test func agentLoopConfigurationNormalizesUnsafeBounds() throws {
+    let direct = AgentLoopConfiguration(
+        maxToolIterations: -1,
+        maxToolCallsPerIteration: 0,
+        maxRunDurationSeconds: 0,
+        maxToolResultBytes: -1,
+        maxConsecutiveToolResultErrors: -1,
+        promptMaxEstimatedTokens: 0,
+        modelContextWindowTokens: -1,
+        reservedOutputTokens: 0
+    )
+    let decoded = try JSONDecoder().decode(
+        AgentLoopConfiguration.self,
+        from: Data(#"{"maxToolIterations":-2,"maxToolCallsPerIteration":0,"maxRunDurationSeconds":0,"maxToolResultBytes":-2,"maxConsecutiveToolResultErrors":-2}"#.utf8)
+    )
+
+    for configuration in [direct, decoded] {
+        #expect(configuration.maxToolIterations == 1)
+        #expect(configuration.maxToolCallsPerIteration == 1)
+        #expect(configuration.maxRunDurationSeconds == 1)
+        #expect(configuration.maxToolResultBytes == 0)
+        #expect(configuration.maxConsecutiveToolResultErrors == 0)
+    }
+    #expect(direct.promptMaxEstimatedTokens == 1)
+    #expect(direct.modelContextWindowTokens == 1)
+    #expect(direct.reservedOutputTokens == 1)
 }
 
 @Test func progressPromptAndToolStayAlignedForNonGPTModels() async throws {
@@ -775,6 +847,26 @@ private struct NamedDelayTool: AgentTool {
     }
 }
 
+private struct ContextualNoteSearchTool: AgentTool {
+    let name = AgentNoteSearchPreflightPolicy.requiredToolName
+    let description = "Search notes for contextual preflight testing"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.object(properties: [
+        "query": .string(description: "Note query")
+    ], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: #"{"records":[]}"#,
+            contentJSON: #"{"records":[]}"#
+        )
+    }
+}
+
 private struct LongResultTool: AgentTool {
     let name = "long_result"
     let description = "Return a long deterministic result"
@@ -973,8 +1065,8 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(!toolMessage.content.contains("klmnopqrstuvwxyz"))
     #expect(toolMessage.content.contains("...[truncated tool result:"))
     #expect(toolMessage.content.contains("tool=long_result"))
-    #expect(toolMessage.content.contains("kept=10 chars"))
-    #expect(toolMessage.content.contains("original=26 chars"))
+    #expect(toolMessage.content.contains("kept=10 bytes"))
+    #expect(toolMessage.content.contains("original=26 bytes"))
 }
 
 @Test func agentLoopFitsOversizedToolResultIntoModelContextInsteadOfStoppingRun() async throws {
@@ -1702,7 +1794,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
         for: AgentChatRequest(sessionID: "note", userMessage: "查看今天的笔记"),
         mode: .contextual
     )
-    #expect(datedNote.requiresCurrentTime)
+    #expect(!datedNote.requiresCurrentTime)
     #expect(datedNote.requiresNoteSearch)
 }
 
@@ -2299,10 +2391,12 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     var registry = AgentToolRegistry()
     registry.register(NamedDelayTool(name: "slow_tool", delayNanoseconds: 60_000_000))
     registry.register(NamedDelayTool(name: "fast_tool", delayNanoseconds: 1_000_000))
+    let audit = InMemoryAgentAuditLog()
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: registry,
-        configuration: AgentLoopConfiguration()
+        configuration: AgentLoopConfiguration(),
+        auditLog: audit
     )
 
     var events: [AgentEvent] = []
@@ -2321,6 +2415,9 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
         $0.role == .tool && ["call-slow", "call-fast"].contains($0.toolCallID ?? "")
     }
     #expect(toolMessages.map(\.toolCallID) == ["call-slow", "call-fast"])
+    let auditEvents = await audit.events.filter { ["slow_tool", "fast_tool"].contains($0.toolName ?? "") }
+    #expect(auditEvents.filter { $0.eventType == .toolStarted }.count == 2)
+    #expect(auditEvents.filter { $0.eventType == .toolFinished }.count == 2)
 }
 
 @Test func agentLoopEmitsTurnBoundariesAroundModelCallAndToolBatch() async throws {
@@ -2402,4 +2499,116 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     }.first { $0.stoppedAfterTurn })
     #expect(turnCompleted.stoppedAfterTurn)
     #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopUsesContextualRetrievalPlanInsideStrategyPhase() async throws {
+    let provider = ContextualPreflightProvider()
+    var registry = AgentToolRegistry()
+    registry.register(GetCurrentTimeTool())
+    registry.register(ContextualNoteSearchTool())
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(sessionID: "session-contextual-preflight", userMessage: "查看今天的笔记")) {
+        events.append(event)
+    }
+
+    let requests = await provider.requests
+    #expect(requests.first?.promptCacheContext?.phase == .strategyResearch)
+    #expect(requests.first?.tools.contains(where: { $0.name == AgentNoteSearchPreflightPolicy.requiredToolName }) == true)
+    #expect(requests.allSatisfy { request in
+        !request.tools.contains(where: { $0.name == AgentCurrentTimePreflightPolicy.requiredToolName })
+    })
+    #expect(events.contains { event in
+        if case .toolFinished(let result) = event { return result.toolName == AgentNoteSearchPreflightPolicy.requiredToolName }
+        return false
+    })
+    #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopDefersExcessToolCallsWithoutPreservingStaleProviderMetadata() async throws {
+    let calls = (1...3).map {
+        AgentToolCall(id: "limited-call-\($0)", name: "echo_args", argumentsJSON: "{\"value\":\"\($0)\"}")
+    }
+    let rawItems = #"[{"type":"function_call","call_id":"limited-call-1","name":"echo_args","arguments":"{}"},{"type":"function_call","call_id":"limited-call-2","name":"echo_args","arguments":"{}"},{"type":"function_call","call_id":"limited-call-3","name":"echo_args","arguments":"{}"}]"#
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: calls,
+            finishReason: .toolCalls,
+            providerMetadata: AgentModelProviderMetadata(providerID: "openai-responses", rawOutputItemsJSON: rawItems)
+        ),
+        AgentModelResponse(text: "done")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(maxToolCallsPerIteration: 2)
+    )
+
+    for try await _ in loop.run(.init(sessionID: "session-limited-calls", userMessage: "Run the requested operations")) {}
+
+    let followUp = try #require(await provider.requests.last)
+    let assistant = try #require(followUp.messages.first {
+        $0.role == .assistant && $0.toolCalls?.contains(where: { $0.id == "limited-call-1" }) == true
+    })
+    #expect(assistant.toolCalls?.map(\.id) == ["limited-call-1", "limited-call-2"])
+    #expect(assistant.providerMetadata == nil)
+    #expect(followUp.messages.contains {
+        $0.role == .system && $0.content.contains("deferred 1 calls")
+    })
+}
+
+@Test func agentLoopEnforcesMaximumRunDuration() async throws {
+    let provider = SuspendingModelProvider()
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(maxRunDurationSeconds: 1)
+    )
+    var events: [AgentEvent] = []
+
+    do {
+        for try await event in loop.run(.init(sessionID: "session-run-timeout", userMessage: "wait")) {
+            events.append(event)
+        }
+        Issue.record("Expected the run deadline to stop the request")
+    } catch {
+        #expect(error as? AgentLoopError == .runDurationExceeded(1))
+    }
+
+    #expect(await provider.wasCancelled)
+    #expect(events.last?.kind == .runFailed)
+}
+
+@Test func alternatingIdenticalToolCallsTriggerLoopProtection() async throws {
+    let responses = (0..<24).map { index in
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [.init(
+                id: "alternating-\(index)",
+                name: index.isMultiple(of: 2) ? "fast_tool" : "slow_tool",
+                argumentsJSON: "{}"
+            )],
+            finishReason: .toolCalls
+        )
+    }
+    let provider = ScriptedModelProvider(responses: responses)
+    var registry = AgentToolRegistry()
+    registry.register(NamedDelayTool(name: "slow_tool", delayNanoseconds: 0))
+    registry.register(NamedDelayTool(name: "fast_tool", delayNanoseconds: 0))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(maxToolIterations: 30)
+    )
+
+    do {
+        for try await _ in loop.run(.init(sessionID: "session-alternating-loop", userMessage: "Repeat reads")) {}
+        Issue.record("Expected alternating repeated calls to trigger loop protection")
+    } catch {
+        #expect(error as? AgentLoopError == .maxToolIterationsReached)
+    }
 }
