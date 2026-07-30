@@ -231,6 +231,16 @@ public enum AgentPromptModuleCatalog {
         return ordered.sorted { (catalogOrder[$0] ?? .max) < (catalogOrder[$1] ?? .max) }
     }
 
+    public static func invalidRequestedModuleIDs(
+        _ requested: [AgentPromptModuleID],
+        capabilities: Set<AgentPromptCapability>
+    ) -> [AgentPromptModuleID] {
+        requested.filter { id in
+            guard let specification = specificationByID[id] else { return true }
+            return specification.loadingPolicy != .kernel && !specification.requirement.isSatisfied(by: capabilities)
+        }
+    }
+
     public static func document(from markdown: String) -> AgentPromptDocument {
         let specificationsByTitle = Dictionary(uniqueKeysWithValues: specifications.map { ($0.title, $0) })
         var modules: [AgentPromptModule] = []

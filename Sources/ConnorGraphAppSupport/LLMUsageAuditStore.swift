@@ -102,6 +102,7 @@ public struct LLMUsageAuditSummary: Codable, Sendable, Equatable {
     public var totalTokens: Int
     public var cacheCreationInputTokens: Int
     public var cacheReadInputTokens: Int
+    public var uncachedInputTokens: Int
     public var unclassifiedCalls: Int
     public var byRequestKind: [LLMUsageAuditSummaryRow]
     public var byModel: [LLMUsageAuditSummaryRow]
@@ -152,6 +153,7 @@ public struct LLMUsageAuditQueryService: Sendable {
             totalTokens: records.compactMap(\.totalTokens).reduce(0, +),
             cacheCreationInputTokens: records.compactMap(\.cacheCreationInputTokens).reduce(0, +),
             cacheReadInputTokens: records.compactMap(\.cacheReadInputTokens).reduce(0, +),
+            uncachedInputTokens: records.compactMap(\.uncachedInputTokens).reduce(0, +),
             unclassifiedCalls: records.filter { $0.requestKind == .unclassified }.count,
             byRequestKind: rows { $0.requestKind.rawValue },
             byModel: rows { $0.modelID },
@@ -277,6 +279,7 @@ public struct AuditedAgentModelProvider: StreamingAgentModelProvider, AgentGener
             relatedToolNames: Array(Set(request.messages.filter { $0.role == .tool }.compactMap(\.name))).sorted(),
             promptTokens: response?.usage?.promptTokens, completionTokens: response?.usage?.completionTokens, totalTokens: response?.usage?.totalTokens,
             cacheCreationInputTokens: response?.usage?.cacheCreationInputTokens, cacheReadInputTokens: response?.usage?.cacheReadInputTokens,
+            uncachedInputTokens: response?.usage?.uncachedInputTokens,
             estimatedInputTokens: max(1, characters / 4), messageCount: request.messages.count, inputCharacterCount: characters,
             toolDefinitionCount: request.tools.count, containsImages: request.messages.contains { $0.contentParts?.contains { $0.kind == .imageDataURL } == true },
             outputCharacterCount: response?.text?.count, toolCallCount: response?.toolCalls.count, finishReason: response?.finishReason.rawValue,

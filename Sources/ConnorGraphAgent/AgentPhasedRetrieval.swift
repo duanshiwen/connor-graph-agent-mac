@@ -160,12 +160,14 @@ public struct AgentStrategyPlan: Codable, Sendable, Equatable {
 }
 
 public enum AgentStrategyPlanValidationError: Error, Sendable, Equatable {
+    case invalidCommitPhase(AgentLoopPhase)
     case missingProvisionalApproach
     case missingRecommendedApproach
     case invalidMemoryPageSize
     case memoryQueriesRequired
     case memoryQueriesForbiddenWhenSkipped
     case memoryCapabilityUnavailable
+    case invalidMemorySkipReasonForTaskMode
 }
 
 public struct AgentStrategyPlanValidator: Sendable {
@@ -189,6 +191,15 @@ public struct AgentStrategyPlanValidator: Sendable {
             guard plan.memoryQueries.isEmpty else { throw AgentStrategyPlanValidationError.memoryQueriesForbiddenWhenSkipped }
             if reason == .capabilityUnavailable, memoryCapabilityAvailable {
                 throw AgentStrategyPlanValidationError.memoryCapabilityUnavailable
+            }
+            if reason == .mechanicalTextTransformation || reason == .deterministicComputationWithCompleteInput,
+               plan.taskMode != .mechanical {
+                throw AgentStrategyPlanValidationError.invalidMemorySkipReasonForTaskMode
+            }
+            if reason == .historyIndependentMechanicalOrCodingTask,
+               plan.taskMode != .mechanical,
+               plan.taskMode != .coding {
+                throw AgentStrategyPlanValidationError.invalidMemorySkipReasonForTaskMode
             }
         }
     }
@@ -267,6 +278,18 @@ public protocol AgentExternalKnowledgeSource: Sendable {
     func read(_ request: AgentExternalResearchReadRequest) async throws -> AgentExternalKnowledgeItem
 }
 
+public struct AgentExternalKnowledgeSourceDescriptor: Codable, Sendable, Equatable {
+    public var id: String
+    public var kind: AgentExternalKnowledgeSourceKind
+    public var summary: String
+
+    public init(id: String, kind: AgentExternalKnowledgeSourceKind, summary: String) {
+        self.id = id
+        self.kind = kind
+        self.summary = summary
+    }
+}
+
 public struct AnyAgentExternalKnowledgeSource: AgentExternalKnowledgeSource, Sendable {
     public let id: String
     public let kind: AgentExternalKnowledgeSourceKind
@@ -280,6 +303,20 @@ public struct AnyAgentExternalKnowledgeSource: AgentExternalKnowledgeSource, Sen
         isReadOnly = source.isReadOnly
         searchClosure = source.search
         readClosure = source.read
+    }
+
+    public init(
+        id: String,
+        kind: AgentExternalKnowledgeSourceKind,
+        isReadOnly: Bool = true,
+        search: @escaping @Sendable (AgentExternalResearchRequest) async throws -> [AgentExternalKnowledgeItem],
+        read: @escaping @Sendable (AgentExternalResearchReadRequest) async throws -> AgentExternalKnowledgeItem
+    ) {
+        self.id = id
+        self.kind = kind
+        self.isReadOnly = isReadOnly
+        self.searchClosure = search
+        self.readClosure = read
     }
 
     public func search(_ request: AgentExternalResearchRequest) async throws -> [AgentExternalKnowledgeItem] { try await searchClosure(request) }
@@ -505,6 +542,48 @@ public struct AgentEvidenceState: Codable, Sendable, Equatable {
         seenQuerySignatures.formUnion(other.seenQuerySignatures)
     }
 
+    @discardableResult
+    public mutating func ingestExternalResearchPayload(_ payload: String) -> Int {
+        guard let data = payload.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rawItems = object["results"] as? [[String: Any]] else { return 0 }
+        var knownReferences = Set(references.map { $0.uri ?? $0.id })
+        var added = 0
+        for raw in rawItems {
+            guard raw["error"] == nil else { continue }
+            let id = raw["id"] as? String ?? "evidence-\(references.count + added + 1)"
+            let uri = raw["uri"] as? String ?? (raw["citations"] as? [String])?.first
+            let summary = (raw["summary"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard uri != nil || !summary.isEmpty else { continue }
+            let identity = uri ?? id
+            guard knownReferences.insert(identity).inserted else { continue }
+            references.append(.init(id: id, uri: uri, claim: summary))
+            if !summary.isEmpty, !conclusions.contains(summary) { conclusions.append(summary) }
+            added += 1
+        }
+        return added
+    }
+
+    public var compactPrompt: String {
+        let conclusionText = conclusions.suffix(12).map { "- \($0)" }.joined(separator: "\n")
+        let referenceText = references.suffix(20).map { reference in
+            "- [\(reference.id)] \(reference.uri ?? "no-uri"): \(reference.claim)"
+        }.joined(separator: "\n")
+        let conflictText = conflicts.suffix(8).map { "- \($0)" }.joined(separator: "\n")
+        let unresolvedText = unresolvedQuestions.suffix(8).map { "- \($0)" }.joined(separator: "\n")
+        return """
+        Compressed research evidence retained by the trusted runtime.
+        Conclusions:
+        \(conclusionText.isEmpty ? "- none" : conclusionText)
+        References:
+        \(referenceText.isEmpty ? "- none" : referenceText)
+        Conflicts:
+        \(conflictText.isEmpty ? "- none" : conflictText)
+        Unresolved questions:
+        \(unresolvedText.isEmpty ? "- none" : unresolvedText)
+        """
+    }
+
     private func stableUnion(_ lhs: [String], _ rhs: [String]) -> [String] { stableUnion(lhs, rhs, key: { $0 }) }
     private func stableUnion<T>(_ lhs: [T], _ rhs: [T], key: (T) -> String) -> [T] {
         var seen = Set<String>()
@@ -522,6 +601,17 @@ public struct AgentLoopRecoveryState: Codable, Sendable, Equatable {
         self.activeModuleIDs = activeModuleIDs
         self.evidenceState = evidenceState
     }
+
+    public var trustedPrompt: String {
+        let modules = activeModuleIDs.map(\.rawValue).joined(separator: ", ")
+        return """
+        Trusted context recovery state:
+        - phase: \(phase.rawValue)
+        - active Prompt Modules: \(modules)
+
+        \(evidenceState.compactPrompt)
+        """
+    }
 }
 
 public struct AgentPhasedLoopState: Sendable, Equatable {
@@ -533,7 +623,9 @@ public struct AgentPhasedLoopState: Sendable, Equatable {
     public init() {}
 
     public mutating func commitStrategy(_ plan: AgentStrategyPlan, memoryCapabilityAvailable: Bool) throws {
-        guard phase == .strategyResearch else { return }
+        guard phase == .strategyResearch else {
+            throw AgentStrategyPlanValidationError.invalidCommitPhase(phase)
+        }
         try AgentStrategyPlanValidator().validate(plan, memoryCapabilityAvailable: memoryCapabilityAvailable)
         strategy = plan
         phase = plan.memoryDecision == .query ? .memoryPreparation : .taskExecution
@@ -541,6 +633,7 @@ public struct AgentPhasedLoopState: Sendable, Equatable {
 
     public mutating func completeMemoryPreparation() { if phase == .memoryPreparation { phase = .taskExecution } }
     public mutating func prepareFinalOutput() { if phase == .taskExecution { phase = .finalSynthesis } }
+    public mutating func resumeMemoryPreparation() { phase = .memoryPreparation }
     public mutating func resumeResearch() { phase = .strategyResearch }
     public var recoveryState: AgentLoopRecoveryState { .init(phase: phase, activeModuleIDs: activeModuleIDs, evidenceState: evidenceState) }
 }

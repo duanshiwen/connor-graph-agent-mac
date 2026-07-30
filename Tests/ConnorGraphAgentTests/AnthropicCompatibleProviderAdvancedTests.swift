@@ -150,6 +150,34 @@ data: {"type":"message_stop"}
     #expect(cache["ttl"] as? String == "1h")
 }
 
+@Test func anthropicExplicitBreakpointCachesOnlyStableSystemPrefix() async throws {
+    let client = AdvancedAnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            apiKey: "sk-ant-test",
+            model: "claude-sonnet-test",
+            featureOptions: AnthropicCompatibleFeatureOptions(promptCache: .init(enabled: true, ttl: .oneHour))
+        ),
+        httpClient: client
+    )
+    #expect(provider.capabilities.supportsExplicitPromptCacheBreakpoints)
+    _ = try await provider.complete(.init(
+        messages: [
+            .init(role: .system, content: "stable kernel"),
+            .init(role: .system, content: "Current Time: dynamic"),
+            .init(role: .user, content: "request")
+        ],
+        promptCacheContext: .init(phase: .strategyResearch, promptVersion: "v1", stableToolBundleVersion: "tools", explicitBreakpointIndex: 1)
+    ))
+
+    let object = try capturedJSONObject(client.storage.capturedRequest)
+    let system = try #require(object["system"] as? [[String: Any]])
+    #expect(system.map { $0["text"] as? String } == ["stable kernel", "Current Time: dynamic"])
+    #expect(system[0]["cache_control"] != nil)
+    #expect(system[1]["cache_control"] == nil)
+}
+
 @Test func anthropicToolDefinitionsCanBeCachedAndEagerStreamed() async throws {
     let client = AdvancedAnthropicCapturingHTTPClient()
     let provider = AnthropicCompatibleProvider(

@@ -14,7 +14,7 @@ private func auditTestStore() -> (FileLLMUsageAuditStore, URL) {
     let (store, root) = auditTestStore()
     defer { try? FileManager.default.removeItem(at: root) }
     let base = AnyAgentModelProvider(modelID: "audit-model") { _ in
-        AgentModelResponse(text: "PRIVATE_RESPONSE_BODY", usage: AgentModelUsage(promptTokens: 12, completionTokens: 3), finishReason: .stop)
+        AgentModelResponse(text: "PRIVATE_RESPONSE_BODY", usage: AgentModelUsage(promptTokens: 12, completionTokens: 3, cacheCreationInputTokens: 2, cacheReadInputTokens: 5), finishReason: .stop)
     }
     let provider = AuditedAgentModelProvider(provider: base, recorder: store)
     let request = AgentModelRequest(
@@ -33,6 +33,9 @@ private func auditTestStore() -> (FileLLMUsageAuditStore, URL) {
     #expect(record.requestKind == .memoryL1Extraction)
     #expect(record.operation == "MemoryWorker.extract")
     #expect(record.totalTokens == 15)
+    #expect(record.cacheCreationInputTokens == 2)
+    #expect(record.cacheReadInputTokens == 5)
+    #expect(record.uncachedInputTokens == 7)
     #expect(record.inputCharacterCount == 19)
     #expect(record.outputCharacterCount == 21)
     let persisted = try String(contentsOf: store.fileURL, encoding: .utf8)
@@ -54,6 +57,18 @@ private func auditTestStore() -> (FileLLMUsageAuditStore, URL) {
     #expect(record?.status == .failed)
     #expect(record?.requestKind == .unclassified)
     #expect(record?.errorType?.contains("AuditTestError") == true)
+}
+
+@Test func auditStoreDecodesLegacyRecordsWithoutUncachedInputTokens() throws {
+    let (store, root) = auditTestStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let legacyJSON = #"{"backgroundJobID":null,"cacheCreationInputTokens":null,"cacheReadInputTokens":null,"cancelled":false,"completedAt":"2026-07-30T00:00:00Z","completionTokens":3,"connectionID":null,"containsImages":false,"correlationID":null,"durationMilliseconds":1,"errorMessage":null,"errorType":null,"estimatedInputTokens":12,"executionMode":"completion","finishReason":"stop","generatedByteCount":null,"id":"legacy","initiator":"system","inputCharacterCount":48,"iteration":null,"messageCount":1,"metadata":{},"modelID":"legacy-model","operation":null,"outputCharacterCount":2,"promptTokens":12,"providerID":null,"providerMode":null,"relatedToolNames":[],"requestKind":"unclassified","runID":null,"sessionID":null,"startedAt":"2026-07-30T00:00:00Z","status":"succeeded","toolCallCount":0,"toolDefinitionCount":0,"totalTokens":15}"#
+    try FileManager.default.createDirectory(at: store.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data((legacyJSON + "\n").utf8).write(to: store.fileURL)
+
+    let record = try #require(store.records().only)
+    #expect(record.id == "legacy")
+    #expect(record.uncachedInputTokens == nil)
 }
 
 @Test func auditedProviderRecordsStreamingCompletionOnce() async throws {
