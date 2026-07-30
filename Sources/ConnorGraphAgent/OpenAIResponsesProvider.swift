@@ -269,9 +269,14 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
             body["reasoning"] = ["effort": reasoningEffort]
         }
         if config.baseURL.host?.lowercased().hasSuffix("openai.com") == true,
-           let stablePrefix = request.messages.first?.content,
-           !stablePrefix.isEmpty {
-            let digest = SHA256.hash(data: Data("\(config.requestModel)\u{1F}\(stablePrefix)".utf8))
+           let cache = request.promptCacheContext {
+            let identity = [
+                config.requestModel,
+                cache.promptVersion,
+                cache.phase.rawValue,
+                cache.stableToolBundleVersion
+            ].joined(separator: "\u{1F}")
+            let digest = SHA256.hash(data: Data(identity.utf8))
                 .prefix(12)
                 .map { String(format: "%02x", $0) }
                 .joined()

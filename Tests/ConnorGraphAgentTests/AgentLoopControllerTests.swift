@@ -1652,8 +1652,11 @@ private struct InstructionPromotionTool: AgentTool {
 @Test func instructionCapabilityProjectorRoutesRetrievalRulesByAvailableTools() {
     let projector = AgentInstructionCapabilityProjector()
     let instruction = AgentInstructionSection.defaultConnorInstruction
+    let localDocument = projector.projectedDocument(instruction, availableToolNames: ["Read"])
     let localOnly = projector.project(instruction, availableToolNames: ["Read"])
 
+    #expect(localDocument.moduleIDs.contains(AgentPromptModuleID(rawValue: "programming_precision")))
+    #expect(!localDocument.moduleIDs.contains(AgentPromptModuleID(rawValue: "web_research")))
     #expect(localOnly.contains("## Core Startup and Final Preference Checkpoint"))
     #expect(localOnly.contains("## Retrieval Completion Rules"))
     #expect(localOnly.contains("## Programming and Precision Work"))

@@ -142,7 +142,11 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         profile.supportsStreaming = config.featureOptions.streamingEnabled
         return profile
     }
-    public var capabilities: AgentModelCapabilities { capabilityProfile.agentCapabilities }
+    public var capabilities: AgentModelCapabilities {
+        var capabilities = capabilityProfile.agentCapabilities
+        capabilities.supportsExplicitPromptCacheBreakpoints = config.featureOptions.promptCache.enabled
+        return capabilities
+    }
 
     public init(config: AnthropicCompatibleConfig, httpClient: Client, sseClient: (any AgentSSEHTTPClient)? = nil) {
         self.config = config
