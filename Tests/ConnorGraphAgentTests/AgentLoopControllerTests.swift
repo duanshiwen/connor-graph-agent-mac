@@ -1657,6 +1657,12 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(localOnly.contains("## Core Startup and Final Preference Checkpoint"))
     #expect(localOnly.contains("## Retrieval Completion Rules"))
     #expect(localOnly.contains("## Programming and Precision Work"))
+    #expect(localOnly.contains("## Workspace Tool Rules"))
+    #expect(localOnly.contains("## Workspace Execution Rules"))
+    #expect(!localOnly.contains("## Environment Tool Rules"))
+    #expect(!localOnly.contains("## Current Time Tool Contract"))
+    #expect(!localOnly.contains("## Session Status Tool Rules"))
+    #expect(!localOnly.contains("## Note Session File Boundary"))
     #expect(!localOnly.contains("## Current Time Retrieval Rules"))
     #expect(!localOnly.contains("## Memory Retrieval Rules"))
     #expect(!localOnly.contains("## Calendar Retrieval Rules"))
@@ -1673,10 +1679,14 @@ private struct InstructionPromotionTool: AgentTool {
         availableToolNames: [AgentCurrentTimePreflightPolicy.requiredToolName, "calendar_search_events"]
     )
     #expect(calendar.contains("## Current Time Retrieval Rules"))
+    #expect(calendar.contains("## Current Time Tool Contract"))
     #expect(calendar.contains("## Calendar Retrieval Rules"))
     #expect(calendar.contains("## Native Personal Source Tools"))
     #expect(calendar.contains("## Calendar Tool Workflow"))
     #expect(!calendar.contains("## Programming and Precision Work"))
+    #expect(!calendar.contains("## Workspace Tool Rules"))
+    #expect(!calendar.contains("## Environment Tool Rules"))
+    #expect(!calendar.contains("## Session Status Tool Rules"))
     #expect(!calendar.contains("## Mail Retrieval Rules"))
     #expect(!calendar.contains("## Mail Tool Workflow"))
     #expect(!calendar.contains("## RSS Tool Workflow"))
@@ -1690,10 +1700,24 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(browserHistory.contains("## Browser History Tool Workflow"))
     #expect(browserHistory.contains("## Native Source Evidence Rules"))
     #expect(!browserHistory.contains("## Programming and Precision Work"))
+    #expect(!browserHistory.contains("## Workspace Tool Rules"))
     #expect(!browserHistory.contains("## Web Research Rules"))
 
     let noTools = projector.project(instruction, availableToolNames: [])
     #expect(!noTools.contains("## Programming and Precision Work"))
+    #expect(!noTools.contains("## Environment Tool Rules"))
+    #expect(!noTools.contains("## Workspace Tool Rules"))
+    #expect(!noTools.contains("## Current Time Tool Contract"))
+    #expect(!noTools.contains("## Session Status Tool Rules"))
+    #expect(!noTools.contains("## Note Session File Boundary"))
+
+    let environment = projector.project(instruction, availableToolNames: ["get_current_environment"])
+    #expect(environment.contains("## Environment Tool Rules"))
+    #expect(!environment.contains("## Workspace Tool Rules"))
+
+    let sessions = projector.project(instruction, availableToolNames: ["session_get_status"])
+    #expect(sessions.contains("## Session Status Tool Rules"))
+    #expect(!sessions.contains("## Environment Tool Rules"))
 }
 
 @Test func agentLoopAttemptsCurrentTimeFirstAndContinuesAfterFailure() async throws {

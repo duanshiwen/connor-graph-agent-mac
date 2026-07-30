@@ -176,6 +176,8 @@ public struct AgentInstructionCapabilityProjector: Sendable, Equatable {
         let hasCloudKnowledge = availableToolNames.contains(where: { $0.hasPrefix("cloud_kb_") })
         let hasWeb = availableToolNames.contains(where: { $0.hasPrefix("web_") || $0 == "browser_fetch" })
         let hasImages = availableToolNames.contains(where: { ["generate_image", "edit_image", "image_search", "present_image"].contains($0) })
+        let hasEnvironment = availableToolNames.contains(where: { $0 == "get_current_environment" || $0.hasPrefix("environment_") })
+        let hasSessions = availableToolNames.contains(where: { $0.hasPrefix("session_") })
         let hasWorkspaceTools = availableToolNames.contains(where: {
             AgentRunTokenPolicy.localToolNames.contains($0)
                 || $0.hasPrefix("local_")
@@ -183,7 +185,13 @@ public struct AgentInstructionCapabilityProjector: Sendable, Equatable {
         })
         let omittedHeadings = Set([
             hasWorkspaceTools ? nil : "Programming and Precision Work",
+            hasWorkspaceTools ? nil : "Workspace Tool Rules",
+            hasWorkspaceTools ? nil : "Workspace Execution Rules",
+            hasEnvironment ? nil : "Environment Tool Rules",
+            hasSessions ? nil : "Session Status Tool Rules",
+            hasWorkspaceTools && hasNote ? nil : "Note Session File Boundary",
             hasCurrentTime ? nil : "Current Time Retrieval Rules",
+            hasCurrentTime ? nil : "Current Time Tool Contract",
             hasMemory ? nil : "Memory OS Architecture",
             hasMemory ? nil : "Memory Retrieval Rules",
             hasMemory ? nil : "Personal Continuity and Tailoring",
