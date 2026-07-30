@@ -195,7 +195,7 @@ struct MailAgentToolsTests {
         let tool = MailSearchMessagesTool(runtime: RecordingMailRuntime())
         let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "search mail", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMail])
 
-        await #expect(throws: AgentToolError.invalidArguments("startDate must be a valid ISO-8601 timestamp")) {
+        await #expect(throws: AgentToolError.invalidArguments("startDate must be a valid RFC 3339/ISO-8601 timestamp with timezone, for example 2026-07-29T05:03:12+08:00")) {
             try await tool.execute(
                 arguments: try AgentToolArguments(json: "{\"query\":\"invoice\",\"startDate\":\"not-a-date\"}"),
                 context: context

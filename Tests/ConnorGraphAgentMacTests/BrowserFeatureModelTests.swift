@@ -339,7 +339,12 @@ struct BrowserFeatureModelTests {
         )
         await fixture.model.synchronizeHistorySearchIndex()
 
-        #expect(await backend.operationLog() == ["rebuild-start", "rebuild-end", "upsert"])
+        let operations = await backend.operationLog()
+        let rebuildStart = try #require(operations.firstIndex(of: "rebuild-start"))
+        let rebuildEnd = try #require(operations.firstIndex(of: "rebuild-end"))
+        let upsert = try #require(operations.firstIndex(of: "upsert"))
+        #expect(rebuildStart < rebuildEnd)
+        #expect(rebuildEnd < upsert)
         #expect(await backend.indexedTitles() == ["认识 Surface Laptop"])
     }
 

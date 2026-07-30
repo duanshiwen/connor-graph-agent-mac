@@ -28,20 +28,21 @@ private enum WebFetchDeadline {
             }
             continuation.finish()
         }
-        let timeoutTask = Task {
-            do {
-                try await Task.sleep(for: .milliseconds(timeoutMilliseconds))
-            } catch {
-                return
-            }
+        let timeoutTimer = DispatchSource.makeTimerSource(
+            queue: DispatchQueue(label: "com.connor.web-fetch-timeout.(UUID().uuidString)")
+        )
+        timeoutTimer.schedule(deadline: .now() + .milliseconds(timeoutMilliseconds))
+        timeoutTimer.setEventHandler {
             continuation.yield(.failure(AgentToolError.invalidArguments(
                 "\(toolName) timed out after \(timeoutMilliseconds)ms"
             )))
             continuation.finish()
         }
+        timeoutTimer.resume()
         defer {
             operationTask.cancel()
-            timeoutTask.cancel()
+            timeoutTimer.setEventHandler {}
+            timeoutTimer.cancel()
             continuation.finish()
         }
 

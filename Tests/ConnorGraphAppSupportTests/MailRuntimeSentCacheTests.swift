@@ -143,12 +143,13 @@ struct MailRuntimeSentCacheTests {
             repository: InMemoryMailSourceRepository(accounts: [account]),
             cache: cache,
             credentialStore: AppMailCredentialStore(credentialStore: credentialStore),
-            smtpClient: FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-sent-attachment-id"))
+            smtpClient: FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-sent-attachment-id")),
+            outboundAttachmentResolver: MailRuntimeSentCacheAttachmentResolver()
         )
 
         let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Attachment sent", body: "Sent body text", attachmentIDs: [MailAttachmentID(rawValue: "attachment-1")])
         _ = try await runtime.sendApprovalPayload(draftID: draft.id)
-        _ = try await runtime.sendDraft(draftID: draft.id, approved: true)
+        _ = try await runtime.sendDraft(draftID: draft.id, approved: true, sessionID: "mail-session")
 
         let sent = try #require(try await cache.message(id: MailMessageID(rawValue: "provider-sent-attachment-id")))
         #expect(sent.attachments.count == 1)
@@ -157,6 +158,20 @@ struct MailRuntimeSentCacheTests {
         #expect(attachment.filename == "attachment-1")
         #expect(attachment.byteCount == 0)
         #expect(sent.body?.plainText?.text.contains("Sent body text") == true)
+    }
+}
+
+private struct MailRuntimeSentCacheAttachmentResolver: OutboundMailAttachmentResolving {
+    func resolve(ids: [MailAttachmentID], sessionID: String?) async throws -> [OutboundMailAttachment] {
+        guard sessionID == "mail-session" else { throw MailRuntimeError.attachmentSessionRequired }
+        return ids.map {
+            OutboundMailAttachment(
+                id: $0,
+                filename: $0.rawValue,
+                mimeType: "application/octet-stream",
+                data: Data()
+            )
+        }
     }
 }
 

@@ -8,7 +8,7 @@ import ConnorGraphAppSupport
 @Test func coordinatorEnqueuesL1UnifiedProjectionWhenPendingCaptureCountReaches100() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryCoordinatorDatabaseURL().path)
     try store.migrate()
-    let facade = AppMemoryOSFacade(store: store)
+    let facade = AppMemoryOSFacade(store: store, canRunL1Extraction: { _ in true })
     let coordinator = AppMemoryOSPipelineTriggerCoordinator(facade: facade)
     let now = Date(timeIntervalSince1970: 30_000)
     for index in 0..<99 {
@@ -27,7 +27,7 @@ import ConnorGraphAppSupport
 @Test func coordinatorDailySweepEnqueuesL1UnifiedProjectionWhenOldestPendingCaptureIs24HoursOld() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryCoordinatorDatabaseURL().path)
     try store.migrate()
-    let facade = AppMemoryOSFacade(store: store)
+    let facade = AppMemoryOSFacade(store: store, canRunL1Extraction: { _ in true })
     let coordinator = AppMemoryOSPipelineTriggerCoordinator(facade: facade)
     let occurredAt = Date(timeIntervalSince1970: 40_000)
     _ = try facade.ingestChatMessage(messageID: "old-message", sessionID: "session", role: "user", content: "Old important memory", occurredAt: occurredAt)

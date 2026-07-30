@@ -390,12 +390,35 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             return true
                         }
                         modelRequest.toolChoice = phasedState.phase == .finalSynthesis ? .auto : .required
-                        try AgentModelContextGuard().validate(
+                        let localContextGuard = AgentModelContextGuard()
+                        let localContextWindowTokens = configuration.modelContextWindowTokens
+                            ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
+                        let localMaximumInputTokens = localContextGuard.maximumInputTokens(
+                            contextWindowTokens: localContextWindowTokens,
+                            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+                            reservedOutputTokens: configuration.reservedOutputTokens
+                        )
+                        if localContextGuard.estimatedInputTokens(modelRequest) > localMaximumInputTokens {
+                            let recoveryMargin = min(2_048, max(1_024, localMaximumInputTokens / 50))
+                            let originalRequest = modelRequest
+                            var recoveredRequest = try await contextRecoveredModelRequest(
+                                modelRequest,
+                                promptAssembly: promptAssembly,
+                                iterationCount: iterationCount,
+                                maximumEstimatedTokens: max(1, localMaximumInputTokens - recoveryMargin),
+                                recoveryState: phasedState.recoveryState
+                            )
+                            recoveredRequest.auditContext = originalRequest.auditContext
+                            recoveredRequest.promptCacheContext = originalRequest.promptCacheContext
+                            recoveredRequest.toolChoice = originalRequest.toolChoice
+                            modelRequest = recoveredRequest
+                            messages = recoveredRequest.messages
+                        }
+                        try localContextGuard.validate(
                             modelRequest,
                             currentUserInput: request.userMessage,
                             currentAttachmentEstimatedTokens: request.attachmentContextPlan.estimatedTokens,
-                            contextWindowTokens: configuration.modelContextWindowTokens
-                                ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID),
+                            contextWindowTokens: localContextWindowTokens,
                             configuredPromptLimit: configuration.promptMaxEstimatedTokens,
                             reservedOutputTokens: configuration.reservedOutputTokens,
                             isAfterToolExecution: iterationCount > 1
@@ -1098,45 +1121,89 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 $0.role == .system && $0.content.contains("Runtime Context (trusted, captured once for this user run)")
             }
             recovered.messages.insert(contentsOf: dynamicRuntimeMessages, at: min(1, recovered.messages.count))
-            return applyingRecoveryState(recoveryState, to: recovered)
+            recovered = applyingRecoveryState(recoveryState, to: recovered)
+            trimOldestConversationMessages(
+                from: &recovered,
+                maximumEstimatedTokens: maximumEstimatedTokens,
+                contextGuard: contextGuard
+            )
+            return recovered
         }
 
         var recovered = request
         let toolMessageIndices = recovered.messages.indices.filter {
             recovered.messages[$0].role == .tool
         }
-        guard !toolMessageIndices.isEmpty else { return request }
+        if !toolMessageIndices.isEmpty {
+            var requestWithoutToolBodies = recovered
+            for index in toolMessageIndices {
+                requestWithoutToolBodies.messages[index].content = ""
+            }
+            let fixedTokens = contextGuard.estimatedInputTokens(requestWithoutToolBodies)
+            let availableToolTokens = max(0, maximumEstimatedTokens - fixedTokens)
+            let demands = toolMessageIndices.map {
+                contextGuard.estimator.estimate(recovered.messages[$0].content).estimatedTokenCount
+            }
+            let totalDemand = max(1, demands.reduce(0, +))
+            let gate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
+                maxResultCharacters: configuration.maxToolResultBytes
+            ))
+            for (offset, messageIndex) in toolMessageIndices.enumerated() {
+                let message = recovered.messages[messageIndex]
+                let allocatedTokens = Int(
+                    Double(availableToolTokens) * Double(demands[offset]) / Double(totalDemand)
+                )
+                let syntheticResult = AgentToolResult(
+                    toolCallID: message.toolCallID ?? "context-recovery",
+                    toolName: message.name ?? "tool",
+                    contentText: message.content
+                )
+                recovered.messages[messageIndex].content = gate.gatedContent(
+                    for: syntheticResult,
+                    maximumEstimatedTokens: allocatedTokens,
+                    estimator: contextGuard.estimator
+                )
+            }
+        }
+        recovered = applyingRecoveryState(recoveryState, to: recovered)
+        trimOldestConversationMessages(
+            from: &recovered,
+            maximumEstimatedTokens: maximumEstimatedTokens,
+            contextGuard: contextGuard
+        )
+        return recovered
+    }
 
-        var requestWithoutToolBodies = recovered
-        for index in toolMessageIndices {
-            requestWithoutToolBodies.messages[index].content = ""
+    private func trimOldestConversationMessages(
+        from request: inout AgentModelRequest,
+        maximumEstimatedTokens: Int,
+        contextGuard: AgentModelContextGuard
+    ) {
+        while contextGuard.estimatedInputTokens(request) > maximumEstimatedTokens {
+            guard let currentRequestIndex = request.messages.lastIndex(where: {
+                $0.role == .user && $0.toolCallID == nil
+            }) else { return }
+            if let oldestConversationIndex = request.messages.indices.first(where: { index in
+                  index < currentRequestIndex
+                      && (request.messages[index].role == .user || request.messages[index].role == .assistant)
+                      && request.messages[index].toolCalls?.isEmpty != false
+                      && request.messages[index].toolCallID == nil
+            }) {
+                request.messages.remove(at: oldestConversationIndex)
+                continue
+            }
+
+            let marker = "\n\nCurrent user request:\n"
+            guard let markerRange = request.messages[currentRequestIndex].content.range(of: marker) else { return }
+            let currentRequestContent = "Current user request:\n"
+                + request.messages[currentRequestIndex].content[markerRange.upperBound...]
+            request.messages[currentRequestIndex].content = currentRequestContent
+            if var parts = request.messages[currentRequestIndex].contentParts,
+               let textIndex = parts.firstIndex(where: { $0.kind == .text }) {
+                parts[textIndex].text = currentRequestContent
+                request.messages[currentRequestIndex].contentParts = parts
+            }
         }
-        let fixedTokens = contextGuard.estimatedInputTokens(requestWithoutToolBodies)
-        let availableToolTokens = max(0, maximumEstimatedTokens - fixedTokens)
-        let demands = toolMessageIndices.map {
-            contextGuard.estimator.estimate(recovered.messages[$0].content).estimatedTokenCount
-        }
-        let totalDemand = max(1, demands.reduce(0, +))
-        let gate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
-            maxResultCharacters: configuration.maxToolResultBytes
-        ))
-        for (offset, messageIndex) in toolMessageIndices.enumerated() {
-            let message = recovered.messages[messageIndex]
-            let allocatedTokens = Int(
-                Double(availableToolTokens) * Double(demands[offset]) / Double(totalDemand)
-            )
-            let syntheticResult = AgentToolResult(
-                toolCallID: message.toolCallID ?? "context-recovery",
-                toolName: message.name ?? "tool",
-                contentText: message.content
-            )
-            recovered.messages[messageIndex].content = gate.gatedContent(
-                for: syntheticResult,
-                maximumEstimatedTokens: allocatedTokens,
-                estimator: contextGuard.estimator
-            )
-        }
-        return applyingRecoveryState(recoveryState, to: recovered)
     }
 
     private func applyingRecoveryState(
@@ -1938,7 +2005,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     ## Phased Agent Loop Protocol
     Current Time is trusted host context and is not a task step. Strategy Research is the first model task.
     1. Strategy Research: form a provisional approach from your own knowledge, then search available read-only Web, MCP, and knowledge sources. Compare authority, freshness, applicability, constraints, and tradeoffs. Search summaries discover candidates; deep-read original material before relying on it. Repeat useful search/read batches as needed, but do not repeat a query that produced no new evidence. Never use side-effecting tools in this phase.
-    2. Commit once through agent_commit_strategy. Include the provisional and recommended approaches, evidence, modules, and the Memory decision in that single call. Memory is strongly recommended. Skip it only using one enumerated Memory-specific exception, never merely because the task seems simple. `memoryCapabilityUnavailable` means only that the runtime explicitly reports its two Memory tools unavailable; it never describes image generation or another task capability. Task tools are intentionally hidden during Strategy Research, so their absence in this phase is not evidence that they are unavailable.
+    2. Commit once through agent_commit_strategy. Include the provisional and recommended approaches, evidence, modules, and the Memory decision in that single call. Memory is strongly recommended. Skip it only using one enumerated Memory-specific exception, never merely because the task seems simple. `memoryCapabilityUnavailable` means only that the runtime explicitly reports the unified Memory tool unavailable; it never describes image generation or another task capability. Task tools are intentionally hidden during Strategy Research, so their absence in this phase is not evidence that they are unavailable.
     3. Memory Preparation: use only LLM-authored queries through memory_query. Do not infer queries in the runtime and do not preload Memory. Complete this before task execution.
     4. Task Execution: follow the committed strategy. Batch independent read-only work; serialize dependent, permissioned, or conflicting writes.
     5. Final Synthesis: call prepare_final_output immediately before a non-mechanical final answer or artifact. The runtime completes final-response Profile pagination internally. If preferences invalidate the plan, return to useful research or Memory work within the global budget.

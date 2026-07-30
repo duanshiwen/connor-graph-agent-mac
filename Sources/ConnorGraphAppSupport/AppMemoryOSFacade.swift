@@ -212,19 +212,22 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     public var ingestionService: MemoryOSIngestionService
     public var backgroundRunner: AppMemoryOSBackgroundJobRunner
     public var searchKernel: MemoryOSSearchKernel?
+    public var canRunL1Extraction: @Sendable (Date) -> Bool
 
     public init(
         store: SQLiteMemoryOSStore,
         repository: AppMemoryOSRepository? = nil,
         ingestionService: MemoryOSIngestionService = MemoryOSIngestionService(),
         backgroundRunner: AppMemoryOSBackgroundJobRunner = AppMemoryOSBackgroundJobRunner(),
-        searchKernel: MemoryOSSearchKernel? = nil
+        searchKernel: MemoryOSSearchKernel? = nil,
+        canRunL1Extraction: @escaping @Sendable (Date) -> Bool = { L1ExtractionEligibility.shared.canRun(now: $0) }
     ) {
         self.store = store
         self.repository = repository ?? AppMemoryOSRepository(store: store)
         self.ingestionService = ingestionService
         self.backgroundRunner = backgroundRunner
         self.searchKernel = searchKernel
+        self.canRunL1Extraction = canRunL1Extraction
     }
 
     public func operationalSummary(now: Date = Date()) throws -> AppMemoryOSOperationalSummary {
