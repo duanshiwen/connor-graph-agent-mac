@@ -42,7 +42,25 @@ public enum AgentMemorySkipReason: String, Codable, Sendable, Equatable {
     case mechanicalTextTransformation
     case deterministicComputationWithCompleteInput
     case historyIndependentMechanicalOrCodingTask
-    case capabilityUnavailable
+    case memoryCapabilityUnavailable
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        if rawValue == "capabilityUnavailable" {
+            self = .memoryCapabilityUnavailable
+            return
+        }
+        guard let value = Self(rawValue: rawValue) else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown Memory skip reason: \(rawValue)")
+        }
+        self = value
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 public enum AgentStrategyMemoryDecision: Sendable, Equatable, Codable {
@@ -184,7 +202,7 @@ public struct AgentStrategyPlanValidator: Sendable {
             guard !normalizedQueries(plan.memoryQueries).isEmpty else { throw AgentStrategyPlanValidationError.memoryQueriesRequired }
         case .skip(let reason):
             guard plan.memoryQueries.isEmpty else { throw AgentStrategyPlanValidationError.memoryQueriesForbiddenWhenSkipped }
-            if reason == .capabilityUnavailable, memoryCapabilityAvailable {
+            if reason == .memoryCapabilityUnavailable, memoryCapabilityAvailable {
                 throw AgentStrategyPlanValidationError.memoryCapabilityUnavailable
             }
             if reason == .mechanicalTextTransformation || reason == .deterministicComputationWithCompleteInput,
@@ -425,7 +443,7 @@ public actor AgentExternalResearchCoordinator {
     }
 }
 
-public enum AgentMemoryPartition: String, Codable, Sendable, Equatable { case recent, longTerm }
+public enum AgentMemoryPartition: String, Codable, CaseIterable, Sendable, Equatable { case recent, longTerm }
 
 public struct AgentMemoryQueryRequest: Codable, Sendable, Equatable {
     public var query: String
@@ -468,43 +486,106 @@ public protocol AgentMemoryQueryProvider: Sendable {
 public struct AgentMemoryQueryPage: Codable, Sendable, Equatable {
     public var items: [AgentMemoryQueryItem]
     public var nextPage: String?
-    public init(items: [AgentMemoryQueryItem], nextPage: String? = nil) { self.items = items; self.nextPage = nextPage }
+    public var errors: [String]
+
+    public init(items: [AgentMemoryQueryItem], nextPage: String? = nil, errors: [String] = []) {
+        self.items = items
+        self.nextPage = nextPage
+        self.errors = errors
+    }
 }
 
 public actor AgentMemoryQueryCoordinator {
     private let provider: any AgentMemoryQueryProvider
-    private var cursors: [String: [AgentMemoryPartition: String]] = [:]
+    private struct CursorState: Sendable {
+        var query: String
+        var pageSize: Int
+        var partitionCursors: [AgentMemoryPartition: String]
+        var bufferedItems: [AgentMemoryQueryItem]
+        var seenItemIDs: Set<String>
+    }
+    private var cursors: [String: CursorState] = [:]
 
     public init(provider: any AgentMemoryQueryProvider) { self.provider = provider }
 
     public func query(_ query: String, pageSize: Int = 20, page: String? = nil) async -> AgentMemoryQueryPage {
         let size = min(100, max(1, pageSize))
-        let cursorKey = page ?? query
-        let partitionCursors = cursors[cursorKey] ?? [:]
-        async let recent = fetch(query, pageSize: size, partition: .recent, cursor: partitionCursors[.recent])
-        async let longTerm = fetch(query, pageSize: size, partition: .longTerm, cursor: partitionCursors[.longTerm])
-        let pages = await [recent, longTerm]
-        var seen = Set<String>()
-        let merged = pages.flatMap(\.items)
+        let previousState: CursorState?
+        if let page {
+            guard let saved = cursors[page] else {
+                return AgentMemoryQueryPage(items: [], errors: ["Unknown or expired Memory nextPage token"])
+            }
+            guard saved.query == query, saved.pageSize == size else {
+                return AgentMemoryQueryPage(items: [], errors: ["Memory pagination must keep the original query and pageSize"])
+            }
+            cursors.removeValue(forKey: page)
+            previousState = saved
+        } else {
+            previousState = nil
+        }
+        let bufferedItems = previousState?.bufferedItems ?? []
+        let partitionCursors = previousState?.partitionCursors ?? [:]
+        let pending: [(AgentMemoryPartition, String?)]
+        if bufferedItems.count >= size {
+            pending = []
+        } else if previousState == nil {
+            pending = AgentMemoryPartition.allCases.map { ($0, nil) }
+        } else {
+            pending = AgentMemoryPartition.allCases.compactMap { partition in
+                partitionCursors[partition].map { (partition, Optional($0)) }
+            }
+        }
+        let pages = await AgentToolBatchScheduler(maximumConcurrency: 2).run(pending) { entry in
+            await self.fetch(query, pageSize: size, partition: entry.0, cursor: entry.1)
+        }
+        let previouslySeen = previousState?.seenItemIDs ?? []
+        var batchSeen = previouslySeen
+        let merged = (bufferedItems + pages.flatMap(\.page.items))
             .sorted { lhs, rhs in lhs.eventTime == rhs.eventTime ? lhs.id < rhs.id : lhs.eventTime > rhs.eventTime }
-            .filter { seen.insert($0.id).inserted }
-        let nextCursors: [AgentMemoryPartition: String] = [
-            .recent: pages[0].nextCursor,
-            .longTerm: pages[1].nextCursor
-        ].compactMapValues { $0 }
-        let nextPage = nextCursors.isEmpty ? nil : UUID().uuidString
-        if let nextPage { cursors[nextPage] = nextCursors }
-        let visible = merged.prefix(size).map { item in
+            .filter { batchSeen.insert($0.id).inserted }
+        var nextCursors = partitionCursors
+        for result in pages { nextCursors[result.partition] = nil }
+        nextCursors.merge(Dictionary(uniqueKeysWithValues: pages.compactMap { result in
+            result.page.nextCursor.map { (result.partition, $0) }
+        })) { _, replacement in replacement }
+        let pageItems = Array(merged.prefix(size))
+        let remainingItems = Array(merged.dropFirst(pageItems.count))
+        var returnedItemIDs = previouslySeen
+        returnedItemIDs.formUnion(pageItems.map(\.id))
+        let nextPage = nextCursors.isEmpty && remainingItems.isEmpty ? nil : UUID().uuidString
+        if let nextPage {
+            cursors[nextPage] = CursorState(
+                query: query,
+                pageSize: size,
+                partitionCursors: nextCursors,
+                bufferedItems: remainingItems,
+                seenItemIDs: returnedItemIDs
+            )
+        }
+        let visible = pageItems.map { item in
             var redacted = item
             redacted.provenance = nil
             return redacted
         }
-        return AgentMemoryQueryPage(items: Array(visible), nextPage: nextPage)
+        return AgentMemoryQueryPage(items: Array(visible), nextPage: nextPage, errors: pages.compactMap(\.error))
     }
 
-    private func fetch(_ query: String, pageSize: Int, partition: AgentMemoryPartition, cursor: String?) async -> AgentMemoryPartitionPage {
-        do { return try await provider.query(.init(query: query, pageSize: pageSize, cursor: cursor), partition: partition) }
-        catch { return AgentMemoryPartitionPage(items: []) }
+    private struct PartitionResult: Sendable {
+        var partition: AgentMemoryPartition
+        var page: AgentMemoryPartitionPage
+        var error: String?
+    }
+
+    private func fetch(_ query: String, pageSize: Int, partition: AgentMemoryPartition, cursor: String?) async -> PartitionResult {
+        do {
+            return PartitionResult(
+                partition: partition,
+                page: try await provider.query(.init(query: query, pageSize: pageSize, cursor: cursor), partition: partition),
+                error: nil
+            )
+        } catch {
+            return PartitionResult(partition: partition, page: AgentMemoryPartitionPage(items: []), error: String(describing: error))
+        }
     }
 }
 
@@ -668,7 +749,10 @@ public enum AgentPhaseToolContract {
                 "unresolvedQuestions": .array(items: .string(description: ""), description: ""),
                 "taskMode": .stringEnumeration(values: AgentStrategyTaskMode.allRawValues, description: ""),
                 "requestedModuleIDs": .array(items: .string(description: ""), description: ""),
-                "memoryDecision": .object(properties: ["action": .stringEnumeration(values: ["query", "skip"], description: ""), "reason": .stringEnumeration(values: AgentMemorySkipReason.allRawValues, description: "")], required: ["action"]),
+                "memoryDecision": .object(properties: [
+                    "action": .stringEnumeration(values: ["query", "skip"], description: "Query Memory or skip only for an enumerated Memory-specific exception."),
+                    "reason": .stringEnumeration(values: AgentMemorySkipReason.allRawValues, description: "Reason for skipping Memory. memoryCapabilityUnavailable refers only to the runtime Memory tools, never image generation or another task capability.")
+                ], required: ["action"]),
                 "memoryQueries": .array(items: .string(description: ""), description: ""),
                 "memoryPageSize": .integer(description: "1...100; defaults to 20.")
             ], required: ["provisionalApproach", "recommendedApproach", "taskMode", "memoryDecision"])
@@ -707,7 +791,7 @@ private extension AgentStrategyTaskMode {
 
 private extension AgentMemorySkipReason {
     static var allRawValues: [String] {
-        [userExplicitlyDisabled, mechanicalTextTransformation, deterministicComputationWithCompleteInput, historyIndependentMechanicalOrCodingTask, capabilityUnavailable].map(\.rawValue)
+        [userExplicitlyDisabled, mechanicalTextTransformation, deterministicComputationWithCompleteInput, historyIndependentMechanicalOrCodingTask].map(\.rawValue)
     }
 }
 
