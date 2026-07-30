@@ -42,11 +42,11 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("Follow the latest actual user request"))
     #expect(assembly.instruction.text.contains("get_current_time"))
     #expect(assembly.instruction.text.contains("## Core Startup and Final Preference Checkpoint"))
-    #expect(assembly.instruction.text.contains("call it as the first tool attempt of every new user run"))
-    #expect(assembly.instruction.text.contains("including a blocked local-file request with no selected working directory"))
+    #expect(assembly.instruction.text.contains("When the Runtime Retrieval Plan requires `get_current_time` and the tool is available, call it before other tools or a final answer"))
+    #expect(assembly.instruction.text.contains("For a blocked local-file request with no selected working directory, complete the Runtime Retrieval Plan"))
     #expect(assembly.instruction.text.contains("Never use model training time"))
     #expect(assembly.instruction.text.contains("Strict time rule"))
-    #expect(assembly.instruction.text.contains("requires `get_current_time` to be the first tool attempted in every new user run"))
+    #expect(assembly.instruction.text.contains("when the Runtime Retrieval Plan requires `get_current_time`, it must be the first tool attempted"))
     #expect(assembly.instruction.text.contains("only when both conditions are true"))
     #expect(assembly.instruction.text.contains("Do not infer, calculate, or reuse current time from memory"))
     #expect(assembly.instruction.text.contains("If `get_current_time` is unavailable, returns empty content, or fails"))
@@ -65,6 +65,7 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("call the same tool again with `page` set to exactly `nextPage`"))
     #expect(assembly.instruction.text.contains("For the final-response profile checkpoint"))
     #expect(assembly.instruction.text.contains("Newer is not automatically more relevant or more true"))
+    #expect(assembly.instruction.text.components(separatedBy: "## Native Personal Source Tools").count == 2)
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }
 

@@ -163,13 +163,40 @@ public struct AgentInstructionCapabilityProjector: Sendable, Equatable {
     public init() {}
 
     public func project(_ instruction: String, availableToolNames: Set<String>) -> String {
+        let hasCurrentTime = availableToolNames.contains(AgentCurrentTimePreflightPolicy.requiredToolName)
+        let hasMemory = availableToolNames.contains(where: { $0.hasPrefix("memory_os_") })
+        let hasNote = availableToolNames.contains(where: { $0.hasPrefix("note_") })
+        let hasSkills = availableToolNames.contains(where: { $0.hasPrefix("connor_skill_") })
+        let hasPeople = availableToolNames.contains(where: { $0.hasPrefix("contact") || $0.hasPrefix("person_") })
+        let hasCalendar = availableToolNames.contains(where: { $0.hasPrefix("calendar_") })
+        let hasMail = availableToolNames.contains(where: { $0.hasPrefix("mail_") })
+        let hasRSS = availableToolNames.contains(where: { $0.hasPrefix("rss_") })
+        let hasBrowserHistory = availableToolNames.contains(where: { $0.hasPrefix("browser_history_") })
+        let hasNativeSources = hasCalendar || hasMail || hasRSS || hasBrowserHistory
+        let hasCloudKnowledge = availableToolNames.contains(where: { $0.hasPrefix("cloud_kb_") })
+        let hasWeb = availableToolNames.contains(where: { $0.hasPrefix("web_") || $0 == "browser_fetch" })
+        let hasImages = availableToolNames.contains(where: { ["generate_image", "edit_image", "image_search", "present_image"].contains($0) })
         let omittedHeadings = Set([
-            availableToolNames.contains(where: { $0.hasPrefix("memory_os_") }) ? nil : "Memory OS Architecture",
-            availableToolNames.contains(where: { $0.hasPrefix("note_") }) ? nil : "Note Reference Materials",
-            availableToolNames.contains(where: { $0.hasPrefix("connor_skill_") }) ? nil : "Connor Skill Tools",
-            availableToolNames.contains(where: { $0.hasPrefix("contact") || $0.hasPrefix("person_") }) ? nil : "Person Registry and Relationships",
-            availableToolNames.contains(where: { $0.hasPrefix("memory_os_") }) ? nil : "Personal Continuity and Tailoring",
-            availableToolNames.contains(where: { ["generate_image", "edit_image", "image_search", "present_image"].contains($0) }) ? nil : "Rich Media Responses"
+            hasCurrentTime ? nil : "Current Time Retrieval Rules",
+            hasMemory ? nil : "Memory OS Architecture",
+            hasMemory ? nil : "Memory Retrieval Rules",
+            hasMemory ? nil : "Personal Continuity and Tailoring",
+            hasNote ? nil : "Note Reference Materials",
+            hasNote ? nil : "Note Retrieval Rules",
+            hasSkills ? nil : "Skill Discovery Rules",
+            hasSkills ? nil : "Connor Skill Tools",
+            hasPeople ? nil : "Person Registry and Relationships",
+            hasCalendar ? nil : "Calendar Retrieval Rules",
+            hasCalendar ? nil : "Calendar Tool Workflow",
+            hasMail ? nil : "Mail Retrieval Rules",
+            hasMail ? nil : "Mail Tool Workflow",
+            hasRSS ? nil : "RSS Tool Workflow",
+            hasBrowserHistory ? nil : "Browser History Tool Workflow",
+            hasNativeSources ? nil : "Native Personal Source Tools",
+            hasNativeSources ? nil : "Native Source Evidence Rules",
+            hasCloudKnowledge ? nil : "Cloud Knowledge Retrieval Rules",
+            hasWeb ? nil : "Web Research Rules",
+            hasImages ? nil : "Rich Media Responses"
         ].compactMap { $0 })
         guard !omittedHeadings.isEmpty else { return instruction }
 
