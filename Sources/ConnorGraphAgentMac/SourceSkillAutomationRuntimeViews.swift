@@ -161,9 +161,12 @@ private struct MCPSourceDetailView: View {
                     MCPAuditPreview(records: auditRecords)
                 }
             }
-            .padding(AppShellLayout.spaceXL)
-            .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
+            .padding(.horizontal, AgentChatLayout.spaceXL)
+            .padding(.vertical, AgentChatLayout.spaceL)
+            .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
+        .scrollContentBackground(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(AppShellColors.detailBackground)
     }
