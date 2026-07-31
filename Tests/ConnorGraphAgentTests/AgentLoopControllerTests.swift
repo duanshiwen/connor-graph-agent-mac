@@ -2617,6 +2617,49 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     })
 }
 
+@Test func agentLoopEmbedsAttentionBriefInsidePrepareFinalOutputResult() async throws {
+    let provider = PhaseToolChoiceProvider()
+    var registry = AgentToolRegistry()
+    let calendar = CalendarID(rawValue: "calendar-brief")
+    let now = Date()
+    let runtime = InMemoryAgentCalendarRuntime(events: [
+        CalendarEvent(
+            id: CalendarEventID(rawValue: "event-brief"),
+            calendarID: calendar,
+            title: "Team sync",
+            start: CalendarEventDateTime(date: now.addingTimeInterval(3_600)),
+            end: CalendarEventDateTime(date: now.addingTimeInterval(7_200))
+        )
+    ])
+    registry.register(AttentionBriefTool(calendarRuntime: runtime))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(AgentChatRequest(sessionID: "session-attention-brief", userMessage: "随便聊聊，今天心情不错")) {}
+
+    let requests = await provider.requests
+    let finalSynthesis = try #require(requests.first { $0.promptCacheContext?.phase == .finalSynthesis })
+
+    // attention_brief bypasses contextual routing even without calendar or
+    // mail signals in the conversation.
+    #expect(finalSynthesis.tools.contains { $0.name == AttentionBriefTool.toolName })
+
+    // The prepare_final_output tool result already embeds the briefing, so
+    // final synthesis needs no extra calendar/mail tool turns.
+    let prepareResult = try #require(finalSynthesis.messages.first {
+        $0.role == .tool && $0.name == AgentPhaseToolContract.prepareFinalOutputName
+    })
+    #expect(prepareResult.content.contains("attentionBrief"))
+    #expect(prepareResult.content.contains("event-brief"))
+
+    // The attention-brief flavored guidance replaces the calendar-only one.
+    #expect(finalSynthesis.messages.contains {
+        $0.role == .system && $0.content.contains("proactive attention reminders")
+    })
+    #expect(finalSynthesis.messages.contains {
+        $0.role == .system && $0.content.contains("proactive schedule reminders")
+    } == false)
+}
+
 @Test func agentLoopKeepsToolArrayStableWithinPhaseAfterStartupToolUse() async throws {
     let provider = ContextualPreflightProvider()
     var registry = AgentToolRegistry()
