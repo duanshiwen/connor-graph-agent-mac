@@ -247,13 +247,23 @@ public struct AgentLoopContextCompactor: Sendable {
         let compactCount = max(0, toolIndices.count - max(0, retainedRecentToolResults))
         for index in toolIndices.prefix(compactCount) {
             let message = compacted.messages[index]
-            compacted.messages[index].content = "[Compacted tool result: name=\(message.name ?? "tool"), callID=\(message.toolCallID ?? "unknown"), originalCharacters=\(message.content.count); see checkpoint generation \(checkpoint.generation).]"
+            compacted.messages[index].content = "\(Self.compactedToolResultPrefix) name=\(message.name ?? "tool"), callID=\(message.toolCallID ?? "unknown"), originalCharacters=\(message.content.count); see checkpoint generation \(checkpoint.generation).]"
             compacted.messages[index].contentParts = nil
             compacted.messages[index].providerMetadata = nil
         }
         return AgentLoopCompactionResult(request: compacted, compactedToolResultCount: compactCount)
     }
 
+    /// Marker prefix used by ``compact(_:checkpoint:retainedRecentToolResults:)`` when it
+    /// replaces an older tool result with a reference back to the run checkpoint.
+    static let compactedToolResultPrefix = "[Compacted tool result:"
+
+    /// Best-effort second-stage reduction used when a checkpoint compaction is still above the
+    /// target. It only shrinks the *live* (non-placeholder) tool-result bodies of the current run,
+    /// distributing the remaining token budget across them by demand. It never trims persisted
+    /// conversation history and never re-touches results that were already reduced to a checkpoint
+    /// reference, so previously compacted tokens stay stable (cache-friendly) and the retained
+    /// recent results absorb the shrink first.
     public func fitCurrentRunToolResults(
         in request: AgentModelRequest,
         maximumEstimatedTokens: Int,
@@ -261,21 +271,26 @@ public struct AgentLoopContextCompactor: Sendable {
         contextGuard: AgentModelContextGuard = .init()
     ) -> AgentModelRequest {
         var fitted = request
-        let toolMessageIndices = fitted.messages.indices.filter { fitted.messages[$0].role == .tool }
-        guard !toolMessageIndices.isEmpty else { return fitted }
-
-        var requestWithoutToolBodies = fitted
-        for index in toolMessageIndices {
-            requestWithoutToolBodies.messages[index].content = ""
+        let liveToolIndices = fitted.messages.indices.filter {
+            fitted.messages[$0].role == .tool
+                && !fitted.messages[$0].content.hasPrefix(Self.compactedToolResultPrefix)
         }
-        let fixedTokens = contextGuard.estimatedInputTokens(requestWithoutToolBodies)
+        guard !liveToolIndices.isEmpty else { return fitted }
+
+        // Treat everything except the live tool bodies (including already-compacted placeholders)
+        // as fixed, so the remaining budget is reserved for the results we are allowed to shrink.
+        var requestWithoutLiveToolBodies = fitted
+        for index in liveToolIndices {
+            requestWithoutLiveToolBodies.messages[index].content = ""
+        }
+        let fixedTokens = contextGuard.estimatedInputTokens(requestWithoutLiveToolBodies)
         let availableToolTokens = max(0, maximumEstimatedTokens - fixedTokens)
-        let demands = toolMessageIndices.map {
+        let demands = liveToolIndices.map {
             contextGuard.estimator.estimate(fitted.messages[$0].content).estimatedTokenCount
         }
         let totalDemand = max(1, demands.reduce(0, +))
         let gate = AgentToolResultGate(configuration: .init(maxResultCharacters: maximumResultBytes))
-        for (offset, index) in toolMessageIndices.enumerated() {
+        for (offset, index) in liveToolIndices.enumerated() {
             let message = fitted.messages[index]
             let allocatedTokens = Int(Double(availableToolTokens) * Double(demands[offset]) / Double(totalDemand))
             fitted.messages[index].content = gate.gatedContent(
