@@ -17,6 +17,7 @@ struct CoreBootstrapSnapshot: @unchecked Sendable {
     let nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
     let sessionSearchIndexService: SessionSearchIndexService?
     let mailStore: FileBackedMailSourceStore?
+    let imStore: SQLiteImStore?
     let memoryOSStore: SQLiteMemoryOSStore?
     let memoryOSFacade: AppMemoryOSFacade?
     let memoryOSSearchHealthSummary: String?
@@ -55,6 +56,12 @@ actor AppBootstrapActor {
         let sessionSearchIndexService = try? SessionSearchIndexService(databaseURL: paths.sessionSearchDatabaseURL)
         let mailStore = try? FileBackedMailSourceStore(openingStoragePaths: paths, searchService: nativeSourceSearchBackend)
 
+        // Peer-to-peer IM local cache (per-account server projection, not synced).
+        let imDatabaseURL = paths.applicationSupportDirectory
+            .appendingPathComponent("im", isDirectory: true)
+            .appendingPathComponent("im.sqlite")
+        let imStore = try? SQLiteImStore(databaseURL: imDatabaseURL)
+
         var memoryOSStore: SQLiteMemoryOSStore?
         var memoryOSFacade: AppMemoryOSFacade?
         var memoryOSSearchHealthSummary: String?
@@ -66,6 +73,9 @@ actor AppBootstrapActor {
             let searchKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: paths)
             memoryOSStore = store
             memoryOSFacade = AppMemoryOSFacade(store: store, searchKernel: searchKernel)
+            if let imStore {
+                memoryOSFacade?.installImForwardAliasRewriter(imStore: imStore)
+            }
             memoryOSSearchHealthSummary = health.status == .healthy
                 ? "Memory OS SearchKernel 正常：索引已验证。"
                 : "Memory OS SearchKernel 降级启动，后台将修复索引：\(health.messages.joined(separator: ", "))"
@@ -85,6 +95,7 @@ actor AppBootstrapActor {
             nativeSourceSearchBackend: nativeSourceSearchBackend,
             sessionSearchIndexService: sessionSearchIndexService,
             mailStore: mailStore,
+            imStore: imStore,
             memoryOSStore: memoryOSStore,
             memoryOSFacade: memoryOSFacade,
             memoryOSSearchHealthSummary: memoryOSSearchHealthSummary,

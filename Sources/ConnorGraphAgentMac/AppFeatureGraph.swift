@@ -105,6 +105,10 @@ final class AppFeatureGraph {
     let shellActions: AppShellRuntimeActions
     let settingsActions: SettingsRuntimeActions
     let commercialReadinessDashboard: () -> CommercialReadinessDashboard
+    /// Peer-to-peer IM slice; installed post-construction by the composition root
+    /// (requires the identity store, which the runtime never owns). Nil in
+    /// placeholder/demo runtimes.
+    var im: ImFeatureModel?
 
     init(
         shell: AppShellFeatureModel,

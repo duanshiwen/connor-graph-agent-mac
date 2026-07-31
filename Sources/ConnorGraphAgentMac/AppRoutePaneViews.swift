@@ -17,7 +17,8 @@ struct CraftListPaneView: View {
                     model: graph.chat,
                     governanceModel: graph.governance,
                     sessionActions: graph.chatActions.session,
-                    rowActions: graph.chatSessionListActions
+                    rowActions: graph.chatSessionListActions,
+                    imModel: graph.im
                 )
             case .llmSettings:
                 CraftSettingsListPane(shellModel: graph.shell, selection: $selection)
@@ -25,6 +26,12 @@ struct CraftListPaneView: View {
                 CraftCalendarListPane(model: graph.calendar)
             case .contacts:
                 CraftContactsListPane(model: graph.contacts)
+            case .imContacts:
+                CraftSimpleListPane(
+                    title: "通讯录",
+                    subtitle: "好友与好友请求",
+                    rows: (graph.im?.friends ?? []).map(\.displayName)
+                )
             case .rss:
                 RSSListRouteView(model: graph.rss)
             case .mail:
@@ -96,7 +103,11 @@ struct CraftDetailPaneView: View {
             case .observeLog:
                 ObserveLogView(entries: graph.graphDiagnostics.observeLogEntries)
             case .agentChat:
-                ChatDetailRouteView(model: graph.chat, chatActions: graph.chatActions)
+                if let im = graph.im, im.selectedConversationId != nil {
+                    ImChatDetailView(model: im, chatModel: graph.chat)
+                } else {
+                    ChatDetailRouteView(model: graph.chat, chatActions: graph.chatActions)
+                }
             case .promotionQueue:
                 PromotionQueueView(model: graph.graphDiagnostics)
             case .pendingApprovals:
@@ -115,6 +126,23 @@ struct CraftDetailPaneView: View {
                 CalendarSourceSettingsView(model: graph.calendar)
             case .contacts:
                 ContactsSourceSettingsView(model: graph.contacts)
+            case .imContacts:
+                if let im = graph.im {
+                    ImContactsDetailView(
+                        model: im,
+                        contacts: graph.contacts,
+                        onOpenPeerChat: { peerId in
+                            Task { await im.openPeerConversation(peerId: peerId) }
+                            _ = graph.shell.select(.agentChat)
+                        }
+                    )
+                } else {
+                    ContentUnavailableView(
+                        "通讯录不可用",
+                        systemImage: "person.crop.circle.badge.exclamationmark",
+                        description: Text("登录康纳账号后即可添加好友聊天。")
+                    )
+                }
             case .mail:
                 MailDetailRouteView(model: graph.mail)
             case .rss:
