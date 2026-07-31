@@ -23,6 +23,7 @@ final class AppCompositionRoot: ObservableObject {
     private let maintenanceBootstrapActor = AppMaintenanceBootstrapActor()
     private var runtime: AppRuntimeLifecycle
     private var coreOutcome: CoreOutcome?
+    private var imIdentityCancellable: AnyCancellable?
 
     private init(
         runtime: AppRuntimeLifecycle,
@@ -130,7 +131,11 @@ final class AppCompositionRoot: ObservableObject {
                     throw CancellationError()
                 }
                 let previousRuntime = self.runtime
+                previousRuntime.graph.im?.shutdown()
                 previousRuntime.shutdown()
+                if case .loaded(let snapshot) = coreOutcome, let imStore = snapshot.imStore {
+                    self.installImFeature(imStore: imStore, runtime: runtime)
+                }
                 self.runtime = runtime
                 self.graph = runtime.graph
                 self.noteImportModel = noteImportModel
@@ -174,6 +179,61 @@ final class AppCompositionRoot: ObservableObject {
                 self.runtime.shutdown()
             }
         )
+    }
+
+    /// Builds the IM stack: message center (REST + WS frames), identity snapshot
+    /// box, forward-to-AI closures bridged onto the chat actions, then installs
+    /// the feature model on the runtime's graph. Mirrors the Android container
+    /// wiring for `ImMessageCenter`.
+    private func installImFeature(imStore: SQLiteImStore, runtime: AppRuntimeLifecycle) {
+        let identityStore = self.identityStore
+        let identityBox = ImSelfIdentityBox()
+        if case .signedIn(let user) = identityStore.authenticationState {
+            identityBox.value = ImSelfIdentity(id: Int64(user.id), displayName: user.displayName)
+        }
+        imIdentityCancellable = identityStore.$authenticationState.sink { state in
+            switch state {
+            case .signedIn(let user):
+                identityBox.value = ImSelfIdentity(id: Int64(user.id), displayName: user.displayName)
+            case .signedOut, .expired:
+                identityBox.value = nil
+            case .restoring:
+                break
+            }
+        }
+
+        let center = ImMessageCenter(
+            store: imStore,
+            service: identityStore.makeImBackendService(),
+            sendFrame: { [weak identityStore] text in
+                guard let identityStore else { return false }
+                return await identityStore.sendImFrame(text)
+            },
+            currentIdentity: { identityBox.value }
+        )
+        identityStore.onImFrame = { type, rawText in
+            await center.handleFrame(type: type, text: rawText)
+        }
+        identityStore.onImSocketStateChange = { connected in
+            if connected { await center.handleSocketConnected() }
+        }
+
+        let chatActions = runtime.graph.chatActions
+        let imFeature = ImFeatureModel(
+            store: imStore,
+            center: center,
+            identityStore: identityStore,
+            forwardFacade: { [weak runtime] in runtime?.imForwardMemoryFacade },
+            forwardToNewSession: { prompt in
+                await chatActions.run.submitNewChat(prompt: prompt, displayPrompt: nil)
+            },
+            forwardToExistingSession: { sessionID, prompt in
+                chatActions.session.selectChatSession(sessionID)
+                return await chatActions.run.submitChat(prompt: prompt, clearComposer: false)
+            }
+        )
+        runtime.graph.im = imFeature
+        imFeature.start()
     }
 
     private func bindCommandRouting(to runtime: AppRuntimeLifecycle) {

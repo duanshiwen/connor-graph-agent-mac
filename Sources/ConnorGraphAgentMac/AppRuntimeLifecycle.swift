@@ -148,6 +148,10 @@ final class AppRuntimeLifecycle {
     private var repository: AppGraphRepository?
     private var memoryOSStore: SQLiteMemoryOSStore?
     private var memoryOSFacade: AppMemoryOSFacade?
+    /// IM local cache; kept so the alias rewriter survives facade rebuilds.
+    private var imStore: SQLiteImStore?
+    /// Facade snapshot for IM forwarded-transcript ingestion (composition root).
+    var imForwardMemoryFacade: AppMemoryOSFacade? { memoryOSFacade }
     private var chatSessionRepository: AppChatSessionRepository?
     private var activityTimelineCacheWriter: ActivityTimelineCacheWriter?
     private var storagePaths: AppStoragePaths?
@@ -528,6 +532,7 @@ final class AppRuntimeLifecycle {
         injectedMemoryOSFacade: AppMemoryOSFacade? = nil,
         injectedMemoryOSSearchHealthSummary: String? = nil,
         injectedMemoryOSInitializationError: String? = nil,
+        injectedImStore: SQLiteImStore? = nil,
         startupMode: AppRuntimeStartupMode = .immediate,
         calendarRemoteAccountSynchronizer: @escaping CalendarFeatureModel.RemoteAccountSynchronizer = { account, credential, runID, runtimeStore in
             let engine = CalendarSourceSyncEngine(
@@ -742,6 +747,11 @@ final class AppRuntimeLifecycle {
             } catch {
                 self.errorFeatureModel.message = "Memory OS 初始化失败：\(error)"
             }
+        }
+        self.imStore = injectedImStore
+        if let injectedImStore {
+            // Idempotent: bootstrap-injected facades already carry the rewriter.
+            self.memoryOSFacade?.installImForwardAliasRewriter(imStore: injectedImStore)
         }
         self.databasePath = databasePath
         let initialSession = AgentSession(id: "app-session")
@@ -1516,6 +1526,9 @@ final class AppRuntimeLifecycle {
                 self.memoryOSSearchHealthSummary = "Memory OS SearchKernel 正常：后台索引已重建（\(documentCount) 条文档）。"
                 if let store = self.memoryOSStore {
                     self.memoryOSFacade = AppMemoryOSFacade(store: store, searchKernel: repairedKernel)
+                    if let imStore = self.imStore {
+                        self.memoryOSFacade?.installImForwardAliasRewriter(imStore: imStore)
+                    }
                 }
                 self.rebuildNativeSessionManagerForActiveSession()
             },
@@ -2515,6 +2528,9 @@ final class AppRuntimeLifecycle {
             let rebuiltDocumentCount = try AppMemoryOSSearchKernelFactory.rebuildLiveIndex(paths: storagePaths)
             let searchKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: storagePaths)
             memoryOSFacade = AppMemoryOSFacade(store: memoryOSStore, searchKernel: searchKernel)
+            if let imStore {
+                memoryOSFacade?.installImForwardAliasRewriter(imStore: imStore)
+            }
             memoryOSSearchHealthSummary = "Memory OS 已清空，搜索索引已重建（\(rebuiltDocumentCount) 条文档）。"
 
             chatSessionCoordinator.clearSelection()
@@ -2525,6 +2541,9 @@ final class AppRuntimeLifecycle {
             maintenanceCoordinator.resumeAfterMemoryReset()
         } catch {
             memoryOSFacade = AppMemoryOSFacade(store: memoryOSStore, searchKernel: nil)
+            if let imStore {
+                memoryOSFacade?.installImForwardAliasRewriter(imStore: imStore)
+            }
             rebuildNativeSessionManagerForActiveSession()
             maintenanceCoordinator.resumeAfterMemoryReset()
             throw error
@@ -3591,6 +3610,7 @@ extension AppRuntimeLifecycle {
             injectedMemoryOSFacade: snapshot.memoryOSFacade,
             injectedMemoryOSSearchHealthSummary: snapshot.memoryOSSearchHealthSummary,
             injectedMemoryOSInitializationError: snapshot.memoryOSInitializationError,
+            injectedImStore: snapshot.imStore,
             startupMode: .deferred
         )
     }
