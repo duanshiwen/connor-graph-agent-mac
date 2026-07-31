@@ -411,6 +411,14 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
         }
     }
 
+    /// Synchronous token lookup for the projection path: the Memory OS projection
+    /// pipeline is synchronous, so the alias rewriter cannot await the async API.
+    public func forwardAlias(token: String) throws -> ImForwardAlias? {
+        try queue.sync {
+            try queryAliases(sql: "SELECT * FROM im_forward_alias WHERE alias_token = ? LIMIT 1;", bindings: [.text(token)]).first
+        }
+    }
+
     public func aliasesForPerson(personProfileID: String) async throws -> [ImForwardAlias] {
         try queue.sync {
             try queryAliases(sql: "SELECT * FROM im_forward_alias WHERE person_profile_id = ?;", bindings: [.text(personProfileID)])
