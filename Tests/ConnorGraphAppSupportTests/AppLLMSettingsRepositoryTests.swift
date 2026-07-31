@@ -374,6 +374,32 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(request.headers[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] == nil)
 }
 
+@Test func modelCatalogFiltersUnsupportedGitHubCopilotModels() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let connection = AppLLMConnectionConfig(
+        id: "github-copilot",
+        name: "GitHub Copilot",
+        providerMode: .openAICompatible,
+        connectionKind: .githubCopilot,
+        baseURLString: "https://api.githubcopilot.com",
+        model: "gpt-4.1",
+        selectedModel: "gpt-4.1"
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "copilot-token"
+    )
+    let body = #"{"data":[{"id":"gpt-4.1"},{"id":"gpt-5.4"},{"id":"gpt-5.6-sol"},{"id":"gpt-5.6-terra"}]}"#.data(using: .utf8)!
+    let catalog = AppLLMModelCatalog(
+        settingsRepository: repository,
+        httpClient: FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: body))
+    )
+
+    let loaded = try #require(await catalog.loadConnections().first)
+
+    #expect(loaded.models.map(\.id) == ["gpt-4.1", "gpt-5.6-sol"])
+}
+
 @Test func modelCatalogPreservesOpenAIResponsesProviderMode() async throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     let connection = AppLLMConnectionConfig(

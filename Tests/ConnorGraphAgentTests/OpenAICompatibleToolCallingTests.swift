@@ -67,6 +67,21 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     #expect(requestText.contains("graph_search"))
 }
 
+@Test func openAICompatibleProviderRecoversTextualDeepSeekToolCalls() async throws {
+    let body = #"{"choices":[{"message":{"role":"assistant","content":"<tool_calls>\n<tool_call>\n{\"name\":\"graph_search\",\"arguments\":{\"query\":\"memory\"}}\n</tool_call>\n</tool_calls>"},"finish_reason":"stop"}]}"#.data(using: .utf8)!
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "deepseek-test"),
+        httpClient: ToolCallingCapturingHTTPClient(responseBody: body)
+    )
+
+    let response = try await provider.completeWithTools(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Search")]))
+
+    #expect(response.text == nil)
+    #expect(response.finishReason == .toolCalls)
+    #expect(response.toolCalls.map(\.name) == ["graph_search"])
+    #expect(response.toolCalls.first?.argumentsJSON == #"{"query":"memory"}"#)
+}
+
 @Test func openAICompatibleProviderRequiresToolCallsWhenRequested() async throws {
     let body = #"{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}"#.data(using: .utf8)!
     let client = ToolCallingCapturingHTTPClient(responseBody: body)
