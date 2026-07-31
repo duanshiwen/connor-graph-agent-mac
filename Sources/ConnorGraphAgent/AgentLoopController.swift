@@ -325,6 +325,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var invokedContinuityToolNames = Set<String>()
                 let noteSearchPreflightPolicy = AgentNoteSearchPreflightPolicy()
                 var didAttemptNoteSearch = false
+                // Injected once when Task Execution begins, only if batch file
+                // tools are registered. It is appended a single time and then
+                // stays stable, so it does not disturb the KV-cache prefix.
+                var didInjectTaskExecutionGuidance = false
+                let hasBatchFileTools = availableToolDefinitions.contains { $0.name == "ReadMany" }
+                    && availableToolDefinitions.contains { $0.name == "WriteBatch" }
                 // Startup tool visibility is fixed for the whole run so the serialized
                 // tool array stays prefix-stable for provider prompt caching. Usage
                 // discipline is enforced through corrective instructions and call
@@ -809,6 +815,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 default:
                                     break
                                 }
+                        }
+
+                        if hasBatchFileTools,
+                           !didInjectTaskExecutionGuidance,
+                           phasedState.phase == .taskExecution {
+                            messages.append(AgentModelMessage(role: .system, content: Self.taskExecutionBatchFileGuidance))
+                            didInjectTaskExecutionGuidance = true
                         }
 
                         let contextGuard = AgentModelContextGuard()
@@ -1862,6 +1875,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         }
     }
 
+    static var taskExecutionBatchFileGuidance: String { """
+    Trusted execution guidance for file-heavy work (batch to minimize turns):
+    - Read strategy: before editing, issue a single ReadMany call for the files you are confident you need. Locate first with Grep/Glob, then ReadMany the exact hits — do not dump the whole repository. Read enough to act correctly but not more; you may read additional files in later turns, so prefer the clearly-necessary set over the maximal set, and skip files you will not use.
+    - Write strategy: combine multiple changes into a single WriteBatch call. Order operations deliberately to respect dependencies and avoid conflicts: create a file before editing files that reference it, and use one multiedit entry for several changes to the same file instead of overlapping edit operations. The runtime validates the whole batch against a projected copy and commits atomically; if any operation fails, nothing is written and you receive per-operation errors to fix and resend.
+    - Common recipes: (1) change a symbol across files — Grep the symbol, ReadMany the matches, one WriteBatch with a per-file edit or multiedit; (2) add a module — one WriteBatch that first creates the new file, then edits the registration/index files; (3) refactor within one file — a single MultiEdit; (4) investigate then answer — Glob/Grep, ReadMany, answer, without reading unrelated files.
+    """ }
+
     private func phasedToolDefinitions(
         from definitions: [AgentToolDefinition],
         phase: AgentLoopPhase,
@@ -1891,7 +1911,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 AgentPhaseToolContract.memoryQueryName
             ])
         case .finalSynthesis:
-            names = Set(definitions.map(\.name))
+            // Final synthesis may still batch-read for citation accuracy but must
+            // not mutate the workspace, so WriteBatch is filtered out here. This
+            // is a static phase-boundary filter and does not cause intra-phase
+            // tool-array churn (KV-cache prefix stays stable within the phase).
+            names = Set(definitions.map(\.name)).subtracting(["WriteBatch"])
         }
         return definitions.filter { names.contains($0.name) }
     }

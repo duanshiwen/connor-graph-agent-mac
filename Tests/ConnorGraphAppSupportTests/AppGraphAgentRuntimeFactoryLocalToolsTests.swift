@@ -31,6 +31,13 @@ import ConnorGraphStore
     #expect(names.contains("Edit"))
     #expect(names.contains("MultiEdit"))
     #expect(names.contains("Bash"))
+    #expect(names.contains("ReadMany"))
+    #expect(names.contains("WriteBatch"))
+    // Parallel-execution classification is driven purely by the tool's
+    // capability: ReadMany reuses the read capability (parallel-safe) while
+    // WriteBatch reuses the edit capability (must run sequentially).
+    #expect(controller.toolRegistry.permission(named: "ReadMany") == .readWorkspaceFile)
+    #expect(controller.toolRegistry.permission(named: "WriteBatch") == .editWorkspaceFile)
 }
 
 @Test func agentLoopRuntimeFactoryRegistersSessionStatusTools() throws {
