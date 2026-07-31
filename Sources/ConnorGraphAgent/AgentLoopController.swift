@@ -20,6 +20,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var permissionMode: AgentPermissionMode
     public var instructionAppendix: String
     public var budget: AgentBudgetConfiguration
+    public var compaction: AgentLoopCompactionConfiguration
 
     public init(
         maxToolIterations: Int = 24,
@@ -37,7 +38,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         reservedOutputTokens: Int = 8_192,
         permissionMode: AgentPermissionMode = .askToWrite,
         instructionAppendix: String = "",
-        budget: AgentBudgetConfiguration = AgentBudgetConfiguration()
+        budget: AgentBudgetConfiguration = AgentBudgetConfiguration(),
+        compaction: AgentLoopCompactionConfiguration = AgentLoopCompactionConfiguration()
     ) {
         self.maxToolIterations = max(1, maxToolIterations)
         self.maxToolCallsPerIteration = max(1, maxToolCallsPerIteration)
@@ -55,6 +57,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.permissionMode = permissionMode
         self.instructionAppendix = instructionAppendix
         self.budget = budget
+        self.compaction = compaction
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -74,6 +77,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         case permissionMode
         case instructionAppendix
         case budget
+        case compaction
     }
 
     public init(from decoder: Decoder) throws {
@@ -94,6 +98,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.permissionMode = try container.decodeIfPresent(AgentPermissionMode.self, forKey: .permissionMode) ?? .askToWrite
         self.instructionAppendix = try container.decodeIfPresent(String.self, forKey: .instructionAppendix) ?? ""
         self.budget = try container.decodeIfPresent(AgentBudgetConfiguration.self, forKey: .budget) ?? AgentBudgetConfiguration()
+        self.compaction = try container.decodeIfPresent(AgentLoopCompactionConfiguration.self, forKey: .compaction) ?? AgentLoopCompactionConfiguration()
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -114,6 +119,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         try container.encode(permissionMode, forKey: .permissionMode)
         try container.encode(instructionAppendix, forKey: .instructionAppendix)
         try container.encode(budget, forKey: .budget)
+        try container.encode(compaction, forKey: .compaction)
     }
 }
 

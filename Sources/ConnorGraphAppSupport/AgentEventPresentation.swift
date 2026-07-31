@@ -136,6 +136,22 @@ public struct AgentEventPresenter: Sendable {
             )
         case .budgetWarning(let warning):
             return item(event, title: "Budget warning", detail: warning.message, severity: .warning)
+        case .compactionStarted(let payload):
+            return item(
+                event,
+                title: "正在压缩上下文",
+                detail: "第 \(payload.generation) 次压缩 · 输入约 \(payload.estimatedInputTokens)/\(payload.maximumInputTokens) tokens",
+                severity: .info
+            )
+        case .compactionCompleted(let payload):
+            return item(
+                event,
+                title: "上下文压缩完成",
+                detail: "\(payload.inputTokensBefore) → \(payload.inputTokensAfter) tokens · 清理 \(payload.compactedToolResultCount) 个工具结果 · \(payload.durationMilliseconds) ms",
+                severity: .success
+            )
+        case .compactionFailed(let payload):
+            return item(event, title: "上下文压缩失败", detail: payload.message, severity: .warning)
         case .sessionStatusChanged(let payload):
             return item(event, title: "Session status changed", detail: payload.message, severity: .info)
         case .sessionLabelsChanged(let payload):

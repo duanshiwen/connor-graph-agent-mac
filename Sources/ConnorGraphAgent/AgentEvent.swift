@@ -17,6 +17,9 @@ public enum AgentEvent: Sendable, Equatable {
     case permissionRequested(AgentPermissionRequest)
     case permissionResolved(AgentPermissionDecision)
     case budgetWarning(AgentBudgetWarning)
+    case compactionStarted(AgentCompactionStartedEvent)
+    case compactionCompleted(AgentCompactionCompletedEvent)
+    case compactionFailed(AgentCompactionFailedEvent)
     case sessionStatusChanged(AgentSessionGovernanceEvent)
     case sessionLabelsChanged(AgentSessionGovernanceEvent)
     case sessionArchived(AgentSessionGovernanceEvent)
@@ -48,6 +51,9 @@ public enum AgentEvent: Sendable, Equatable {
         case .permissionRequested: return .permissionRequested
         case .permissionResolved: return .permissionResolved
         case .budgetWarning: return .budgetWarning
+        case .compactionStarted: return .compactionStarted
+        case .compactionCompleted: return .compactionCompleted
+        case .compactionFailed: return .compactionFailed
         case .sessionStatusChanged: return .sessionStatusChanged
         case .sessionLabelsChanged: return .sessionLabelsChanged
         case .sessionArchived: return .sessionArchived
@@ -79,6 +85,9 @@ public enum AgentEvent: Sendable, Equatable {
         case .permissionRequested(let request): return request.runID
         case .permissionResolved(let decision): return decision.runID
         case .budgetWarning(let warning): return warning.runID
+        case .compactionStarted(let event): return event.runID
+        case .compactionCompleted(let event): return event.runID
+        case .compactionFailed(let event): return event.runID
         case .sessionStatusChanged(let event), .sessionLabelsChanged(let event), .sessionArchived(let event), .sessionRestored(let event): return event.runID
         case .artifactCreated(let event): return event.runID
         case .sourceRegistryChanged(let event), .skillRegistryChanged(let event): return event.runID
@@ -104,6 +113,9 @@ public enum AgentEvent: Sendable, Equatable {
         case .permissionRequested(let request): return request.sessionID
         case .permissionResolved(let decision): return decision.sessionID
         case .budgetWarning(let warning): return warning.sessionID
+        case .compactionStarted(let event): return event.sessionID
+        case .compactionCompleted(let event): return event.sessionID
+        case .compactionFailed(let event): return event.sessionID
         case .sessionStatusChanged(let event), .sessionLabelsChanged(let event), .sessionArchived(let event), .sessionRestored(let event): return event.sessionID
         case .artifactCreated(let event): return event.sessionID
         case .sourceRegistryChanged(let event), .skillRegistryChanged(let event): return event.sessionID
