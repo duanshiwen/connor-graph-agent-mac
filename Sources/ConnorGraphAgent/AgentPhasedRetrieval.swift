@@ -764,7 +764,7 @@ public enum AgentPhaseToolContract {
         ),
         AgentToolDefinition(
             name: prepareFinalOutputName,
-            description: "Enter Final Synthesis and internally finish final-response Profile pagination before generating a non-mechanical final output.",
+            description: "Enter Final Synthesis and internally finish final-response Profile pagination before generating a non-mechanical final output. When the attention briefing capability is registered the result also embeds an attentionBrief section (upcoming events across all calendars plus recent received mail across all accounts) so no separate calendar or mail call is needed.",
             inputSchema: .object(properties: ["reason": .string(description: "")], required: ["reason"])
         ),
         AgentToolDefinition(

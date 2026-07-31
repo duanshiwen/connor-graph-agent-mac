@@ -332,11 +332,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 let hasBatchFileTools = availableToolDefinitions.contains { $0.name == "ReadMany" }
                     && availableToolDefinitions.contains { $0.name == "WriteBatch" }
                 // Injected once on entry to Final Synthesis, only if the
-                // all-calendars upcoming-events tool is registered. Like the
-                // batch-file guidance above it is appended a single time and
-                // then stays stable, so it does not disturb the KV-cache prefix.
+                // one-call attention briefing tool (all calendars + recent
+                // mail) is registered; falls back to the all-calendars
+                // upcoming-events tool. Like the batch-file guidance above it
+                // is appended a single time and then stays stable, so it does
+                // not disturb the KV-cache prefix.
                 var didInjectFinalSynthesisCalendarGuidance = false
-                let hasCalendarReminderTool = availableToolDefinitions.contains { $0.name == "calendar_upcoming_events" }
+                let hasAttentionBriefTool = availableToolDefinitions.contains { $0.name == "attention_brief" }
+                let hasCalendarReminderTool = hasAttentionBriefTool
+                    || availableToolDefinitions.contains { $0.name == "calendar_upcoming_events" }
                 // Startup tool visibility is fixed for the whole run so the serialized
                 // tool array stays prefix-stable for provider prompt caching. Usage
                 // discipline is enforced through corrective instructions and call
@@ -833,7 +837,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         if hasCalendarReminderTool,
                            !didInjectFinalSynthesisCalendarGuidance,
                            phasedState.phase == .finalSynthesis {
-                            messages.append(AgentModelMessage(role: .system, content: Self.finalSynthesisCalendarReminderGuidance))
+                            let guidance = hasAttentionBriefTool
+                                ? Self.finalSynthesisAttentionBriefGuidance
+                                : Self.finalSynthesisCalendarReminderGuidance
+                            messages.append(AgentModelMessage(role: .system, content: guidance))
                             didInjectFinalSynthesisCalendarGuidance = true
                         }
 
@@ -1609,13 +1616,37 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             }
         }
         if call.name == AgentPhaseToolContract.prepareFinalOutputName {
+            // Nest the one-call attention briefing (all-calendars upcoming
+            // events + recent received mail) into the same result so Final
+            // Synthesis needs no further tool turns: preferences, calendar,
+            // and mail all arrive in this single prepare_final_output reply.
+            // A brief failure degrades to the profile-only payload.
+            var attentionBrief: Any?
+            var attentionCitations: [String] = []
+            if toolRegistry.definition(named: AttentionBriefTool.toolName) != nil {
+                let briefCall = AgentToolCall(id: "\(call.id)-attention-brief", runID: run.id, sessionID: run.sessionID, name: AttentionBriefTool.toolName, argumentsJSON: "{}")
+                if let briefResult = try? await toolRegistry.execute(briefCall, context: context), briefResult.error == nil {
+                    attentionCitations = briefResult.citations
+                    if let json = briefResult.contentJSON,
+                       let data = json.data(using: .utf8),
+                       let object = try? JSONSerialization.jsonObject(with: data) {
+                        attentionBrief = object
+                    } else {
+                        attentionBrief = ["content": briefResult.contentText]
+                    }
+                }
+            }
             guard toolRegistry.definition(named: AgentContinuityPreflightPolicy.currentUserProfileToolName) != nil else {
-                return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id, toolName: call.name, contentText: "Final Synthesis prepared; Profile capability is unavailable.", contentJSON: #"{"profileAvailable":false,"success":true}"#)
+                var payload: [String: Any] = ["profileAvailable": false, "success": true]
+                if let attentionBrief { payload["attentionBrief"] = attentionBrief }
+                let encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+                let json = String(data: encoded, encoding: .utf8) ?? #"{"profileAvailable":false,"success":true}"#
+                return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id, toolName: call.name, contentText: "Final Synthesis prepared; Profile capability is unavailable.", contentJSON: json, citations: attentionCitations)
             }
             var page = 1
             var seenPages = Set<Int>()
             var profilePages: [Any] = []
-            var citations: [String] = []
+            var citations: [String] = attentionCitations
             let paginationPolicy = AgentContinuityPreflightPolicy()
             while seenPages.insert(page).inserted {
                 guard seenPages.count <= configuration.maxToolIterations else {
@@ -1635,7 +1666,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 guard let next = paginationPolicy.nextRequiredCurrentUserProfilePage(after: result) else { break }
                 page = next
             }
-            let encoded = try JSONSerialization.data(withJSONObject: ["profileAvailable": true, "profilePages": profilePages, "success": true], options: [.sortedKeys])
+            var payload: [String: Any] = ["profileAvailable": true, "profilePages": profilePages, "success": true]
+            if let attentionBrief { payload["attentionBrief"] = attentionBrief }
+            let encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
             let json = String(data: encoded, encoding: .utf8) ?? "{}"
             let gated = AgentToolResultGate(configuration: .init(maxResultCharacters: configuration.maxToolResultBytes)).gatedContent(for: AgentToolResult(toolCallID: call.id, toolName: call.name, contentText: json, contentJSON: json))
             return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id, toolName: call.name, contentText: gated, contentJSON: json, citations: citations)
@@ -1901,6 +1934,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     - If nothing noteworthy is upcoming, do not manufacture a reminder — just answer. Otherwise, close the reply with a short, natural reminder of the important or soon-to-start events (title + when), on top of whatever the user actually asked for.
     - Remind a day early for anything that needs lead time: if an event has a location that implies travel, or notes/attendees implying preparation, surface it the day before so the user can get ready or leave on time. Say briefly why it needs early attention (e.g. travel to the venue, materials to prepare).
     - Keep it concise and grounded in the returned events; never invent times, places, or events, and do not call calendar_write.
+    """ }
+
+    static var finalSynthesisAttentionBriefGuidance: String { """
+    Trusted final-synthesis guidance for proactive attention reminders:
+    - The prepare_final_output result you just received already contains an attentionBrief section alongside the user profile: upcoming events across every calendar for the next couple of days AND the most recent received mail across every account. Do not spend extra tool turns re-fetching it — no get_current_time, list_calendars, mail_list_accounts, calendar_upcoming_events, or mail_list_recent_messages calls are needed. Only call attention_brief yourself if the brief is missing from that result or you genuinely need a wider window (pass days).
+    - Scan the brief for anything the user must act on right away: events starting soon, and recent mail that looks urgent or unanswered (unread, deadline-like subjects, direct requests). If nothing needs attention, do not manufacture a reminder — just answer.
+    - Otherwise, close the reply with a short, natural heads-up on top of whatever the user actually asked for: the important or soon-to-start events (title + when), and at most two or three mail items truly worth immediate attention (sender + subject).
+    - Remind a day early for anything that needs lead time: if an event has a location that implies travel, or notes/attendees implying preparation, surface it the day before so the user can get ready or leave on time. Say briefly why it needs early attention (e.g. travel to the venue, materials to prepare).
+    - Keep it concise and grounded in the returned brief; never invent times, places, events, or mail, and do not call calendar_write or any mail write/send tool.
     """ }
 
     private func phasedToolDefinitions(

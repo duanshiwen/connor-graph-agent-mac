@@ -99,6 +99,10 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
         if name == AgentNoteSearchPreflightPolicy.requiredToolName { return retrievalPlan.requiresNoteSearch }
         if name == AgentContinuityPreflightPolicy.currentUserProfileToolName { return retrievalPlan.requiresFinalProfile }
         if name == "load_attachment_context" { return !request.attachmentRefs.isEmpty || !request.attachmentContextPlan.isEmpty }
+        // The one-call attention briefing must be available on every run so the
+        // final reply can proactively remind the user, regardless of whether the
+        // conversation contains calendar or mail signals.
+        if name == "attention_brief" { return true }
 
         if Self.localToolNames.contains(name) || matches(name, prefixes: ["local_", "workspace_"]) { return containsAny(context, signals: Self.localFileSignals) }
         if matches(name, prefixes: ["calendar_"]) { return containsAny(context, signals: Self.calendarSignals) }

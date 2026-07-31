@@ -333,7 +333,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 .fastmailCalDAV: calDAVAdapter,
                 .nextcloudCalDAV: calDAVAdapter
             ])
-            registry.registerNativeCalendarTools(runtime: CalendarSourceAgentRuntimeBridge(store: calendarStore, mutationService: calendarMutationService), recorder: nativeSourceReferenceRecorder)
+            let calendarAgentRuntime = CalendarSourceAgentRuntimeBridge(store: calendarStore, mutationService: calendarMutationService)
+            registry.registerNativeCalendarTools(runtime: calendarAgentRuntime, recorder: nativeSourceReferenceRecorder)
             let effectiveRSSRuntime = rssRuntime ?? RSSRuntime(
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
@@ -356,10 +357,16 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 contactRuntime: contactRuntime,
                 recorder: nativeSourceReferenceRecorder
             )
+            registry.register(AttentionBriefTool(
+                calendarRuntime: calendarAgentRuntime,
+                mailRuntime: effectiveMailRuntime,
+                recorder: nativeSourceReferenceRecorder
+            ))
 
             registry.registerBrowserHistoryTools(store: BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL), recorder: nativeSourceReferenceRecorder)
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
+            registry.register(AttentionBriefTool(calendarRuntime: InMemoryAgentCalendarRuntime()))
         }
         registry.registerNativeContactsAggregateTools(runtime: makePersonRegistryContactRuntime(memoryOSFacade: memoryOSFacade) ?? InMemoryAgentContactRuntime())
         registry.register(BrowserFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
