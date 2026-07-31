@@ -141,6 +141,23 @@ private func temporaryCommercialMCPStoragePaths(_ name: String = UUID().uuidStri
     #expect(result.content.first?.text == "hello")
 }
 
+@Test func commercialMCPStdioTransportDoesNotWaitForeverForAResponse() async {
+    let transport = MCPStdioClientTransport(
+        command: "/usr/bin/python3",
+        arguments: ["-c", "import sys,time; sys.stdin.readline(); time.sleep(10)"],
+        requestTimeout: 0.1
+    )
+    let client = MCPJSONRPCClient(transport: transport, clientName: "Connor", clientVersion: "1.0")
+    let startedAt = Date()
+
+    do {
+        _ = try await client.initialize()
+        Issue.record("Expected the unresponsive MCP server request to time out.")
+    } catch {
+        #expect(Date().timeIntervalSince(startedAt) < 2)
+    }
+}
+
 @Test func commercialMCPSourceTestServicePersistsDiscoveryArtifacts() async throws {
     let fixture = try makeMCPFixtureServer()
     defer { try? FileManager.default.removeItem(at: fixture.deletingLastPathComponent()) }
@@ -271,22 +288,11 @@ private func makeMCPFixtureServer() throws -> URL {
 import json, sys
 
 def read_message():
-    headers = {}
-    while True:
-        line = sys.stdin.buffer.readline()
-        if not line:
-            return None
-        if line == b"\r\n":
-            break
-        key, value = line.decode("utf-8").split(":", 1)
-        headers[key.lower()] = value.strip()
-    length = int(headers["content-length"])
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
+    line = sys.stdin.buffer.readline()
+    return json.loads(line.decode("utf-8")) if line else None
 
 def send(message):
-    payload = json.dumps(message).encode("utf-8")
-    sys.stdout.buffer.write(f"Content-Length: {len(payload)}\r\n\r\n".encode("utf-8"))
-    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.write(json.dumps(message).encode("utf-8") + b"\n")
     sys.stdout.buffer.flush()
 
 while True:

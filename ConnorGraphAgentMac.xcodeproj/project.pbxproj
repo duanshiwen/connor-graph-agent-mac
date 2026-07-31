@@ -178,10 +178,14 @@
 		AA5A70000000000000000105 /* Sources/ConnorGraphAgentMac/MailApprovalViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5A70000000000000000005 /* Sources/ConnorGraphAgentMac/MailApprovalViews.swift */; };
 		AA5A70000000000000000106 /* Sources/ConnorGraphAgentMac/MailAuditTimelineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5A70000000000000000006 /* Sources/ConnorGraphAgentMac/MailAuditTimelineViews.swift */; };
 		AA5A70000000000000000107 /* Sources/ConnorGraphAgentMac/MailReadinessViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5A70000000000000000007 /* Sources/ConnorGraphAgentMac/MailReadinessViews.swift */; };
+		B1A100000000000000000001 /* Sources/ConnorGraphAgentMac/ImFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000001 /* Sources/ConnorGraphAgentMac/ImFeatureModel.swift */; };
+		B1A100000000000000000002 /* Sources/ConnorGraphAgentMac/ImChatViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000002 /* Sources/ConnorGraphAgentMac/ImChatViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		E90100000000000000000003 /* Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift; sourceTree = "<group>"; };
+		B1A000000000000000000001 /* Sources/ConnorGraphAgentMac/ImFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ImFeatureModel.swift; sourceTree = "<group>"; };
+		B1A000000000000000000002 /* Sources/ConnorGraphAgentMac/ImChatViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ImChatViews.swift; sourceTree = "<group>"; };
 		51A7E0010000000000000011 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionCoordinator.swift; sourceTree = "<group>"; };
 		51A7E0010000000000000012 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionController.swift; sourceTree = "<group>"; };
 		6D47A1000000000000000001 /* Sources/ConnorGraphAgentMac/AppGlobalSearchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppGlobalSearchModels.swift; sourceTree = "<group>"; };
@@ -438,6 +442,8 @@
 				A0000000000000000000008D /* Sources/ConnorGraphAgentMac/AppRuntimeLifecycle.swift */,
 				A00000000000000000000091 /* Sources/ConnorGraphAgentMac/GlobalSearchRuntimeCoordinator.swift */,
 				A00000000000000000000093 /* Sources/ConnorGraphAgentMac/AIConnectionsRuntimeCoordinator.swift */,
+				B1A000000000000000000001 /* Sources/ConnorGraphAgentMac/ImFeatureModel.swift */,
+				B1A000000000000000000002 /* Sources/ConnorGraphAgentMac/ImChatViews.swift */,
 				C00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift */,
 				E00000000000000000000011 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift */,
 				E00000000000000000000012 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift */,
@@ -752,6 +758,8 @@
 				A0000000000000000000008C /* Sources/ConnorGraphAgentMac/AppRuntimeLifecycle.swift in Sources */,
 				A00000000000000000000090 /* Sources/ConnorGraphAgentMac/GlobalSearchRuntimeCoordinator.swift in Sources */,
 				A00000000000000000000092 /* Sources/ConnorGraphAgentMac/AIConnectionsRuntimeCoordinator.swift in Sources */,
+				B1A100000000000000000001 /* Sources/ConnorGraphAgentMac/ImFeatureModel.swift in Sources */,
+				B1A100000000000000000002 /* Sources/ConnorGraphAgentMac/ImChatViews.swift in Sources */,
 				D00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift in Sources */,
 				E00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift in Sources */,
 				E00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift in Sources */,
