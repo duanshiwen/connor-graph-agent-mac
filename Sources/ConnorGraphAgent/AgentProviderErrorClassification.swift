@@ -35,11 +35,20 @@ enum AgentProviderErrorHeuristics {
 
     static func classifyHTTPStatus(_ status: Int, message: String?) -> AgentModelProviderErrorClass {
         if isContextOverflowMessage(message) { return .contextOverflow }
+        if status == 429, isQuotaExhaustionMessage(message) { return .permanent }
         switch status {
         case 408, 409, 425, 429, 500...599:
             return .transient
         default:
             return .permanent
+        }
+    }
+
+    private static func isQuotaExhaustionMessage(_ message: String?) -> Bool {
+        guard let message else { return false }
+        let lowered = message.lowercased()
+        return ["quota exhausted", "quota_exhausted", "insufficient_quota", "billing hard limit", "credit balance"].contains {
+            lowered.contains($0)
         }
     }
 }

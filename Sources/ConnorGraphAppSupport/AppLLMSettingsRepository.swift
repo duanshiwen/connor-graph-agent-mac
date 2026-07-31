@@ -812,7 +812,9 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
             guard response.statusCode >= 200, response.statusCode < 300 else {
                 return AppLLMModelConnection(id: activeConnection.id, title: activeConnection.name + (isDefault ? " · 默认" : ""), subtitle: "\(providerTitle) · 模型列表请求失败（HTTP \(response.statusCode)）", providerMode: providerMode, models: configuredOptions(from: activeConnection), isLiveCatalog: false)
             }
-            let modelIDs = try Self.parseModelIDs(response.body).filter(Self.isChatSelectableModelID)
+            let modelIDs = try Self.parseModelIDs(response.body).filter {
+                Self.isChatSelectableModelID($0, connectionKind: activeConnection.connectionKind)
+            }
             guard !modelIDs.isEmpty else {
                 return AppLLMModelConnection(id: activeConnection.id, title: activeConnection.name + (isDefault ? " · 默认" : ""), subtitle: "\(providerTitle) · 未发现可用聊天模型", providerMode: providerMode, models: configuredOptions(from: activeConnection), isLiveCatalog: false)
             }
@@ -866,8 +868,12 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
-    private static func isChatSelectableModelID(_ modelID: String) -> Bool {
+    private static func isChatSelectableModelID(_ modelID: String, connectionKind: AppLLMConnectionKind) -> Bool {
         let normalized = modelID.lowercased()
+        if connectionKind == .githubCopilot,
+           ["gpt-5.4", "gpt-5.6-terra"].contains(normalized) {
+            return false
+        }
         let nonChatFragments = [
             "embedding", "rerank", "moderation", "whisper", "transcription", "transcribe",
             "-tts", "_tts", "/tts", "tts-", "text-to-speech",

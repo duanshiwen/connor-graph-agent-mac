@@ -442,13 +442,17 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
         let decoded = try JSONDecoder().decode(OpenAIChatCompletionResponse.self, from: data)
         let choice = decoded.choices.first
         let message = choice?.message
-        let toolCalls = message?.toolCalls?.map { call in
+        let structuredToolCalls = message?.toolCalls?.map { call in
             AgentToolCall(id: call.id, name: call.function.name, argumentsJSON: call.function.arguments)
         } ?? []
-        let finishReason = AgentModelFinishReason.openAICompatible(finishReason: choice?.finishReason)
+        let recovered = OpenAITextualToolCallParser.parse(message?.content)
+        let toolCalls = structuredToolCalls.isEmpty ? recovered.toolCalls : structuredToolCalls
+        let finishReason = toolCalls.isEmpty
+            ? AgentModelFinishReason.openAICompatible(finishReason: choice?.finishReason)
+            : .toolCalls
         let usage = decoded.usage.map(\.agentModelUsage)
         return AgentModelResponse(
-            text: message?.content,
+            text: recovered.toolCalls.isEmpty ? message?.content : recovered.text,
             toolCalls: toolCalls,
             usage: usage,
             finishReason: finishReason,
@@ -772,6 +776,8 @@ private struct OpenAIChatCompletionStreamAccumulator {
     private var usage: AgentModelUsage?
     private var rawEvents: [String] = []
     private var toolCalls: [Int: ToolCallState] = [:]
+    private var withheldText = ""
+    private var isSuppressingTextualToolMarkup = false
 
     mutating func append(chunk: OpenAIChatCompletionStreamChunk, rawJSON: String) -> [AgentModelStreamEvent] {
         rawEvents.append(rawJSON)
@@ -785,7 +791,9 @@ private struct OpenAIChatCompletionStreamAccumulator {
             }
             if let content = choice.delta.content, !content.isEmpty {
                 text += content
-                events.append(.textDelta(content))
+                if let visible = visibleTextDelta(content), !visible.isEmpty {
+                    events.append(.textDelta(visible))
+                }
             }
             if let reasoning = choice.delta.reasoningContent, !reasoning.isEmpty {
                 reasoningContent += reasoning
@@ -807,20 +815,103 @@ private struct OpenAIChatCompletionStreamAccumulator {
     }
 
     func response() -> AgentModelResponse {
-        let calls = toolCalls.keys.sorted().compactMap { index -> AgentToolCall? in
+        let structuredCalls = toolCalls.keys.sorted().compactMap { index -> AgentToolCall? in
             guard let state = toolCalls[index], let name = state.name else { return nil }
             return AgentToolCall(id: state.id ?? "call_\(index)", name: name, argumentsJSON: state.arguments)
         }
+        let recovered = OpenAITextualToolCallParser.parse(text.isEmpty ? nil : text)
+        let calls = structuredCalls.isEmpty ? recovered.toolCalls : structuredCalls
         return AgentModelResponse(
-            text: text.isEmpty ? nil : text,
+            text: recovered.toolCalls.isEmpty ? (text.isEmpty ? nil : text) : recovered.text,
             toolCalls: calls,
             usage: usage,
-            finishReason: finishReason,
+            finishReason: calls.isEmpty ? finishReason : .toolCalls,
             rawResponseJSON: rawEvents.joined(separator: "\n"),
             providerMetadata: reasoningContent.isEmpty
                 ? nil
                 : AgentModelProviderMetadata(providerID: "openai-compatible", reasoningContent: reasoningContent)
         )
+    }
+
+    private mutating func visibleTextDelta(_ content: String) -> String? {
+        guard !isSuppressingTextualToolMarkup else { return nil }
+        let candidate = withheldText + content
+        withheldText = ""
+        if let range = candidate.range(of: "<tool_call", options: [.caseInsensitive]) {
+            isSuppressingTextualToolMarkup = true
+            return String(candidate[..<range.lowerBound])
+        }
+        if let markerStart = candidate.lastIndex(of: "<") {
+            let suffix = String(candidate[markerStart...])
+            if "<tool_call".hasPrefix(suffix.lowercased()) {
+                withheldText = suffix
+                return String(candidate[..<markerStart])
+            }
+        }
+        return candidate
+    }
+}
+
+private enum OpenAITextualToolCallParser {
+    struct Parsed {
+        var text: String?
+        var toolCalls: [AgentToolCall]
+    }
+
+    static func parse(_ text: String?) -> Parsed {
+        guard let text, text.range(of: "<tool_call", options: [.caseInsensitive]) != nil else {
+            return Parsed(text: text, toolCalls: [])
+        }
+        let blocks = matches(pattern: #"<tool_call\b[^>]*>(.*?)</tool_call\s*>"#, in: text, captureGroup: 1)
+        var calls = blocks.enumerated().compactMap { index, block in parseCall(block, index: index) }
+        if calls.isEmpty,
+           let envelope = matches(pattern: #"<tool_calls\b[^>]*>(.*?)</tool_calls\s*>"#, in: text, captureGroup: 1).first,
+           let call = parseCall(envelope, index: 0) {
+            calls = [call]
+        }
+        guard !calls.isEmpty else { return Parsed(text: text, toolCalls: []) }
+
+        var cleaned = replacing(pattern: #"<tool_calls\b[^>]*>.*?</tool_calls\s*>"#, in: text, with: "")
+        cleaned = replacing(pattern: #"<tool_call\b[^>]*>.*?</tool_call\s*>"#, in: cleaned, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return Parsed(text: cleaned.isEmpty ? nil : cleaned, toolCalls: calls)
+    }
+
+    private static func parseCall(_ raw: String, index: Int) -> AgentToolCall? {
+        let json = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"^```(?:json)?\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s*```$"#, with: "", options: .regularExpression)
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let function = object["function"] as? [String: Any]
+        guard let name = (object["name"] as? String) ?? (function?["name"] as? String), !name.isEmpty else { return nil }
+        let arguments = object["arguments"] ?? function?["arguments"] ?? [String: Any]()
+        let argumentsJSON: String
+        if let arguments = arguments as? String {
+            argumentsJSON = arguments
+        } else if JSONSerialization.isValidJSONObject(arguments),
+                  let encoded = try? JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys]) {
+            argumentsJSON = String(decoding: encoded, as: UTF8.self)
+        } else {
+            argumentsJSON = "{}"
+        }
+        return AgentToolCall(id: object["id"] as? String ?? "text_call_\(index)", name: name, argumentsJSON: argumentsJSON)
+    }
+
+    private static func matches(pattern: String, in text: String, captureGroup: Int) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else { return [] }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.matches(in: text, range: range).compactMap { match in
+            guard captureGroup < match.numberOfRanges,
+                  let range = Range(match.range(at: captureGroup), in: text) else { return nil }
+            return String(text[range])
+        }
+    }
+
+    private static func replacing(pattern: String, in text: String, with replacement: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else { return text }
+        return regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: replacement)
     }
 }
 

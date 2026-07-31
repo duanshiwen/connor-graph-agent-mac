@@ -82,6 +82,30 @@ private struct OpenAIStreamingFallbackHTTPClient: AgentHTTPClient {
     #expect(object["stream"] as? Bool == true)
 }
 
+@Test func openAICompatibleProviderSuppressesAndRecoversStreamedTextualToolCalls() async throws {
+    let sseClient = OpenAIStreamingCapturingSSEClient(frames: [
+        "data: {\"choices\":[{\"delta\":{\"content\":\"<to\"}}]}\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"ol_calls><tool_call>{\\\"name\\\":\\\"graph_search\\\",\\\"arguments\\\":{\\\"query\\\":\\\"memory\\\"}}</tool_call></tool_calls>\"},\"finish_reason\":\"stop\"}]}\n",
+        "data: [DONE]\n"
+    ])
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "deepseek-test"),
+        httpClient: OpenAIStreamingFallbackHTTPClient(),
+        sseClient: sseClient
+    )
+
+    var events: [AgentModelStreamEvent] = []
+    for try await event in provider.streamComplete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Search")])) {
+        events.append(event)
+    }
+
+    #expect(!events.contains { if case .textDelta = $0 { return true }; return false })
+    let response = try #require(events.compactMap { if case .completed(let response) = $0 { return response }; return nil }.last)
+    #expect(response.text == nil)
+    #expect(response.finishReason == .toolCalls)
+    #expect(response.toolCalls.map(\.name) == ["graph_search"])
+}
+
 @Test func anyAgentModelProviderPreservesOpenAICompatibleStreamingPath() async throws {
     let sseClient = OpenAIStreamingCapturingSSEClient(frames: [
         "data: {\"choices\":[{\"delta\":{\"content\":\"streamed\"},\"finish_reason\":\"stop\"}]}\n",

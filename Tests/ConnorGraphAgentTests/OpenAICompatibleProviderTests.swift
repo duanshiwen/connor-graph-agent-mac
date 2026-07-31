@@ -3,6 +3,11 @@ import Testing
 import ConnorGraphSearch
 import ConnorGraphAgent
 
+@Test func openAICompatibleProviderClassifiesExhaustedQuotaAsPermanent() {
+    #expect(OpenAICompatibleProviderError.httpStatus(429, message: "quota exhausted").providerErrorClass == .permanent)
+    #expect(OpenAICompatibleProviderError.httpStatus(429, message: "rate limit exceeded").providerErrorClass == .transient)
+}
+
 private struct CapturingHTTPClient: AgentHTTPClient {
     final class Storage: @unchecked Sendable {
         var captured: CapturedRequest?
