@@ -454,7 +454,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             memoryQueryProvider: memoryOSFacade.map {
                 AppAgentMemoryQueryProvider(facade: $0, configuration: memoryOSContextToolConfiguration)
             },
-            automaticallySynthesizesProgressUpdates: false
+            automaticallySynthesizesProgressUpdates: false,
+            streamComplete: { provider, request in provider.streamComplete(request) }
         )
     }
 

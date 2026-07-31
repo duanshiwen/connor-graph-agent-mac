@@ -566,9 +566,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             }
         }
         let usageObject = object["usage"] as? [String: Any]
-        let inputTokens = usageObject?["input_tokens"] as? Int ?? 0
-        let outputTokens = usageObject?["output_tokens"] as? Int ?? 0
-        let usage = usageObject == nil ? nil : AgentModelUsage(promptTokens: inputTokens, completionTokens: outputTokens, cacheCreationInputTokens: usageObject?["cache_creation_input_tokens"] as? Int, cacheReadInputTokens: usageObject?["cache_read_input_tokens"] as? Int)
+        let usage = AnthropicStreamAccumulator.usage(from: usageObject)
         let stopReason = object["stop_reason"] as? String
         let finishReason = AgentModelFinishReason.anthropic(stopReason: stopReason)
         let rawJSON = String(data: data, encoding: .utf8)
