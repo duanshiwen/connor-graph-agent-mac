@@ -446,7 +446,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             AgentToolCall(id: call.id, name: call.function.name, argumentsJSON: call.function.arguments)
         } ?? []
         let finishReason = AgentModelFinishReason.openAICompatible(finishReason: choice?.finishReason)
-        let usage = decoded.usage.map { AgentModelUsage(promptTokens: $0.promptTokens, completionTokens: $0.completionTokens, totalTokens: $0.totalTokens) }
+        let usage = decoded.usage.map(\.agentModelUsage)
         return AgentModelResponse(
             text: message?.content,
             toolCalls: toolCalls,
@@ -673,11 +673,35 @@ private struct OpenAIChatCompletionResponse: Decodable {
         var promptTokens: Int
         var completionTokens: Int
         var totalTokens: Int
+        var promptTokensDetails: PromptTokensDetails?
+        var promptCacheHitTokens: Int?
+
+        struct PromptTokensDetails: Decodable {
+            var cachedTokens: Int?
+
+            enum CodingKeys: String, CodingKey {
+                case cachedTokens = "cached_tokens"
+            }
+        }
 
         enum CodingKeys: String, CodingKey {
             case promptTokens = "prompt_tokens"
             case completionTokens = "completion_tokens"
             case totalTokens = "total_tokens"
+            case promptTokensDetails = "prompt_tokens_details"
+            case promptCacheHitTokens = "prompt_cache_hit_tokens"
+        }
+
+        var agentModelUsage: AgentModelUsage {
+            // OpenAI-style endpoints report cached tokens in
+            // prompt_tokens_details.cached_tokens; DeepSeek-style endpoints use
+            // top-level prompt_cache_hit_tokens. Both are subsets of prompt_tokens.
+            AgentModelUsage(
+                promptTokens: promptTokens,
+                completionTokens: completionTokens,
+                totalTokens: totalTokens,
+                cacheReadInputTokens: promptTokensDetails?.cachedTokens ?? promptCacheHitTokens
+            )
         }
     }
 }
@@ -752,7 +776,7 @@ private struct OpenAIChatCompletionStreamAccumulator {
     mutating func append(chunk: OpenAIChatCompletionStreamChunk, rawJSON: String) -> [AgentModelStreamEvent] {
         rawEvents.append(rawJSON)
         if let chunkUsage = chunk.usage {
-            usage = AgentModelUsage(promptTokens: chunkUsage.promptTokens, completionTokens: chunkUsage.completionTokens, totalTokens: chunkUsage.totalTokens)
+            usage = chunkUsage.agentModelUsage
         }
         var events: [AgentModelStreamEvent] = []
         for choice in chunk.choices {
