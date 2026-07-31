@@ -381,7 +381,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("If a tool is unavailable, denied, or fails, do not fabricate completion"))
     #expect(prompt.contains("Only checkpoints named by the Runtime Retrieval Plan are mandatory"))
     #expect(prompt.contains("a blocked or failed retrieval or operation is not complete"))
-    #expect(prompt.contains("must not block an unrelated non-time-dependent task"))
+    #expect(prompt.contains("Continue with the best available evidence only when the missing evidence is not essential to the current request"))
     #expect(!prompt.contains("Every other task must call `web_search`"))
     #expect(!prompt.contains("Always call `web_search` before beginning task execution"))
 }
