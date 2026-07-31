@@ -99,7 +99,7 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
         let hasPermissionRequest = events.contains { $0.kind == "permissionRequested" }
         let primaryErrorMessage = events.first(where: { $0.severity == .error })?.detail.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         let state = state(for: process, events: events, hasPermissionRequest: hasPermissionRequest)
-        let statusText = statusText(for: state)
+        let statusText = isCompactionActive(events) ? "正在压缩上下文" : statusText(for: state)
         let compactToolText = compactToolText(for: toolNames)
         let title = "第 \(process.turnNumber) 轮 · \(statusText)"
         let subtitle = subtitle(
@@ -126,6 +126,13 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
             primaryErrorMessage: primaryErrorMessage,
             eventCount: events.count
         )
+    }
+
+    private func isCompactionActive(_ events: [AgentEventPresentation]) -> Bool {
+        guard let lastLifecycleEvent = events.last(where: {
+            $0.kind == "compactionStarted" || $0.kind == "compactionCompleted" || $0.kind == "compactionFailed"
+        }) else { return false }
+        return lastLifecycleEvent.kind == "compactionStarted"
     }
 
     private func state(for process: AgentChatTurnProcessPresentation, events: [AgentEventPresentation], hasPermissionRequest: Bool) -> AgentTurnActivitySummaryState {

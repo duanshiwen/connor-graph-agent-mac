@@ -70,3 +70,49 @@ import Testing
     #expect(checkpoint.completedToolCalls[0].arguments.contains("README.md"))
     #expect(checkpoint.modelContext.contains("do not repeat completed side effects"))
 }
+
+@Test func contextCompactorKeepsRecentToolResultsAndReplacesPriorCheckpoint() {
+    let oldCheckpoint = AgentModelMessage(
+        role: .system,
+        content: "[AGENT RUN CHECKPOINT - TRUSTED RUNTIME STATE]\nGeneration: 1"
+    )
+    let messages = [
+        AgentModelMessage(role: .system, content: "system"),
+        oldCheckpoint,
+        AgentModelMessage(role: .user, content: "historical user message"),
+        AgentModelMessage(role: .assistant, content: "historical final response"),
+        AgentModelMessage(role: .assistant, content: "", toolCalls: [
+            AgentToolCall(id: "call-1", name: "read_file", argumentsJSON: #"{"path":"one"}"#)
+        ]),
+        AgentModelMessage(role: .tool, content: String(repeating: "old", count: 2_000), toolCallID: "call-1", name: "read_file"),
+        AgentModelMessage(role: .assistant, content: "", toolCalls: [
+            AgentToolCall(id: "call-2", name: "read_file", argumentsJSON: #"{"path":"two"}"#)
+        ]),
+        AgentModelMessage(role: .tool, content: "recent result", toolCallID: "call-2", name: "read_file")
+    ]
+    let checkpoint = AgentRunCheckpointBuilder().build(
+        generation: 2,
+        originalGoal: "Read two files",
+        currentPhase: "taskExecution",
+        iteration: 3,
+        messages: messages
+    )
+
+    let result = AgentLoopContextCompactor().compact(
+        AgentModelRequest(messages: messages),
+        checkpoint: checkpoint,
+        retainedRecentToolResults: 1
+    )
+
+    #expect(result.compactedToolResultCount == 1)
+    #expect(result.request.messages.filter {
+        $0.role == .system && $0.content.hasPrefix("[AGENT RUN CHECKPOINT - TRUSTED RUNTIME STATE]")
+    }.count == 1)
+    #expect(result.request.messages.first { $0.toolCallID == "call-1" }?.content.hasPrefix("[Compacted tool result:") == true)
+    #expect(result.request.messages.first { $0.toolCallID == "call-2" }?.content == "recent result")
+    #expect(result.request.messages.contains { $0.role == .user && $0.content == "historical user message" })
+    #expect(result.request.messages.contains { $0.role == .assistant && $0.content == "historical final response" })
+    let assistantCallIDs = Set(result.request.messages.flatMap { $0.toolCalls?.map(\.id) ?? [] })
+    let toolResultIDs = Set(result.request.messages.compactMap(\.toolCallID))
+    #expect(toolResultIDs.isSubset(of: assistantCallIDs))
+}
