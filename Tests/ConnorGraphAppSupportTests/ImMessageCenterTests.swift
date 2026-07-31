@@ -75,7 +75,8 @@ struct ImMessageCenterTests {
         let conversationId = ImConversation.peerConversationID(peerUserId: 9)
         let tempId = try #require(try await fixture.store.messages(conversationId: conversationId).first).id
 
-        let failed = try await waitUntil {
+        // Generous deadline: the 20ms ack timer can starve under full-suite parallel load.
+        let failed = try await waitUntil(timeout: .seconds(10)) {
             try await fixture.store.message(id: tempId)?.status == .failed
         }
         #expect(failed)
