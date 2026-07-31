@@ -2554,6 +2554,44 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(events.last?.kind == .runCompleted)
 }
 
+@Test func agentLoopExposesBatchFileToolsPerPhaseAndInjectsGuidance() async throws {
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("connor-batch-phase-visibility-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    let policy = LocalWorkspacePolicy(workingDirectory: workspace)
+    let provider = PhaseToolChoiceProvider()
+    var registry = AgentToolRegistry()
+    registry.register(LocalReadManyTool(policy: policy))
+    registry.register(LocalWriteBatchTool(policy: policy))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(AgentChatRequest(sessionID: "session-batch-phase", userMessage: "Do file work")) {}
+
+    let requests = await provider.requests
+    let strategy = try #require(requests.first { $0.promptCacheContext?.phase == .strategyResearch })
+    let taskExecution = try #require(requests.first { $0.promptCacheContext?.phase == .taskExecution })
+    let finalSynthesis = try #require(requests.first { $0.promptCacheContext?.phase == .finalSynthesis })
+
+    // Strategy research only exposes strategy-scoped tools, so the batch file
+    // tools must not appear there.
+    #expect(strategy.tools.contains { $0.name == "ReadMany" } == false)
+    #expect(strategy.tools.contains { $0.name == "WriteBatch" } == false)
+
+    // Task execution exposes both batch tools and carries the pragmatic
+    // read/write guidance as a system message.
+    #expect(taskExecution.tools.contains { $0.name == "ReadMany" })
+    #expect(taskExecution.tools.contains { $0.name == "WriteBatch" })
+    #expect(taskExecution.messages.contains {
+        $0.role == .system && $0.content.contains("batch to minimize turns")
+    })
+
+    // Final synthesis may still batch-read but must not mutate the workspace,
+    // so WriteBatch is filtered out while ReadMany remains.
+    #expect(finalSynthesis.tools.contains { $0.name == "ReadMany" })
+    #expect(finalSynthesis.tools.contains { $0.name == "WriteBatch" } == false)
+}
+
 @Test func agentLoopKeepsToolArrayStableWithinPhaseAfterStartupToolUse() async throws {
     let provider = ContextualPreflightProvider()
     var registry = AgentToolRegistry()

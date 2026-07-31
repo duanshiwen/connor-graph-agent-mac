@@ -378,6 +378,311 @@ public struct LocalMultiEditTool: AgentTool {
     }
 }
 
+public struct LocalReadManyTool: AgentTool {
+    public let name = "ReadMany"
+    public let description = "Read multiple text files from the configured local workspace in a single call. Prefer this over separate Read calls when a task needs several files: every file is returned in one turn. Each request supports optional 1-based line offset and limit; a per-file error does not fail the whole batch. Paths must stay inside allowed workspace roots."
+    public let permission: AgentPermissionCapability = .readWorkspaceFile
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "requests": .array(
+            items: .closedObject(properties: [
+                "filePath": .string(description: "Path to a file inside the workspace."),
+                "offset": .integer(description: "Optional 1-based line number to start reading from."),
+                "limit": .integer(description: "Optional maximum number of lines to return.")
+            ], required: ["filePath"]),
+            description: "Files to read. Each item is read independently and concurrently."
+        )
+    ], required: ["requests"])
+
+    private let policy: LocalWorkspacePolicy
+    private let perFileByteLimit: Int
+    private let batchByteLimit: Int
+
+    public init(policy: LocalWorkspacePolicy) {
+        self.policy = policy
+        // Bound a single ReadMany result so a large fan-out cannot flood context:
+        // cap each file to the shell output budget and the whole batch to 4x it.
+        self.perFileByteLimit = policy.maxToolOutputBytes
+        self.batchByteLimit = policy.maxToolOutputBytes * 4
+    }
+
+    private struct Request: Sendable {
+        var index: Int
+        var filePath: String
+        var offset: Int
+        var limit: Int?
+    }
+
+    private struct FileOutcome: Sendable {
+        var index: Int
+        var filePath: String
+        var content: String
+        var offset: Int
+        var limit: Int
+        var lineCount: Int
+        var truncated: Bool
+        var error: String?
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let rawRequests = arguments.array("requests") else {
+            throw AgentToolError.invalidArguments("requests is required")
+        }
+        guard !rawRequests.isEmpty else {
+            throw AgentToolError.invalidArguments("requests must not be empty")
+        }
+        var parsed: [Request] = []
+        for (index, value) in rawRequests.enumerated() {
+            guard let object = value.objectValue,
+                  let filePath = object["filePath"]?.stringValue ?? object["file_path"]?.stringValue else {
+                throw AgentToolError.invalidArguments("Each request requires filePath")
+            }
+            let offset = max(object["offset"]?.intValue ?? 1, 1)
+            let limit = object["limit"]?.intValue.map { max($0, 0) }
+            parsed.append(Request(index: index, filePath: filePath, offset: offset, limit: limit))
+        }
+
+        let policy = self.policy
+        let outcomes = await AgentToolBatchScheduler(maximumConcurrency: 4).run(parsed) { request -> FileOutcome in
+            do {
+                let path = try policy.resolvePath(request.filePath)
+                try policy.validateReadablePath(path)
+                try policy.validateReadableSize(path: path)
+                let text = try String(contentsOf: path, encoding: .utf8)
+                let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                let limit = max(request.limit ?? min(lines.count, 2000), 0)
+                let start = min(request.offset - 1, lines.count)
+                let end = min(start + limit, lines.count)
+                let selected = lines[start..<end].enumerated().map { offset, line in
+                    "\(start + offset + 1): \(line)"
+                }.joined(separator: "\n")
+                let truncated = start > 0 || end < lines.count
+                return FileOutcome(index: request.index, filePath: path.path, content: selected, offset: request.offset, limit: limit, lineCount: lines.count, truncated: truncated, error: nil)
+            } catch {
+                return FileOutcome(index: request.index, filePath: request.filePath, content: "", offset: request.offset, limit: request.limit ?? 0, lineCount: 0, truncated: false, error: String(describing: error))
+            }
+        }
+
+        var remaining = batchByteLimit
+        let resultObjects: [[String: Any]] = outcomes.sorted { $0.index < $1.index }.map { outcome in
+            var value: [String: Any] = [
+                "filePath": outcome.filePath,
+                "offset": outcome.offset,
+                "limit": outcome.limit,
+                "lineCount": outcome.lineCount
+            ]
+            if let error = outcome.error {
+                value["error"] = error
+                value["truncated"] = outcome.truncated
+                return value
+            }
+            let (clipped, contentTruncated) = LocalReadManyTool.clip(outcome.content, toBytes: min(perFileByteLimit, remaining))
+            remaining = max(0, remaining - clipped.utf8.count)
+            value["content"] = clipped
+            value["truncated"] = outcome.truncated || contentTruncated
+            return value
+        }
+        let json = LocalToolJSON.encode(["results": resultObjects]) ?? "{}"
+        let successCount = outcomes.filter { $0.error == nil }.count
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: json,
+            contentJSON: json,
+            error: successCount == 0 ? "All \(outcomes.count) reads failed" : nil
+        )
+    }
+
+    static func clip(_ text: String, toBytes limit: Int) -> (String, Bool) {
+        let bytes = Array(text.utf8)
+        guard bytes.count > max(0, limit) else { return (text, false) }
+        let head = String(decoding: bytes.prefix(max(0, limit)), as: UTF8.self)
+        return (head + "\n[truncated]", true)
+    }
+}
+
+public struct LocalWriteBatchTool: AgentTool {
+    public let name = "WriteBatch"
+    public let description = "Apply multiple file changes across the workspace in a single call, executed in the exact order you provide. Prefer this over separate Write/Edit/MultiEdit calls when a task touches several files: everything commits in one turn. Each operation is 'create' (filePath + content), 'edit' (filePath + oldText + newText), or 'multiedit' (filePath + edits[]). All operations are validated against a projected in-memory copy first; if any fails, nothing is written. Order matters: create a file before editing it, and use a single 'multiedit' for several changes to the same file instead of overlapping 'edit' operations. Deletion is not supported here."
+    public let permission: AgentPermissionCapability = .editWorkspaceFile
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "operations": .array(
+            items: .closedObject(properties: [
+                "op": .string(description: "One of: create, edit, multiedit."),
+                "filePath": .string(description: "Path to write inside the workspace."),
+                "content": .string(description: "Full file content for 'create'."),
+                "oldText": .string(description: "Exact text to replace for 'edit'. Must occur exactly once in the projected file."),
+                "newText": .string(description: "Replacement text for 'edit'."),
+                "edits": .array(items: .closedObject(properties: [
+                    "oldText": .string(description: "Exact text to replace. Must occur exactly once in the projected file."),
+                    "newText": .string(description: "Replacement text.")
+                ], required: ["oldText", "newText"]), description: "Ordered replacements for 'multiedit'.")
+            ], required: ["op", "filePath"]),
+            description: "Ordered list of file operations. Applied top to bottom against a projected copy, then committed atomically."
+        )
+    ], required: ["operations"])
+
+    private let policy: LocalWorkspacePolicy
+
+    public init(policy: LocalWorkspacePolicy) { self.policy = policy }
+
+    private enum Op {
+        case create(content: String)
+        case edit(oldText: String, newText: String)
+        case multiedit(edits: [(oldText: String, newText: String)])
+
+        var label: String {
+            switch self {
+            case .create: return "create"
+            case .edit: return "edit"
+            case .multiedit: return "multiedit"
+            }
+        }
+    }
+
+    private struct ParsedOperation {
+        var index: Int
+        var path: URL
+        var op: Op
+    }
+
+    public func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
+        // Surface the full batch scope in the single approval prompt so one
+        // approval covers every file the batch will create or edit.
+        guard let arguments = try? AgentToolArguments(json: call.argumentsJSON),
+              let rawOps = arguments.array("operations") else {
+            return call.argumentsJSON
+        }
+        let summary: [[String: Any]] = rawOps.enumerated().compactMap { index, value in
+            guard let object = value.objectValue,
+                  let op = object["op"]?.stringValue,
+                  let path = object["filePath"]?.stringValue ?? object["file_path"]?.stringValue else {
+                return nil
+            }
+            return ["index": index, "op": op, "filePath": path]
+        }
+        return LocalToolJSON.encode(["operations": summary]) ?? call.argumentsJSON
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let rawOps = arguments.array("operations") else {
+            throw AgentToolError.invalidArguments("operations is required")
+        }
+        guard !rawOps.isEmpty else { throw AgentToolError.invalidArguments("operations must not be empty") }
+
+        var operations: [ParsedOperation] = []
+        for (index, value) in rawOps.enumerated() {
+            guard let object = value.objectValue,
+                  let opName = object["op"]?.stringValue?.lowercased(),
+                  let rawPath = object["filePath"]?.stringValue ?? object["file_path"]?.stringValue else {
+                throw AgentToolError.invalidArguments("Each operation requires op and filePath")
+            }
+            let path = try policy.resolvePath(rawPath)
+            switch opName {
+            case "create":
+                guard let content = object["content"]?.stringValue else {
+                    throw AgentToolError.invalidArguments("operation \(index) (create) requires content")
+                }
+                operations.append(ParsedOperation(index: index, path: path, op: .create(content: content)))
+            case "edit":
+                guard let oldText = object["oldText"]?.stringValue ?? object["old_text"]?.stringValue,
+                      let newText = object["newText"]?.stringValue ?? object["new_text"]?.stringValue else {
+                    throw AgentToolError.invalidArguments("operation \(index) (edit) requires oldText and newText")
+                }
+                operations.append(ParsedOperation(index: index, path: path, op: .edit(oldText: oldText, newText: newText)))
+            case "multiedit":
+                guard let rawEdits = object["edits"]?.arrayValue else {
+                    throw AgentToolError.invalidArguments("operation \(index) (multiedit) requires edits")
+                }
+                let edits: [(oldText: String, newText: String)] = try rawEdits.map { editValue in
+                    guard let editObject = editValue.objectValue,
+                          let oldText = editObject["oldText"]?.stringValue ?? editObject["old_text"]?.stringValue,
+                          let newText = editObject["newText"]?.stringValue ?? editObject["new_text"]?.stringValue else {
+                        throw AgentToolError.invalidArguments("operation \(index) (multiedit) each edit requires oldText and newText")
+                    }
+                    return (oldText, newText)
+                }
+                guard !edits.isEmpty else { throw AgentToolError.invalidArguments("operation \(index) (multiedit) edits must not be empty") }
+                operations.append(ParsedOperation(index: index, path: path, op: .multiedit(edits: edits)))
+            default:
+                throw AgentToolError.invalidArguments("operation \(index) has unsupported op '\(opName)'; use create, edit, or multiedit")
+            }
+        }
+
+        // Phase 1: validate every operation against a projected in-memory copy.
+        // Any failure aborts the whole batch before a single byte is written.
+        var projected: [String: String] = [:]
+        var seenInBatch = Set<String>()
+        var orderedPaths: [String] = []
+        for operation in operations {
+            let key = operation.path.path
+            switch operation.op {
+            case .create(let content):
+                let alreadyStaged = seenInBatch.contains(key)
+                let existsOnDisk = FileManager.default.fileExists(atPath: key)
+                try policy.validateWritablePath(operation.path, operation: (existsOnDisk || alreadyStaged) ? .overwriteFile : .createFile)
+                projected[key] = content
+            case .edit(let oldText, let newText):
+                try policy.validateWritablePath(operation.path, operation: .editFile)
+                let current = try projectedContent(for: operation.path, key: key, projected: projected, seenInBatch: seenInBatch)
+                projected[key] = try LocalTextEditor.replacingUnique(original: current, oldText: oldText, newText: newText)
+            case .multiedit(let edits):
+                try policy.validateWritablePath(operation.path, operation: .editFile)
+                let current = try projectedContent(for: operation.path, key: key, projected: projected, seenInBatch: seenInBatch)
+                projected[key] = try LocalTextEditor.applyingAtomicEdits(original: current, edits: edits)
+            }
+            if seenInBatch.insert(key).inserted { orderedPaths.append(key) }
+        }
+        for key in orderedPaths {
+            try policy.validateWritableSize(path: URL(fileURLWithPath: key), content: projected[key] ?? "")
+        }
+
+        // Phase 2: commit. Each unique file is written once with its final
+        // projected content; per-file content is independent across paths.
+        for key in orderedPaths {
+            let url = URL(fileURLWithPath: key)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try (projected[key] ?? "").write(to: url, atomically: true, encoding: .utf8)
+        }
+
+        let operationsReport: [[String: Any]] = operations.map { operation in
+            ["index": operation.index, "filePath": operation.path.path, "op": operation.op.label]
+        }
+        let json = LocalToolJSON.encode([
+            "filesChanged": orderedPaths.count,
+            "operations": operationsReport,
+            "success": true
+        ]) ?? "{}"
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Applied \(operations.count) operations across \(orderedPaths.count) files.",
+            contentJSON: json
+        )
+    }
+
+    private func projectedContent(for path: URL, key: String, projected: [String: String], seenInBatch: Set<String>) throws -> String {
+        if let staged = projected[key] { return staged }
+        if seenInBatch.contains(key) { return "" }
+        try policy.validateReadablePath(path)
+        return try String(contentsOf: path, encoding: .utf8)
+    }
+}
+
+private extension SendableJSONValue {
+    var arrayValue: [SendableJSONValue]? {
+        if case .array(let value) = self { return value }
+        return nil
+    }
+
+    var intValue: Int? {
+        switch self {
+        case .int(let value): return value
+        case .double(let value): return Int(value)
+        default: return nil
+        }
+    }
+}
+
 enum LocalTextEditor {
     static func replacingUnique(original: String, oldText: String, newText: String) throws -> String {
         guard !oldText.isEmpty else { throw AgentToolError.invalidArguments("oldText must not be empty") }

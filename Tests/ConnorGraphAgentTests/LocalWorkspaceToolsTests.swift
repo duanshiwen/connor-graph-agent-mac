@@ -160,6 +160,145 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     #expect(try String(contentsOf: file, encoding: .utf8) == "one\ntwo\n")
 }
 
+@Test func readManyToolReadsMultipleFilesInRequestOrder() async throws {
+    let workspace = try makeToolTempWorkspace()
+    try "alpha\nbeta\n".write(to: workspace.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+    try "one\ntwo\nthree\nfour\n".write(to: workspace.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+    let tool = LocalReadManyTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"requests":[{"filePath":"a.txt"},{"filePath":"b.txt","offset":2,"limit":2}]}"#),
+        context: .localToolTestContext(toolCallID: "readmany-1")
+    )
+
+    #expect(result.toolName == "ReadMany")
+    #expect(result.error == nil)
+    let aIndex = result.contentText.firstRange(of: "a.txt")?.lowerBound
+    let bIndex = result.contentText.firstRange(of: "b.txt")?.lowerBound
+    #expect(aIndex != nil && bIndex != nil)
+    #expect(aIndex! < bIndex!)
+    #expect(result.contentText.contains("1: alpha"))
+    #expect(result.contentText.contains("2: two"))
+    #expect(result.contentText.contains("3: three"))
+    #expect(!result.contentText.contains("1: one"))
+}
+
+@Test func readManyToolReportsPerFileErrorWithoutFailingBatch() async throws {
+    let workspace = try makeToolTempWorkspace()
+    try "present\n".write(to: workspace.appendingPathComponent("here.txt"), atomically: true, encoding: .utf8)
+    let tool = LocalReadManyTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"requests":[{"filePath":"here.txt"},{"filePath":"missing.txt"}]}"#),
+        context: .localToolTestContext(toolCallID: "readmany-partial")
+    )
+
+    // One good read means the whole batch still succeeds; the missing file is
+    // reported as a per-item error inside the JSON payload.
+    #expect(result.error == nil)
+    #expect(result.contentText.contains("present"))
+    #expect(result.contentText.contains("\"error\""))
+}
+
+@Test func readManyToolRejectsPathEscapeAsPerFileError() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let tool = LocalReadManyTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"requests":[{"filePath":"../../etc/hosts"}]}"#),
+        context: .localToolTestContext(toolCallID: "readmany-escape")
+    )
+
+    // Every request failed, so the batch surfaces an error, and the escape is
+    // recorded as a per-item error rather than reading outside the workspace.
+    #expect(result.error != nil)
+    #expect(result.contentText.contains("\"error\""))
+}
+
+@Test func writeBatchToolAppliesCreateThenEditInOrder() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let tool = LocalWriteBatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"operations":[{"op":"create","filePath":"Sources/New.swift","content":"let value = 1\n"},{"op":"edit","filePath":"Sources/New.swift","oldText":"let value = 1","newText":"let value = 2"}]}"#),
+        context: .localToolTestContext(toolCallID: "writebatch-1")
+    )
+
+    let file = workspace.appendingPathComponent("Sources/New.swift")
+    #expect(try String(contentsOf: file, encoding: .utf8) == "let value = 2\n")
+    #expect(result.toolName == "WriteBatch")
+    #expect(result.contentJSON?.contains("\"success\":true") == true)
+}
+
+@Test func writeBatchToolIsAtomicWhenAnyOperationFails() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let existing = workspace.appendingPathComponent("Existing.swift")
+    try "let a = 1\n".write(to: existing, atomically: true, encoding: .utf8)
+    let tool = LocalWriteBatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    await #expect(throws: AgentToolError.self) {
+        _ = try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"operations":[{"op":"create","filePath":"Fresh.swift","content":"new\n"},{"op":"edit","filePath":"Existing.swift","oldText":"missing","newText":"x"}]}"#),
+            context: .localToolTestContext(toolCallID: "writebatch-atomic")
+        )
+    }
+
+    // The failing edit must roll back the whole batch: the create is never
+    // committed and the existing file is untouched.
+    #expect(!FileManager.default.fileExists(atPath: workspace.appendingPathComponent("Fresh.swift").path))
+    #expect(try String(contentsOf: existing, encoding: .utf8) == "let a = 1\n")
+}
+
+@Test func writeBatchToolRejectsOverlappingEditsOnSameFile() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("App.swift")
+    try "let a = 1\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalWriteBatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    await #expect(throws: AgentToolError.self) {
+        // The second edit's oldText no longer exists in the projected copy
+        // produced by the first edit, so the conflict is caught before commit.
+        _ = try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"operations":[{"op":"edit","filePath":"App.swift","oldText":"let a = 1","newText":"let a = 2"},{"op":"edit","filePath":"App.swift","oldText":"let a = 1","newText":"let a = 3"}]}"#),
+            context: .localToolTestContext(toolCallID: "writebatch-conflict")
+        )
+    }
+    #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 1\n")
+}
+
+@Test func writeBatchToolRejectsUnsupportedOp() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let tool = LocalWriteBatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    await #expect(throws: AgentToolError.self) {
+        _ = try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"operations":[{"op":"delete","filePath":"App.swift"}]}"#),
+            context: .localToolTestContext(toolCallID: "writebatch-delete")
+        )
+    }
+}
+
+@Test func writeBatchApprovalPayloadListsEveryOperation() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let tool = LocalWriteBatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    var call = AgentToolCall(
+        id: "writebatch-approval",
+        name: "WriteBatch",
+        argumentsJSON: #"{"operations":[{"op":"create","filePath":"A.swift","content":"a"},{"op":"edit","filePath":"B.swift","oldText":"x","newText":"y"}]}"#
+    )
+    call.runID = "run-local-tools"
+
+    let payload = await tool.approvalPayloadJSON(
+        for: call,
+        context: .localToolTestContext(toolCallID: "writebatch-approval")
+    )
+
+    #expect(payload.contains("A.swift"))
+    #expect(payload.contains("B.swift"))
+    #expect(payload.contains("create"))
+    #expect(payload.contains("edit"))
+}
+
 private extension AgentToolExecutionContext {
     static func localToolTestContext(toolCallID: String) -> AgentToolExecutionContext {
         AgentToolExecutionContext(
