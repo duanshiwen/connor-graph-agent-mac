@@ -385,6 +385,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     var phasedResearchSignatures = Set<String>()
                     var correctionContinueCounts: [String: Int] = [:]
                     let maxCorrectionContinuesPerCategory = 3
+                    let compactionPolicy = AgentLoopCompactionPolicy(configuration: configuration.compaction)
+                    var runCheckpoint: AgentRunCheckpoint?
+                    var compactionGeneration = 0
+                    var lastCompactionEstimateAfter: Int?
+                    var hasCheckpointForCurrentPressure = false
 
                     func shouldApplyCorrectionContinue(_ category: String) -> Bool {
                         let count = correctionContinueCounts[category, default: 0] + 1
@@ -451,6 +456,102 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             configuredPromptLimit: configuration.promptMaxEstimatedTokens,
                             reservedOutputTokens: configuration.reservedOutputTokens
                         )
+                        var localInputEstimate = localContextGuard.estimatedInputTokens(modelRequest)
+                        if localInputEstimate < Int(Double(localMaximumInputTokens) * configuration.compaction.checkpointRatio) {
+                            hasCheckpointForCurrentPressure = false
+                        }
+                        let compactionSnapshot = AgentLoopCompactionSnapshot(
+                            estimatedInputTokens: localInputEstimate,
+                            maximumInputTokens: localMaximumInputTokens,
+                            tokensAddedSinceLastCompaction: lastCompactionEstimateAfter.map { max(0, localInputEstimate - $0) } ?? Int.max
+                        )
+                        // Persisted history contains only user/final-assistant messages and is
+                        // handled by rolling summaries. This policy is exclusively for tool trace
+                        // accumulated inside the current run.
+                        let hasCurrentRunToolTrace = iterationCount > 1 && modelRequest.messages.contains { $0.role == .tool }
+                        let compactionDecision = hasCurrentRunToolTrace
+                            ? compactionPolicy.decision(
+                                for: compactionSnapshot,
+                                hasCheckpointForCurrentPressure: hasCheckpointForCurrentPressure
+                            )
+                            : .none
+                        if compactionDecision == .checkpoint {
+                            runCheckpoint = AgentRunCheckpointBuilder().build(
+                                generation: max(1, compactionGeneration + 1),
+                                originalGoal: request.userMessage,
+                                currentPhase: phasedState.phase.rawValue,
+                                iteration: iterationCount,
+                                messages: modelRequest.messages,
+                                previousCheckpoint: runCheckpoint
+                            )
+                            hasCheckpointForCurrentPressure = true
+                        } else if compactionDecision == .compact || compactionDecision == .emergency {
+                            compactionGeneration += 1
+                            let startedAt = Date()
+                            yield(.compactionStarted(AgentCompactionStartedEvent(
+                                runID: run.id,
+                                sessionID: run.sessionID,
+                                generation: compactionGeneration,
+                                iteration: iterationCount,
+                                estimatedInputTokens: localInputEstimate,
+                                maximumInputTokens: localMaximumInputTokens,
+                                startedAt: startedAt
+                            )), to: continuation, recorder: eventRecorder)
+                            do {
+                                let checkpoint = AgentRunCheckpointBuilder().build(
+                                    generation: compactionGeneration,
+                                    originalGoal: request.userMessage,
+                                    currentPhase: phasedState.phase.rawValue,
+                                    iteration: iterationCount,
+                                    messages: modelRequest.messages,
+                                    previousCheckpoint: runCheckpoint
+                                )
+                                let compacted = AgentLoopContextCompactor().compact(
+                                    modelRequest,
+                                    checkpoint: checkpoint,
+                                    retainedRecentToolResults: configuration.compaction.retainedRecentToolResults
+                                )
+                                var compactedRequest = compacted.request
+                                let targetTokens = compactionPolicy.targetTokens(maximumInputTokens: localMaximumInputTokens)
+                                if localContextGuard.estimatedInputTokens(compactedRequest) > targetTokens {
+                                    compactedRequest = try await contextRecoveredModelRequest(
+                                        compactedRequest,
+                                        promptAssembly: promptAssembly,
+                                        iterationCount: iterationCount,
+                                        maximumEstimatedTokens: targetTokens,
+                                        recoveryState: phasedState.recoveryState
+                                    )
+                                }
+                                compactedRequest.auditContext = modelRequest.auditContext
+                                compactedRequest.auditContext.metadata["compaction_generation"] = String(compactionGeneration)
+                                compactedRequest.promptCacheContext = modelRequest.promptCacheContext
+                                compactedRequest.toolChoice = modelRequest.toolChoice
+                                modelRequest = compactedRequest
+                                messages = compactedRequest.messages
+                                runCheckpoint = checkpoint
+                                hasCheckpointForCurrentPressure = true
+                                localInputEstimate = localContextGuard.estimatedInputTokens(compactedRequest)
+                                lastCompactionEstimateAfter = localInputEstimate
+                                yield(.compactionCompleted(AgentCompactionCompletedEvent(
+                                    runID: run.id,
+                                    sessionID: run.sessionID,
+                                    generation: compactionGeneration,
+                                    iteration: iterationCount,
+                                    inputTokensBefore: compactionSnapshot.estimatedInputTokens,
+                                    inputTokensAfter: localInputEstimate,
+                                    compactedToolResultCount: compacted.compactedToolResultCount,
+                                    durationMilliseconds: max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
+                                )), to: continuation, recorder: eventRecorder)
+                            } catch {
+                                yield(.compactionFailed(AgentCompactionFailedEvent(
+                                    runID: run.id,
+                                    sessionID: run.sessionID,
+                                    generation: compactionGeneration,
+                                    iteration: iterationCount,
+                                    message: String(describing: error)
+                                )), to: continuation, recorder: eventRecorder)
+                            }
+                        }
                         if localContextGuard.estimatedInputTokens(modelRequest) > localMaximumInputTokens {
                             let recoveryMargin = min(2_048, max(1_024, localMaximumInputTokens / 50))
                             let originalRequest = modelRequest

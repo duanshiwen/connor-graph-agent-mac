@@ -40,6 +40,10 @@ struct AgentActivityHeaderTextPresentation: Equatable {
     var text: String
 
     init(statusText: String, toolNames: [String]) {
+        if statusText == "正在压缩上下文" {
+            text = statusText
+            return
+        }
         let visibleToolNames = toolNames.filter { !Self.routineToolNames.contains($0) }
         guard !visibleToolNames.isEmpty else {
             text = statusText

@@ -159,14 +159,19 @@ public struct AgentRunCheckpointBuilder: Sendable {
         originalGoal: String,
         currentPhase: String,
         iteration: Int,
-        messages: [AgentModelMessage]
+        messages: [AgentModelMessage],
+        previousCheckpoint: AgentRunCheckpoint? = nil
     ) -> AgentRunCheckpoint {
         var calls: [String: AgentToolCall] = [:]
         for call in messages.flatMap({ $0.toolCalls ?? [] }) {
             calls[call.id] = call
         }
         var remainingCharacters = maximumCheckpointCharacters
-        var completed: [AgentRunCheckpointTool] = []
+        var completed = previousCheckpoint?.completedToolCalls ?? []
+        var completedIndices = Dictionary(uniqueKeysWithValues: completed.enumerated().map { ($0.element.callID, $0.offset) })
+        remainingCharacters = max(0, remainingCharacters - completed.reduce(0) {
+            $0 + $1.name.count + $1.arguments.count + $1.resultExcerpt.count + 64
+        })
         for message in messages where message.role == .tool {
             guard remainingCharacters > 0 else { break }
             let callID = message.toolCallID ?? "unknown"
@@ -174,13 +179,21 @@ public struct AgentRunCheckpointBuilder: Sendable {
             let name = message.name ?? call?.name ?? "tool"
             let arguments = bounded(call?.argumentsJSON ?? "{}", limit: maximumFieldCharacters)
             let excerpt = bounded(message.content, limit: min(maximumFieldCharacters, remainingCharacters))
-            completed.append(AgentRunCheckpointTool(
+            let item = AgentRunCheckpointTool(
                 callID: callID,
                 name: name,
                 arguments: arguments,
                 resultExcerpt: excerpt,
                 resultCharacterCount: message.content.count
-            ))
+            )
+            if let existingIndex = completedIndices[callID] {
+                if !message.content.hasPrefix("[Compacted tool result:") {
+                    completed[existingIndex] = item
+                }
+            } else {
+                completedIndices[callID] = completed.count
+                completed.append(item)
+            }
             remainingCharacters -= name.count + arguments.count + excerpt.count + 64
         }
         return AgentRunCheckpoint(
@@ -198,5 +211,46 @@ public struct AgentRunCheckpointBuilder: Sendable {
         let headCount = max(1, limit * 2 / 3)
         let tailCount = max(1, limit - headCount - 1)
         return String(value.prefix(headCount)) + "…" + String(value.suffix(tailCount))
+    }
+}
+
+public struct AgentLoopCompactionResult: Sendable, Equatable {
+    public var request: AgentModelRequest
+    public var compactedToolResultCount: Int
+
+    public init(request: AgentModelRequest, compactedToolResultCount: Int) {
+        self.request = request
+        self.compactedToolResultCount = compactedToolResultCount
+    }
+}
+
+public struct AgentLoopContextCompactor: Sendable {
+    public init() {}
+
+    public func compact(
+        _ request: AgentModelRequest,
+        checkpoint: AgentRunCheckpoint,
+        retainedRecentToolResults: Int
+    ) -> AgentLoopCompactionResult {
+        var compacted = request
+        compacted.messages.removeAll {
+            $0.role == .system && $0.content.hasPrefix("[AGENT RUN CHECKPOINT - TRUSTED RUNTIME STATE]")
+        }
+
+        let checkpointIndex = min(1, compacted.messages.count)
+        compacted.messages.insert(
+            AgentModelMessage(role: .system, content: checkpoint.modelContext),
+            at: checkpointIndex
+        )
+
+        let toolIndices = compacted.messages.indices.filter { compacted.messages[$0].role == .tool }
+        let compactCount = max(0, toolIndices.count - max(0, retainedRecentToolResults))
+        for index in toolIndices.prefix(compactCount) {
+            let message = compacted.messages[index]
+            compacted.messages[index].content = "[Compacted tool result: name=\(message.name ?? "tool"), callID=\(message.toolCallID ?? "unknown"), originalCharacters=\(message.content.count); see checkpoint generation \(checkpoint.generation).]"
+            compacted.messages[index].contentParts = nil
+            compacted.messages[index].providerMetadata = nil
+        }
+        return AgentLoopCompactionResult(request: compacted, compactedToolResultCount: compactCount)
     }
 }

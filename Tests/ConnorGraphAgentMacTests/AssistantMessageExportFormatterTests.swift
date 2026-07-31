@@ -101,6 +101,16 @@ struct AssistantMessageExportFormatterTests {
         #expect(routineOnly.text == "正在处理")
     }
 
+    @Test("activity header gives active compaction exclusive status text")
+    func activityHeaderShowsCompactionWithoutToolSuffix() {
+        let presentation = AgentActivityHeaderTextPresentation(
+            statusText: "正在压缩上下文",
+            toolNames: ["读取文件", "执行终端命令"]
+        )
+
+        #expect(presentation.text == "正在压缩上下文")
+    }
+
     @Test("actions expose compact titles and accessibility copy")
     func actionsExposeCompactTitlesAndAccessibilityCopy() {
         let presentation = AgentAssistantMessageActionsPresentation(

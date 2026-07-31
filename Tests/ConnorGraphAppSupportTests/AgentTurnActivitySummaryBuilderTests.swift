@@ -182,6 +182,29 @@ import ConnorGraphCore
     #expect(summary.toolSummaries.first?.compactCountText == "获取当前时间")
 }
 
+@Test func showsCompactionOnlyWhileLifecycleIsActive() {
+    let process = makeProcess(state: .running, turnNumber: 15)
+    let started = event(
+        kind: "compactionStarted",
+        title: "正在压缩上下文",
+        detail: "generation 1",
+        severity: .info
+    )
+    let completed = event(
+        kind: "compactionCompleted",
+        title: "上下文压缩完成",
+        detail: "80000 -> 45000 tokens",
+        severity: .success
+    )
+
+    let active = AgentTurnActivitySummaryBuilder().summary(process: process, events: [started])
+    let hidden = AgentTurnActivitySummaryBuilder().summary(process: process, events: [started, completed])
+
+    #expect(active.statusText == "正在压缩上下文")
+    #expect(active.state == .running)
+    #expect(hidden.statusText == "正在处理")
+}
+
 private func makeProcess(state: AgentChatTurnProcessState, turnNumber: Int) -> AgentChatTurnProcessPresentation {
     let user = AgentMessage(id: "user-\(turnNumber)", role: .user, content: "测试请求", createdAt: Date(timeIntervalSince1970: 0))
     let pending = AgentChatPendingAssistantPresentation(messages: [user])
