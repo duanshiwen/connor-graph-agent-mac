@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import ConnorGraphSearch
 
@@ -267,6 +268,20 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
         if let reasoningEffort = config.reasoningEffort, !reasoningEffort.isEmpty {
             body["reasoning"] = ["effort": reasoningEffort]
         }
+        if config.baseURL.host?.lowercased().hasSuffix("openai.com") == true,
+           let cache = request.promptCacheContext {
+            let identity = [
+                config.requestModel,
+                cache.promptVersion,
+                cache.phase.rawValue,
+                cache.stableToolBundleVersion
+            ].joined(separator: "\u{1F}")
+            let digest = SHA256.hash(data: Data(identity.utf8))
+                .prefix(12)
+                .map { String(format: "%02x", $0) }
+                .joined()
+            body["prompt_cache_key"] = "connor:\(digest)"
+        }
         if config.includeEncryptedReasoning {
             body["include"] = ["reasoning.encrypted_content"]
         }
@@ -281,7 +296,7 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
         }
         if !tools.isEmpty {
             body["tools"] = tools
-            body["tool_choice"] = "auto"
+            body["tool_choice"] = request.toolChoice.rawValue
         }
         let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return AgentHTTPRequest(url: endpoint, method: "POST", headers: requestHeaders(), body: data, timeoutInterval: config.requestTimeout)
@@ -483,7 +498,15 @@ private enum OpenAIResponsesParser {
         let prompt = object["input_tokens"] as? Int ?? object["prompt_tokens"] as? Int ?? 0
         let completion = object["output_tokens"] as? Int ?? object["completion_tokens"] as? Int ?? 0
         let total = object["total_tokens"] as? Int
-        return AgentModelUsage(promptTokens: prompt, completionTokens: completion, totalTokens: total)
+        let details = object["input_tokens_details"] as? [String: Any]
+            ?? object["prompt_tokens_details"] as? [String: Any]
+        return AgentModelUsage(
+            promptTokens: prompt,
+            completionTokens: completion,
+            totalTokens: total,
+            cacheCreationInputTokens: details?["cache_write_tokens"] as? Int,
+            cacheReadInputTokens: details?["cached_tokens"] as? Int
+        )
     }
 
     static func jsonObject(from data: Data) throws -> [String: Any] {

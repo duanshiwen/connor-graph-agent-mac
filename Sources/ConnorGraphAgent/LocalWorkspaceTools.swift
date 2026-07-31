@@ -462,19 +462,25 @@ enum LocalShellExecutor {
 
         try process.run()
 
-        let startedAt = Date()
-        let timeoutInterval = TimeInterval(timeoutSeconds)
-        let timeoutLeeway: TimeInterval = 0.1
-        let deadline = startedAt.addingTimeInterval(timeoutInterval)
-        while process.isRunning && Date() < deadline {
+        let timeoutState = LocalShellTimeoutState()
+        let timeoutTimer = DispatchSource.makeTimerSource(
+            queue: DispatchQueue(label: "com.connor.local-shell-timeout.(UUID().uuidString)")
+        )
+        timeoutTimer.schedule(deadline: .now() + .seconds(timeoutSeconds))
+        timeoutTimer.setEventHandler {
+            timeoutState.terminateIfRunning(process)
+        }
+        timeoutTimer.resume()
+        defer {
+            timeoutTimer.setEventHandler {}
+            timeoutTimer.cancel()
+        }
+
+        while process.isRunning {
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
-        if process.isRunning {
-            process.terminate()
+        if timeoutState.didTimeout {
             process.waitUntilExit()
-            throw LocalWorkspacePolicyError.commandTimedOut(command)
-        }
-        if Date().timeIntervalSince(startedAt) >= timeoutInterval + timeoutLeeway {
             throw LocalWorkspacePolicyError.commandTimedOut(command)
         }
         try stdoutHandle.close()
@@ -502,6 +508,23 @@ enum LocalShellExecutor {
         let head = String(decoding: bytes.prefix(headCount), as: UTF8.self)
         let tail = String(decoding: bytes.suffix(tailCount), as: UTF8.self)
         return (head + "\n[truncated to \(maxBytes) bytes; middle omitted]\n" + tail, true)
+    }
+}
+
+private final class LocalShellTimeoutState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var timedOut = false
+
+    var didTimeout: Bool {
+        lock.withLock { timedOut }
+    }
+
+    func terminateIfRunning(_ process: Process) {
+        lock.withLock {
+            guard process.isRunning else { return }
+            timedOut = true
+            process.terminate()
+        }
     }
 }
 

@@ -11,7 +11,7 @@ public struct AgentBudgetConfiguration: Codable, Sendable, Equatable {
     public var warningThresholdRatio: Double
     public var maxEstimatedCostCents: Double?
 
-    public init(maxTotalTokens: Int = 10_000_000, warningThresholdRatio: Double = 0.8, maxEstimatedCostCents: Double? = nil) {
+    public init(maxTotalTokens: Int = 300_000, warningThresholdRatio: Double = 0.8, maxEstimatedCostCents: Double? = nil) {
         self.maxTotalTokens = maxTotalTokens
         self.warningThresholdRatio = warningThresholdRatio
         self.maxEstimatedCostCents = maxEstimatedCostCents

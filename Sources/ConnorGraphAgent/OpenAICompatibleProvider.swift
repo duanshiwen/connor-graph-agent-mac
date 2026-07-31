@@ -396,7 +396,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             messages: messages,
             temperature: request.temperature,
             tools: tools.isEmpty ? nil : tools,
-            toolChoice: tools.isEmpty ? nil : "auto",
+            toolChoice: tools.isEmpty ? nil : request.toolChoice.rawValue,
             reasoningEffort: config.reasoningEffort,
             stream: stream
         )

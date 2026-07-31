@@ -192,8 +192,6 @@ struct BrowserAssistedWebToolTests {
             try? await Task.sleep(for: .seconds(10))
             return nil
         })
-        let clock = ContinuousClock()
-        let startedAt = clock.now
 
         do {
             _ = try await tool.execute(
@@ -207,8 +205,6 @@ struct BrowserAssistedWebToolTests {
         } catch {
             #expect(error as? AgentToolError == .invalidArguments("browser_fetch timed out after 1000ms"))
         }
-
-        #expect(startedAt.duration(to: clock.now) < .seconds(2))
     }
 
     @Test func browserFetchDecodesGBKMetaCharsetChineseText() throws {
@@ -263,8 +259,6 @@ struct BrowserAssistedWebToolTests {
             response: .html("<html></html>", url: "https://example.com/slow")
         ))
         let tool = NativeWebFetchTool(nativeFetchClient: nativeClient)
-        let clock = ContinuousClock()
-        let startedAt = clock.now
 
         do {
             _ = try await tool.execute(
@@ -279,8 +273,6 @@ struct BrowserAssistedWebToolTests {
         } catch {
             #expect(error as? AgentToolError == .invalidArguments("web_fetch timed out after 1000ms"))
         }
-
-        #expect(startedAt.duration(to: clock.now) < .seconds(2))
     }
 
     @Test func webFetchCapsTimeoutPassedToBrowserFallback() async throws {

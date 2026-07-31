@@ -382,6 +382,26 @@ private enum AnthropicFixtures {
     #expect(object["tool_choice"] == nil)
 }
 
+@Test func anthropicToolRequestRequiresAnyToolWhenRequested() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+    let tool = AgentToolDefinition(name: "phase_gate", description: "Advance phase", inputSchema: .object(properties: [:], required: []))
+
+    _ = try await provider.complete(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "advance")],
+        tools: [tool],
+        toolChoice: .required
+    ))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let choice = try #require(object["tool_choice"] as? [String: Any])
+    #expect(choice["type"] as? String == "any")
+}
+
 @Test func anthropicParsesToolUseResponseIntoAgentToolCalls() async throws {
     let client = AnthropicCapturingHTTPClient(body: AnthropicFixtures.toolUseResponse)
     let provider = AnthropicCompatibleProvider(

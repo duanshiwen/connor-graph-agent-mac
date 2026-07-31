@@ -192,6 +192,7 @@ public struct AgentModelCapabilities: Codable, Sendable, Equatable {
     public var supportsStructuredOutput: Bool
     public var supportsVision: Bool
     public var generatedMediaCapabilities: Set<AgentGeneratedMediaCapability>
+    public var supportsExplicitPromptCacheBreakpoints: Bool
 
     public init(
         supportsStreaming: Bool,
@@ -199,7 +200,8 @@ public struct AgentModelCapabilities: Codable, Sendable, Equatable {
         supportsParallelToolCalls: Bool,
         supportsStructuredOutput: Bool,
         supportsVision: Bool,
-        generatedMediaCapabilities: Set<AgentGeneratedMediaCapability> = []
+        generatedMediaCapabilities: Set<AgentGeneratedMediaCapability> = [],
+        supportsExplicitPromptCacheBreakpoints: Bool = false
     ) {
         self.supportsStreaming = supportsStreaming
         self.supportsToolCalling = supportsToolCalling
@@ -207,11 +209,13 @@ public struct AgentModelCapabilities: Codable, Sendable, Equatable {
         self.supportsStructuredOutput = supportsStructuredOutput
         self.supportsVision = supportsVision
         self.generatedMediaCapabilities = generatedMediaCapabilities
+        self.supportsExplicitPromptCacheBreakpoints = supportsExplicitPromptCacheBreakpoints
     }
 
     private enum CodingKeys: String, CodingKey {
         case supportsStreaming, supportsToolCalling, supportsParallelToolCalls, supportsStructuredOutput, supportsVision
         case generatedMediaCapabilities
+        case supportsExplicitPromptCacheBreakpoints
     }
 
     public init(from decoder: Decoder) throws {
@@ -222,6 +226,7 @@ public struct AgentModelCapabilities: Codable, Sendable, Equatable {
         supportsStructuredOutput = try container.decode(Bool.self, forKey: .supportsStructuredOutput)
         supportsVision = try container.decode(Bool.self, forKey: .supportsVision)
         generatedMediaCapabilities = try container.decodeIfPresent(Set<AgentGeneratedMediaCapability>.self, forKey: .generatedMediaCapabilities) ?? []
+        supportsExplicitPromptCacheBreakpoints = try container.decodeIfPresent(Bool.self, forKey: .supportsExplicitPromptCacheBreakpoints) ?? false
     }
 }
 
@@ -245,6 +250,11 @@ public enum CurrentModelMediaCapabilityGate {
     }
 }
 
+public enum AgentModelToolChoice: String, Sendable, Equatable {
+    case auto
+    case required
+}
+
 public struct AgentModelRequest: Sendable, Equatable {
     public var messages: [AgentModelMessage]
     public var tools: [AgentToolDefinition]
@@ -252,6 +262,8 @@ public struct AgentModelRequest: Sendable, Equatable {
     public var promptDiagnostics: AgentPromptDiagnostics?
     public var instructionPlacement: AgentInstructionPlacement
     public var auditContext: AgentLLMRequestAuditContext
+    public var promptCacheContext: AgentPromptCacheContext?
+    public var toolChoice: AgentModelToolChoice
 
     public init(
         messages: [AgentModelMessage],
@@ -259,7 +271,9 @@ public struct AgentModelRequest: Sendable, Equatable {
         temperature: Double = 0.2,
         promptDiagnostics: AgentPromptDiagnostics? = nil,
         instructionPlacement: AgentInstructionPlacement = .systemMessage,
-        auditContext: AgentLLMRequestAuditContext = .init()
+        auditContext: AgentLLMRequestAuditContext = .init(),
+        promptCacheContext: AgentPromptCacheContext? = nil,
+        toolChoice: AgentModelToolChoice = .auto
     ) {
         self.messages = messages
         self.tools = tools
@@ -267,6 +281,8 @@ public struct AgentModelRequest: Sendable, Equatable {
         self.promptDiagnostics = promptDiagnostics
         self.instructionPlacement = instructionPlacement
         self.auditContext = auditContext
+        self.promptCacheContext = promptCacheContext
+        self.toolChoice = toolChoice
     }
 }
 
@@ -276,6 +292,7 @@ public struct AgentModelUsage: Codable, Sendable, Equatable {
     public var totalTokens: Int
     public var cacheCreationInputTokens: Int?
     public var cacheReadInputTokens: Int?
+    public var uncachedInputTokens: Int { max(0, promptTokens - (cacheReadInputTokens ?? 0)) }
 
     public init(promptTokens: Int, completionTokens: Int, totalTokens: Int? = nil, cacheCreationInputTokens: Int? = nil, cacheReadInputTokens: Int? = nil) {
         self.promptTokens = promptTokens

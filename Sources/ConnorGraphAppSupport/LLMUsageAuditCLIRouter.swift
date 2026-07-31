@@ -117,7 +117,7 @@ public enum LLMUsageAuditCLIRouter {
             "Operation: \(record.operation ?? "-")", "Model: \(record.modelID)", "Provider: \(record.providerID ?? record.providerMode ?? "-")",
             "Connection: \(record.connectionID ?? "-")", "Session: \(record.sessionID ?? "-")", "Run: \(record.runID ?? "-")", "Background job: \(record.backgroundJobID ?? "-")",
             "Tokens: \(record.totalTokens.map(String.init) ?? "n/a") (input \(record.promptTokens.map(String.init) ?? "n/a"), output \(record.completionTokens.map(String.init) ?? "n/a"))",
-            "Cache: create \(record.cacheCreationInputTokens.map(String.init) ?? "n/a"), read \(record.cacheReadInputTokens.map(String.init) ?? "n/a")",
+            "Cache: create \(record.cacheCreationInputTokens.map(String.init) ?? "n/a"), read \(record.cacheReadInputTokens.map(String.init) ?? "n/a"), uncached input \(record.uncachedInputTokens.map(String.init) ?? "n/a")",
             "Request shape: \(record.messageCount) messages, \(record.toolDefinitionCount) tool definitions, \(record.inputCharacterCount) characters, images \(record.containsImages)",
             "Related tools: \(tools)", "Finish: \(record.finishReason ?? "-")", "Error: \(record.errorMessage ?? "-")"
         ].joined(separator: "\n")

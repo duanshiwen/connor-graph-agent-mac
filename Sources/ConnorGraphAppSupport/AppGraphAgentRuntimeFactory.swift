@@ -451,7 +451,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             contextBuilder: AgentContextBuilder(hybridSearchService: searchService, groupID: groupID),
             environmentProvider: environmentProvider,
             environmentStore: environmentStore,
-            automaticallySynthesizesProgressUpdates: true
+            memoryQueryProvider: memoryOSFacade.map {
+                AppAgentMemoryQueryProvider(facade: $0, configuration: memoryOSContextToolConfiguration)
+            },
+            automaticallySynthesizesProgressUpdates: false
         )
     }
 
