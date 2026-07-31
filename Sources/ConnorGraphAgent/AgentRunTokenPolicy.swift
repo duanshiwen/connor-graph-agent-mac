@@ -128,9 +128,10 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
     }
 
     private func routingContext(for request: AgentChatRequest) -> String {
-        ([request.userMessage] + request.recentMessages.suffix(4).map(\.content))
-            .joined(separator: "\n")
-            .lowercased()
+        // Route optional retrieval and tool families from the active instruction only.
+        // Historical messages remain in the prompt for continuity, but stale keywords
+        // must not turn an unrelated local task into a mandatory retrieval preflight.
+        request.userMessage.lowercased()
     }
 
     private func containsAny(_ text: String, signals: [String]) -> Bool {

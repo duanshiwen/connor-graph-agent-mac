@@ -85,6 +85,8 @@ import ConnorGraphCore
         "Answer completed",
         "Run completed"
     ])
+    #expect(presentations.map(\.id) == events.map(\.id))
+    #expect(presentations.map(\.occurredAt) == events.map { Optional($0.createdAt) })
 }
 
 private func persisted(_ event: AgentEvent, id: String, sequence: Int?, createdAt: Date) -> PersistedAgentEvent {

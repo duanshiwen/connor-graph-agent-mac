@@ -1870,6 +1870,54 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(datedNote.requiresNoteSearch)
 }
 
+@Test func contextualRunTokenPolicyDoesNotRouteLocalTasksFromStaleConversationSignals() {
+    let policy = AgentRunTokenPolicy()
+    let staleContext = [
+        AgentMessage(role: .user, content: "请记住我的写作偏好"),
+        AgentMessage(role: .assistant, content: "我会参考之前的笔记和偏好。")
+    ]
+    let requests = [
+        "读取当前工作区的 README.md",
+        "把 foo.swift 中的 oldName 改成 newName",
+        "运行这个项目的测试"
+    ]
+
+    for (index, message) in requests.enumerated() {
+        let plan = policy.retrievalPlan(
+            for: AgentChatRequest(
+                sessionID: "local-\(index)",
+                userMessage: message,
+                recentMessages: staleContext
+            ),
+            mode: .contextual
+        )
+        #expect(!plan.requiresContinuity)
+        #expect(!plan.requiresNoteSearch)
+        #expect(!plan.requiresFinalProfile)
+    }
+
+    let continuation = policy.retrievalPlan(
+        for: AgentChatRequest(
+            sessionID: "continuation",
+            userMessage: "继续我们之前的计划，并根据我的偏好写回复",
+            recentMessages: staleContext
+        ),
+        mode: .contextual
+    )
+    #expect(continuation.requiresContinuity)
+    #expect(continuation.requiresFinalProfile)
+
+    let noteLookup = policy.retrievalPlan(
+        for: AgentChatRequest(
+            sessionID: "note-lookup",
+            userMessage: "查找我上周的笔记",
+            recentMessages: staleContext
+        ),
+        mode: .contextual
+    )
+    #expect(noteLookup.requiresNoteSearch)
+}
+
 @Test func contextualRunTokenPolicyRoutesNativeToolFamiliesAndPreservesExternalTools() {
     let definitions = ["Read", "mail_search_messages", "web_search", "memory_os_recent_context", "external_mcp_action"].map {
         AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
