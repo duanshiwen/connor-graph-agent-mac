@@ -560,12 +560,20 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
     // MARK: - Internal writes
 
     private func upsertConversationInternal(_ conversation: ImConversation) throws {
+        // ON CONFLICT DO UPDATE (not INSERT OR REPLACE): REPLACE deletes the old row
+        // first, which would cascade-delete every message of the conversation.
         try executePrepared(
             """
-            INSERT OR REPLACE INTO im_conversations (
+            INSERT INTO im_conversations (
                 id, kind, peer_user_id, group_id, title, avatar, last_message_preview,
                 last_message_at, unread_count, pinned, muted, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                kind = excluded.kind, peer_user_id = excluded.peer_user_id,
+                group_id = excluded.group_id, title = excluded.title, avatar = excluded.avatar,
+                last_message_preview = excluded.last_message_preview,
+                last_message_at = excluded.last_message_at, unread_count = excluded.unread_count,
+                pinned = excluded.pinned, muted = excluded.muted, updated_at = excluded.updated_at;
             """,
             bindings: [
                 .text(conversation.id),
