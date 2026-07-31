@@ -916,6 +916,12 @@ public final class AppUserIdentityStore: ObservableObject {
         }
     }
 
+    /// IM REST endpoints bound to this store's token-refresh session
+    /// (`authenticatedSession` is private, hence this factory).
+    public func makeImBackendService() -> ImBackendService {
+        ImBackendService(api: ImAPIClient(baseURL: baseURL), session: authenticatedSession)
+    }
+
     /// Writes an IM up-frame to the device socket; returns false when not connected.
     public func sendImFrame(_ text: String) async -> Bool {
         guard let syncEventSocket else { return false }

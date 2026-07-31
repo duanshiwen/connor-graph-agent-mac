@@ -267,6 +267,7 @@ struct AppRouteViewDependencyTests {
         case .productOS: "productOS"
         case .calendar: "calendar"
         case .contacts: "contacts"
+        case .imContacts: "imContacts"
         case .mail: "mail"
         case .rss: "rss"
         case .sources: "sources"

@@ -74,3 +74,11 @@ public struct ImForwardAliasProjectionRewriter {
         return resolvePersonEntityID(token)
     }
 }
+
+extension AppMemoryOSFacade {
+    /// Convenience wiring: installs the IM alias rewriter on this facade. Must be
+    /// re-applied whenever a facade is rebuilt (search index repair, memory reset).
+    public mutating func installImForwardAliasRewriter(imStore: SQLiteImStore) {
+        projectionBatchRewriter = ImForwardAliasProjectionRewriter(imStore: imStore, memoryStore: store).rewrite
+    }
+}
