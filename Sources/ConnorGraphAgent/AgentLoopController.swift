@@ -1888,15 +1888,31 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     ) async throws -> AgentToolResult {
         let timeoutSeconds = configuration.toolExecutionTimeoutSeconds
         let registry = toolRegistry
-        return try await withThrowingTaskGroup(of: AgentToolResult.self) { group in
-            group.addTask { try await registry.execute(call, context: context) }
-            group.addTask {
-                try await Task.sleep(for: .seconds(timeoutSeconds))
-                throw AgentToolExecutionTimeoutError(toolName: call.name, seconds: timeoutSeconds)
+        let race = AgentToolExecutionRace()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                race.install(continuation: continuation)
+                let executionTask = Task {
+                    do {
+                        race.resolve(.success(try await registry.execute(call, context: context)))
+                    } catch {
+                        race.resolve(.failure(error))
+                    }
+                }
+                let timeoutTask = Task {
+                    do {
+                        try await Task.sleep(for: .seconds(timeoutSeconds))
+                        race.resolve(.failure(AgentToolExecutionTimeoutError(toolName: call.name, seconds: timeoutSeconds)))
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        race.resolve(.failure(error))
+                    }
+                }
+                race.install(tasks: [executionTask, timeoutTask])
             }
-            defer { group.cancelAll() }
-            guard let result = try await group.next() else { throw CancellationError() }
-            return result
+        } onCancel: {
+            race.resolve(.failure(CancellationError()))
         }
     }
 
@@ -2331,6 +2347,54 @@ private struct AgentToolExecutionTimeoutError: Error, CustomStringConvertible, S
 
     var description: String {
         "Tool \(toolName) timed out after \(seconds) seconds and was cancelled. Retry with a smaller request or a different approach."
+    }
+}
+
+private final class AgentToolExecutionRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<AgentToolResult, Error>?
+    private var pendingResult: Result<AgentToolResult, Error>?
+    private var tasks: [Task<Void, Never>] = []
+    private var isResolved = false
+
+    func install(continuation: CheckedContinuation<AgentToolResult, Error>) {
+        lock.lock()
+        if let pendingResult {
+            lock.unlock()
+            continuation.resume(with: pendingResult)
+        } else {
+            self.continuation = continuation
+            lock.unlock()
+        }
+    }
+
+    func install(tasks: [Task<Void, Never>]) {
+        lock.lock()
+        if isResolved {
+            lock.unlock()
+            tasks.forEach { $0.cancel() }
+        } else {
+            self.tasks = tasks
+            lock.unlock()
+        }
+    }
+
+    func resolve(_ result: Result<AgentToolResult, Error>) {
+        lock.lock()
+        guard !isResolved else {
+            lock.unlock()
+            return
+        }
+        isResolved = true
+        let continuation = self.continuation
+        self.continuation = nil
+        if continuation == nil { pendingResult = result }
+        let tasks = self.tasks
+        self.tasks = []
+        lock.unlock()
+
+        tasks.forEach { $0.cancel() }
+        continuation?.resume(with: result)
     }
 }
 

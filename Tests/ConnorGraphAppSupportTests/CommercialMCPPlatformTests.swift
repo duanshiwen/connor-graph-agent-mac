@@ -280,6 +280,45 @@ private func temporaryCommercialMCPStoragePaths(_ name: String = UUID().uuidStri
     #expect(audit.map(\.eventKind).contains(.toolDefinitionChanged))
 }
 
+@Test func commercialMCPPoolHidesFilesystemServerOutsideSelectedWorkspace() throws {
+    let storagePaths = temporaryCommercialMCPStoragePaths()
+    defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
+    let repository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
+    let config = MCPSourceRuntimeConfiguration(
+        sourceID: "local-files",
+        displayName: "Local Files",
+        transport: .stdio(
+            command: "npx",
+            arguments: ["-y", "@modelcontextprotocol/server-filesystem", "/code/repository"]
+        ),
+        status: .enabled,
+        credentialRequirement: .none,
+        allowedCapabilities: [.readWorkspaceFile],
+        toolNamePrefix: "local_files"
+    )
+    try repository.save(config)
+    try repository.saveToolCatalog(sourceID: config.sourceID, catalog: [MCPSourceToolDescriptor(
+        sourceID: config.sourceID,
+        name: "mcp__local_files__read_text_file",
+        rawName: "read_text_file",
+        description: "Read a text file",
+        inputSchema: .object(["type": .string("object")]),
+        requiredCapabilities: [.readWorkspaceFile]
+    )])
+
+    let incompatible = try MCPClientPool.loadEnabledPersistedCatalog(
+        repository: repository,
+        workingDirectory: URL(fileURLWithPath: "/Users/example/Documents", isDirectory: true)
+    )
+    let compatible = try MCPClientPool.loadEnabledPersistedCatalog(
+        repository: repository,
+        workingDirectory: URL(fileURLWithPath: "/code/repository/subdirectory", isDirectory: true)
+    )
+
+    #expect(incompatible.isEmpty)
+    #expect(compatible.map(\.name) == ["mcp__local_files__read_text_file"])
+}
+
 private func makeMCPFixtureServer() throws -> URL {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorMCPFixture-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
