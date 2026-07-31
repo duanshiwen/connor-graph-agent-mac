@@ -52,6 +52,12 @@ public struct AgentEventReplayer: Sendable {
             return .permissionResolved(try decoder.decode(AgentPermissionDecision.self, from: data))
         case .budgetWarning:
             return .budgetWarning(try decoder.decode(AgentBudgetWarning.self, from: data))
+        case .compactionStarted:
+            return .compactionStarted(try decoder.decode(AgentCompactionStartedEvent.self, from: data))
+        case .compactionCompleted:
+            return .compactionCompleted(try decoder.decode(AgentCompactionCompletedEvent.self, from: data))
+        case .compactionFailed:
+            return .compactionFailed(try decoder.decode(AgentCompactionFailedEvent.self, from: data))
         case .sessionStatusChanged:
             return .sessionStatusChanged(try decoder.decode(AgentSessionGovernanceEvent.self, from: data))
         case .sessionLabelsChanged:
