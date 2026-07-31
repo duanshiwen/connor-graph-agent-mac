@@ -501,6 +501,61 @@ struct CalendarContactsAgentToolsTests {
         #expect(names.contains("contacts_write"))
     }
 
+    @Test func calendarUpcomingEventsToolReturnsAllCalendarsWithinDefaultWindowWithoutArguments() async throws {
+        let now = Date()
+        let soonA = CalendarEvent(id: .init(rawValue: "event-soon-a"), calendarID: .init(rawValue: "calendar-a"), title: "Standup", start: .init(date: now.addingTimeInterval(3_600)), end: .init(date: now.addingTimeInterval(7_200)))
+        let soonB = CalendarEvent(id: .init(rawValue: "event-soon-b"), calendarID: .init(rawValue: "calendar-b"), title: "Client visit", start: .init(date: now.addingTimeInterval(10_800)), end: .init(date: now.addingTimeInterval(14_400)), location: "Downtown Office Tower", notes: "Bring laptop and printed deck")
+        let far = CalendarEvent(id: .init(rawValue: "event-far"), calendarID: .init(rawValue: "calendar-a"), title: "Quarterly review", start: .init(date: now.addingTimeInterval(10 * 86_400)), end: .init(date: now.addingTimeInterval(10 * 86_400 + 3_600)))
+        let past = CalendarEvent(id: .init(rawValue: "event-past"), calendarID: .init(rawValue: "calendar-a"), title: "Old sync", start: .init(date: now.addingTimeInterval(-7_200)), end: .init(date: now.addingTimeInterval(-3_600)))
+        let tool = CalendarUpcomingEventsTool(runtime: InMemoryAgentCalendarRuntime(events: [far, soonB, past, soonA]))
+
+        let result = try await tool.execute(arguments: try AgentToolArguments(json: "{}"), context: Self.context(toolCallID: "call-upcoming-default"))
+
+        #expect(result.toolName == "calendar_upcoming_events")
+        #expect(result.contentText.contains("across all calendars"))
+        let rows = try #require(try Self.jsonObject(result) as? [[String: Any]])
+        let ids = rows.compactMap { $0["eventID"] as? String }
+        #expect(ids == ["event-soon-a", "event-soon-b"])
+        let calendarIDs = Set(rows.compactMap { $0["calendarID"] as? String })
+        #expect(calendarIDs == ["calendar-a", "calendar-b"])
+    }
+
+    @Test func calendarUpcomingEventsToolWidensWindowWithDaysArgument() async throws {
+        let now = Date()
+        let soon = CalendarEvent(id: .init(rawValue: "event-soon"), calendarID: .init(rawValue: "calendar-a"), title: "Standup", start: .init(date: now.addingTimeInterval(3_600)), end: .init(date: now.addingTimeInterval(7_200)))
+        let far = CalendarEvent(id: .init(rawValue: "event-far"), calendarID: .init(rawValue: "calendar-b"), title: "Quarterly review", start: .init(date: now.addingTimeInterval(10 * 86_400)), end: .init(date: now.addingTimeInterval(10 * 86_400 + 3_600)))
+        let tool = CalendarUpcomingEventsTool(runtime: InMemoryAgentCalendarRuntime(events: [soon, far]))
+
+        let defaultResult = try await tool.execute(arguments: try AgentToolArguments(json: "{}"), context: Self.context(toolCallID: "call-upcoming-narrow"))
+        let defaultIDs = try #require(try Self.jsonObject(defaultResult) as? [[String: Any]]).compactMap { $0["eventID"] as? String }
+        #expect(defaultIDs == ["event-soon"])
+
+        let widenedResult = try await tool.execute(arguments: try AgentToolArguments(json: "{\"days\":15}"), context: Self.context(toolCallID: "call-upcoming-wide"))
+        let widenedIDs = try #require(try Self.jsonObject(widenedResult) as? [[String: Any]]).compactMap { $0["eventID"] as? String }
+        #expect(widenedIDs == ["event-soon", "event-far"])
+    }
+
+    @Test func calendarUpcomingEventsToolSchemaIsArgumentFreeAndReadOnly() async throws {
+        let tool = CalendarUpcomingEventsTool(runtime: InMemoryAgentCalendarRuntime())
+        #expect(tool.name == "calendar_upcoming_events")
+        #expect(tool.permission == .readCalendar)
+        #expect(CalendarUpcomingEventsTool.defaultLookAheadDays == 2)
+        guard case .closedObject(let properties, let required) = tool.inputSchema else {
+            Issue.record("Expected closed object schema")
+            return
+        }
+        #expect(required.isEmpty)
+        #expect(properties["days"] != nil)
+        #expect(tool.description.contains("ALL of Connor's calendars"))
+    }
+
+    @Test func registerNativeCalendarToolsRegistersUpcomingEventsAsParallelSafeRead() async throws {
+        var registry = AgentToolRegistry()
+        registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
+        #expect(registry.definition(named: "calendar_upcoming_events") != nil)
+        #expect(registry.permission(named: "calendar_upcoming_events") == .readCalendar)
+    }
+
     private static func context(toolCallID: String) -> AgentToolExecutionContext {
         let audit = InMemoryAgentAuditLog()
         let policy = AgentPolicyEngine(permissionMode: .allowAll, auditLog: audit)

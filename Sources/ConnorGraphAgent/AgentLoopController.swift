@@ -331,6 +331,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var didInjectTaskExecutionGuidance = false
                 let hasBatchFileTools = availableToolDefinitions.contains { $0.name == "ReadMany" }
                     && availableToolDefinitions.contains { $0.name == "WriteBatch" }
+                // Injected once on entry to Final Synthesis, only if the
+                // all-calendars upcoming-events tool is registered. Like the
+                // batch-file guidance above it is appended a single time and
+                // then stays stable, so it does not disturb the KV-cache prefix.
+                var didInjectFinalSynthesisCalendarGuidance = false
+                let hasCalendarReminderTool = availableToolDefinitions.contains { $0.name == "calendar_upcoming_events" }
                 // Startup tool visibility is fixed for the whole run so the serialized
                 // tool array stays prefix-stable for provider prompt caching. Usage
                 // discipline is enforced through corrective instructions and call
@@ -822,6 +828,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                            phasedState.phase == .taskExecution {
                             messages.append(AgentModelMessage(role: .system, content: Self.taskExecutionBatchFileGuidance))
                             didInjectTaskExecutionGuidance = true
+                        }
+
+                        if hasCalendarReminderTool,
+                           !didInjectFinalSynthesisCalendarGuidance,
+                           phasedState.phase == .finalSynthesis {
+                            messages.append(AgentModelMessage(role: .system, content: Self.finalSynthesisCalendarReminderGuidance))
+                            didInjectFinalSynthesisCalendarGuidance = true
                         }
 
                         let contextGuard = AgentModelContextGuard()
@@ -1880,6 +1893,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     - Read strategy: before editing, issue a single ReadMany call for the files you are confident you need. Locate first with Grep/Glob, then ReadMany the exact hits — do not dump the whole repository. Read enough to act correctly but not more; you may read additional files in later turns, so prefer the clearly-necessary set over the maximal set, and skip files you will not use.
     - Write strategy: combine multiple changes into a single WriteBatch call. Order operations deliberately to respect dependencies and avoid conflicts: create a file before editing files that reference it, and use one multiedit entry for several changes to the same file instead of overlapping edit operations. The runtime validates the whole batch against a projected copy and commits atomically; if any operation fails, nothing is written and you receive per-operation errors to fix and resend.
     - Common recipes: (1) change a symbol across files — Grep the symbol, ReadMany the matches, one WriteBatch with a per-file edit or multiedit; (2) add a module — one WriteBatch that first creates the new file, then edits the registration/index files; (3) refactor within one file — a single MultiEdit; (4) investigate then answer — Glob/Grep, ReadMany, answer, without reading unrelated files.
+    """ }
+
+    static var finalSynthesisCalendarReminderGuidance: String { """
+    Trusted final-synthesis guidance for proactive schedule reminders:
+    - Before you write the final reply, make one calendar_upcoming_events call to see what is coming up. It already spans every calendar and defaults to the next couple of days, so you do not need get_current_time, list_calendars, or per-calendar queries first; call it with no arguments (or pass days to widen the window). Run it in parallel with any other read you still need.
+    - If nothing noteworthy is upcoming, do not manufacture a reminder — just answer. Otherwise, close the reply with a short, natural reminder of the important or soon-to-start events (title + when), on top of whatever the user actually asked for.
+    - Remind a day early for anything that needs lead time: if an event has a location that implies travel, or notes/attendees implying preparation, surface it the day before so the user can get ready or leave on time. Say briefly why it needs early attention (e.g. travel to the venue, materials to prepare).
+    - Keep it concise and grounded in the returned events; never invent times, places, or events, and do not call calendar_write.
     """ }
 
     private func phasedToolDefinitions(
