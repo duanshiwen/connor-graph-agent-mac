@@ -7,6 +7,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var maxToolIterations: Int
     public var maxToolCallsPerIteration: Int
     public var maxRunDurationSeconds: Int
+    public var toolExecutionTimeoutSeconds: Int
     public var maxToolResultBytes: Int
     public var maxConsecutiveToolResultErrors: Int
     public var stopAfterTurnWhenBudgetExceeded: Bool
@@ -24,6 +25,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         maxToolIterations: Int = 24,
         maxToolCallsPerIteration: Int = 4,
         maxRunDurationSeconds: Int = 1800,
+        toolExecutionTimeoutSeconds: Int = 300,
         maxToolResultBytes: Int = 32 * 1_024,
         maxConsecutiveToolResultErrors: Int = 3,
         stopAfterTurnWhenBudgetExceeded: Bool = true,
@@ -40,6 +42,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.maxToolIterations = max(1, maxToolIterations)
         self.maxToolCallsPerIteration = max(1, maxToolCallsPerIteration)
         self.maxRunDurationSeconds = max(1, maxRunDurationSeconds)
+        self.toolExecutionTimeoutSeconds = max(1, toolExecutionTimeoutSeconds)
         self.maxToolResultBytes = max(0, maxToolResultBytes)
         self.maxConsecutiveToolResultErrors = max(0, maxConsecutiveToolResultErrors)
         self.stopAfterTurnWhenBudgetExceeded = stopAfterTurnWhenBudgetExceeded
@@ -58,6 +61,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         case maxToolIterations
         case maxToolCallsPerIteration
         case maxRunDurationSeconds
+        case toolExecutionTimeoutSeconds
         case maxToolResultBytes
         case maxConsecutiveToolResultErrors
         case stopAfterTurnWhenBudgetExceeded
@@ -77,6 +81,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.maxToolIterations = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 24)
         self.maxToolCallsPerIteration = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 4)
         self.maxRunDurationSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800)
+        self.toolExecutionTimeoutSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .toolExecutionTimeoutSeconds) ?? 300)
         self.maxToolResultBytes = max(0, try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1_024)
         self.maxConsecutiveToolResultErrors = max(0, try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 3)
         self.stopAfterTurnWhenBudgetExceeded = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded) ?? true
@@ -96,6 +101,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         try container.encode(maxToolIterations, forKey: .maxToolIterations)
         try container.encode(maxToolCallsPerIteration, forKey: .maxToolCallsPerIteration)
         try container.encode(maxRunDurationSeconds, forKey: .maxRunDurationSeconds)
+        try container.encode(toolExecutionTimeoutSeconds, forKey: .toolExecutionTimeoutSeconds)
         try container.encode(maxToolResultBytes, forKey: .maxToolResultBytes)
         try container.encode(maxConsecutiveToolResultErrors, forKey: .maxConsecutiveToolResultErrors)
         try container.encode(stopAfterTurnWhenBudgetExceeded, forKey: .stopAfterTurnWhenBudgetExceeded)
@@ -225,7 +231,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     }
 
     public func run(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
-        AsyncThrowingStream(AgentEvent.self, bufferingPolicy: .unbounded) { continuation in
+        AsyncThrowingStream(AgentEvent.self, bufferingPolicy: .bufferingNewest(4_096)) { continuation in
             let startGate = AgentLoopStartGate()
             let task = Task {
                 await startGate.wait()
@@ -243,7 +249,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 )
                 defer { cancellationRegistry.unregister(runID: request.runID) }
                 try? Task.checkCancellation()
-                try? eventRecorder.recordRun(run)
+                recordRun(run)
                 yield(.runStarted(AgentRunStartedEvent(run: run)), to: continuation, recorder: eventRecorder)
 
                 let policy = AgentPolicyEngine(permissionMode: request.permissionMode, auditLog: auditLog)
@@ -319,6 +325,20 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var invokedContinuityToolNames = Set<String>()
                 let noteSearchPreflightPolicy = AgentNoteSearchPreflightPolicy()
                 var didAttemptNoteSearch = false
+                // Startup tool visibility is fixed for the whole run so the serialized
+                // tool array stays prefix-stable for provider prompt caching. Usage
+                // discipline is enforced through corrective instructions and call
+                // filtering below, not by removing definitions after they are used.
+                var runStartupToolNames = Set<String>()
+                if retrievalPlan.requiresContinuity {
+                    runStartupToolNames.formUnion(continuityPreflightPolicy.missingToolNames(
+                        availableTools: availableToolDefinitions,
+                        invokedToolNames: []
+                    ))
+                }
+                if retrievalPlan.requiresNoteSearch {
+                    runStartupToolNames.insert(AgentNoteSearchPreflightPolicy.requiredToolName)
+                }
                 let hasCurrentUserProfileTool = availableToolDefinitions.contains {
                     $0.name == AgentContinuityPreflightPolicy.currentUserProfileToolName
                 }
@@ -341,6 +361,18 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     var consecutiveStrategyCommitRejections = 0
                     let maxConsecutiveStrategyCommitRejections = 3
                     var phasedResearchSignatures = Set<String>()
+                    var correctionContinueCounts: [String: Int] = [:]
+                    let maxCorrectionContinuesPerCategory = 3
+
+                    func shouldApplyCorrectionContinue(_ category: String) -> Bool {
+                        let count = correctionContinueCounts[category, default: 0] + 1
+                        correctionContinueCounts[category] = count
+                        if count > maxCorrectionContinuesPerCategory {
+                            logger.warning("Correction cap reached for \(category, privacy: .public); accepting model output without another corrective turn")
+                            return false
+                        }
+                        return true
+                    }
 
                     func recordToolCallSignature(_ signature: String) -> Bool {
                         recentToolCallSignatures.append(signature)
@@ -383,19 +415,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             phase: phasedState.phase,
                             hasExternalKnowledgeSources: !externalSourceDescriptors.isEmpty
                         )
-                        var startupToolNames = Set<String>()
-                        if retrievalPlan.requiresContinuity {
-                            startupToolNames.formUnion(continuityPreflightPolicy.missingToolNames(
-                                availableTools: availableToolDefinitions,
-                                invokedToolNames: invokedContinuityToolNames
-                            ))
-                        }
-                        if retrievalPlan.requiresNoteSearch, !didAttemptNoteSearch {
-                            startupToolNames.insert(AgentNoteSearchPreflightPolicy.requiredToolName)
-                        }
                         let phaseVisibleNames = Set(phaseVisibleTools.map(\.name))
                         phaseVisibleTools.append(contentsOf: availableToolDefinitions.filter {
-                            startupToolNames.contains($0.name) && !phaseVisibleNames.contains($0.name)
+                            runStartupToolNames.contains($0.name) && !phaseVisibleNames.contains($0.name)
                         })
                         modelRequest.tools = phaseVisibleTools
                         modelRequest.toolChoice = phasedState.phase == .finalSynthesis ? .auto : .required
@@ -495,7 +517,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                         if modelResponse.toolCalls.isEmpty {
                             if phasedState.phase != .finalSynthesis,
-                               phasedState.strategy?.taskMode != .mechanical {
+                               phasedState.strategy?.taskMode != .mechanical,
+                               shouldApplyCorrectionContinue("phase_protocol") {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 let required = phasedState.phase == .strategyResearch ? AgentPhaseToolContract.commitStrategyName : AgentPhaseToolContract.prepareFinalOutputName
                                 messages.append(AgentModelMessage(role: .system, content: "The phased protocol is incomplete. Call \(required) before producing this non-mechanical final output."))
@@ -507,7 +530,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     invokedToolNames: invokedContinuityToolNames
                                 )
                                 : []
-                            if let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools) {
+                            if let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools),
+                               shouldApplyCorrectionContinue("continuity") {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 messages.append(AgentModelMessage(role: .system, content: correction))
                                 continue
@@ -515,7 +539,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             if retrievalPlan.requiresNoteSearch, noteSearchPreflightPolicy.requiresAttempt(
                                 availableTools: availableToolDefinitions,
                                 didAttempt: didAttemptNoteSearch
-                            ) {
+                            ), shouldApplyCorrectionContinue("note_search") {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 messages.append(AgentModelMessage(role: .system, content: noteSearchPreflightPolicy.correctionInstruction()))
                                 continue
@@ -545,7 +569,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             if retrievalPlan.requiresFinalProfile, continuityPreflightPolicy.requiresFinalResponseProfile(
                                 availableTools: availableToolDefinitions,
                                 isComplete: isFinalResponseProfileComplete
-                            ) {
+                            ), shouldApplyCorrectionContinue("final_profile") {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 messages.append(AgentModelMessage(
                                     role: .system,
@@ -582,7 +606,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             )), to: continuation, recorder: eventRecorder)
                             run.status = .completed
                             run.completedAt = Date()
-                            try? eventRecorder.recordRun(run)
+                            recordRun(run)
                             yield(.runCompleted(AgentRunCompletedEvent(run: run)), to: continuation, recorder: eventRecorder)
                             continuation.finish()
                             return
@@ -606,31 +630,35 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 AgentContinuityPreflightPolicy.requiredToolNames.contains($0.name)
                             }
                             if continuityCalls.isEmpty {
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools)
-                                if let correction {
-                                    messages.append(AgentModelMessage(role: .system, content: correction))
+                                if shouldApplyCorrectionContinue("continuity") {
+                                    messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                    let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools)
+                                    if let correction {
+                                        messages.append(AgentModelMessage(role: .system, content: correction))
+                                    }
+                                    continue
                                 }
-                                continue
+                            } else {
+                                let startupCalls = calls.filter {
+                                    AgentContinuityPreflightPolicy.requiredToolNames.contains($0.name)
+                                        || (requiresNoteSearchAttempt && $0.name == AgentNoteSearchPreflightPolicy.requiredToolName)
+                                }
+                                calls = startupCalls
+                                // Let the model observe continuity results before it chooses or
+                                // repeats task-specific calls that may depend on memory context.
                             }
-                            let startupCalls = calls.filter {
-                                AgentContinuityPreflightPolicy.requiredToolNames.contains($0.name)
-                                    || (requiresNoteSearchAttempt && $0.name == AgentNoteSearchPreflightPolicy.requiredToolName)
-                            }
-                            calls = startupCalls
-                            // Let the model observe continuity results before it chooses or
-                            // repeats task-specific calls that may depend on memory context.
                         }
                         if missingContinuityTools.isEmpty,
                            requiresNoteSearchAttempt {
-                            guard let noteSearchCall = calls.first(where: {
+                            if let noteSearchCall = calls.first(where: {
                                 $0.name == AgentNoteSearchPreflightPolicy.requiredToolName
-                            }) else {
+                            }) {
+                                calls = [noteSearchCall]
+                            } else if shouldApplyCorrectionContinue("note_search") {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 messages.append(AgentModelMessage(role: .system, content: noteSearchPreflightPolicy.correctionInstruction()))
                                 continue
                             }
-                            calls = [noteSearchCall]
                         }
                         if phasedState.phase == .strategyResearch {
                             let researchCalls = calls.filter {
@@ -640,7 +668,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             let hasDuplicateResearch = researchCalls.contains { call in
                                 !phasedResearchSignatures.insert("\(call.name):\(call.argumentsJSON)").inserted
                             }
-                            if hasDuplicateResearch {
+                            if hasDuplicateResearch, shouldApplyCorrectionContinue("duplicate_research") {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 messages.append(AgentModelMessage(role: .system, content: "The runtime blocked a duplicate research batch because it cannot add marginal information. Refine the requests, deep-read a different candidate, commit the strategy, or stop researching."))
                                 continue
@@ -698,7 +726,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 )
                                 run.status = .failed
                                 run.completedAt = Date()
-                                try? eventRecorder.recordRun(run)
+                                recordRun(run)
                                 yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
                                 continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
                                 return
@@ -996,7 +1024,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             )
                             run.status = .failed
                             run.completedAt = Date()
-                            try? eventRecorder.recordRun(run)
+                            recordRun(run)
                             yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
                             continuation.finish(throwing: AgentLoopError.consecutiveToolResultErrorsReached)
                             return
@@ -1005,7 +1033,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         if shouldStopAfterTurn {
                             run.status = .completed
                             run.completedAt = Date()
-                            try? eventRecorder.recordRun(run)
+                            recordRun(run)
                             yield(.runCompleted(AgentRunCompletedEvent(run: run)), to: continuation, recorder: eventRecorder)
                             continuation.finish()
                             return
@@ -1014,14 +1042,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     let failure = AgentRunFailure(runID: run.id, sessionID: run.sessionID, message: "Max tool iterations reached")
                     run.status = .failed
                     run.completedAt = Date()
-                    try? eventRecorder.recordRun(run)
+                    recordRun(run)
                     yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
                     continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
                 } catch is CancellationError {
                     let didTimeOut = cancellationRegistry.isTimedOut(runID: run.id)
                     run.status = didTimeOut ? .failed : .cancelled
                     run.completedAt = Date()
-                    try? eventRecorder.recordRun(run)
+                    recordRun(run)
                     let message = didTimeOut
                         ? "Run exceeded the configured maximum duration of \(configuration.maxRunDurationSeconds) seconds."
                         : "cancelled"
@@ -1032,7 +1060,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 } catch {
                     run.status = .failed
                     run.completedAt = Date()
-                    try? eventRecorder.recordRun(run)
+                    recordRun(run)
                     yield(.runFailed(AgentRunFailure(runID: run.id, sessionID: run.sessionID, message: String(describing: error))), to: continuation, recorder: eventRecorder)
                     continuation.finish(throwing: error)
                 }
@@ -1047,6 +1075,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             continuation.onTermination = { @Sendable _ in
                 task.cancel()
                 cancellationRegistry.unregister(runID: request.runID)
+                Task { await approvalRegistry.cancel(runID: request.runID) }
             }
             Task { await startGate.open() }
         }
@@ -1058,27 +1087,69 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         publishesTextDeltas: Bool,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentModelResponse {
+        let maxTransientAttempts = 3
+        var attempt = 1
+        while true {
+            var didPublishTextDelta = false
+            do {
+                return try await completeModelRequestOnce(
+                    request,
+                    run: run,
+                    publishesTextDeltas: publishesTextDeltas,
+                    didPublishTextDelta: &didPublishTextDelta,
+                    continuation: continuation
+                )
+            } catch {
+                try Task.checkCancellation()
+                guard attempt < maxTransientAttempts,
+                      !didPublishTextDelta,
+                      Self.classifyProviderError(error) == .transient else { throw error }
+                logger.warning("Transient model provider error on attempt \(attempt)/\(maxTransientAttempts), retrying: \(String(describing: error))")
+                try await Task.sleep(for: .milliseconds(400 * (1 << (attempt - 1))))
+                attempt += 1
+            }
+        }
+    }
+
+    private func completeModelRequestOnce(
+        _ request: AgentModelRequest,
+        run: AgentRun,
+        publishesTextDeltas: Bool,
+        didPublishTextDelta: inout Bool,
+        continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
+    ) async throws -> AgentModelResponse {
         guard modelProvider.capabilities.supportsStreaming,
               let streamCompleteHandler else {
             return try await modelProvider.complete(request)
         }
         var completedResponse: AgentModelResponse?
+        var streamedText = ""
+        var sawToolInputDelta = false
         for try await event in streamCompleteHandler(modelProvider, request) {
             try Task.checkCancellation()
             switch event {
             case .textDelta(let text):
-                guard publishesTextDeltas, !text.isEmpty else { continue }
+                guard !text.isEmpty else { continue }
+                streamedText += text
+                guard publishesTextDeltas else { continue }
+                didPublishTextDelta = true
                 yield(.textDelta(AgentTextDeltaEvent(runID: run.id, sessionID: run.sessionID, text: text)), to: continuation, recorder: eventRecorder)
-            case .thinkingDelta, .toolInputDelta, .rawProviderEvent:
+            case .toolInputDelta:
+                sawToolInputDelta = true
+            case .thinkingDelta, .rawProviderEvent:
                 continue
             case .completed(let response):
                 completedResponse = response
             }
         }
-        guard let completedResponse else {
-            return try await modelProvider.complete(request)
+        if let completedResponse { return completedResponse }
+        // The stream ended cleanly without a completed envelope. Prefer the text the
+        // stream already produced over re-issuing the whole request, so any published
+        // deltas can never diverge from the returned response.
+        if !streamedText.isEmpty, !sawToolInputDelta {
+            return AgentModelResponse(text: streamedText, toolCalls: [], finishReason: .stop)
         }
-        return completedResponse
+        return try await modelProvider.complete(request)
     }
 
     private func contextRecoveredModelRequest(
@@ -1226,16 +1297,22 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         }
     }
 
+    private static func classifyProviderError(_ error: Error) -> AgentModelProviderErrorClass {
+        if let classifying = error as? any AgentModelProviderErrorClassifying {
+            return classifying.providerErrorClass
+        }
+        if let urlError = error as? URLError {
+            return urlError.code == .cancelled ? .permanent : .transient
+        }
+        // Fallback for providers without typed classification.
+        if AgentProviderErrorHeuristics.isContextOverflowMessage(String(describing: error)) {
+            return .contextOverflow
+        }
+        return .permanent
+    }
+
     private static func isProviderContextOverflow(_ error: Error) -> Bool {
-        let description = String(describing: error).lowercased()
-        return [
-            "exceeds the context window",
-            "context window exceeded",
-            "context length exceeded",
-            "maximum context length",
-            "model_context_window_exceeded",
-            "too many input tokens"
-        ].contains { description.contains($0) }
+        classifyProviderError(error) == .contextOverflow
     }
 
     private func trustedSkillPromotion(from result: AgentToolResult) -> AgentToolInstructionPromotion? {
@@ -1430,6 +1507,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             payloadJSON: auditPayload
         ))
         do {
+            if let invalidArgumentsMessage = Self.invalidToolArgumentsMessage(for: call) {
+                throw AgentToolError.invalidArguments(invalidArgumentsMessage)
+            }
             let result: AgentToolResult
             if AgentPhaseToolContract.definitions.contains(where: { $0.name == call.name }) {
                 result = try await executePhaseTool(call: call, context: context, run: run)
@@ -1715,12 +1795,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentToolResult {
         do {
-            return try await toolRegistry.execute(call, context: context)
+            return try await executeRegisteredTool(call, context: context)
         } catch AgentToolError.permissionNeedsApproval(let request) {
             await approvalRegistry.register(requestID: request.id, runID: run.id)
             yield(.permissionRequested(request), to: continuation, recorder: eventRecorder)
             run.status = .waitingForApproval
-            try? eventRecorder.recordRun(run)
+            recordRun(run)
             let status = await approvalRegistry.waitForResolution(requestID: request.id)
             if status == .cancelled { throw CancellationError() }
             let outcome: AgentPermissionOutcome = status == .approved ? .approved : .denied
@@ -1737,10 +1817,40 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 throw AgentToolError.permissionDenied(decision.reason)
             }
             run.status = .running
-            try? eventRecorder.recordRun(run)
+            recordRun(run)
             let approvedContext = context.approving(request.capability)
-            return try await toolRegistry.execute(call, context: approvedContext)
+            return try await executeRegisteredTool(call, context: approvedContext)
         }
+    }
+
+    private func executeRegisteredTool(
+        _ call: AgentToolCall,
+        context: AgentToolExecutionContext
+    ) async throws -> AgentToolResult {
+        let timeoutSeconds = configuration.toolExecutionTimeoutSeconds
+        let registry = toolRegistry
+        return try await withThrowingTaskGroup(of: AgentToolResult.self) { group in
+            group.addTask { try await registry.execute(call, context: context) }
+            group.addTask {
+                try await Task.sleep(for: .seconds(timeoutSeconds))
+                throw AgentToolExecutionTimeoutError(toolName: call.name, seconds: timeoutSeconds)
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else { throw CancellationError() }
+            return result
+        }
+    }
+
+    private static func invalidToolArgumentsMessage(for call: AgentToolCall) -> String? {
+        let trimmed = call.argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard let object = try? JSONSerialization.jsonObject(with: Data(trimmed.utf8)) as? [String: Any] else {
+            return "Tool call arguments were not a valid JSON object. Re-issue this tool call with arguments that satisfy the tool's input schema."
+        }
+        if object.count == 1, object["INVALID_JSON"] != nil {
+            return "The streamed tool call arguments could not be reassembled into valid JSON. Re-issue this tool call with arguments that satisfy the tool's input schema."
+        }
+        return nil
     }
 
     private func canExecuteInParallel(_ calls: [AgentToolCall]) -> Bool {
@@ -1926,8 +2036,20 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     }
 
     private func yield(_ event: AgentEvent, to continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation, recorder: AgentEventRecorder) {
-        try? recorder.record(event)
+        do {
+            try recorder.record(event)
+        } catch {
+            logger.error("Failed to persist agent event \(event.kind.rawValue, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
         continuation.yield(event)
+    }
+
+    private func recordRun(_ run: AgentRun) {
+        do {
+            try eventRecorder.recordRun(run)
+        } catch {
+            logger.error("Failed to persist run \(run.id, privacy: .public) status \(run.status.rawValue, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
     }
 
     private func buildPromptAssembly(
@@ -2116,6 +2238,15 @@ public enum AgentLoopError: Error, Sendable, Equatable {
     case cancelled
 }
 
+private struct AgentToolExecutionTimeoutError: Error, CustomStringConvertible, Sendable {
+    let toolName: String
+    let seconds: Int
+
+    var description: String {
+        "Tool \(toolName) timed out after \(seconds) seconds and was cancelled. Retry with a smaller request or a different approach."
+    }
+}
+
 private struct AgentToolBatchResult: Sendable, Equatable {
     var call: AgentToolCall
     var result: AgentToolResult
@@ -2168,8 +2299,18 @@ private actor AgentLoopApprovalRegistry {
         if let resolvedStatus = resolvedStatuses[requestID], resolvedStatus != .pending {
             status = resolvedStatus
         } else {
-            status = await withCheckedContinuation { continuation in
-                continuations[requestID] = continuation
+            status = await withTaskCancellationHandler {
+                await withCheckedContinuation { (continuation: CheckedContinuation<AgentPendingApprovalStatus, Never>) in
+                    if let resolvedStatus = resolvedStatuses[requestID], resolvedStatus != .pending {
+                        continuation.resume(returning: resolvedStatus)
+                    } else if Task.isCancelled {
+                        continuation.resume(returning: .cancelled)
+                    } else {
+                        continuations[requestID] = continuation
+                    }
+                }
+            } onCancel: {
+                Task { await self.cancelWait(requestID: requestID) }
             }
         }
         resolvedStatuses.removeValue(forKey: requestID)
@@ -2188,6 +2329,15 @@ private actor AgentLoopApprovalRegistry {
         }
         for requestID in requestIDs {
             resolve(requestID: requestID, status: .cancelled)
+        }
+    }
+
+    private func cancelWait(requestID: String) {
+        if let continuation = continuations.removeValue(forKey: requestID) {
+            resolvedStatuses[requestID] = .cancelled
+            continuation.resume(returning: .cancelled)
+        } else if resolvedStatuses[requestID] == .pending {
+            resolvedStatuses[requestID] = .cancelled
         }
     }
 }

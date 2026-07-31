@@ -10,7 +10,10 @@ private func automaticPhaseResponse(
 ) -> AgentModelResponse? {
     guard request.auditContext.operation == "AgentLoopController.completeModelRequest" else { return nil }
     let startupNames = Set(AgentContinuityPreflightPolicy.requiredToolNames + [AgentNoteSearchPreflightPolicy.requiredToolName])
-    let startupTools = request.tools.filter { startupNames.contains($0.name) }
+    // Startup tools stay visible for the whole run (prefix-stable tool array);
+    // a well-behaved model only calls the ones it has not already executed.
+    let alreadyInvokedToolNames = Set(request.messages.compactMap { $0.role == .tool ? $0.name : nil })
+    let startupTools = request.tools.filter { startupNames.contains($0.name) && !alreadyInvokedToolNames.contains($0.name) }
     if request.promptCacheContext?.phase == .strategyResearch, !startupTools.isEmpty {
         return AgentModelResponse(
             text: nil,
@@ -202,7 +205,11 @@ private actor ContextualPreflightProvider: AgentModelProvider {
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
         requests.append(request)
+        let didRunNoteSearch = request.messages.contains {
+            $0.role == .tool && $0.name == AgentNoteSearchPreflightPolicy.requiredToolName
+        }
         if request.promptCacheContext?.phase == .strategyResearch,
+           !didRunNoteSearch,
            request.tools.contains(where: { $0.name == AgentNoteSearchPreflightPolicy.requiredToolName }) {
             return AgentModelResponse(
                 text: nil,
@@ -263,6 +270,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
     #expect(configuration.promptMaxEstimatedTokens == 200_000)
     #expect(configuration.maxToolResultBytes == 32 * 1_024)
+    #expect(configuration.toolExecutionTimeoutSeconds == 300)
     #expect(configuration.budget.maxTotalTokens == 300_000)
 }
 
@@ -704,6 +712,51 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(events.map(\.kind).contains(.permissionRequested))
     #expect(events.map(\.kind).contains(.toolFinished))
     #expect(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("shell-created.txt").path))
+}
+
+@Test func agentLoopAbortDuringPendingApprovalCancelsRun() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-write-abort", name: "Write", argumentsJSON: #"{"filePath":"note.txt","content":"never"}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        )
+    ])
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorAgentLoopApprovalAbort-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    var registry = AgentToolRegistry()
+    registry.register(LocalWriteFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(permissionMode: .askToWrite)
+    )
+    let request = AgentChatRequest(runID: "run-write-abort", sessionID: "session-write-abort", userMessage: "Write note", permissionMode: .askToWrite)
+
+    let task = Task { () -> [AgentEvent] in
+        var events: [AgentEvent] = []
+        do {
+            for try await event in loop.run(request) {
+                events.append(event)
+                if case .permissionRequested = event {
+                    loop.abort(runID: request.runID)
+                }
+            }
+        } catch {
+            // Expected cancellation path.
+        }
+        return events
+    }
+
+    let events = await task.value
+
+    #expect(events.map(\.kind).contains(.permissionRequested))
+    #expect(events.map(\.kind).contains(.runFailed))
+    #expect(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("note.txt").path) == false)
 }
 
 @Test func agentLoopContinuesAfterTokenBudgetExceeded() async throws {
@@ -2501,6 +2554,25 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(events.last?.kind == .runCompleted)
 }
 
+@Test func agentLoopKeepsToolArrayStableWithinPhaseAfterStartupToolUse() async throws {
+    let provider = ContextualPreflightProvider()
+    var registry = AgentToolRegistry()
+    registry.register(ContextualNoteSearchTool())
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(.init(sessionID: "session-stable-tools", userMessage: "查看今天的笔记")) {}
+
+    let requests = await provider.requests
+    let strategyToolNames = requests
+        .filter { $0.promptCacheContext?.phase == .strategyResearch }
+        .map { $0.tools.map(\.name) }
+    #expect(strategyToolNames.count >= 2)
+    // The serialized tool array must stay identical across iterations of the
+    // same phase so provider prefix caching survives startup-tool invocation.
+    #expect(Set(strategyToolNames).count == 1)
+    #expect(strategyToolNames.first?.contains(AgentNoteSearchPreflightPolicy.requiredToolName) == true)
+}
+
 @Test func agentLoopUsesContextualRetrievalPlanInsideStrategyPhase() async throws {
     let provider = ContextualPreflightProvider()
     var registry = AgentToolRegistry()
@@ -2611,4 +2683,149 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     } catch {
         #expect(error as? AgentLoopError == .maxToolIterationsReached)
     }
+}
+
+private actor TransientFailureThenSuccessProvider: AgentModelProvider {
+    let modelID = "transient-then-success"
+    let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+    private(set) var failureCount = 0
+    private var didFail = false
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        if !didFail {
+            didFail = true
+            failureCount += 1
+            throw OpenAICompatibleProviderError.httpStatus(503, message: "temporary upstream failure")
+        }
+        if let automatic = automaticPhaseResponse(for: request, nextResponse: .init(text: "Recovered final answer")) {
+            return automatic
+        }
+        return AgentModelResponse(text: "Recovered final answer")
+    }
+}
+
+@Test func agentLoopRetriesTransientProviderErrorAndCompletes() async throws {
+    let provider = TransientFailureThenSuccessProvider()
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(sessionID: "session-transient-retry", userMessage: "Hello")) {
+        events.append(event)
+    }
+
+    #expect(await provider.failureCount == 1)
+    #expect(!events.map(\.kind).contains(.runFailed))
+    #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopTimesOutSlowToolAndContinuesRun() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-slow-timeout", name: "slow_tool", argumentsJSON: "{}")],
+            usage: AgentModelUsage(promptTokens: 1, completionTokens: 1),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Moved on after the timeout.", usage: AgentModelUsage(promptTokens: 1, completionTokens: 1))
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(NamedDelayTool(name: "slow_tool", delayNanoseconds: 30_000_000_000))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(toolExecutionTimeoutSeconds: 1)
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(sessionID: "session-tool-timeout", userMessage: "Run the slow tool")) {
+        events.append(event)
+    }
+
+    let failure = try #require(events.compactMap { event -> AgentToolFailure? in
+        if case .toolFailed(let payload) = event { return payload }
+        return nil
+    }.first)
+    #expect(failure.toolName == "slow_tool")
+    #expect(failure.message.contains("timed out"))
+    #expect(events.last?.kind == .runCompleted)
+}
+
+private actor StubbornPlainTextProvider: AgentModelProvider {
+    let modelID = "stubborn-plain-text"
+    let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+    private(set) var executionCallCount = 0
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        if request.promptCacheContext?.phase == .strategyResearch {
+            return automaticPhaseResponse(for: request)!
+        }
+        executionCallCount += 1
+        return AgentModelResponse(text: "Plain answer without phase protocol.")
+    }
+}
+
+@Test func agentLoopCapsPhaseProtocolCorrectionsAndAcceptsFinalText() async throws {
+    let provider = StubbornPlainTextProvider()
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(sessionID: "session-correction-cap", userMessage: "Just answer directly")) {
+        events.append(event)
+    }
+
+    // 3 corrective continues, then the 4th plain-text response is accepted.
+    #expect(await provider.executionCallCount == 4)
+    #expect(events.last?.kind == .runCompleted)
+    let completeText = events.compactMap { event -> String? in
+        if case .textComplete(let payload) = event { return payload.text }
+        return nil
+    }.first
+    #expect(completeText == "Plain answer without phase protocol.")
+}
+
+private struct StreamingSynthesisWithoutCompletionProvider: StreamingAgentModelProvider {
+    let modelID = "streaming-synthesis"
+    let capabilities = AgentModelCapabilities(supportsStreaming: true, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        if let automatic = automaticPhaseResponse(for: request, nextResponse: .init(text: "Synthesized")) {
+            return automatic
+        }
+        return AgentModelResponse(text: "Fallback complete")
+    }
+
+    func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            if let automatic = automaticPhaseResponse(for: request, nextResponse: .init(text: "Synthesized")) {
+                continuation.yield(.completed(automatic))
+                continuation.finish()
+                return
+            }
+            continuation.yield(.textDelta("Synthe"))
+            continuation.yield(.textDelta("sized"))
+            continuation.finish()
+        }
+    }
+}
+
+@Test func agentLoopSynthesizesResponseFromStreamedDeltasWhenStreamOmitsCompletion() async throws {
+    let provider = StreamingSynthesisWithoutCompletionProvider()
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        streamComplete: { provider, request in provider.streamComplete(request) }
+    )
+
+    var textDeltas: [String] = []
+    var completeText: String?
+    for try await event in loop.run(AgentChatRequest(runID: "run-stream-synthesis", sessionID: "session-stream-synthesis", userMessage: "Hello")) {
+        switch event {
+        case .textDelta(let payload): textDeltas.append(payload.text)
+        case .textComplete(let payload): completeText = payload.text
+        default: break
+        }
+    }
+
+    #expect(textDeltas == ["Synthe", "sized"])
+    #expect(completeText == "Synthesized")
 }

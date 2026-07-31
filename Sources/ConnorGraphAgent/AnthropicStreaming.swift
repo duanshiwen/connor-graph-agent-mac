@@ -218,9 +218,16 @@ public struct AnthropicStreamAccumulator: Sendable, Equatable {
             return nil
         case .messageDelta(let stopReason, let usage):
             if let stopReason { self.stopReason = stopReason }
-            if let usage { self.usage = usage }
+            if let usage { self.usage = Self.mergedUsage(self.usage, usage) }
             return nil
         case .messageStart(let rawJSON):
+            // message_start carries the request-side usage (input_tokens plus
+            // cache creation/read); message_delta later only updates outputs.
+            if let object = try? JSONSerialization.jsonObject(with: Data(rawJSON.utf8)) as? [String: Any],
+               let message = object["message"] as? [String: Any],
+               let startUsage = Self.usage(from: message["usage"] as? [String: Any]) {
+                usage = Self.mergedUsage(usage, startUsage)
+            }
             return .rawProviderEvent(rawJSON)
         case .messageStop:
             return .completed(response())
@@ -291,11 +298,16 @@ public struct AnthropicStreamAccumulator: Sendable, Equatable {
         guard let object else { return nil }
         let input = object["input_tokens"] as? Int ?? 0
         let output = object["output_tokens"] as? Int ?? 0
+        let cacheCreation = object["cache_creation_input_tokens"] as? Int
+        let cacheRead = object["cache_read_input_tokens"] as? Int
+        // Anthropic reports input_tokens excluding cache creation/read tokens.
+        // Normalize promptTokens to the full input so cache accounting shares
+        // OpenAI-style semantics (cacheReadInputTokens ⊆ promptTokens).
         return AgentModelUsage(
-            promptTokens: input,
+            promptTokens: input + (cacheCreation ?? 0) + (cacheRead ?? 0),
             completionTokens: output,
-            cacheCreationInputTokens: object["cache_creation_input_tokens"] as? Int,
-            cacheReadInputTokens: object["cache_read_input_tokens"] as? Int
+            cacheCreationInputTokens: cacheCreation,
+            cacheReadInputTokens: cacheRead
         )
     }
 }
