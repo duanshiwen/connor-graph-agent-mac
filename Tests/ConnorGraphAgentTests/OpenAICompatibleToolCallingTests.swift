@@ -269,3 +269,59 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     #expect(tool["tool_call_id"] as? String == "call-1")
     #expect(tool["name"] as? String == "graph_search")
 }
+
+@Test func openAICompatibleProviderParsesOpenAIStyleCachedPromptTokens() async throws {
+    let body = #"""
+    {
+      "choices": [{ "message": { "role": "assistant", "content": "Hi" }, "finish_reason": "stop" }],
+      "usage": {
+        "prompt_tokens": 1200,
+        "completion_tokens": 5,
+        "total_tokens": 1205,
+        "prompt_tokens_details": { "cached_tokens": 1024 }
+      }
+    }
+    """#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+
+    let response = try await provider.completeWithTools(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "Hello")]
+    ))
+
+    let usage = try #require(response.usage)
+    #expect(usage.promptTokens == 1200)
+    #expect(usage.cacheReadInputTokens == 1024)
+    #expect(usage.uncachedInputTokens == 176)
+}
+
+@Test func openAICompatibleProviderParsesDeepSeekStyleCacheHitTokens() async throws {
+    let body = #"""
+    {
+      "choices": [{ "message": { "role": "assistant", "content": "Hi" }, "finish_reason": "stop" }],
+      "usage": {
+        "prompt_tokens": 1200,
+        "completion_tokens": 5,
+        "total_tokens": 1205,
+        "prompt_cache_hit_tokens": 1000,
+        "prompt_cache_miss_tokens": 200
+      }
+    }
+    """#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "deepseek-test"),
+        httpClient: client
+    )
+
+    let response = try await provider.completeWithTools(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "Hello")]
+    ))
+
+    let usage = try #require(response.usage)
+    #expect(usage.cacheReadInputTokens == 1000)
+    #expect(usage.uncachedInputTokens == 200)
+}

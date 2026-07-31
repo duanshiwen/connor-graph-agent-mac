@@ -310,6 +310,18 @@ public struct AnthropicStreamAccumulator: Sendable, Equatable {
             cacheReadInputTokens: cacheRead
         )
     }
+
+    static func mergedUsage(_ existing: AgentModelUsage?, _ update: AgentModelUsage) -> AgentModelUsage {
+        guard let existing else { return update }
+        // Later events (message_delta) usually carry only output_tokens; keep
+        // the request-side fields captured at message_start when absent.
+        return AgentModelUsage(
+            promptTokens: update.promptTokens > 0 ? update.promptTokens : existing.promptTokens,
+            completionTokens: update.completionTokens > 0 ? update.completionTokens : existing.completionTokens,
+            cacheCreationInputTokens: update.cacheCreationInputTokens ?? existing.cacheCreationInputTokens,
+            cacheReadInputTokens: update.cacheReadInputTokens ?? existing.cacheReadInputTokens
+        )
+    }
 }
 
 public protocol AgentSSEHTTPClient: Sendable {

@@ -421,3 +421,69 @@ data: {"type":"message_stop"}
     #expect(content.first?["type"] as? String == "thinking")
     #expect(content.dropFirst().first?["type"] as? String == "tool_use")
 }
+
+@Test func anthropicUsageNormalizesCacheTokensIntoPromptTokens() async throws {
+    var client = AdvancedAnthropicCapturingHTTPClient()
+    client.response = AgentHTTPResponse(
+        statusCode: 200,
+        body: Data(#"{"content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":4,"cache_creation_input_tokens":200,"cache_read_input_tokens":3000}}"#.utf8)
+    )
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+
+    let response = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Hello")]))
+
+    let usage = try #require(response.usage)
+    // input_tokens excludes cache tokens on Anthropic; promptTokens is
+    // normalized to the full input so cacheRead ⊆ promptTokens everywhere.
+    #expect(usage.promptTokens == 3210)
+    #expect(usage.cacheCreationInputTokens == 200)
+    #expect(usage.cacheReadInputTokens == 3000)
+    #expect(usage.uncachedInputTokens == 210)
+}
+
+@Test func anthropicStreamAccumulatorCapturesCacheUsageFromMessageStart() throws {
+    let parser = AnthropicSSEParser()
+    var accumulator = AnthropicStreamAccumulator()
+    let frames = [
+        #"""
+event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":200,"cache_read_input_tokens":3000}}}
+"""#,
+        #"""
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+"""#,
+        #"""
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+"""#,
+        #"""
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+"""#,
+        #"""
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":42}}
+"""#,
+        #"""
+event: message_stop
+data: {"type":"message_stop"}
+"""#
+    ]
+
+    var completed: AgentModelResponse?
+    for frame in frames {
+        for event in parser.parse(frame) {
+            if case .completed(let response)? = accumulator.append(event) { completed = response }
+        }
+    }
+
+    let usage = try #require(completed?.usage)
+    #expect(usage.promptTokens == 3210)
+    #expect(usage.completionTokens == 42)
+    #expect(usage.cacheCreationInputTokens == 200)
+    #expect(usage.cacheReadInputTokens == 3000)
+}
