@@ -18,6 +18,7 @@ public struct AgentEventPresentation: Codable, Sendable, Equatable, Identifiable
     public var sessionID: String?
     public var assistantMessageID: String?
     public var toolActivity: AgentToolActivityPresentation?
+    public var occurredAt: Date?
 
     public init(
         id: String = UUID().uuidString,
@@ -28,7 +29,8 @@ public struct AgentEventPresentation: Codable, Sendable, Equatable, Identifiable
         runID: String?,
         sessionID: String?,
         assistantMessageID: String? = nil,
-        toolActivity: AgentToolActivityPresentation? = nil
+        toolActivity: AgentToolActivityPresentation? = nil,
+        occurredAt: Date? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -39,6 +41,7 @@ public struct AgentEventPresentation: Codable, Sendable, Equatable, Identifiable
         self.sessionID = sessionID
         self.assistantMessageID = assistantMessageID
         self.toolActivity = toolActivity
+        self.occurredAt = occurredAt
     }
 }
 
@@ -167,6 +170,8 @@ public struct AgentEventPresenter: Sendable {
 
     private func item(
         _ event: AgentEvent,
+        id: String = UUID().uuidString,
+        occurredAt: Date = Date(),
         title: String,
         detail: String,
         severity: AgentEventPresentationSeverity,
@@ -174,6 +179,7 @@ public struct AgentEventPresenter: Sendable {
         toolActivity: AgentToolActivityPresentation? = nil
     ) -> AgentEventPresentation {
         AgentEventPresentation(
+            id: id,
             kind: event.kind.rawValue,
             title: title,
             detail: detail,
@@ -181,7 +187,8 @@ public struct AgentEventPresenter: Sendable {
             runID: event.runID,
             sessionID: event.sessionID,
             assistantMessageID: assistantMessageID,
-            toolActivity: toolActivity
+            toolActivity: toolActivity,
+            occurredAt: occurredAt
         )
     }
 

@@ -649,6 +649,11 @@ struct AgentActivityEventRow: View {
                 .foregroundStyle(.tertiary)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
+            if let occurredAt = event.occurredAt {
+                Text(occurredAt.formatted(date: .omitted, time: .standard))
+                    .font(AgentChatTypography.micro.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
             Text(event.kind)
                 .font(AgentChatTypography.monoMicro)
                 .foregroundStyle(.tertiary)
