@@ -140,3 +140,32 @@ import Testing
     #expect(fitted.messages.contains(historicalAssistant))
     #expect(fitted.messages.first { $0.toolCallID == "call-large" }?.content.count ?? .max < request.messages.last?.content.count ?? 0)
 }
+
+@Test func currentRunToolFittingLeavesCheckpointPlaceholdersUntouched() throws {
+    let placeholder = "[Compacted tool result: name=read_file, callID=call-old, originalCharacters=9000; see checkpoint generation 1.]"
+    let request = AgentModelRequest(messages: [
+        AgentModelMessage(role: .system, content: "system"),
+        AgentModelMessage(role: .user, content: "goal"),
+        AgentModelMessage(role: .assistant, content: "", toolCalls: [
+            AgentToolCall(id: "call-old", name: "read_file", argumentsJSON: "{}")
+        ]),
+        AgentModelMessage(role: .tool, content: placeholder, toolCallID: "call-old", name: "read_file"),
+        AgentModelMessage(role: .assistant, content: "", toolCalls: [
+            AgentToolCall(id: "call-recent", name: "read_file", argumentsJSON: "{}")
+        ]),
+        AgentModelMessage(role: .tool, content: String(repeating: "recent payload ", count: 5_000), toolCallID: "call-recent", name: "read_file")
+    ])
+
+    let fitted = AgentLoopContextCompactor().fitCurrentRunToolResults(
+        in: request,
+        maximumEstimatedTokens: 2_000,
+        maximumResultBytes: 1_000_000
+    )
+
+    // The already-compacted placeholder must not be re-touched or shrunk.
+    #expect(fitted.messages.first { $0.toolCallID == "call-old" }?.content == placeholder)
+    // The live recent result absorbs the shrink instead.
+    let recent = fitted.messages.first { $0.toolCallID == "call-recent" }?.content ?? ""
+    #expect(recent.count < request.messages.last?.content.count ?? 0)
+}
+
