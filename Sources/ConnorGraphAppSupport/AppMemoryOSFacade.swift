@@ -213,6 +213,9 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     public var backgroundRunner: AppMemoryOSBackgroundJobRunner
     public var searchKernel: MemoryOSSearchKernel?
     public var canRunL1Extraction: @Sendable (Date) -> Bool
+    /// Optional projection batch post-processor applied right before
+    /// `saveProjectionBatch` (e.g. IM forwarding alias → person entity redirect).
+    public var projectionBatchRewriter: ((MemoryOSProjectionBatch) -> MemoryOSProjectionBatch)?
 
     public init(
         store: SQLiteMemoryOSStore,
@@ -559,7 +562,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try store.save(artifact: envelope)
         let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(envelope)
         let build = MemoryOSProjectionService().projectionBatch(from: envelope, validation: validation, now: now)
-        guard build.accepted, let batch = build.batch else {
+        guard build.accepted, let builtBatch = build.batch else {
             try store.save(audit: MemoryOSAuditEvent(
                 eventType: "memory_os.projection.rejected",
                 actor: "memory-os",
@@ -584,6 +587,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             }
             return MemoryOSProjectionRunSummary(artifactID: envelope.id, accepted: false, acceptanceMode: build.validation.acceptanceMode, repairedRecordCount: build.validation.repairedRecordCount, degradedRecordCount: build.validation.degradedRecordCount, droppedRecordCount: build.validation.droppedRecordCount, issues: build.validation.issues)
         }
+        // Alias-aware post-processing (IM forwarding tokens → bound person entities).
+        let batch = projectionBatchRewriter?(builtBatch) ?? builtBatch
         try store.saveProjectionBatch(batch)
         if let queueItem {
             _ = try recordQueueSuccess(queueItem, now: now)
