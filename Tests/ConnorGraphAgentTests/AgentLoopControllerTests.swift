@@ -2592,6 +2592,31 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(finalSynthesis.tools.contains { $0.name == "WriteBatch" } == false)
 }
 
+@Test func agentLoopInjectsFinalSynthesisCalendarReminderGuidanceWhenUpcomingToolAvailable() async throws {
+    let provider = PhaseToolChoiceProvider()
+    var registry = AgentToolRegistry()
+    registry.register(CalendarUpcomingEventsTool(runtime: InMemoryAgentCalendarRuntime()))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(AgentChatRequest(sessionID: "session-calendar-reminder", userMessage: "帮我看看今天的日程安排")) {}
+
+    let requests = await provider.requests
+    let taskExecution = try #require(requests.first { $0.promptCacheContext?.phase == .taskExecution })
+    let finalSynthesis = try #require(requests.first { $0.promptCacheContext?.phase == .finalSynthesis })
+
+    // The all-calendars upcoming-events tool is exposed for calendar-relevant runs.
+    #expect(finalSynthesis.tools.contains { $0.name == "calendar_upcoming_events" })
+
+    // The proactive-reminder guidance is injected once on entry to final
+    // synthesis, not during task execution.
+    #expect(taskExecution.messages.contains {
+        $0.role == .system && $0.content.contains("proactive schedule reminders")
+    } == false)
+    #expect(finalSynthesis.messages.contains {
+        $0.role == .system && $0.content.contains("proactive schedule reminders")
+    })
+}
+
 @Test func agentLoopKeepsToolArrayStableWithinPhaseAfterStartupToolUse() async throws {
     let provider = ContextualPreflightProvider()
     var registry = AgentToolRegistry()
