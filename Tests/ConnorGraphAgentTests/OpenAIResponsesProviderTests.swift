@@ -69,7 +69,7 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     let response = try await provider.complete(AgentModelRequest(messages: [
         AgentModelMessage(role: .system, content: "Connor system"),
         AgentModelMessage(role: .user, content: "Say hello")
-    ]))
+    ], promptCacheContext: .init(phase: .strategyResearch, promptVersion: "v1", stableToolBundleVersion: "tools-v1", explicitBreakpointIndex: 1)))
 
     #expect(response.text == "Hello from Responses")
     #expect(client.captured?.url.absoluteString == "https://api.openai.com/v1/responses")
@@ -80,11 +80,83 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
     #expect(object["model"] as? String == "gpt-test")
     #expect(object["store"] as? Bool == false)
+    #expect((object["prompt_cache_key"] as? String)?.hasPrefix("connor:") == true)
     #expect(object["messages"] == nil)
     let input = try #require(object["input"] as? [[String: Any]])
     #expect(input.count == 2)
     #expect(input[0]["role"] as? String == "system")
     #expect(input[1]["role"] as? String == "user")
+}
+
+@Test func openAIResponsesProviderParsesPromptCacheUsageDetails() async throws {
+    let body = """
+    {
+      "id": "resp_cache",
+      "output": [{"type":"message","content":[{"type":"output_text","text":"Cached"}]}],
+      "usage": {
+        "input_tokens": 2006,
+        "output_tokens": 30,
+        "total_tokens": 2036,
+        "input_tokens_details": {"cached_tokens": 1920, "cache_write_tokens": 64}
+      }
+    }
+    """.data(using: .utf8)!
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: ResponsesCapturingHTTPClient(responseBody: body)
+    )
+
+    let response = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(role: .system, content: "Stable prefix"),
+        AgentModelMessage(role: .user, content: "Hello")
+    ]))
+
+    #expect(response.usage?.promptTokens == 2006)
+    #expect(response.usage?.completionTokens == 30)
+    #expect(response.usage?.cacheReadInputTokens == 1920)
+    #expect(response.usage?.cacheCreationInputTokens == 64)
+    #expect(response.usage?.uncachedInputTokens == 86)
+}
+
+@Test func openAIResponsesProviderRequiresToolCallsWhenRequested() async throws {
+    let responseBody = #"{"id":"r","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}"#.data(using: .utf8)!
+    let client = ResponsesCapturingHTTPClient(responseBody: responseBody)
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "key", model: "gpt-test"),
+        httpClient: client
+    )
+    let tool = AgentToolDefinition(name: "phase_gate", description: "Advance phase", inputSchema: .object(properties: [:], required: []))
+
+    _ = try await provider.complete(.init(
+        messages: [.init(role: .user, content: "advance")],
+        tools: [tool],
+        toolChoice: .required
+    ))
+
+    let body = try #require(client.captured?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    #expect(object["tool_choice"] as? String == "required")
+}
+
+@Test func openAIResponsesPromptCacheKeyUsesStablePhaseIdentityInsteadOfDynamicSystemText() async throws {
+    let responseBody = #"{"id":"r","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}"#.data(using: .utf8)!
+    let firstClient = ResponsesCapturingHTTPClient(responseBody: responseBody)
+    let secondClient = ResponsesCapturingHTTPClient(responseBody: responseBody)
+    let config = OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "key", model: "gpt-test")
+    let cache = AgentPromptCacheContext(phase: .taskExecution, promptVersion: "v3", stableToolBundleVersion: "a,b", explicitBreakpointIndex: 1)
+    _ = try await OpenAIResponsesProvider(config: config, httpClient: firstClient).complete(.init(
+        messages: [.init(role: .system, content: "Current Time: first")],
+        promptCacheContext: cache
+    ))
+    _ = try await OpenAIResponsesProvider(config: config, httpClient: secondClient).complete(.init(
+        messages: [.init(role: .system, content: "Current Time: second")],
+        promptCacheContext: cache
+    ))
+    let firstBody = try #require(firstClient.captured?.body)
+    let secondBody = try #require(secondClient.captured?.body)
+    let first = try #require(try JSONSerialization.jsonObject(with: firstBody) as? [String: Any])
+    let second = try #require(try JSONSerialization.jsonObject(with: secondBody) as? [String: Any])
+    #expect(first["prompt_cache_key"] as? String == second["prompt_cache_key"] as? String)
 }
 
 @Test func openAIResponsesProviderPreservesSanitizedHTTPErrorMessage() async throws {

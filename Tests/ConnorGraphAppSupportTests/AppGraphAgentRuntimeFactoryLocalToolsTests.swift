@@ -609,10 +609,10 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(!names.contains("memory_os_dashboard_summary"))
     #expect(!names.contains("memory_os_ingest_observation"))
     #expect(!names.contains("memory_os_project_structured_artifact"))
-    // Conversation runtime should only register read-only memory tools
+    // Conversation runtime exposes one phase-level memory_query; partition tools stay internal.
     #expect(names.contains("get_current_time"))
-    #expect(names.contains("memory_os_recent_context"))
-    #expect(names.contains("memory_os_knowledge_context"))
+    #expect(!names.contains("memory_os_recent_context"))
+    #expect(!names.contains("memory_os_knowledge_context"))
     #expect(names.contains("memory_os_get_current_user_profile"))
     #expect(!names.contains("conversation_history_search"))
     #expect(names.contains("web_search"))
@@ -644,23 +644,6 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(!names.contains("memory_os_l4_update_entities"))
     #expect(!names.contains("memory_os_l3_update_beliefs"))
 
-    let result = try await controller.toolRegistry.execute(
-        AgentToolCall(id: "configured-memory", runID: "run", sessionID: "session", name: "memory_os_recent_context", argumentsJSON: #"{"query":"configuration"}"#),
-        context: AgentToolExecutionContext(
-            runID: "run",
-            sessionID: "session",
-            groupID: "default",
-            userPrompt: "configuration",
-            toolCallID: "configured-memory",
-            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
-        )
-    )
-    let response = try JSONDecoder().decode(
-        MemoryOSContextToolResponse.self,
-        from: Data(try #require(result.contentJSON).utf8)
-    )
-    #expect(response.page == 1)
-    #expect(response.pageSize == 17)
     // memory_os_trace_evidence was removed - verify it's gone
     #expect(!names.contains("memory_os_trace_evidence"))
     #expect(!names.contains("graph_ingest_episode"))

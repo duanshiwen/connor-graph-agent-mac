@@ -483,6 +483,56 @@ public struct MemoryOSKnowledgeContextTool: AgentTool {
     }
 }
 
+public struct AppAgentMemoryQueryProvider: AgentMemoryQueryProvider {
+    private let recentTool: MemoryOSRecentContextTool
+    private let knowledgeTool: MemoryOSKnowledgeContextTool
+
+    public init(facade: AppMemoryOSFacade, configuration: MemoryOSContextToolConfiguration = .init()) {
+        recentTool = MemoryOSRecentContextTool(facade: facade, configuration: configuration)
+        knowledgeTool = MemoryOSKnowledgeContextTool(facade: facade, configuration: configuration)
+    }
+
+    public func query(_ request: AgentMemoryQueryRequest, partition: AgentMemoryPartition) async throws -> AgentMemoryPartitionPage {
+        let page = request.cursor.flatMap(Int.init) ?? 1
+        let arguments = try AgentToolArguments(json: "{\"query\":\(Self.jsonString(request.query)),\"page\":\(page),\"pageSize\":\(request.pageSize),\"depth\":1}")
+        let context = AgentToolExecutionContext(
+            runID: "memory_query",
+            sessionID: "memory_query",
+            groupID: "memory_query",
+            userPrompt: request.query,
+            toolCallID: "memory_query",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+        let result: AgentToolResult
+        switch partition {
+        case .recent: result = try await recentTool.execute(arguments: arguments, context: context)
+        case .longTerm: result = try await knowledgeTool.execute(arguments: arguments, context: context)
+        }
+        guard let json = result.contentJSON else { throw AgentToolError.invalidArguments("Memory backend returned no structured response") }
+        let response = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(json.utf8))
+        guard response.success else { throw AgentToolError.invalidArguments(response.reason) }
+        let formatter = ISO8601DateFormatter()
+        let items = response.records.map { record in
+            AgentMemoryQueryItem(
+                id: record.recordID,
+                text: record.text,
+                eventTime: record.occurredAt.flatMap { formatter.date(from: $0) }
+                    ?? record.updatedAt.flatMap { formatter.date(from: $0) }
+                    ?? .distantPast,
+                citation: record.evidenceRefs.first ?? record.recordID,
+                provenance: partition.rawValue
+            )
+        }
+        return AgentMemoryPartitionPage(items: items, nextCursor: response.nextPage.map(String.init))
+    }
+
+    private static func jsonString(_ value: String) -> String {
+        let data = try? JSONSerialization.data(withJSONObject: [value])
+        let encoded = data.flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
+        return String(encoded.dropFirst().dropLast())
+    }
+}
+
 public struct MemoryOSSearchTool: AgentTool {
     public let name = "memory_os_search"
     public let description = "Search Connor Memory OS across L0/L1/L2/L3/L4 by optional topic and/or ISO-8601 source-event time bounds. Omit query or pass an empty string for no lexical filtering; omit both dates for all history, or add either/both dates to filter by traceable occurred_at. Records without occurred_at are excluded only when a time bound is present. startDate is inclusive and endDate is exclusive. Returns ranked candidate records and entry points, not graph-complete memory truth."
@@ -1312,13 +1362,11 @@ public struct MemoryOSL3UpdateBeliefsTool: AgentTool {
 }
 
 public extension AgentToolRegistry {
-    /// Conversation-time read-only tools expose operational context, durable knowledge, and user profile separately.
+    /// Conversation-time registration keeps only the late-bound Profile reader. Memory search is the single phase tool `memory_query`.
     mutating func registerMemoryOSReadTools(
         facade: AppMemoryOSFacade,
         configuration: MemoryOSContextToolConfiguration = .init()
     ) {
-        register(MemoryOSRecentContextTool(facade: facade, configuration: configuration))
-        register(MemoryOSKnowledgeContextTool(facade: facade, configuration: configuration))
         register(MemoryOSGetCurrentUserProfileTool(facade: facade, configuration: configuration))
     }
 
@@ -1328,6 +1376,8 @@ public extension AgentToolRegistry {
         configuration: MemoryOSContextToolConfiguration = .init()
     ) {
         registerMemoryOSReadTools(facade: facade, configuration: configuration)
+        register(MemoryOSRecentContextTool(facade: facade, configuration: configuration))
+        register(MemoryOSKnowledgeContextTool(facade: facade, configuration: configuration))
         // Write tools
         register(MemoryOSL2UpdateEntitiesTool(facade: facade))
         register(MemoryOSUpdateCurrentUserProfileTool(facade: facade))

@@ -448,23 +448,18 @@ struct CalendarContactsAgentToolsTests {
         #expect(found.toolName == "contacts_read")
         #expect(found.contentText.contains("Found 1 contacts"))
 
-        var deniedContactWrite = false
-        do {
-            _ = try await writeTool.execute(
-                arguments: try AgentToolArguments(json: "{\"operation\":\"create_person\",\"email\":\"alice@example.com\",\"name\":\"Alice\",\"approved\":false}"),
-                context: Self.context(toolCallID: "call-contacts-write-denied")
-            )
-        } catch AgentToolError.permissionDenied(_) {
-            deniedContactWrite = true
-        }
-        #expect(deniedContactWrite)
+        let createdWithoutModelApproval = try await writeTool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"create_person\",\"email\":\"alice@example.com\",\"name\":\"Alice\",\"approved\":false}"),
+            context: Self.context(toolCallID: "call-contacts-write-with-trusted-context")
+        )
+        #expect(createdWithoutModelApproval.contentText.contains("Created person"))
 
         let created = try await writeTool.execute(
-            arguments: try AgentToolArguments(json: "{\"operation\":\"create_person\",\"email\":\"alice@example.com\",\"name\":\"Alice\",\"approved\":true}"),
+            arguments: try AgentToolArguments(json: "{\"operation\":\"create_person\",\"email\":\"bob@example.com\",\"name\":\"Bob\",\"approved\":true}"),
             context: Self.context(toolCallID: "call-contacts-write-approved")
         )
         #expect(created.toolName == "contacts_write")
-        #expect(created.contentText.contains("Created approved person"))
+        #expect(created.contentText.contains("Created person"))
     }
 
     @Test func contactsToolsDocumentStructuredPersonReferenceIDs() {

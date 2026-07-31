@@ -98,6 +98,7 @@ public struct LLMUsageAuditRecord: Codable, Sendable, Equatable, Identifiable {
     public var totalTokens: Int?
     public var cacheCreationInputTokens: Int?
     public var cacheReadInputTokens: Int?
+    public var uncachedInputTokens: Int?
     public var estimatedInputTokens: Int
     public var messageCount: Int
     public var inputCharacterCount: Int
@@ -117,7 +118,7 @@ public struct LLMUsageAuditRecord: Codable, Sendable, Equatable, Identifiable {
         modelID: String, providerID: String?, providerMode: String?, connectionID: String?,
         sessionID: String?, runID: String?, backgroundJobID: String?, correlationID: String?, iteration: Int?,
         operation: String?, initiator: AgentLLMRequestInitiator, relatedToolNames: [String],
-        promptTokens: Int?, completionTokens: Int?, totalTokens: Int?, cacheCreationInputTokens: Int?, cacheReadInputTokens: Int?,
+        promptTokens: Int?, completionTokens: Int?, totalTokens: Int?, cacheCreationInputTokens: Int?, cacheReadInputTokens: Int?, uncachedInputTokens: Int? = nil,
         estimatedInputTokens: Int, messageCount: Int, inputCharacterCount: Int, toolDefinitionCount: Int, containsImages: Bool,
         outputCharacterCount: Int?, toolCallCount: Int?, finishReason: String?, generatedByteCount: Int64?,
         errorType: String?, errorMessage: String?, metadata: [String: String]
@@ -146,6 +147,7 @@ public struct LLMUsageAuditRecord: Codable, Sendable, Equatable, Identifiable {
         self.totalTokens = totalTokens
         self.cacheCreationInputTokens = cacheCreationInputTokens
         self.cacheReadInputTokens = cacheReadInputTokens
+        self.uncachedInputTokens = uncachedInputTokens
         self.estimatedInputTokens = estimatedInputTokens
         self.messageCount = messageCount
         self.inputCharacterCount = inputCharacterCount

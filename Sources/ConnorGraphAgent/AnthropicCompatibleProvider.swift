@@ -142,7 +142,11 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         profile.supportsStreaming = config.featureOptions.streamingEnabled
         return profile
     }
-    public var capabilities: AgentModelCapabilities { capabilityProfile.agentCapabilities }
+    public var capabilities: AgentModelCapabilities {
+        var capabilities = capabilityProfile.agentCapabilities
+        capabilities.supportsExplicitPromptCacheBreakpoints = config.featureOptions.promptCache.enabled
+        return capabilities
+    }
 
     public init(config: AnthropicCompatibleConfig, httpClient: Client, sseClient: (any AgentSSEHTTPClient)? = nil) {
         self.config = config
@@ -281,13 +285,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         if !isXiaomiMiMoEndpoint, let cache = config.featureOptions.promptCache.jsonObject {
             body["cache_control"] = cache
         }
-        let system = request.messages
-            .filter { $0.role == .system }
-            .map(\.content)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
-        if !system.isEmpty {
+        if let system = anthropicSystem(for: request) {
             body["system"] = system
         }
         if !request.tools.isEmpty || !config.featureOptions.serverTools.isEmpty {
@@ -316,6 +314,9 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             }
             tools.append(contentsOf: config.featureOptions.serverTools.map(\.jsonObject))
             body["tools"] = tools
+            if request.toolChoice == .required {
+                body["tool_choice"] = ["type": "any"]
+            }
         }
         let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return AgentHTTPRequest(
@@ -325,6 +326,27 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             body: data,
             timeoutInterval: config.requestTimeout
         )
+    }
+
+    private func anthropicSystem(for request: AgentModelRequest) -> Any? {
+        let indexed = request.messages.enumerated().compactMap { index, message -> (Int, String)? in
+            guard message.role == .system else { return nil }
+            let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            return content.isEmpty ? nil : (index, content)
+        }
+        guard !indexed.isEmpty else { return nil }
+        guard config.featureOptions.promptCache.enabled,
+              let breakpoint = request.promptCacheContext?.explicitBreakpointIndex,
+              let cachedIndex = indexed.lastIndex(where: { $0.0 < breakpoint }) else {
+            return indexed.map(\.1).joined(separator: "\n\n")
+        }
+        return indexed.enumerated().map { offset, entry -> [String: Any] in
+            var block: [String: Any] = ["type": "text", "text": entry.1]
+            if offset == cachedIndex, let cache = config.featureOptions.promptCache.jsonObject {
+                block["cache_control"] = cache
+            }
+            return block
+        }
     }
 
     private func anthropicMessages(for messages: [AgentModelMessage]) -> [[String: Any]] {

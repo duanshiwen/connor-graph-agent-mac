@@ -34,11 +34,16 @@ struct AppMaintenanceCoordinatorTests {
     @Test func schedulerRunsDailySweepImmediatelyOnLaunch() async throws {
         let coordinator = AppMaintenanceCoordinator()
         var dailySweepRuns = 0
-        coordinator.runDailySweep = { dailySweepRuns += 1 }
+        let (runs, continuation) = AsyncStream<Void>.makeStream()
+        coordinator.runDailySweep = {
+            dailySweepRuns += 1
+            continuation.yield()
+            coordinator.stopScheduler()
+        }
 
         coordinator.startScheduler(interval: 10)
-        try await Task.sleep(for: .milliseconds(30))
-        coordinator.stopScheduler()
+        var iterator = runs.makeAsyncIterator()
+        _ = await iterator.next()
 
         #expect(dailySweepRuns == 1)
     }
@@ -46,8 +51,10 @@ struct AppMaintenanceCoordinatorTests {
     @Test func backgroundTriggerWhileWorkerIsBusyRunsAnotherBatch() async throws {
         let coordinator = AppMaintenanceCoordinator()
         var backgroundRuns = 0
+        let (runs, continuation) = AsyncStream<Void>.makeStream()
         coordinator.runBackgroundJobs = {
             backgroundRuns += 1
+            continuation.yield()
             if backgroundRuns == 1 {
                 try? await Task.sleep(for: .milliseconds(30))
             }
@@ -55,7 +62,9 @@ struct AppMaintenanceCoordinatorTests {
 
         coordinator.scheduleBackgroundJobs()
         coordinator.scheduleBackgroundJobs()
-        try await Task.sleep(for: .milliseconds(80))
+        var iterator = runs.makeAsyncIterator()
+        _ = await iterator.next()
+        _ = await iterator.next()
 
         #expect(backgroundRuns == 2)
     }

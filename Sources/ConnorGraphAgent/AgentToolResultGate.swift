@@ -1,7 +1,9 @@
 import Foundation
 
 public struct AgentToolResultGateConfiguration: Codable, Sendable, Equatable {
+    /// UTF-8 byte limit retained under its original source-compatible name.
     public var maxResultCharacters: Int
+    /// Per-tool UTF-8 byte limits retained under the original source-compatible name.
     public var perToolCharacterLimits: [String: Int]
     public var includeTruncationMetadata: Bool
 
@@ -49,12 +51,14 @@ public struct AgentToolResultGate: Sendable, Equatable {
         if Self.completeResultToolNames.contains(result.toolName) {
             return prefix + payload
         }
-        let payloadLimit = prefix.isEmpty ? limit : max(0, limit - prefix.count)
-        guard payload.count > payloadLimit else { return prefix + payload }
+        let payloadLimit = prefix.isEmpty ? limit : max(0, limit - prefix.utf8.count)
+        let originalBytes = payload.utf8.count
+        guard originalBytes > payloadLimit else { return prefix + payload }
 
-        let kept = String(payload.prefix(payloadLimit))
+        let kept = utf8Prefix(of: payload, maximumBytes: payloadLimit)
+        let keptBytes = kept.utf8.count
         guard configuration.includeTruncationMetadata else { return prefix + kept }
-        return prefix + kept + "\n...[truncated tool result: tool=\(result.toolName), kept=\(payloadLimit) chars, original=\(payload.count) chars]"
+        return prefix + kept + "\n...[truncated tool result: tool=\(result.toolName), kept=\(keptBytes) bytes, original=\(originalBytes) bytes]"
     }
 
     public func gatedContent(
@@ -95,6 +99,19 @@ public struct AgentToolResultGate: Sendable, Equatable {
             }
         }
         return String(text.prefix(lowerBound))
+    }
+
+    private func utf8Prefix(of text: String, maximumBytes: Int) -> String {
+        guard maximumBytes > 0, !text.isEmpty else { return "" }
+        var byteCount = 0
+        var endIndex = text.startIndex
+        for character in text {
+            let characterBytes = String(character).utf8.count
+            guard byteCount + characterBytes <= maximumBytes else { break }
+            byteCount += characterBytes
+            endIndex = text.index(after: endIndex)
+        }
+        return String(text[..<endIndex])
     }
 
     private func modelVisibleContent(for result: AgentToolResult) -> String {

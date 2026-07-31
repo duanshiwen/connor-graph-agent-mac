@@ -20,8 +20,12 @@ private actor Train4CapturingProvider: AgentModelProvider {
     private(set) var lastRequest: AgentModelRequest?
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        let final = AgentModelResponse(text: "Memory-aware answer", usage: AgentModelUsage(promptTokens: 10, completionTokens: 4))
+        if let automatic = appSupportAutomaticPhaseResponse(for: request, nextResponse: final) {
+            return automatic
+        }
         lastRequest = request
-        return AgentModelResponse(text: "Memory-aware answer", usage: AgentModelUsage(promptTokens: 10, completionTokens: 4))
+        return final
     }
 }
 

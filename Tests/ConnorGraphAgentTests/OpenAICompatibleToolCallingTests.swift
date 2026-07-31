@@ -67,6 +67,26 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     #expect(requestText.contains("graph_search"))
 }
 
+@Test func openAICompatibleProviderRequiresToolCallsWhenRequested() async throws {
+    let body = #"{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}"#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+    let tool = AgentToolDefinition(name: "phase_gate", description: "Advance phase", inputSchema: .object(properties: [:], required: []))
+
+    _ = try await provider.completeWithTools(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "advance")],
+        tools: [tool],
+        toolChoice: .required
+    ))
+
+    let captured = try #require(client.storage.capturedBody)
+    let object = try #require(try JSONSerialization.jsonObject(with: captured) as? [String: Any])
+    #expect(object["tool_choice"] as? String == "required")
+}
+
 @Test func openAICompatibleProviderPreservesClosedObjectBooleanOnWire() async throws {
     let body = #"""
     {
