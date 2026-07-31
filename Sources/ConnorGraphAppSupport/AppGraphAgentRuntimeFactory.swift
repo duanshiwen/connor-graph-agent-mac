@@ -198,7 +198,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let repository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
         guard let catalog = try? MCPClientPool.loadEnabledPersistedCatalog(
             repository: repository,
-            allowedToolNames: allowedToolNames
+            allowedToolNames: allowedToolNames,
+            workingDirectory: workingDirectory
         ), !catalog.isEmpty else { return }
         let pool = MCPClientPool(repository: repository, currentDirectoryURL: workingDirectory)
         MCPToolRegistryBridge().registerTools(catalog: catalog, into: &registry, router: pool)

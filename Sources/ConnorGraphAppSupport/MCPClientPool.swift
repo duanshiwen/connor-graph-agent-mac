@@ -59,12 +59,13 @@ public actor MCPClientPool: MCPToolRouting {
 
     public nonisolated static func loadEnabledPersistedCatalog(
         repository: AppMCPSourceRuntimeRepository,
-        allowedToolNames: [String]? = nil
+        allowedToolNames: [String]? = nil,
+        workingDirectory: URL? = nil
     ) throws -> [MCPSourceToolDescriptor] {
         let configurations = try repository.list().filter { $0.status == .enabled }
         let allowedNames = allowedToolNames.map(Set.init)
         var catalog: [MCPSourceToolDescriptor] = []
-        for configuration in configurations {
+        for configuration in configurations where isCompatibleWithWorkspace(configuration, workingDirectory: workingDirectory) {
             let descriptors = try repository.loadToolCatalog(sourceID: configuration.sourceID)
             catalog.append(contentsOf: descriptors.map { descriptor in
                 let exposedName = descriptor.name.hasPrefix("mcp__")
@@ -84,6 +85,26 @@ public actor MCPClientPool: MCPToolRouting {
             }.filter { allowedNames?.contains($0.name) ?? true })
         }
         return catalog.sorted { $0.name < $1.name }
+    }
+
+    nonisolated static func isCompatibleWithWorkspace(
+        _ configuration: MCPSourceRuntimeConfiguration,
+        workingDirectory: URL?
+    ) -> Bool {
+        guard let workingDirectory,
+              case .stdio(_, let arguments) = configuration.transport else { return true }
+        let invocation = arguments.joined(separator: " ").lowercased()
+        guard invocation.contains("server-filesystem") || invocation.contains("filesystem-server") else { return true }
+
+        let configuredRoots = arguments
+            .filter { $0.hasPrefix("/") }
+            .map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL }
+        guard !configuredRoots.isEmpty else { return true }
+        let workspace = workingDirectory.standardizedFileURL.path
+        return configuredRoots.contains { root in
+            let rootPath = root.path
+            return workspace == rootPath || workspace.hasPrefix(rootPath.hasSuffix("/") ? rootPath : rootPath + "/")
+        }
     }
 
     public func refreshEnabledStdioSources(now: Date = Date()) async throws -> [MCPSourceTestReport] {

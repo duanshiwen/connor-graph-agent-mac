@@ -900,6 +900,25 @@ private struct NamedDelayTool: AgentTool {
     }
 }
 
+private struct CancellationIgnoringDelayTool: AgentTool {
+    let name: String
+    let delayNanoseconds: UInt64
+    let description = "Delay without cooperating with task cancellation"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().asyncAfter(
+                deadline: .now() + .nanoseconds(Int(clamping: delayNanoseconds))
+            ) {
+                continuation.resume()
+            }
+        }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: name)
+    }
+}
+
 private struct ContextualNoteSearchTool: AgentTool {
     let name = AgentNoteSearchPreflightPolicy.requiredToolName
     let description = "Search notes for contextual preflight testing"
@@ -2854,6 +2873,29 @@ private actor TransientFailureThenSuccessProvider: AgentModelProvider {
     #expect(failure.toolName == "slow_tool")
     #expect(failure.message.contains("timed out"))
     #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopTimeoutDoesNotWaitForCancellationIgnoringTool() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-stubborn-timeout", name: "stubborn_tool", argumentsJSON: "{}")],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Moved on after the hard timeout.")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(CancellationIgnoringDelayTool(name: "stubborn_tool", delayNanoseconds: 10_000_000_000))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(toolExecutionTimeoutSeconds: 1)
+    )
+    let startedAt = ContinuousClock.now
+
+    for try await _ in loop.run(.init(sessionID: "session-stubborn-timeout", userMessage: "Run the stubborn tool")) {}
+
+    #expect(startedAt.duration(to: .now) < .seconds(3))
 }
 
 private actor StubbornPlainTextProvider: AgentModelProvider {
