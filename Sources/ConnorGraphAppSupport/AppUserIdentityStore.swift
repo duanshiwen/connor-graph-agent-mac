@@ -483,8 +483,25 @@ public actor ConnorBackendAuthenticatedSession {
     }
 }
 
+/// Routing decision for a `/ws/device` frame. Sync frames wake the device-sync
+/// pass; control frames are consumed; everything else — including typeless bare
+/// ack payloads from `chat_send`/`group_send` — is an IM frame.
+public enum ConnorDeviceSocketFrameRoute: Equatable, Sendable {
+    case syncWake
+    case control
+    case im(type: String?)
+
+    public static func classify(type: String?) -> ConnorDeviceSocketFrameRoute {
+        switch type {
+        case "connected", "sync_changed", "sync_peer_online": return .syncWake
+        case "heartbeat_ack": return .control
+        default: return .im(type: type)
+        }
+    }
+}
+
 private actor ConnorAccountSyncEventSocket {
-    private struct EventEnvelope: Decodable { var type: String }
+    private struct EventEnvelope: Decodable { var type: String? }
 
     private let baseURL: URL
     private var webSocket: URLSessionWebSocketTask?
@@ -493,7 +510,24 @@ private actor ConnorAccountSyncEventSocket {
         self.baseURL = baseURL
     }
 
-    func listen(accessToken: String, deviceID: String, onWake: @escaping @Sendable () async -> Void) async throws {
+    /// Writes an IM up-frame; returns false when the socket is not ready.
+    func send(_ text: String) async -> Bool {
+        guard let webSocket else { return false }
+        do {
+            try await webSocket.send(.string(text))
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func listen(
+        accessToken: String,
+        deviceID: String,
+        onWake: @escaping @Sendable () async -> Void,
+        onConnected: (@Sendable () async -> Void)? = nil,
+        onImFrame: (@Sendable (_ type: String?, _ rawText: String) async -> Void)? = nil
+    ) async throws {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         components?.scheme = baseURL.scheme == "https" ? "wss" : "ws"
         components?.path = "/ws/device"
@@ -521,15 +555,21 @@ private actor ConnorAccountSyncEventSocket {
 
         while !Task.isCancelled {
             let message = try await socket.receive()
-            let data: Data
+            let text: String
             switch message {
-            case .data(let value): data = value
-            case .string(let value): data = Data(value.utf8)
+            case .data(let value): text = String(decoding: value, as: UTF8.self)
+            case .string(let value): text = value
             @unknown default: continue
             }
-            guard let event = try? JSONDecoder().decode(EventEnvelope.self, from: data) else { continue }
-            if event.type == "connected" || event.type == "sync_changed" || event.type == "sync_peer_online" {
+            let type = (try? JSONDecoder().decode(EventEnvelope.self, from: Data(text.utf8)))?.type
+            switch ConnorDeviceSocketFrameRoute.classify(type: type) {
+            case .syncWake:
+                if type == "connected" { await onConnected?() }
                 await onWake()
+            case .control:
+                continue
+            case .im(let frameType):
+                await onImFrame?(frameType, text)
             }
         }
     }
@@ -553,6 +593,8 @@ public final class AppUserIdentityStore: ObservableObject {
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var isDeviceSyncEnabled: Bool
     @Published public private(set) var deviceSyncStatus: ConnorAccountSyncStatus
+    /// Live `/ws/device` connectivity for the IM feature (drives the reconnect banner).
+    @Published public private(set) var isImSocketConnected = false
 
     private let api: ConnorBackendAPIClient
     private let baseURL: URL
@@ -571,6 +613,10 @@ public final class AppUserIdentityStore: ObservableObject {
     private var syncPassRequested = false
     private let deviceID: String
     public var onDeviceSyncPass: (@MainActor () async throws -> Void)?
+    /// IM frames from `/ws/device` (chat_* / group_* / friend_* and bare typeless acks).
+    public var onImFrame: (@Sendable (_ type: String?, _ rawText: String) async -> Void)?
+    /// Socket connectivity transitions; each reconnect should trigger an IM refreshAll.
+    public var onImSocketStateChange: (@Sendable (_ connected: Bool) async -> Void)?
 
     public init(
         baseURL: URL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!,
@@ -669,6 +715,7 @@ public final class AppUserIdentityStore: ObservableObject {
             }
             let user = try await authenticatedSession.currentUser()
             authenticationState = .signedIn(user)
+            startEventSocketIfNeeded()
             if isDeviceSyncEnabled { startDeviceSync() }
             await refreshLibraries()
         } catch ConnorBackendAPIError.unauthorized, ConnorBackendAPIError.missingRefreshToken {
@@ -696,6 +743,7 @@ public final class AppUserIdentityStore: ObservableObject {
             guard !identity.tokens.refreshToken.isEmpty else { throw ConnorBackendAPIError.invalidResponse }
             try credentials.saveTokens(identity.tokens)
             authenticationState = .signedIn(identity.user)
+            startEventSocketIfNeeded()
             if isDeviceSyncEnabled { startDeviceSync() }
             await refreshLibraries()
         } catch {
@@ -750,6 +798,7 @@ public final class AppUserIdentityStore: ObservableObject {
 
     private func clearLocalSession(state: ConnorAuthenticationState) {
         stopDeviceSync()
+        stopEventSocket()
         try? credentials.clearTokens()
         authenticationState = state
         ownedKnowledgeBases = []
@@ -781,7 +830,7 @@ public final class AppUserIdentityStore: ObservableObject {
         deviceSyncStatus = .connecting
         let session = authenticatedSession
         let deviceID = deviceID
-        startSyncEventSocket(session: session, deviceID: deviceID)
+        startEventSocketIfNeeded()
         deviceSyncTask = Task {
             var needsInitialReconcile = true
             while !Task.isCancelled {
@@ -804,18 +853,30 @@ public final class AppUserIdentityStore: ObservableObject {
         }
     }
 
+    /// Stops sync passes only; the event socket stays up because IM depends on it
+    /// for as long as the user remains signed in.
     private func stopDeviceSync() {
         deviceSyncTask?.cancel(); deviceSyncTask = nil
-        syncSocketTask?.cancel(); syncSocketTask = nil
         syncPassTask?.cancel(); syncPassTask = nil
         localChangeDebounceTask?.cancel(); localChangeDebounceTask = nil
         syncPassRequested = false
-        if let syncEventSocket { Task { await syncEventSocket.stop() } }
-        syncEventSocket = nil
         L1ExtractionEligibility.shared.update(granted: false, expiresAt: nil)
     }
 
-    private func startSyncEventSocket(session: ConnorBackendAuthenticatedSession, deviceID: String) {
+    private func stopEventSocket() {
+        syncSocketTask?.cancel(); syncSocketTask = nil
+        if let syncEventSocket { Task { await syncEventSocket.stop() } }
+        syncEventSocket = nil
+        isImSocketConnected = false
+    }
+
+    /// Runs the `/ws/device` socket for the lifetime of the signed-in session:
+    /// sync frames wake sync passes (when enabled), IM frames flow to `onImFrame`,
+    /// and connectivity transitions feed the IM reconnect logic.
+    private func startEventSocketIfNeeded() {
+        guard syncSocketTask == nil, currentUser != nil else { return }
+        let session = authenticatedSession
+        let deviceID = deviceID
         let socket = ConnorAccountSyncEventSocket(baseURL: baseURL)
         syncEventSocket = socket
         syncSocketTask = Task { [weak self] in
@@ -824,20 +885,54 @@ public final class AppUserIdentityStore: ObservableObject {
             while !Task.isCancelled {
                 do {
                     let token = try await session.accessToken()
-                    try await socket.listen(accessToken: token, deviceID: deviceID) { [weak self] in
-                        await MainActor.run { self?.requestDeviceSyncPass() }
-                    }
+                    try await socket.listen(
+                        accessToken: token,
+                        deviceID: deviceID,
+                        onWake: { [weak self] in
+                            await MainActor.run { self?.requestDeviceSyncPass() }
+                        },
+                        onConnected: { [weak self] in
+                            await self?.setImSocketConnected(true)
+                        },
+                        onImFrame: { [weak self] type, rawText in
+                            guard let handler = await self?.onImFrame else { return }
+                            await handler(type, rawText)
+                        }
+                    )
+                    await setImSocketConnected(false)
                     retryDelay = 1
                 } catch {
                     guard !Task.isCancelled else { return }
-                    deviceSyncStatus = networkIsAvailable() && serverIsReachable()
-                        ? .failed(error.localizedDescription)
-                        : .offline
+                    await setImSocketConnected(false)
+                    if isDeviceSyncEnabled {
+                        deviceSyncStatus = networkIsAvailable() && serverIsReachable()
+                            ? .failed(error.localizedDescription)
+                            : .offline
+                    }
                     try? await Task.sleep(for: .seconds(retryDelay))
                     retryDelay = min(retryDelay * 2, 30)
                 }
             }
         }
+    }
+
+    /// IM REST endpoints bound to this store's token-refresh session
+    /// (`authenticatedSession` is private, hence this factory).
+    public func makeImBackendService() -> ImBackendService {
+        ImBackendService(api: ImAPIClient(baseURL: baseURL), session: authenticatedSession)
+    }
+
+    /// Writes an IM up-frame to the device socket; returns false when not connected.
+    public func sendImFrame(_ text: String) async -> Bool {
+        guard let syncEventSocket else { return false }
+        return await syncEventSocket.send(text)
+    }
+
+    private func setImSocketConnected(_ connected: Bool) async {
+        let changed = isImSocketConnected != connected
+        isImSocketConnected = connected
+        guard changed else { return }
+        await onImSocketStateChange?(connected)
     }
 
     private func scheduleLocalChangeSync() {

@@ -15,6 +15,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case productOS = "Product OS"
     case calendar = "Calendar"
     case contacts = "Contacts"
+    case imContacts = "通讯录"
     case mail = "Mail"
     case rss = "RSS"
     case sources = "Sources"

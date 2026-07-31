@@ -104,6 +104,8 @@ struct CraftPrimarySidebarView: View {
 
                     SidebarRow(title: "人际关系", systemImage: "person.2", count: graph.contacts.presentation.rows.count, isSelected: selection == .contacts) { select(.contacts) }
 
+                    SidebarRow(title: "通讯录", systemImage: "person.crop.circle.badge.plus", count: imPendingRequestCount, isSelected: selection == .imContacts) { select(.imContacts) }
+
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
                         SidebarRow(title: "日历", systemImage: "calendar", count: graph.calendar.presentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }
                         SidebarRow(title: "邮件", systemImage: "envelope", count: mailSidebarCount, isSelected: selection == .mail) { select(.mail) }
@@ -166,6 +168,11 @@ struct CraftPrimarySidebarView: View {
     private var mailSidebarCount: Int? {
         let totalCount = graph.mail.presentation.totalMailboxMessageCount
         return totalCount > 0 ? totalCount : nil
+    }
+
+    private var imPendingRequestCount: Int? {
+        let count = graph.im?.pendingIncomingRequestCount ?? 0
+        return count > 0 ? count : nil
     }
 
     private var rssUnreadCount: Int? {

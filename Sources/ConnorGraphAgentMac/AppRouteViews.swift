@@ -5,14 +5,27 @@ struct ChatListRouteView: View {
     @Bindable var governanceModel: GovernanceFeatureModel
     var sessionActions: any ChatSessionCommanding
     var rowActions: ChatSessionListActions
+    var imModel: ImFeatureModel?
 
     var body: some View {
-        CraftSessionListPane(
-            model: model,
-            governanceModel: governanceModel,
-            sessionActions: sessionActions,
-            rowActions: rowActions
-        )
+        VStack(spacing: 0) {
+            if let imModel, !imModel.sortedConversations.isEmpty {
+                ImConversationListSection(model: imModel)
+                Divider()
+            }
+            CraftSessionListPane(
+                model: model,
+                governanceModel: governanceModel,
+                sessionActions: sessionActions,
+                rowActions: rowActions
+            )
+        }
+        .onChange(of: model.sessions.selectedSessionID) { _, newValue in
+            // Selecting an AI session dismisses the IM chat detail overlay.
+            if newValue != nil, let imModel, imModel.selectedConversationId != nil {
+                Task { await imModel.selectConversation(nil) }
+            }
+        }
     }
 }
 
