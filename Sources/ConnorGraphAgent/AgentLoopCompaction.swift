@@ -231,7 +231,7 @@ public struct AgentLoopContextCompactor: Sendable {
         _ request: AgentModelRequest,
         checkpoint: AgentRunCheckpoint,
         retainedRecentToolResults: Int
-    ) -> AgentLoopCompactionResult {
+    ) throws -> AgentLoopCompactionResult {
         var compacted = request
         compacted.messages.removeAll {
             $0.role == .system && $0.content.hasPrefix("[AGENT RUN CHECKPOINT - TRUSTED RUNTIME STATE]")
@@ -252,5 +252,42 @@ public struct AgentLoopContextCompactor: Sendable {
             compacted.messages[index].providerMetadata = nil
         }
         return AgentLoopCompactionResult(request: compacted, compactedToolResultCount: compactCount)
+    }
+
+    public func fitCurrentRunToolResults(
+        in request: AgentModelRequest,
+        maximumEstimatedTokens: Int,
+        maximumResultBytes: Int,
+        contextGuard: AgentModelContextGuard = .init()
+    ) -> AgentModelRequest {
+        var fitted = request
+        let toolMessageIndices = fitted.messages.indices.filter { fitted.messages[$0].role == .tool }
+        guard !toolMessageIndices.isEmpty else { return fitted }
+
+        var requestWithoutToolBodies = fitted
+        for index in toolMessageIndices {
+            requestWithoutToolBodies.messages[index].content = ""
+        }
+        let fixedTokens = contextGuard.estimatedInputTokens(requestWithoutToolBodies)
+        let availableToolTokens = max(0, maximumEstimatedTokens - fixedTokens)
+        let demands = toolMessageIndices.map {
+            contextGuard.estimator.estimate(fitted.messages[$0].content).estimatedTokenCount
+        }
+        let totalDemand = max(1, demands.reduce(0, +))
+        let gate = AgentToolResultGate(configuration: .init(maxResultCharacters: maximumResultBytes))
+        for (offset, index) in toolMessageIndices.enumerated() {
+            let message = fitted.messages[index]
+            let allocatedTokens = Int(Double(availableToolTokens) * Double(demands[offset]) / Double(totalDemand))
+            fitted.messages[index].content = gate.gatedContent(
+                for: AgentToolResult(
+                    toolCallID: message.toolCallID ?? "compaction",
+                    toolName: message.name ?? "tool",
+                    contentText: message.content
+                ),
+                maximumEstimatedTokens: allocatedTokens,
+                estimator: contextGuard.estimator
+            )
+        }
+        return fitted
     }
 }

@@ -71,7 +71,7 @@ import Testing
     #expect(checkpoint.modelContext.contains("do not repeat completed side effects"))
 }
 
-@Test func contextCompactorKeepsRecentToolResultsAndReplacesPriorCheckpoint() {
+@Test func contextCompactorKeepsRecentToolResultsAndReplacesPriorCheckpoint() throws {
     let oldCheckpoint = AgentModelMessage(
         role: .system,
         content: "[AGENT RUN CHECKPOINT - TRUSTED RUNTIME STATE]\nGeneration: 1"
@@ -98,7 +98,7 @@ import Testing
         messages: messages
     )
 
-    let result = AgentLoopContextCompactor().compact(
+    let result = try AgentLoopContextCompactor().compact(
         AgentModelRequest(messages: messages),
         checkpoint: checkpoint,
         retainedRecentToolResults: 1
@@ -115,4 +115,28 @@ import Testing
     let assistantCallIDs = Set(result.request.messages.flatMap { $0.toolCalls?.map(\.id) ?? [] })
     let toolResultIDs = Set(result.request.messages.compactMap(\.toolCallID))
     #expect(toolResultIDs.isSubset(of: assistantCallIDs))
+}
+
+@Test func currentRunToolFittingDoesNotTrimHistoricalConversation() throws {
+    let historicalUser = AgentModelMessage(role: .user, content: String(repeating: "historical user ", count: 200))
+    let historicalAssistant = AgentModelMessage(role: .assistant, content: String(repeating: "historical answer ", count: 200))
+    let request = AgentModelRequest(messages: [
+        AgentModelMessage(role: .system, content: "system"),
+        historicalUser,
+        historicalAssistant,
+        AgentModelMessage(role: .assistant, content: "", toolCalls: [
+            AgentToolCall(id: "call-large", name: "read_file", argumentsJSON: "{}")
+        ]),
+        AgentModelMessage(role: .tool, content: String(repeating: "tool payload ", count: 5_000), toolCallID: "call-large", name: "read_file")
+    ])
+
+    let fitted = AgentLoopContextCompactor().fitCurrentRunToolResults(
+        in: request,
+        maximumEstimatedTokens: 3_000,
+        maximumResultBytes: 1_000_000
+    )
+
+    #expect(fitted.messages.contains(historicalUser))
+    #expect(fitted.messages.contains(historicalAssistant))
+    #expect(fitted.messages.first { $0.toolCallID == "call-large" }?.content.count ?? .max < request.messages.last?.content.count ?? 0)
 }

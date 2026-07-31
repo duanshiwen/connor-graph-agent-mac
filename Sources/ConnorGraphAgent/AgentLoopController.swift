@@ -506,7 +506,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     messages: modelRequest.messages,
                                     previousCheckpoint: runCheckpoint
                                 )
-                                let compacted = AgentLoopContextCompactor().compact(
+                                let contextCompactor = AgentLoopContextCompactor()
+                                let compacted = try contextCompactor.compact(
                                     modelRequest,
                                     checkpoint: checkpoint,
                                     retainedRecentToolResults: configuration.compaction.retainedRecentToolResults
@@ -514,12 +515,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 var compactedRequest = compacted.request
                                 let targetTokens = compactionPolicy.targetTokens(maximumInputTokens: localMaximumInputTokens)
                                 if localContextGuard.estimatedInputTokens(compactedRequest) > targetTokens {
-                                    compactedRequest = try await contextRecoveredModelRequest(
-                                        compactedRequest,
-                                        promptAssembly: promptAssembly,
-                                        iterationCount: iterationCount,
+                                    compactedRequest = contextCompactor.fitCurrentRunToolResults(
+                                        in: compactedRequest,
                                         maximumEstimatedTokens: targetTokens,
-                                        recoveryState: phasedState.recoveryState
+                                        maximumResultBytes: configuration.maxToolResultBytes,
+                                        contextGuard: localContextGuard
                                     )
                                 }
                                 compactedRequest.auditContext = modelRequest.auditContext
