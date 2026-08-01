@@ -23,17 +23,17 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var compaction: AgentLoopCompactionConfiguration
 
     public init(
-        maxToolIterations: Int = 64,
+        maxToolIterations: Int = 12,
         maxToolCallsPerIteration: Int = 4,
         maxRunDurationSeconds: Int = 1800,
         toolExecutionTimeoutSeconds: Int = 300,
-        maxToolResultBytes: Int = 32 * 1_024,
+        maxToolResultBytes: Int = 8 * 1_024,
         maxConsecutiveToolResultErrors: Int = 3,
         stopAfterTurnWhenBudgetExceeded: Bool = false,
         preflightMode: AgentPreflightMode = .contextual,
         toolExposureMode: AgentToolExposureMode = .contextual,
         promptProjectionMode: AgentPromptProjectionMode = .legacySingleUserMessage,
-        promptMaxEstimatedTokens: Int = 200_000,
+        promptMaxEstimatedTokens: Int = 64_000,
         modelContextWindowTokens: Int? = nil,
         reservedOutputTokens: Int = 8_192,
         permissionMode: AgentPermissionMode = .askToWrite,
@@ -84,18 +84,18 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.maxToolIterations = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 64)
+        self.maxToolIterations = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 12)
         self.maxToolCallsPerIteration = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 4)
         self.maxRunDurationSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800)
         self.toolExecutionTimeoutSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .toolExecutionTimeoutSeconds) ?? 300)
-        self.maxToolResultBytes = max(0, try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1_024)
+        self.maxToolResultBytes = max(0, try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 8 * 1_024)
         self.maxConsecutiveToolResultErrors = max(0, try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 3)
         _ = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded)
         self.stopAfterTurnWhenBudgetExceeded = false
         self.preflightMode = try container.decodeIfPresent(AgentPreflightMode.self, forKey: .preflightMode) ?? .contextual
         self.toolExposureMode = try container.decodeIfPresent(AgentToolExposureMode.self, forKey: .toolExposureMode) ?? .contextual
         self.promptProjectionMode = try container.decodeIfPresent(AgentPromptProjectionMode.self, forKey: .promptProjectionMode) ?? .legacySingleUserMessage
-        self.promptMaxEstimatedTokens = max(1, try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 200_000)
+        self.promptMaxEstimatedTokens = max(1, try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 64_000)
         self.modelContextWindowTokens = try container.decodeIfPresent(Int.self, forKey: .modelContextWindowTokens).map { max(1, $0) }
         self.reservedOutputTokens = max(1, try container.decodeIfPresent(Int.self, forKey: .reservedOutputTokens) ?? 8_192)
         self.permissionMode = try container.decodeIfPresent(AgentPermissionMode.self, forKey: .permissionMode) ?? .askToWrite
@@ -389,9 +389,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     var hasCheckpointForCurrentPressure = false
                     var budgetCompactionRequested = false
                     var nextBudgetCompactionTokenThreshold = max(1, configuration.budget.maxTotalTokens)
-                    var executionSegment = 1
-                    var segmentIterationCount = 0
-                    var segmentCompactionRequested = false
 
                     func shouldApplyCorrectionContinue(_ category: String) -> Bool {
                         let count = correctionContinueCounts[category, default: 0] + 1
@@ -412,15 +409,27 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     }
 
                     while true {
-                        if segmentIterationCount >= configuration.maxToolIterations {
-                            executionSegment += 1
-                            segmentIterationCount = 0
-                            segmentCompactionRequested = true
-                            logger.info("Starting execution segment \(executionSegment); checkpointing completed work before continuing")
+                        if iterationCount >= configuration.maxToolIterations {
+                            if finalAttentionPack == nil {
+                                let pack = await AssistantAttentionCoordinator().run(
+                                    request: request,
+                                    registry: toolRegistry,
+                                    policy: policy
+                                )
+                                finalAttentionPack = pack
+                                messages.append(AgentModelMessage(
+                                    role: .system,
+                                    content: AssistantAttentionCoordinator().render(pack)
+                                        + "\n\nThe model-turn budget is exhausted. Produce the best accurate final answer now without more tools."
+                                ))
+                                phasedState.convergeToFinalSynthesis()
+                                forceFinalSynthesisWithoutTools = true
+                            } else if iterationCount >= configuration.maxToolIterations + 1 {
+                                throw AssistantRunLimitError(maximumModelTurns: configuration.maxToolIterations)
+                            }
                         }
                         iterationCount += 1
-                        segmentIterationCount += 1
-                        logger.info("Turn \(iterationCount) (segment \(executionSegment), turn \(segmentIterationCount)/\(configuration.maxToolIterations))")
+                        logger.info("Assistant turn \(iterationCount)/\(configuration.maxToolIterations + 1)")
                         yield(.turnStarted(AgentTurnStartedEvent(
                             runID: run.id,
                             sessionID: run.sessionID,
@@ -441,7 +450,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         let stableToolBundle = modelFacingToolDefinitions.map(\.name).joined(separator: "\u{1F}")
                         modelRequest.promptCacheContext = AgentPromptCacheContext(
                             phase: phasedState.phase,
-                            promptVersion: "agent-loop-personal-assistant-v2",
+                            promptVersion: AssistantPromptPolicy.version,
                             stableToolBundleVersion: stableToolBundle,
                             explicitBreakpointIndex: modelProvider.capabilities.supportsExplicitPromptCacheBreakpoints ? 1 : nil
                         )
@@ -452,6 +461,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         modelRequest.auditContext.metadata["requires_continuity"] = String(retrievalPlan.requiresContinuity)
                         modelRequest.auditContext.metadata["requires_note_search"] = String(retrievalPlan.requiresNoteSearch)
                         modelRequest.auditContext.metadata["requires_final_attention"] = String(retrievalPlan.requiresFinalAttention)
+                        modelRequest.auditContext.metadata["assistant_context_pack_estimated_tokens"] = String(
+                            auditEstimator.estimate(AssistantEvidenceReducer().render(assistantBootstrap.contextPack)).estimatedTokenCount
+                        )
                         // Keep the definition bundle byte-for-byte stable across the run so the
                         // provider can reuse the prompt prefix. Phase safety is enforced before
                         // execution instead of by mutating the advertised tool array.
@@ -480,10 +492,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         let hasCurrentRunToolTrace = iterationCount > 1 && modelRequest.messages.contains { $0.role == .tool }
                         let shouldCompactForExceededBudget = hasCurrentRunToolTrace
                             && budgetCompactionRequested
-                        let shouldCompactForExecutionSegment = hasCurrentRunToolTrace
-                            && segmentCompactionRequested
                         let shouldForceCompaction = shouldCompactForExceededBudget
-                            || shouldCompactForExecutionSegment
                         let compactionDecision = shouldForceCompaction
                             ? AgentLoopCompactionDecision.compact
                             : hasCurrentRunToolTrace
@@ -551,9 +560,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 lastCompactionEstimateAfter = localInputEstimate
                                 if shouldCompactForExceededBudget {
                                     budgetCompactionRequested = false
-                                }
-                                if shouldCompactForExecutionSegment {
-                                    segmentCompactionRequested = false
                                 }
                                 yield(.compactionCompleted(AgentCompactionCompletedEvent(
                                     runID: run.id,
@@ -1016,7 +1022,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }
                             let modelVisibleToolContent = toolResultGate.gatedContent(
                                 for: batchResult.result,
-                                maximumEstimatedTokens: allocatedTokens,
+                                maximumEstimatedTokens: min(
+                                    allocatedTokens,
+                                    AssistantRunBudget().maximumVisibleToolResultTokens
+                                ),
                                 estimator: contextGuard.estimator
                             )
                             remainingToolContentDemand = max(0, remainingToolContentDemand - currentDemand)
@@ -2343,6 +2352,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         runtimeContext: AgentRuntimeContext? = nil
     ) async -> AgentPromptAssembly {
         var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
+        assembly.instruction.text = AssistantPromptPolicy.stableInstruction
         let availableToolNames = Set(availableToolDefinitions.map(\.name))
         var instructionDocument = AgentInstructionCapabilityProjector().projectedDocument(
             assembly.instruction.text,
@@ -2350,7 +2360,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         )
         instructionDocument.append(AgentPromptModule(
             id: .runtimeRetrievalPlan,
-            content: runtimeContext == nil ? retrievalPlan.instruction : Self.phasedRetrievalInstruction
+            content: runtimeContext == nil ? retrievalPlan.instruction : AssistantPromptPolicy.runtimeProtocol
         ))
         let progressUpdateToolIsAvailable = availableToolDefinitions.contains {
             $0.name == ShareProgressUpdateTool.toolName

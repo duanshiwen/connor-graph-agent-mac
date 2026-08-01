@@ -11,6 +11,18 @@ public enum AssistantRunStage: String, Codable, Sendable, Equatable, CaseIterabl
     case completed
 }
 
+public struct AssistantRunLimitError: Error, LocalizedError, Sendable, Equatable {
+    public var maximumModelTurns: Int
+
+    public init(maximumModelTurns: Int) {
+        self.maximumModelTurns = maximumModelTurns
+    }
+
+    public var errorDescription: String? {
+        "Assistant run exceeded its final synthesis allowance after \(maximumModelTurns) model turns."
+    }
+}
+
 public struct AssistantRunEnvelope: Codable, Sendable, Equatable {
     public var runID: String
     public var sessionID: String
