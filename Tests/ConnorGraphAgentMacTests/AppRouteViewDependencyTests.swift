@@ -163,6 +163,21 @@ struct AppRouteViewDependencyTests {
         #expect(skills.contains("AppListPaneHeader(title: \"技能\")"))
     }
 
+    @Test func peopleRouteMergesConnorFriendsWithoutStandaloneContactsRoute() throws {
+        let navigation = try String(contentsOf: projectSourceURL(named: "AppNavigationTypes.swift"), encoding: .utf8)
+        let sidebar = try String(contentsOf: projectSourceURL(named: "AppPrimarySidebarView.swift"), encoding: .utf8)
+        let panes = try String(contentsOf: projectSourceURL(named: "AppListDetailPanes.swift"), encoding: .utf8)
+        let routes = try String(contentsOf: projectSourceURL(named: "AppRoutePaneViews.swift"), encoding: .utf8)
+
+        #expect(!navigation.contains("case imContacts"))
+        #expect(!sidebar.contains("SidebarRow(title: \"通讯录\""))
+        #expect(panes.contains("Button(\"添加康纳好友\""))
+        #expect(panes.contains("Button(\"添加一条人际关系\""))
+        #expect(panes.contains("Menu(\"合并到已有人物\")"))
+        #expect(routes.contains("CraftContactsListPane("))
+        #expect(routes.contains("im: graph.im"))
+    }
+
     @Test func knowledgePublicationHistorySupportsFilteringDetailsAndGuardedRemoval() throws {
         let source = try String(contentsOf: projectSourceURL(named: "KnowledgePublicationProgressViews.swift"), encoding: .utf8)
         let historyStart = try #require(source.range(of: "struct KnowledgePublicationHistoryView: View"))
@@ -267,7 +282,6 @@ struct AppRouteViewDependencyTests {
         case .productOS: "productOS"
         case .calendar: "calendar"
         case .contacts: "contacts"
-        case .imContacts: "imContacts"
         case .mail: "mail"
         case .rss: "rss"
         case .sources: "sources"

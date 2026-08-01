@@ -53,14 +53,10 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
 
     private static func requestKind(for jobKind: String) -> AgentLLMRequestKind {
         if MemoryOSBackgroundJobKind.isL1KnowledgeKind(jobKind) { return .memoryL1Extraction }
-        if jobKind == MemoryOSBackgroundJobKind.preferenceCompaction.rawValue { return .personalPreferenceCompaction }
         return .memoryBackgroundProcessing
     }
 
     private static func operation(for jobKind: String) -> String {
-        if jobKind == MemoryOSBackgroundJobKind.preferenceCompaction.rawValue {
-            return "MemoryOSPreferenceCompactionWorker.compact"
-        }
         return "AgentModelBackgroundToolLoopModel.complete"
     }
 

@@ -67,6 +67,21 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     #expect(requestText.contains("graph_search"))
 }
 
+@Test func openAICompatibleProviderRecoversTextualDeepSeekToolCalls() async throws {
+    let body = #"{"choices":[{"message":{"role":"assistant","content":"<tool_calls>\n<tool_call>\n{\"name\":\"graph_search\",\"arguments\":{\"query\":\"memory\"}}\n</tool_call>\n</tool_calls>"},"finish_reason":"stop"}]}"#.data(using: .utf8)!
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "deepseek-test"),
+        httpClient: ToolCallingCapturingHTTPClient(responseBody: body)
+    )
+
+    let response = try await provider.completeWithTools(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Search")]))
+
+    #expect(response.text == nil)
+    #expect(response.finishReason == .toolCalls)
+    #expect(response.toolCalls.map(\.name) == ["graph_search"])
+    #expect(response.toolCalls.first?.argumentsJSON == #"{"query":"memory"}"#)
+}
+
 @Test func openAICompatibleProviderRequiresToolCallsWhenRequested() async throws {
     let body = #"{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}"#.data(using: .utf8)!
     let client = ToolCallingCapturingHTTPClient(responseBody: body)
@@ -85,6 +100,37 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     let captured = try #require(client.storage.capturedBody)
     let object = try #require(try JSONSerialization.jsonObject(with: captured) as? [String: Any])
     #expect(object["tool_choice"] as? String == "required")
+}
+
+@Test func openAICompatibleProviderOmitsAutomaticToolChoiceForThinkingCompatibility() async throws {
+    let body = #"{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}"#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://llm.example.com/v1")!,
+            apiKey: "test-key",
+            model: "thinking-model",
+            reasoningEffort: "high"
+        ),
+        httpClient: client
+    )
+    let tool = AgentToolDefinition(
+        name: "assistant_tool_search",
+        description: "Discover tools",
+        inputSchema: .object(properties: [:], required: [])
+    )
+
+    _ = try await provider.completeWithTools(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "discover")],
+        tools: [tool],
+        toolChoice: .auto
+    ))
+
+    let captured = try #require(client.storage.capturedBody)
+    let object = try #require(try JSONSerialization.jsonObject(with: captured) as? [String: Any])
+    #expect(object["tools"] != nil)
+    #expect(object["tool_choice"] == nil)
+    #expect(object["reasoning_effort"] as? String == "high")
 }
 
 @Test func openAICompatibleProviderPreservesClosedObjectBooleanOnWire() async throws {
@@ -268,4 +314,60 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     let tool = try #require(messages.first(where: { $0["role"] as? String == "tool" }))
     #expect(tool["tool_call_id"] as? String == "call-1")
     #expect(tool["name"] as? String == "graph_search")
+}
+
+@Test func openAICompatibleProviderParsesOpenAIStyleCachedPromptTokens() async throws {
+    let body = #"""
+    {
+      "choices": [{ "message": { "role": "assistant", "content": "Hi" }, "finish_reason": "stop" }],
+      "usage": {
+        "prompt_tokens": 1200,
+        "completion_tokens": 5,
+        "total_tokens": 1205,
+        "prompt_tokens_details": { "cached_tokens": 1024 }
+      }
+    }
+    """#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+
+    let response = try await provider.completeWithTools(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "Hello")]
+    ))
+
+    let usage = try #require(response.usage)
+    #expect(usage.promptTokens == 1200)
+    #expect(usage.cacheReadInputTokens == 1024)
+    #expect(usage.uncachedInputTokens == 176)
+}
+
+@Test func openAICompatibleProviderParsesDeepSeekStyleCacheHitTokens() async throws {
+    let body = #"""
+    {
+      "choices": [{ "message": { "role": "assistant", "content": "Hi" }, "finish_reason": "stop" }],
+      "usage": {
+        "prompt_tokens": 1200,
+        "completion_tokens": 5,
+        "total_tokens": 1205,
+        "prompt_cache_hit_tokens": 1000,
+        "prompt_cache_miss_tokens": 200
+      }
+    }
+    """#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "deepseek-test"),
+        httpClient: client
+    )
+
+    let response = try await provider.completeWithTools(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "Hello")]
+    ))
+
+    let usage = try #require(response.usage)
+    #expect(usage.cacheReadInputTokens == 1000)
+    #expect(usage.uncachedInputTokens == 200)
 }

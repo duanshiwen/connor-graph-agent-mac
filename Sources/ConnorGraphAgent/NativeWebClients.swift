@@ -73,7 +73,7 @@ public struct NativeWebFetchClient: Sendable {
             throw AgentToolError.invalidArguments("web_fetch failed with HTTP status \(response.statusCode)")
         }
 
-        let decoded = BrowserFetchTool.decodeWebPageText(data: response.data, responseEncodingName: response.textEncodingName)
+        let decoded = WebPageDecodingSupport.decodeWebPageText(data: response.data, responseEncodingName: response.textEncodingName)
         let title = NativeWebTextExtractor.title(from: decoded.text)
         let markdown = NativeWebTextExtractor.markdown(from: decoded.text, baseURL: response.finalURL ?? url)
         let plainText = NativeWebTextExtractor.plainText(fromMarkdown: markdown)
@@ -148,7 +148,7 @@ public struct NativeWebSearchClient: Sendable {
             throw AgentToolError.invalidArguments("web_search failed with HTTP status \(response.statusCode)")
         }
 
-        let decoded = BrowserFetchTool.decodeWebPageText(data: response.data, responseEncodingName: response.textEncodingName)
+        let decoded = WebPageDecodingSupport.decodeWebPageText(data: response.data, responseEncodingName: response.textEncodingName)
         let results = Array(NativeWebSearchParser.duckDuckGoResults(from: decoded.text).prefix(max(1, min(maxResults, 10))))
         let markdown = results.enumerated().map { index, item in
             var lines = ["\(index + 1). \(item.title)", "   URL: \(item.url)"]

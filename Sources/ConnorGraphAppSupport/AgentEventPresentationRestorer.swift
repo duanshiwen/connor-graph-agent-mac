@@ -17,9 +17,13 @@ public struct AgentEventPresentationRestorer: Sendable {
             }
         }
         return replaySource.compactMap { persistedEvent in
-            try? replayer.replay(persistedEvent)
-        }.map { event in
-            presenter.presentation(for: event)
+            guard let event = try? replayer.replay(persistedEvent) else { return nil }
+            var presentation = presenter.presentation(for: event)
+            // Keep these assignments explicit so every event kind preserves the
+            // persistence envelope timestamp even as presenter cases evolve.
+            presentation.id = persistedEvent.id
+            presentation.occurredAt = persistedEvent.createdAt
+            return presentation
         }
     }
 }

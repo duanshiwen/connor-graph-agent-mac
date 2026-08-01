@@ -91,6 +91,7 @@ public enum LLMUsageAuditCLIRouter {
             "LLM Usage Audit",
             "Calls: \(summary.calls)  Success: \(percent(summary.successRate))  Failed: \(summary.failed)  Cancelled: \(summary.cancelled)",
             "Tokens: \(summary.totalTokens)  Input: \(summary.promptTokens)  Output: \(summary.completionTokens)  Cache read: \(summary.cacheReadInputTokens)",
+            "Coverage: \(summary.calls - summary.unmeteredCalls)/\(summary.calls) calls metered  Estimated input: \(summary.estimatedInputTokens)",
             "Unclassified: \(summary.unclassifiedCalls)\(summary.unclassifiedCalls > 0 ? "  ACTION REQUIRED" : "")",
             "",
             "Top operations by token:",

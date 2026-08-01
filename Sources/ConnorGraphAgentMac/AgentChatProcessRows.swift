@@ -40,6 +40,10 @@ struct AgentActivityHeaderTextPresentation: Equatable {
     var text: String
 
     init(statusText: String, toolNames: [String]) {
+        if statusText == "正在压缩上下文" {
+            text = statusText
+            return
+        }
         let visibleToolNames = toolNames.filter { !Self.routineToolNames.contains($0) }
         guard !visibleToolNames.isEmpty else {
             text = statusText
@@ -517,6 +521,17 @@ struct AgentToolActivityRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
+                Text(AgentToolDisplayNameResolver.categoryName(
+                    rawToolName: activity.rawToolName,
+                    semanticKind: activity.semanticKind
+                ))
+                    .font(AgentChatTypography.monoMicro)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 6)
+                    .frame(height: AgentChatLayout.chipHeight)
+                    .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+
                 if let visibleTarget {
                     Text(visibleTarget)
                         .font(AgentChatTypography.monoMicro)
@@ -649,6 +664,11 @@ struct AgentActivityEventRow: View {
                 .foregroundStyle(.tertiary)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
+            if let occurredAt = event.occurredAt {
+                Text(occurredAt.formatted(date: .omitted, time: .standard))
+                    .font(AgentChatTypography.micro.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
             Text(event.kind)
                 .font(AgentChatTypography.monoMicro)
                 .foregroundStyle(.tertiary)

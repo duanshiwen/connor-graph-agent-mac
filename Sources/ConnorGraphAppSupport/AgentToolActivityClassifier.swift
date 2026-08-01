@@ -62,7 +62,7 @@ public struct AgentToolActivityClassifier: Sendable {
             resultJSON: nil,
             fallbackDetail: failure.message
         )
-        if activity?.rawToolName == "Bash" {
+        if activity.map({ ["Shell", "Bash"].contains($0.rawToolName) }) == true {
             activity?.icon = "xmark.octagon"
         }
         return activity
@@ -156,8 +156,16 @@ public struct AgentToolActivityClassifier: Sendable {
                 subtitle: countSubtitle(result["matches"], noun: "matches"),
                 icon: "magnifyingglass"
             )
-        case "Bash":
+        case "Shell", "Bash":
             return shellDescriptor(command: string(arguments["command"]) ?? string(result["command"]))
+        case "ApplyPatch":
+            return ToolDescriptor(
+                semanticKind: .editFile,
+                title: "Apply Patch",
+                target: countSubtitle(result["filesChanged"], noun: "files"),
+                subtitle: countSubtitle(result["operations"], noun: "operations"),
+                icon: "doc.badge.gearshape"
+            )
         case "calendar_write":
             let operation = string(arguments["operation"])
             let title: String
@@ -188,6 +196,8 @@ public struct AgentToolActivityClassifier: Sendable {
                 subtitle: string(arguments["operation"]),
                 icon: "calendar"
             )
+        case "parallel_tool_query", "parallel_tool_execute":
+            return batchDescriptor(rawToolName: rawToolName, arguments: arguments, result: result)
         default:
             if let mcp = mcpDescriptor(rawToolName) { return mcp }
             if rawToolName.localizedCaseInsensitiveContains("browser") {
@@ -246,15 +256,70 @@ public struct AgentToolActivityClassifier: Sendable {
         guard rawToolName.hasPrefix("mcp__") else { return nil }
         let parts = rawToolName.split(separator: "__", omittingEmptySubsequences: false).map(String.init)
         guard parts.count >= 3 else {
-            return ToolDescriptor(semanticKind: .mcp, title: "MCP", target: rawToolName, subtitle: nil, icon: "server.rack")
+            return ToolDescriptor(semanticKind: .mcp, title: rawToolName, target: nil, subtitle: "MCP", icon: "server.rack")
         }
         return ToolDescriptor(
             semanticKind: .mcp,
-            title: "MCP: \(parts[1])",
+            title: rawToolName,
             target: parts.dropFirst(2).joined(separator: "__"),
-            subtitle: nil,
+            subtitle: "MCP · \(parts[1])",
             icon: "server.rack"
         )
+    }
+
+    private func batchDescriptor(rawToolName: String, arguments: [String: Any], result: [String: Any]) -> ToolDescriptor {
+        let isQuery = rawToolName == "parallel_tool_query"
+        let names = batchToolNames(arguments: arguments, result: result)
+        let title: String
+        if names.isEmpty {
+            title = isQuery ? "并行查询" : "批量执行"
+        } else if names.count <= 3 {
+            title = names.joined(separator: "、")
+        } else {
+            title = "\(names.prefix(3).joined(separator: "、")) 等 \(names.count) 个工具"
+        }
+        let categories = stableUnique(names.map(toolCategory))
+        let operation = isQuery ? "并行查询" : "批量执行"
+        let subtitle = ([operation] + categories).joined(separator: " · ")
+        return ToolDescriptor(
+            semanticKind: isQuery ? .parallelQuery : .batchExecution,
+            title: title,
+            target: nil,
+            subtitle: subtitle,
+            icon: isQuery ? "square.stack.3d.up" : "square.stack.3d.down.right"
+        )
+    }
+
+    private func batchToolNames(arguments: [String: Any], result: [String: Any]) -> [String] {
+        let argumentNames = (arguments["calls"] as? [[String: Any]])?.compactMap { string($0["toolName"]) } ?? []
+        if !argumentNames.isEmpty { return stableUnique(argumentNames) }
+        let resultNames = (result["results"] as? [[String: Any]])?.compactMap { string($0["sourceID"]) } ?? []
+        return stableUnique(resultNames)
+    }
+
+    private func toolCategory(_ rawToolName: String) -> String {
+        let name = rawToolName.lowercased()
+        if name.hasPrefix("mcp__") { return "MCP" }
+        if name.hasPrefix("cloud_kb_") { return "知识库" }
+        if name.hasPrefix("memory_os_") || name == "memory_query" { return "记忆" }
+        if name.hasPrefix("mail_") { return "邮件" }
+        if name.hasPrefix("calendar_") { return "日历" }
+        if name.hasPrefix("rss_") { return "RSS" }
+        if name.hasPrefix("browser_") || name.hasPrefix("web_") { return "网页" }
+        if name.hasPrefix("contact") || name.hasPrefix("person") { return "人际关系" }
+        if name.hasPrefix("session_") { return "会话" }
+        if name.hasPrefix("tasks_") { return "任务" }
+        if name.hasPrefix("connor_skill_") || name.hasPrefix("skill_") { return "技能" }
+        if name.hasPrefix("science_") { return "计算" }
+        if ["read", "readmany", "ls", "glob", "grep"].contains(name) { return "文件读取" }
+        if ["write", "writebatch", "edit", "multiedit"].contains(name) { return "文件修改" }
+        if name == "bash" { return "终端" }
+        return "其他"
+    }
+
+    private func stableUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
     private struct ToolDescriptor {

@@ -7,6 +7,8 @@ public enum MCPStdioClientTransportError: Error, Sendable, Equatable, CustomStri
     case missingContentLength
     case invalidHeader(String)
     case invalidUTF8Frame
+    case responseTooLarge(Int)
+    case requestTimedOut(TimeInterval)
     case responseIDMismatch(expected: MCPJSONRPCID, actual: MCPJSONRPCID?)
 
     public var description: String {
@@ -17,12 +19,14 @@ public enum MCPStdioClientTransportError: Error, Sendable, Equatable, CustomStri
         case .missingContentLength: "missingContentLength"
         case .invalidHeader(let header): "invalidHeader: \(header)"
         case .invalidUTF8Frame: "invalidUTF8Frame"
+        case .responseTooLarge(let maximumBytes): "responseTooLarge: maximum \(maximumBytes) bytes"
+        case .requestTimedOut(let seconds): "requestTimedOut: \(seconds) seconds"
         case .responseIDMismatch(let expected, let actual): "responseIDMismatch: expected \(expected), actual \(String(describing: actual))"
         }
     }
 }
 
-/// Real MCP stdio transport using JSON-RPC messages framed with `Content-Length` headers.
+/// Real MCP stdio transport using newline-delimited JSON-RPC messages.
 ///
 /// This transport intentionally owns subprocess lifecycle and filters sensitive inherited
 /// environment variables before injecting source-specific variables. It is serial-call
@@ -32,6 +36,8 @@ public final class MCPStdioClientTransport: MCPClientTransport, @unchecked Senda
     public var arguments: [String]
     public var environment: [String: String]
     public var currentDirectoryURL: URL?
+    public var requestTimeout: TimeInterval
+    public var maximumResponseBytes: Int
 
     private let lock = NSLock()
     private var process: Process?
@@ -45,26 +51,46 @@ public final class MCPStdioClientTransport: MCPClientTransport, @unchecked Senda
         command: String,
         arguments: [String] = [],
         environment: [String: String] = [:],
-        currentDirectoryURL: URL? = nil
+        currentDirectoryURL: URL? = nil,
+        requestTimeout: TimeInterval = 30,
+        maximumResponseBytes: Int = 10 * 1024 * 1024
     ) {
         self.command = command
         self.arguments = arguments
         self.environment = environment
         self.currentDirectoryURL = currentDirectoryURL
+        self.requestTimeout = requestTimeout
+        self.maximumResponseBytes = maximumResponseBytes
     }
 
     public func send(_ message: MCPJSONRPCMessage) async throws -> MCPJSONRPCMessage? {
         try startIfNeeded()
         guard let stdinHandle else { throw MCPStdioClientTransportError.processNotStarted }
-        let data = try encoder.encode(message)
-        let frameHeader = "Content-Length: \(data.count)\r\n\r\n"
-        var frame = Data(frameHeader.utf8)
-        frame.append(data)
-        try stdinHandle.write(contentsOf: frame)
+        var data = try encoder.encode(message)
+        data.append(0x0A)
+        try stdinHandle.write(contentsOf: data)
 
         guard let id = message.id else { return nil }
+        return try await response(matching: id)
+    }
+
+    private func response(matching id: MCPJSONRPCID) async throws -> MCPJSONRPCMessage? {
+        let timeout = max(0.1, requestTimeout)
+        return try await withThrowingTaskGroup(of: MCPJSONRPCMessage?.self) { group in
+            group.addTask { try self.readResponse(matching: id) }
+            group.addTask {
+                try await Task.sleep(for: .seconds(timeout))
+                try await self.close()
+                throw MCPStdioClientTransportError.requestTimedOut(timeout)
+            }
+            defer { group.cancelAll() }
+            return try await group.next() ?? nil
+        }
+    }
+
+    private func readResponse(matching id: MCPJSONRPCID) throws -> MCPJSONRPCMessage? {
         while true {
-            guard let response = try readFrame() else { return nil }
+            guard let response = try readLine() else { return nil }
             if response.id == id { return response }
             if response.id != nil {
                 throw MCPStdioClientTransportError.responseIDMismatch(expected: id, actual: response.id)
@@ -132,10 +158,10 @@ public final class MCPStdioClientTransport: MCPClientTransport, @unchecked Senda
         throw MCPStdioClientTransportError.missingExecutable(command)
     }
 
-    private func readFrame() throws -> MCPJSONRPCMessage? {
+    private func readLine() throws -> MCPJSONRPCMessage? {
         guard let stdoutHandle else { throw MCPStdioClientTransportError.processNotStarted }
-        var headerData = Data()
-        while !headerData.ends(with: Data("\r\n\r\n".utf8)) {
+        var line = Data()
+        while true {
             guard let byte = try stdoutHandle.read(upToCount: 1), !byte.isEmpty else {
                 let stderr = stderrText()
                 if locked({ process?.isRunning == false }) {
@@ -143,26 +169,15 @@ public final class MCPStdioClientTransport: MCPClientTransport, @unchecked Senda
                 }
                 return nil
             }
-            headerData.append(byte)
-        }
-        guard let headerText = String(data: headerData, encoding: .utf8) else {
-            throw MCPStdioClientTransportError.invalidHeader("<non-utf8>")
-        }
-        let lines = headerText.components(separatedBy: "\r\n").filter { !$0.isEmpty }
-        var contentLength: Int?
-        for line in lines {
-            let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            guard parts.count == 2 else { throw MCPStdioClientTransportError.invalidHeader(line) }
-            if parts[0].localizedCaseInsensitiveCompare("Content-Length") == .orderedSame {
-                contentLength = Int(parts[1])
+            if byte[byte.startIndex] == 0x0A { break }
+            line.append(byte)
+            if line.count > maximumResponseBytes {
+                throw MCPStdioClientTransportError.responseTooLarge(maximumResponseBytes)
             }
         }
-        guard let contentLength else { throw MCPStdioClientTransportError.missingContentLength }
-        guard let payload = try stdoutHandle.read(upToCount: contentLength), payload.count == contentLength else {
-            let stderr = stderrText()
-            throw MCPStdioClientTransportError.processTerminated(stderr)
-        }
-        return try decoder.decode(MCPJSONRPCMessage.self, from: payload)
+        if line.last == 0x0D { line.removeLast() }
+        guard !line.isEmpty else { return try readLine() }
+        return try decoder.decode(MCPJSONRPCMessage.self, from: line)
     }
 
     private func stderrText() -> String {
@@ -195,12 +210,5 @@ public final class MCPStdioClientTransport: MCPClientTransport, @unchecked Senda
         var environment = ProcessInfo.processInfo.environment.filter { !blocked.contains($0.key) }
         overrides.forEach { key, value in environment[key] = value }
         return environment
-    }
-}
-
-private extension Data {
-    func ends(with suffix: Data) -> Bool {
-        guard count >= suffix.count else { return false }
-        return self.suffix(suffix.count) == suffix
     }
 }

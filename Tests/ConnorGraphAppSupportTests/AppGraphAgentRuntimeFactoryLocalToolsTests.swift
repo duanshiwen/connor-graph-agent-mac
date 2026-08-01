@@ -23,14 +23,11 @@ import ConnorGraphStore
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
     let names = controller.toolRegistry.definitions.map(\.name)
 
-    #expect(names.contains("Read"))
-    #expect(names.contains("LS"))
-    #expect(names.contains("Glob"))
-    #expect(names.contains("Grep"))
-    #expect(names.contains("Write"))
-    #expect(names.contains("Edit"))
-    #expect(names.contains("MultiEdit"))
-    #expect(names.contains("Bash"))
+    #expect(names.contains("Shell"))
+    #expect(names.contains("ApplyPatch"))
+    #expect(Set(names).isDisjoint(with: ["Read", "ReadMany", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "WriteBatch", "Bash"]))
+    #expect(controller.toolRegistry.permission(named: "Shell") == .runReadOnlyShellCommand)
+    #expect(controller.toolRegistry.permission(named: "ApplyPatch") == .editWorkspaceFile)
 }
 
 @Test func agentLoopRuntimeFactoryRegistersSessionStatusTools() throws {
@@ -104,7 +101,7 @@ import ConnorGraphStore
     #expect(names.contains("science_table_compute"))
 }
 
-@Test func agentLoopRuntimeFactoryNativeReadUsesRuntimeWorkspace() async throws {
+@Test func agentLoopRuntimeFactoryShellUsesRuntimeWorkspace() async throws {
     let appDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorFactoryLocalToolsRuntimeWorkspace-", isDirectory: true)
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -134,8 +131,9 @@ import ConnorGraphStore
     #expect(controller.toolRegistry.permission(named: "present_image") == .externalNetwork)
     #expect(controller.toolRegistry.definitions.map(\.name).contains("image_search"))
     #expect(controller.toolRegistry.permission(named: "image_search") == .externalNetwork)
+    #expect(!controller.toolRegistry.definitions.map(\.name).contains("Read"))
     let result = try await controller.toolRegistry.execute(
-        AgentToolCall(name: "Read", argumentsJSON: #"{"filePath":"README.md"}"#),
+        AgentToolCall(name: "Shell", argumentsJSON: #"{"command":"cat README.md"}"#),
         context: AgentToolExecutionContext(
             runID: "run-local-runtime-workspace",
             sessionID: "session-local-runtime-workspace",
@@ -147,10 +145,9 @@ import ConnorGraphStore
     )
 
     #expect(result.contentText.contains("Runtime workspace README"))
-    #expect(result.contentJSON?.contains("runtime-project") == true)
 }
 
-@Test func agentLoopRuntimeFactoryNativeReadUsesSessionWorkspaceBeforeRuntimeWorkspace() async throws {
+@Test func agentLoopRuntimeFactoryShellUsesSessionWorkspaceBeforeRuntimeWorkspace() async throws {
     let appDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorFactoryLocalToolsSessionWorkspace-", isDirectory: true)
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -187,7 +184,7 @@ import ConnorGraphStore
     )
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly, sessionWorkspace: sessionWorkspaceReference)
     let result = try await controller.toolRegistry.execute(
-        AgentToolCall(name: "Read", argumentsJSON: #"{"filePath":"README.md"}"#),
+        AgentToolCall(name: "Shell", argumentsJSON: #"{"command":"cat README.md"}"#),
         context: AgentToolExecutionContext(
             runID: "run-local-session-workspace",
             sessionID: "session-local-session-workspace",
@@ -200,7 +197,6 @@ import ConnorGraphStore
 
     #expect(result.contentText.contains("Session workspace README"))
     #expect(!result.contentText.contains("Runtime workspace README"))
-    #expect(result.contentJSON?.contains("session-project") == true)
 }
 
 @Test func agentLoopRuntimeFactoryInstructionDeclaresCurrentSessionWorkspace() throws {
@@ -346,11 +342,11 @@ import ConnorGraphStore
         ]
     )
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly, sessionWorkspace: replacementWorkspace)
-    let arguments = #"{"filePath":"\#(oldFile.path)"}"#
+    let arguments = #"{"command":"cat secret.txt","workingDirectory":"\#(oldWorkspace.path)"}"#
 
     do {
         _ = try await controller.toolRegistry.execute(
-            AgentToolCall(name: "Read", argumentsJSON: arguments),
+            AgentToolCall(name: "Shell", argumentsJSON: arguments),
             context: AgentToolExecutionContext(
                 runID: "run-replaced-workspace",
                 sessionID: "session-replaced-workspace",
@@ -362,11 +358,11 @@ import ConnorGraphStore
         )
         Issue.record("Expected the previous workspace to be rejected")
     } catch let error as LocalWorkspacePolicyError {
-        #expect(error == .pathEscapesAllowedRoots(oldFile.resolvingSymlinksInPath().standardizedFileURL.path))
+        #expect(error == .pathEscapesAllowedRoots(oldWorkspace.resolvingSymlinksInPath().standardizedFileURL.path))
     }
 }
 
-@Test func agentLoopRuntimeFactoryNativeReadAllowsAdditionalWorkspaceRoot() async throws {
+@Test func agentLoopRuntimeFactoryShellAllowsAdditionalWorkspaceRoot() async throws {
     let appDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorFactoryLocalToolsMultiRootWorkspace-", isDirectory: true)
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -399,9 +395,9 @@ import ConnorGraphStore
     )
     let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
-    let arguments = #"{"filePath":"\#(sharedFile.path)"}"#
+    let arguments = #"{"command":"cat shared.md","workingDirectory":"\#(secondaryWorkspace.path)"}"#
     let result = try await controller.toolRegistry.execute(
-        AgentToolCall(name: "Read", argumentsJSON: arguments),
+        AgentToolCall(name: "Shell", argumentsJSON: arguments),
         context: AgentToolExecutionContext(
             runID: "run-local-multi-root-workspace",
             sessionID: "session-local-multi-root-workspace",
@@ -413,7 +409,6 @@ import ConnorGraphStore
     )
 
     #expect(result.contentText.contains("Shared workspace root content"))
-    #expect(result.contentJSON?.contains("shared-docs") == true)
 }
 
 @Test func agentLoopRuntimeFactoryContactsReadListsPersistentPersonRegistryProfiles() async throws {
@@ -540,7 +535,10 @@ import ConnorGraphStore
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
 
     let readResult = try await controller.toolRegistry.execute(
-        AgentToolCall(name: "Read", argumentsJSON: #"{"filePath":"\#(skillFile.path)"}"#),
+        AgentToolCall(
+            name: "Shell",
+            argumentsJSON: #"{"command":"cat assistant-skill.md","workingDirectory":"\#(storagePaths.skillsDirectory.path)"}"#
+        ),
         context: AgentToolExecutionContext(
             runID: "run-hidden-data-read",
             sessionID: "session-hidden-data-read",
@@ -552,7 +550,7 @@ import ConnorGraphStore
     )
 
     let listResult = try await controller.toolRegistry.execute(
-        AgentToolCall(name: "LS", argumentsJSON: #"{"path":"."}"#),
+        AgentToolCall(name: "Shell", argumentsJSON: #"{"command":"pwd"}"#),
         context: AgentToolExecutionContext(
             runID: "run-hidden-data-ls",
             sessionID: "session-hidden-data-ls",
@@ -564,8 +562,9 @@ import ConnorGraphStore
     )
 
     #expect(readResult.contentText.contains("Hidden Connor skill content"))
-    #expect(readResult.contentJSON?.contains("ConnorData") == true)
-    #expect(listResult.contentJSON?.contains("VisibleProject") == true)
+    #expect(listResult.contentText.contains("VisibleProject"))
+    #expect(!listResult.contentText.contains("ConnorData"))
+    #expect(!controller.toolRegistry.definitions.map(\.name).contains("LS"))
     #expect(listResult.contentJSON?.contains("ConnorData") != true)
 }
 
@@ -609,15 +608,16 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(!names.contains("memory_os_dashboard_summary"))
     #expect(!names.contains("memory_os_ingest_observation"))
     #expect(!names.contains("memory_os_project_structured_artifact"))
-    // Conversation runtime exposes one phase-level memory_query; partition tools stay internal.
+    // Conversation runtime exposes all read-only continuity domains through the
+    // routed parallel query while keeping write primitives unavailable.
     #expect(names.contains("get_current_time"))
-    #expect(!names.contains("memory_os_recent_context"))
-    #expect(!names.contains("memory_os_knowledge_context"))
+    #expect(names.contains("memory_os_recent_context"))
+    #expect(names.contains("memory_os_knowledge_context"))
     #expect(names.contains("memory_os_get_current_user_profile"))
     #expect(!names.contains("conversation_history_search"))
     #expect(names.contains("web_search"))
     #expect(names.contains("web_fetch"))
-    #expect(names.contains("browser_fetch"))
+    #expect(!names.contains("browser_fetch"))
     #expect(names.contains("connor_skill_list"))
     #expect(names.contains("connor_skill_activate"))
     #expect(names.contains("environment_history_coverage"))

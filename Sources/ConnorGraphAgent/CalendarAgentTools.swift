@@ -218,6 +218,65 @@ public struct CalendarSearchEventsTool: AgentTool {
     }
 }
 
+/// Returns upcoming events across every calendar within a near-term look-ahead
+/// window in a single call. It resolves the window from the current time on the
+/// server and loads all calendars at once, so the model never has to call
+/// get_current_time or list_calendars first, nor iterate calendars one by one.
+/// The read-only `.readCalendar` capability keeps it safe to run in parallel
+/// with other read tools.
+public struct CalendarUpcomingEventsTool: AgentTool {
+    public let runtime: any AgentCalendarRuntime
+    public let recorder: (any NativeSourceReferenceRecording)?
+    public static let defaultLookAheadDays = 2
+    public static let maximumLookAheadDays = 31
+    public var name: String { "calendar_upcoming_events" }
+    public var description: String { "List upcoming events across ALL of Connor's calendars within a near-term look-ahead window, sorted by start time. This is the fastest way to see what is coming up: it needs no prior get_current_time or list_calendars call, computes the window from the current time on the server, and never requires iterating calendars yourself. The window defaults to the next \(Self.defaultLookAheadDays) days; pass days to widen or narrow it (1–\(Self.maximumLookAheadDays)). Use calendar_search_events when you need a keyword or an explicit absolute range, and calendar_read with operation get_event for a detailed evidence read." }
+    public var permission: AgentPermissionCapability { .readCalendar }
+    public var inputSchema: AgentToolInputSchema {
+        .closedObject(properties: [
+            "days": .integer(description: "Optional look-ahead window in days from now (default \(Self.defaultLookAheadDays), max \(Self.maximumLookAheadDays)). Events overlapping this window in any calendar are returned."),
+            "limit": .integer(description: "Maximum events to return")
+        ], required: [])
+    }
+
+    public init(runtime: any AgentCalendarRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        self.runtime = runtime
+        self.recorder = recorder
+    }
+
+    public var inputExamples: [[String: SendableJSONValue]] {
+        [[:], ["days": .int(3)]]
+    }
+
+    public func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments {
+        arguments.normalizingAliases([
+            "days": ["lookAheadDays", "windowDays", "horizonDays", "rangeDays"],
+            "limit": ["maxResults", "maxItems", "pageSize"]
+        ])
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let requestedDays = arguments.int("days") ?? Self.defaultLookAheadDays
+        let days = min(max(1, requestedDays), Self.maximumLookAheadDays)
+        let now = Date()
+        let endDate = now.addingTimeInterval(TimeInterval(days) * 86_400)
+        let events = try await runtime.searchEvents(
+            query: "",
+            startDate: now,
+            endDate: endDate,
+            timePreset: nil,
+            timeFilterMode: NativeSearchTemporalFilterMode.intervalOverlapsRange.rawValue,
+            timeSort: NativeSearchTemporalSort.timeAscThenRelevance.rawValue,
+            limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultSearchLimit),
+            runID: context.runID,
+            sessionID: context.sessionID
+        )
+        await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: nil, strength: .summaryCandidate, toolName: name, context: context) })
+        let window = "next \(days) day\(days == 1 ? "" : "s") across all calendars"
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventCandidateTextRenderer.render(events, verb: "Found upcoming events (\(window)):"), contentJSON: try CalendarToolJSON.encodeEvents(events))
+    }
+}
+
 public struct CalendarDetailReadEvidence: Sendable, Equatable {
     public var runID: String
     public var sessionID: String
@@ -559,6 +618,7 @@ private enum CalendarEventCandidateTextRenderer {
 public extension AgentToolRegistry {
     mutating func registerNativeCalendarTools(runtime: any AgentCalendarRuntime, recorder: (any NativeSourceReferenceRecording)? = nil, evidenceRegistry: CalendarDetailReadEvidenceRegistry = .init()) {
         register(CalendarSearchEventsTool(runtime: runtime, recorder: recorder))
+        register(CalendarUpcomingEventsTool(runtime: runtime, recorder: recorder))
         register(CalendarReadTool(runtime: runtime, recorder: recorder, evidenceRegistry: evidenceRegistry))
         register(CalendarWriteTool(runtime: runtime, evidenceRegistry: evidenceRegistry))
     }

@@ -352,7 +352,8 @@ final class ContactsFeatureModel {
         }
     }
 
-    func mergeProfile(sourceID: ContactID, targetID: ContactID) async {
+    @discardableResult
+    func mergeProfile(sourceID: ContactID, targetID: ContactID) async -> Bool {
         do {
             let now = Date()
             _ = try await profileStore?.merge(sourceID: sourceID, targetID: targetID, now: now)
@@ -367,8 +368,10 @@ final class ContactsFeatureModel {
             selectedContactID = targetID
             rebuildPresentation()
             reportSuccess()
+            return true
         } catch {
             reportFailure("无法合并人物档案：\(error.localizedDescription)")
+            return false
         }
     }
 

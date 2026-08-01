@@ -156,13 +156,13 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
 
     let migrated = try repository.loadOrCreateDefault()
 
-    #expect(migrated.schemaVersion == 6)
-    #expect(migrated.loop.maxToolIterations == 24)
-    #expect(migrated.loop.maxToolResultBytes == 32 * 1_024)
-    #expect(migrated.loop.promptMaxEstimatedTokens == 200_000)
-    #expect(migrated.loop.budget.maxTotalTokens == 300_000)
+    #expect(migrated.schemaVersion == 7)
+    #expect(migrated.loop.maxToolIterations == 12)
+    #expect(migrated.loop.maxToolResultBytes == 8 * 1_024)
+    #expect(migrated.loop.promptMaxEstimatedTokens == 64_000)
+    #expect(migrated.loop.budget.maxTotalTokens == 80_000)
     #expect(migrated.loop.maxConsecutiveToolResultErrors == 3)
-    #expect(migrated.loop.stopAfterTurnWhenBudgetExceeded)
+    #expect(!migrated.loop.stopAfterTurnWhenBudgetExceeded)
     #expect(migrated.loop.preflightMode == .contextual)
     #expect(migrated.loop.toolExposureMode == .contextual)
     #expect(migrated.loop.maxToolCallsPerIteration == 17)
@@ -183,7 +183,7 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
 
     let migrated = try repository.loadOrCreateDefault()
 
-    #expect(migrated.schemaVersion == 6)
+    #expect(migrated.schemaVersion == 7)
     #expect(migrated.loop.maxToolIterations == 512)
     #expect(migrated.loop.maxToolResultBytes == 456_789)
     #expect(migrated.loop.promptMaxEstimatedTokens == 345_678)

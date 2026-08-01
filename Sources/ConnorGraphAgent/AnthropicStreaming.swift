@@ -72,6 +72,7 @@ public enum AnthropicServerTool: Codable, Sendable, Equatable {
 public struct AnthropicCompatibleFeatureOptions: Codable, Sendable, Equatable {
     public var streamingEnabled: Bool
     public var thinking: AnthropicThinkingConfig?
+    public var effort: String?
     public var promptCache: AnthropicPromptCacheConfig
     public var eagerInputStreamingToolNames: Set<String>
     public var cachedToolNames: Set<String>
@@ -82,6 +83,7 @@ public struct AnthropicCompatibleFeatureOptions: Codable, Sendable, Equatable {
     public init(
         streamingEnabled: Bool = true,
         thinking: AnthropicThinkingConfig? = nil,
+        effort: String? = nil,
         promptCache: AnthropicPromptCacheConfig = AnthropicPromptCacheConfig(),
         eagerInputStreamingToolNames: Set<String> = [],
         cachedToolNames: Set<String> = [],
@@ -91,6 +93,7 @@ public struct AnthropicCompatibleFeatureOptions: Codable, Sendable, Equatable {
     ) {
         self.streamingEnabled = streamingEnabled
         self.thinking = thinking
+        self.effort = effort
         self.promptCache = promptCache
         self.eagerInputStreamingToolNames = eagerInputStreamingToolNames
         self.cachedToolNames = cachedToolNames
@@ -218,9 +221,16 @@ public struct AnthropicStreamAccumulator: Sendable, Equatable {
             return nil
         case .messageDelta(let stopReason, let usage):
             if let stopReason { self.stopReason = stopReason }
-            if let usage { self.usage = usage }
+            if let usage { self.usage = Self.mergedUsage(self.usage, usage) }
             return nil
         case .messageStart(let rawJSON):
+            // message_start carries the request-side usage (input_tokens plus
+            // cache creation/read); message_delta later only updates outputs.
+            if let object = try? JSONSerialization.jsonObject(with: Data(rawJSON.utf8)) as? [String: Any],
+               let message = object["message"] as? [String: Any],
+               let startUsage = Self.usage(from: message["usage"] as? [String: Any]) {
+                usage = Self.mergedUsage(usage, startUsage)
+            }
             return .rawProviderEvent(rawJSON)
         case .messageStop:
             return .completed(response())
@@ -291,11 +301,28 @@ public struct AnthropicStreamAccumulator: Sendable, Equatable {
         guard let object else { return nil }
         let input = object["input_tokens"] as? Int ?? 0
         let output = object["output_tokens"] as? Int ?? 0
+        let cacheCreation = object["cache_creation_input_tokens"] as? Int
+        let cacheRead = object["cache_read_input_tokens"] as? Int
+        // Anthropic reports input_tokens excluding cache creation/read tokens.
+        // Normalize promptTokens to the full input so cache accounting shares
+        // OpenAI-style semantics (cacheReadInputTokens ⊆ promptTokens).
         return AgentModelUsage(
-            promptTokens: input,
+            promptTokens: input + (cacheCreation ?? 0) + (cacheRead ?? 0),
             completionTokens: output,
-            cacheCreationInputTokens: object["cache_creation_input_tokens"] as? Int,
-            cacheReadInputTokens: object["cache_read_input_tokens"] as? Int
+            cacheCreationInputTokens: cacheCreation,
+            cacheReadInputTokens: cacheRead
+        )
+    }
+
+    static func mergedUsage(_ existing: AgentModelUsage?, _ update: AgentModelUsage) -> AgentModelUsage {
+        guard let existing else { return update }
+        // Later events (message_delta) usually carry only output_tokens; keep
+        // the request-side fields captured at message_start when absent.
+        return AgentModelUsage(
+            promptTokens: update.promptTokens > 0 ? update.promptTokens : existing.promptTokens,
+            completionTokens: update.completionTokens > 0 ? update.completionTokens : existing.completionTokens,
+            cacheCreationInputTokens: update.cacheCreationInputTokens ?? existing.cacheCreationInputTokens,
+            cacheReadInputTokens: update.cacheReadInputTokens ?? existing.cacheReadInputTokens
         )
     }
 }
@@ -323,7 +350,7 @@ public struct URLSessionAgentSSEHTTPClient: AgentSSEHTTPClient, Sendable, Equata
             )
         }
         return AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     var frame = ""
                     for try await line in bytes.lines {
@@ -342,6 +369,7 @@ public struct URLSessionAgentSSEHTTPClient: AgentSSEHTTPClient, Sendable, Equata
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
 }

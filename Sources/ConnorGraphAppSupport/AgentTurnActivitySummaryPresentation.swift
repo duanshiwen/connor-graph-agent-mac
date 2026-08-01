@@ -99,7 +99,7 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
         let hasPermissionRequest = events.contains { $0.kind == "permissionRequested" }
         let primaryErrorMessage = events.first(where: { $0.severity == .error })?.detail.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         let state = state(for: process, events: events, hasPermissionRequest: hasPermissionRequest)
-        let statusText = statusText(for: state)
+        let statusText = isCompactionActive(events) ? "正在压缩上下文" : statusText(for: state)
         let compactToolText = compactToolText(for: toolNames)
         let title = "第 \(process.turnNumber) 轮 · \(statusText)"
         let subtitle = subtitle(
@@ -128,20 +128,29 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
         )
     }
 
+    private func isCompactionActive(_ events: [AgentEventPresentation]) -> Bool {
+        guard let lastLifecycleEvent = events.last(where: {
+            $0.kind == "compactionStarted" || $0.kind == "compactionCompleted" || $0.kind == "compactionFailed"
+        }) else { return false }
+        return lastLifecycleEvent.kind == "compactionStarted"
+    }
+
     private func state(for process: AgentChatTurnProcessPresentation, events: [AgentEventPresentation], hasPermissionRequest: Bool) -> AgentTurnActivitySummaryState {
         // A failed tool call is recoverable: the agent loop may retry, choose another path,
         // or continue producing a final answer. Only an explicit run-level failure should mark
         // the whole turn as failed. This prevents an in-progress turn from showing “已失败”
         // just because one tool invocation failed along the way.
-        if events.contains(where: { $0.kind == "runFailed" }) {
-            return .failed
+        if events.contains(where: { $0.kind == "runFailed" && $0.title.localizedCaseInsensitiveContains("cancelled") }) {
+            return .cancelled
         }
+        if events.contains(where: { $0.kind == "runFailed" }) { return .failed }
         if hasPermissionRequest && !events.contains(where: { $0.kind == "permissionResolved" && $0.severity == .success }) {
             return .waitingForPermission
         }
         if process.state == .cancelled || events.contains(where: { $0.title.localizedCaseInsensitiveContains("cancelled") }) {
             return .cancelled
         }
+        if process.state == .failed { return .failed }
         if process.state == .running {
             return .running
         }

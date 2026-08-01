@@ -635,7 +635,7 @@ private struct AgentChatConversationView: View {
             var startingTurnCursor: AgentChatTurnCursor
             var contextSignature: Int
             var isSubmitting: Bool
-            var preservesOpenProcess: Bool
+            var preservedOpenProcessState: AgentChatTurnProcessState?
         }
 
         static let shared = TimelineCache()
@@ -665,14 +665,14 @@ private struct AgentChatConversationView: View {
             startingTurnCursor: AgentChatTurnCursor,
             lastContext: AgentContext?,
             isSubmitting: Bool,
-            preservesOpenProcess: Bool
+            preservedOpenProcessState: AgentChatTurnProcessState?
         ) -> [AgentChatTurnTimelineItem] {
             if let cached = entries[key] { return cached }
             let built = AgentChatTurnTimelineItem.items(
                 messages: messages,
                 lastContext: lastContext,
                 isSubmitting: isSubmitting,
-                preservesOpenProcess: preservesOpenProcess,
+                preservedOpenProcessState: preservedOpenProcessState,
                 startingTurnCursor: startingTurnCursor
             )
             if entries.count >= limit {
@@ -683,12 +683,12 @@ private struct AgentChatConversationView: View {
         }
     }
 
-    private var shouldPreserveOpenProcess: Bool {
-        guard !model.run.isSubmitting,
-              !model.run.eventTimeline.isEmpty,
-              model.run.transcript.last?.role == .user
-        else { return false }
-        return true
+    private var preservedOpenProcessState: AgentChatTurnProcessState? {
+        AgentChatOpenProcessStateResolver.resolve(
+            messages: model.run.transcript,
+            isSubmitting: model.run.isSubmitting,
+            events: model.run.eventTimeline
+        )
     }
 
     private func timelineCacheKey(
@@ -714,7 +714,7 @@ private struct AgentChatConversationView: View {
             startingTurnCursor: startingTurnCursor,
             contextSignature: contextSignature,
             isSubmitting: model.run.isSubmitting,
-            preservesOpenProcess: shouldPreserveOpenProcess
+            preservedOpenProcessState: preservedOpenProcessState
         )
     }
 
@@ -737,7 +737,7 @@ private struct AgentChatConversationView: View {
             startingTurnCursor: startingTurnCursor,
             lastContext: model.run.lastContext,
             isSubmitting: model.run.isSubmitting,
-            preservesOpenProcess: shouldPreserveOpenProcess
+            preservedOpenProcessState: preservedOpenProcessState
         )
     }
 

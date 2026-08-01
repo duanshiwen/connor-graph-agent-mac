@@ -50,6 +50,14 @@ struct AgentActivityDetailOverlay: View {
                                 .foregroundStyle(.tertiary)
                             Spacer()
                         }
+                        if let occurredAt = event.occurredAt {
+                            Label(
+                                occurredAt.formatted(date: .abbreviated, time: .standard),
+                                systemImage: "clock"
+                            )
+                            .font(AgentChatTypography.meta.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        }
                         AgentMarkdownPreviewText(markdown: event.detail, font: AgentChatTypography.body)
                             .foregroundStyle(.primary)
                     }
