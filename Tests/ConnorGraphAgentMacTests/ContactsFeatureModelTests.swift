@@ -63,7 +63,7 @@ struct ContactsFeatureModelTests {
         #expect(await fixture.model.saveRelationship(relationship))
         #expect(fixture.model.currentUserRelationships().map(\.id) == [relationship.id])
 
-        await fixture.model.mergeProfile(sourceID: sourceID, targetID: targetID)
+        #expect(await fixture.model.mergeProfile(sourceID: sourceID, targetID: targetID))
 
         let reloaded = fixture.model.relationships.first { $0.id == relationship.id }
         #expect(reloaded?.source.personID == targetID)

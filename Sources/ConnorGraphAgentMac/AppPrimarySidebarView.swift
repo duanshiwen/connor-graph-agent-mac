@@ -102,9 +102,7 @@ struct CraftPrimarySidebarView: View {
                         }
                     }
 
-                    SidebarRow(title: "人际关系", systemImage: "person.2", count: graph.contacts.presentation.rows.count, isSelected: selection == .contacts) { select(.contacts) }
-
-                    SidebarRow(title: "通讯录", systemImage: "person.crop.circle.badge.plus", count: imPendingRequestCount, isSelected: selection == .imContacts) { select(.imContacts) }
+                    SidebarRow(title: "人际关系", systemImage: "person.2", count: contactsBadgeCount, isSelected: selection == .contacts) { select(.contacts) }
 
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
                         SidebarRow(title: "日历", systemImage: "calendar", count: graph.calendar.presentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }
@@ -173,6 +171,14 @@ struct CraftPrimarySidebarView: View {
     private var imPendingRequestCount: Int? {
         let count = graph.im?.pendingIncomingRequestCount ?? 0
         return count > 0 ? count : nil
+    }
+
+    /// Merged 人际关系 badge: pending friend requests take priority, otherwise the
+    /// person count is shown.
+    private var contactsBadgeCount: Int? {
+        if let pending = imPendingRequestCount { return pending }
+        let personCount = graph.contacts.presentation.rows.count
+        return personCount > 0 ? personCount : nil
     }
 
     private var rssUnreadCount: Int? {

@@ -89,13 +89,71 @@ private func auditTestStore() -> (FileLLMUsageAuditStore, URL) {
 
     for try await _ in provider.streamComplete(AgentModelRequest(
         messages: [.init(role: .user, content: "stream")],
-        auditContext: .init(requestKind: .conversationTurn, operation: "AgentLoop.stream", initiator: .foreground)
+        auditContext: .init(
+            requestKind: .conversationTurn,
+            sessionID: "session-1",
+            runID: "run-1",
+            iteration: 2,
+            operation: "AgentLoopController.completeModelRequest",
+            initiator: .foreground
+        )
     )) {}
 
     let records = store.records()
     #expect(records.count == 1)
     #expect(records.first?.executionMode == .streaming)
     #expect(records.first?.totalTokens == 6)
+    #expect(records.first?.requestKind == .conversationTurn)
+    #expect(records.first?.sessionID == "session-1")
+    #expect(records.first?.runID == "run-1")
+    #expect(records.first?.iteration == 2)
+    #expect(store.persistenceHealth().successfulWrites == 1)
+    #expect(store.persistenceHealth().isHealthy)
+}
+
+@Test func auditStoreReportsPersistenceFailuresInsteadOfSilentlyHidingThem() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("connor-llm-audit-blocked-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("not a directory".utf8).write(to: root)
+    let store = FileLLMUsageAuditStore(fileURL: root.appendingPathComponent("llm-usage.jsonl"))
+    let base = AnyAgentModelProvider(modelID: "audit-model") { _ in
+        AgentModelResponse(text: "ok", usage: AgentModelUsage(promptTokens: 2, completionTokens: 1))
+    }
+    let provider = AuditedAgentModelProvider(provider: base, recorder: store)
+
+    _ = try await provider.complete(AgentModelRequest(
+        messages: [.init(role: .user, content: "hello")],
+        auditContext: .init(requestKind: .conversationTurn, sessionID: "session", runID: "run")
+    ))
+
+    let health = store.persistenceHealth()
+    #expect(health.successfulWrites == 0)
+    #expect(health.failedWrites == 1)
+    #expect(health.lastError != nil)
+    #expect(!health.isHealthy)
+}
+
+@Test func auditSummarySeparatesMeteredTokensFromEstimatedCoverage() async throws {
+    let (store, root) = auditTestStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let metered = AnyAgentModelProvider(modelID: "metered") { _ in
+        AgentModelResponse(text: "ok", usage: AgentModelUsage(promptTokens: 8, completionTokens: 2))
+    }
+    let unmetered = AnyAgentModelProvider(modelID: "unmetered") { _ in
+        AgentModelResponse(text: "ok")
+    }
+    _ = try await AuditedAgentModelProvider(provider: metered, recorder: store).complete(
+        AgentModelRequest(messages: [.init(role: .user, content: "12345678")])
+    )
+    _ = try await AuditedAgentModelProvider(provider: unmetered, recorder: store).complete(
+        AgentModelRequest(messages: [.init(role: .user, content: "12345678")])
+    )
+
+    let summary = LLMUsageAuditQueryService(store: store).summary()
+    #expect(summary.calls == 2)
+    #expect(summary.totalTokens == 10)
+    #expect(summary.unmeteredCalls == 1)
+    #expect(summary.estimatedInputTokens == 4)
 }
 
 @Test func llmAuditCLIShowsTopTokenConsumingOperation() async throws {

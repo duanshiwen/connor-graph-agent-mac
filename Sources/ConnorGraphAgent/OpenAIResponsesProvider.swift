@@ -273,7 +273,6 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
             let identity = [
                 config.requestModel,
                 cache.promptVersion,
-                cache.phase.rawValue,
                 cache.stableToolBundleVersion
             ].joined(separator: "\u{1F}")
             let digest = SHA256.hash(data: Data(identity.utf8))

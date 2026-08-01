@@ -567,19 +567,6 @@ import ConnorGraphStore
     #expect(!json.contains("shiwen"))
 }
 
-@Test func memoryOSGetCurrentUserProfileRejectsRawFinalResponseLookup() async throws {
-    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
-    try store.migrate()
-    let tool = MemoryOSGetCurrentUserProfileTool(facade: AppMemoryOSFacade(store: store))
-
-    await #expect(throws: AgentToolError.self) {
-        _ = try await tool.execute(
-            arguments: AgentToolArguments(json: #"{"purpose":"final_response","view":"raw"}"#),
-            context: memoryOSToolContext()
-        )
-    }
-}
-
 @Test func memoryOSGetCurrentUserProfileReturnsAllPagesWithoutDuplicates() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()

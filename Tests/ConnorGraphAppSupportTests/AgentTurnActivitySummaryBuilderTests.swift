@@ -98,6 +98,28 @@ import ConnorGraphCore
     #expect(summary.subtitle == "执行终端命令失败：Call 1 · command timed out · 执行终端命令")
 }
 
+@Test func marksExplicitlyCancelledRunAsCancelledInsteadOfFailed() {
+    let process = makeProcess(state: .cancelled, turnNumber: 14)
+    let events = [
+        event(kind: "runFailed", title: "Run cancelled", detail: "cancelled by user", severity: .warning)
+    ]
+
+    let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
+
+    #expect(summary.state == .cancelled)
+    #expect(summary.statusText == "已取消")
+    #expect(summary.subtitle == "运行已取消 · 未调用工具")
+}
+
+@Test func marksOpenTurnFailedFromExplicitProcessState() {
+    let process = makeProcess(state: .failed, turnNumber: 15)
+
+    let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: [])
+
+    #expect(summary.state == .failed)
+    #expect(summary.statusText == "已失败")
+}
+
 @Test func summarizesManyToolsWithCompactText() {
     let process = makeProcess(state: .completed, turnNumber: 4)
     let events: [AgentEventPresentation] = [
@@ -165,8 +187,11 @@ import ConnorGraphCore
     #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "mail_send_draft", semanticKind: .unknown) == "发送邮件")
     #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "rss_sync_source", semanticKind: .unknown) == "同步 RSS 订阅源")
     #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "memory_os_l4_neighbors", semanticKind: .unknown) == "查看实体关系")
-    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "cloud_kb_future_operation", semanticKind: .unknown) == "执行知识库操作")
-    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "mcp__lark__search", semanticKind: .unknown) == "调用外部工具")
+    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "cloud_kb_future_operation", semanticKind: .unknown) == "cloud_kb_future_operation")
+    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "mcp__lark__search", semanticKind: .unknown) == "mcp__lark__search")
+    #expect(AgentToolDisplayNameResolver.categoryName(rawToolName: "mcp__lark__search", semanticKind: .mcp) == "MCP")
+    #expect(AgentToolDisplayNameResolver.categoryName(rawToolName: "cloud_kb_future_operation", semanticKind: .unknown) == "知识库")
+    #expect(AgentToolDisplayNameResolver.categoryName(rawToolName: "parallel_tool_query", semanticKind: .parallelQuery) == "并行查询")
 }
 
 @Test func toolSummaryCountsInvocationsInsteadOfLifecycleEvents() {
@@ -180,6 +205,29 @@ import ConnorGraphCore
     )
 
     #expect(summary.toolSummaries.first?.compactCountText == "获取当前时间")
+}
+
+@Test func showsCompactionOnlyWhileLifecycleIsActive() {
+    let process = makeProcess(state: .running, turnNumber: 15)
+    let started = event(
+        kind: "compactionStarted",
+        title: "正在压缩上下文",
+        detail: "generation 1",
+        severity: .info
+    )
+    let completed = event(
+        kind: "compactionCompleted",
+        title: "上下文压缩完成",
+        detail: "80000 -> 45000 tokens",
+        severity: .success
+    )
+
+    let active = AgentTurnActivitySummaryBuilder().summary(process: process, events: [started])
+    let hidden = AgentTurnActivitySummaryBuilder().summary(process: process, events: [started, completed])
+
+    #expect(active.statusText == "正在压缩上下文")
+    #expect(active.state == .running)
+    #expect(hidden.statusText == "正在处理")
 }
 
 private func makeProcess(state: AgentChatTurnProcessState, turnNumber: Int) -> AgentChatTurnProcessPresentation {

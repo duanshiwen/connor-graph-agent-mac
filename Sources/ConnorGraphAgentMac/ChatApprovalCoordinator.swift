@@ -115,6 +115,37 @@ final class ChatApprovalCoordinator {
         resolve(approval, status: .cancelled, reason: "Cancelled by system", actor: "system")
     }
 
+    @discardableResult
+    func cancelPendingApprovals(runID: String, reason: String) -> Int {
+        guard !isShutdown else { return 0 }
+        do {
+            let persisted = try repository?.load(runID: runID) ?? []
+            let visible = model.pendingApprovals.filter { $0.runID == runID }
+            let approvals = Dictionary(
+                (persisted + visible).map { ($0.requestID, $0) },
+                uniquingKeysWith: { first, _ in first }
+            ).values.filter { $0.status == .pending }
+
+            for approval in approvals {
+                _ = try repository?.cancel(
+                    requestID: approval.requestID,
+                    reason: reason,
+                    actor: "run-cancellation"
+                )
+            }
+
+            let requestIDs = Set(approvals.map(\.requestID))
+            model.pendingApprovals.removeAll { requestIDs.contains($0.requestID) }
+            if !requestIDs.isEmpty {
+                model.lastResultSummary = "已随运行终止取消 \(requestIDs.count) 个待审批请求，并写入审计和 timeline。"
+            }
+            return requestIDs.count
+        } catch {
+            onError("终止运行时清理待审批请求失败：\(error)")
+            return 0
+        }
+    }
+
     func alwaysAllow(_ approval: AgentPendingApproval) {
         guard !isShutdown else { return }
         onAlwaysAllow()

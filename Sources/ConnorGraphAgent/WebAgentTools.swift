@@ -87,135 +87,7 @@ public struct BrowserAssistedSearchResult: Sendable, Equatable {
 
 public typealias BrowserAssistedSearchHandler = @Sendable (BrowserAssistedSearchRequest) async -> BrowserAssistedSearchResult?
 
-public struct BrowserFetchTool: AgentTool {
-    public let name = "browser_fetch"
-    public let description = "Fetch a known web page through Connor's system-browser-assisted path and return a lightweight text/HTML snapshot. Use this as the fallback when web_fetch returns HTTP 403, cannot use a required authenticated browser session, fails on JavaScript rendering, is blocked by anti-bot protection, or otherwise returns unusable content. Never use it to bypass authorization or access content the user is not permitted to access."
-    public let permission: AgentPermissionCapability = .externalNetwork
-    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "url": .string(description: "The absolute http/https URL to fetch."),
-        "maxChars": .integer(description: "Maximum number of characters to return. Defaults to 12000, capped at 50000."),
-        "userAgent": .string(description: "Optional User-Agent header for the lightweight fallback. Defaults to ConnorGraphAgent/1.0."),
-        "timeoutMs": .integer(description: "Total timeout in milliseconds. Defaults to 30000, capped at 60000.")
-    ], required: ["url"])
-
-    private let browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
-
-    public init(browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil) {
-        self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
-    }
-
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let urlString = arguments.string("url"), let url = URL(string: urlString), ["http", "https"].contains(url.scheme?.lowercased()) else {
-            throw AgentToolError.invalidArguments("browser_fetch requires an absolute http/https url")
-        }
-        let maxChars = min(max(arguments.int("maxChars") ?? arguments.int("max_chars") ?? 12_000, 1_000), 50_000)
-        let timeoutMilliseconds = WebFetchTimeoutPolicy.normalized(arguments.int("timeoutMs") ?? arguments.int("timeout_ms"))
-        return try await WebFetchDeadline.run(toolName: name, timeoutMilliseconds: timeoutMilliseconds) {
-            try await executeWithinDeadline(
-                arguments: arguments,
-                context: context,
-                urlString: urlString,
-                url: url,
-                maxChars: maxChars,
-                timeoutMilliseconds: timeoutMilliseconds
-            )
-        }
-    }
-
-    private func executeWithinDeadline(
-        arguments: AgentToolArguments,
-        context: AgentToolExecutionContext,
-        urlString: String,
-        url: URL,
-        maxChars: Int,
-        timeoutMilliseconds: Int
-    ) async throws -> AgentToolResult {
-        if let browserAssistedWebFetchHandler {
-            let browserRequest = BrowserAssistedWebFetchRequest(
-                urlString: urlString,
-                extractMode: "text",
-                waitUntil: "networkidle",
-                timeoutMilliseconds: timeoutMilliseconds,
-                revealImmediately: false
-            )
-            if let result = await browserAssistedWebFetchHandler(browserRequest) {
-                let text = String(result.contentText.prefix(maxChars))
-                let truncated = result.truncated || result.contentText.count > maxChars
-                let json: [String: Any] = [
-                    "url": result.urlString,
-                    "finalURL": result.finalURLString,
-                    "title": result.title,
-                    "engine": "wkwebview",
-                    "browserAssisted": true,
-                    "taskID": result.taskID,
-                    "sessionID": result.sessionID,
-                    "tabID": result.tabID,
-                    "status": result.status.rawValue,
-                    "errorMessage": result.errorMessage as Any,
-                    "interventionReason": result.interventionReason as Any,
-                    "truncated": truncated,
-                    "originalCharacterCount": result.originalCharacterCount,
-                    "text": text
-                ]
-                switch result.status {
-                case .fetched:
-                    return AgentToolResult(
-                        toolCallID: context.toolCallID,
-                        toolName: name,
-                        contentText: text + (truncated ? "\n\n[truncated]" : ""),
-                        contentJSON: Self.encodeJSONObject(json),
-                        citations: [result.finalURLString.isEmpty ? result.urlString : result.finalURLString]
-                    )
-                case .needsUserIntervention:
-                    let reason = result.interventionReason ?? "Browser page requires user intervention."
-                    return AgentToolResult(
-                        toolCallID: context.toolCallID,
-                        toolName: name,
-                        contentText: "Connor opened this page in the built-in browser, but it requires user intervention.\nURL: \(result.urlString)\nReason: \(reason)\nBrowser session ID: \(result.sessionID)\nBrowser tab ID: \(result.tabID)",
-                        contentJSON: Self.encodeJSONObject(json),
-                        citations: [result.urlString]
-                    )
-                case .failed, .timedOut:
-                    throw AgentToolError.invalidArguments(result.errorMessage ?? "Connor WKWebView browser_fetch failed with status \(result.status.rawValue)")
-                }
-            }
-        }
-
-        let userAgent = arguments.string("userAgent") ?? arguments.string("user_agent") ?? "ConnorGraphAgent/1.0 (+https://local-agent)"
-        var request = URLRequest(url: url)
-        request.timeoutInterval = TimeInterval(timeoutMilliseconds) / 1_000
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5", forHTTPHeaderField: "Accept")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        let mimeType = response.mimeType ?? "unknown"
-        let decoded = Self.decodeWebPageText(data: data, responseEncodingName: response.textEncodingName)
-        let extracted = Self.extractReadableText(from: decoded.text)
-        let truncated = String(extracted.prefix(maxChars))
-        let wasTruncated = extracted.count > maxChars
-
-        let json = Self.encodeJSONObject([
-            "url": url.absoluteString,
-            "statusCode": statusCode,
-            "mimeType": mimeType,
-            "contentLength": data.count,
-            "decodedEncoding": decoded.encodingName,
-            "mojibakeRepaired": decoded.mojibakeRepaired,
-            "returnedCharacters": truncated.count,
-            "truncated": wasTruncated,
-            "text": truncated
-        ])
-
-        return AgentToolResult(
-            toolCallID: context.toolCallID,
-            toolName: name,
-            contentText: "Fetched \(url.absoluteString) [status=\(statusCode), mime=\(mimeType)]\n\n\(truncated)\(wasTruncated ? "\n\n[truncated]" : "")",
-            contentJSON: json,
-            citations: [url.absoluteString]
-        )
-    }
-
+enum WebPageDecodingSupport {
     struct DecodedWebPageText: Sendable, Equatable {
         var text: String
         var encodingName: String
@@ -343,31 +215,19 @@ public struct BrowserFetchTool: AgentTool {
         }
     }
 
-    private static func extractReadableText(from html: String) -> String {
-        var text = html
-        text = text.replacingOccurrences(of: #"(?is)<script[^>]*>.*?</script>"#, with: " ", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"(?is)<style[^>]*>.*?</style>"#, with: " ", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"(?is)<noscript[^>]*>.*?</noscript>"#, with: " ", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"(?i)<br\s*/?>"#, with: "\n", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"(?i)</(p|div|section|article|header|footer|li|h[1-6]|tr)>"#, with: "\n", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"(?is)<[^>]+>"#, with: " ", options: .regularExpression)
-        let entities: [(String, String)] = [
-            ("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
-            ("&quot;", "\""), ("&#39;", "'"), ("&apos;", "'")
-        ]
-        for (entity, replacement) in entities {
-            text = text.replacingOccurrences(of: entity, with: replacement)
-        }
-        text = text.replacingOccurrences(of: #"[ \t\f\r]+"#, with: " ", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"\n\s*\n\s*\n+"#, with: "\n\n", options: .regularExpression)
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+}
 
-    fileprivate static func encodeJSONObject(_ object: [String: Any]) -> String? {
+private enum WebToolJSON {
+    static func encode(_ object: Any) -> String? {
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
               let string = String(data: data, encoding: .utf8) else { return nil }
         return string
+    }
+
+    static func decode(_ string: String?) -> Any? {
+        guard let string, let data = string.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
     }
 }
 
@@ -425,7 +285,7 @@ public struct NativeWebSearchTool: AgentTool {
                     toolCallID: context.toolCallID,
                     toolName: name,
                     contentText: text,
-                    contentJSON: BrowserFetchTool.encodeJSONObject([
+                    contentJSON: WebToolJSON.encode([
                         "query": query,
                         "engine": engine,
                         "maxResults": maxResults,
@@ -446,7 +306,7 @@ public struct NativeWebSearchTool: AgentTool {
             toolCallID: context.toolCallID,
             toolName: name,
             contentText: nativeResult.markdown,
-            contentJSON: BrowserFetchTool.encodeJSONObject([
+            contentJSON: WebToolJSON.encode([
                 "query": nativeResult.query,
                 "engine": nativeResult.engine,
                 "maxResults": maxResults,
@@ -546,7 +406,7 @@ public struct NativeImageSearchTool: AgentTool {
             toolCallID: context.toolCallID,
             toolName: name,
             contentText: result.markdown.isEmpty ? resultText : result.markdown,
-            contentJSON: BrowserFetchTool.encodeJSONObject([
+            contentJSON: WebToolJSON.encode([
                 "query": result.query,
                 "queryLanguage": "en",
                 "provider": result.provider,
@@ -674,15 +534,19 @@ public typealias BrowserAssistedWebFetchHandler = @Sendable (BrowserAssistedWebF
 
 public struct NativeWebFetchTool: AgentTool {
     public let name = "web_fetch"
-    public let description = "Fetch and extract a web page using Connor's native HTTP extractor, with WKWebView assistance for JavaScript rendering. This is the standard original-page reader and should normally be tried before browser_fetch. If it returns HTTP 403, cannot use a required authenticated session, fails on JavaScript rendering, is blocked by anti-bot protection, or otherwise returns unusable content, fall back to browser_fetch."
+    public let description = "Fetch and extract one page with url or up to 10 independent pages concurrently with urls. Prefer urls whenever multiple page URLs are already known. Connor tries the native HTTP extractor first and automatically falls back to its WKWebView browser session when auto rendering encounters HTTP errors, blocked or unusable content, or JavaScript-dependent pages. Use renderMode js when a retained login session or browser rendering is known to be required. Never use browser assistance to bypass authorization or access content the user is not permitted to access."
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "url": .string(description: "The absolute URL to fetch."),
+        "url": .string(description: "One absolute http/https URL. Use either url or urls, never both."),
+        "urls": .array(items: .string(description: "An absolute http/https URL."), description: "One to 10 independent URLs fetched concurrently with a maximum concurrency of 4. Prefer this over multiple web_fetch calls when the URLs are known together."),
         "extractMode": .stringEnumeration(values: ["markdown", "text"], description: "Extraction format. Defaults to markdown."),
         "renderMode": .stringEnumeration(values: ["auto", "http", "js"], description: "Rendering strategy. Defaults to auto."),
         "waitUntil": .stringEnumeration(values: ["load", "domcontentloaded", "networkidle", "commit"], description: "Page readiness condition. Defaults to networkidle."),
-        "timeoutMs": .integer(description: "Total timeout in milliseconds. Defaults to 30000, capped at 60000.")
-    ], required: ["url"])
+        "timeoutMs": .integer(description: "Per-page timeout in milliseconds. Defaults to 30000, capped at 60000.")
+    ], required: [])
+
+    private static let maximumBatchSize = 10
+    private static let maximumBatchConcurrency = 4
 
     private let browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
     private let nativeFetchClient: NativeWebFetchClient
@@ -696,13 +560,55 @@ public struct NativeWebFetchTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let url = arguments.string("url"), !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw AgentToolError.invalidArguments("web_fetch requires url")
+        let singleURL = arguments.string("url")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let batchURLs = arguments.array("urls")?.compactMap(\.stringValue).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard singleURL == nil || batchURLs == nil else {
+            throw AgentToolError.invalidArguments("web_fetch accepts either url or urls, not both")
+        }
+        let urls = singleURL.map { [$0] } ?? batchURLs ?? []
+        guard !urls.isEmpty, urls.allSatisfy({ !$0.isEmpty }) else {
+            throw AgentToolError.invalidArguments("web_fetch requires a non-empty url or urls array")
+        }
+        guard urls.count <= Self.maximumBatchSize else {
+            throw AgentToolError.invalidArguments("web_fetch urls accepts at most \(Self.maximumBatchSize) URLs")
+        }
+        guard urls.allSatisfy(Self.isAbsoluteWebURL) else {
+            throw AgentToolError.invalidArguments("web_fetch requires absolute http/https URLs")
         }
         let renderMode = (arguments.string("renderMode") ?? arguments.string("render_mode") ?? "auto").lowercased()
         let extractMode = (arguments.string("extractMode") ?? arguments.string("extract_mode") ?? "markdown").lowercased()
         let waitUntil = (arguments.string("waitUntil") ?? arguments.string("wait_until") ?? "networkidle").lowercased()
         let timeoutMilliseconds = WebFetchTimeoutPolicy.normalized(arguments.int("timeoutMs") ?? arguments.int("timeout_ms"))
+        if batchURLs != nil {
+            return await executeBatch(
+                urls: urls,
+                renderMode: renderMode,
+                extractMode: extractMode,
+                waitUntil: waitUntil,
+                timeoutMilliseconds: timeoutMilliseconds,
+                context: context
+            )
+        }
+        return try await fetchOne(
+            url: urls[0],
+            renderMode: renderMode,
+            extractMode: extractMode,
+            waitUntil: waitUntil,
+            timeoutMilliseconds: timeoutMilliseconds,
+            context: context
+        )
+    }
+
+    private func fetchOne(
+        url: String,
+        renderMode: String,
+        extractMode: String,
+        waitUntil: String,
+        timeoutMilliseconds: Int,
+        context: AgentToolExecutionContext
+    ) async throws -> AgentToolResult {
         return try await WebFetchDeadline.run(toolName: name, timeoutMilliseconds: timeoutMilliseconds) {
             try await executeWithinDeadline(
                 url: url,
@@ -713,6 +619,69 @@ public struct NativeWebFetchTool: AgentTool {
                 context: context
             )
         }
+    }
+
+    private func executeBatch(
+        urls: [String],
+        renderMode: String,
+        extractMode: String,
+        waitUntil: String,
+        timeoutMilliseconds: Int,
+        context: AgentToolExecutionContext
+    ) async -> AgentToolResult {
+        let outcomes = await AgentToolBatchScheduler(maximumConcurrency: Self.maximumBatchConcurrency).run(urls) { url in
+            do {
+                return WebFetchBatchOutcome(
+                    url: url,
+                    result: try await fetchOne(
+                        url: url,
+                        renderMode: renderMode,
+                        extractMode: extractMode,
+                        waitUntil: waitUntil,
+                        timeoutMilliseconds: timeoutMilliseconds,
+                        context: context
+                    ),
+                    error: nil
+                )
+            } catch {
+                return WebFetchBatchOutcome(url: url, result: nil, error: String(describing: error))
+            }
+        }
+        let citations = outcomes.flatMap { $0.result?.citations ?? [] }.reduce(into: [String]()) { collected, citation in
+            if !collected.contains(citation) { collected.append(citation) }
+        }
+        let entries: [[String: Any]] = outcomes.map { outcome in
+            if let result = outcome.result {
+                return [
+                    "requestedURL": outcome.url,
+                    "success": true,
+                    "content": result.contentText,
+                    "metadata": WebToolJSON.decode(result.contentJSON) ?? NSNull()
+                ]
+            }
+            return [
+                "requestedURL": outcome.url,
+                "success": false,
+                "error": outcome.error ?? "Unknown web fetch error"
+            ]
+        }
+        let contentText = outcomes.enumerated().map { index, outcome in
+            let body = outcome.result?.contentText ?? "Error: \(outcome.error ?? "Unknown web fetch error")"
+            return "[\(index + 1)] \(outcome.url)\n\(body)"
+        }.joined(separator: "\n\n")
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: contentText,
+            contentJSON: WebToolJSON.encode([
+                "requestedCount": outcomes.count,
+                "succeededCount": outcomes.count(where: { $0.result != nil }),
+                "failedCount": outcomes.count(where: { $0.result == nil }),
+                "maximumConcurrency": Self.maximumBatchConcurrency,
+                "results": entries
+            ]),
+            citations: citations
+        )
     }
 
     private func executeWithinDeadline(
@@ -753,11 +722,23 @@ public struct NativeWebFetchTool: AgentTool {
             }
             throw error
         }
+        if renderMode == "auto",
+           nativeResult.contentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let result = try await executeBrowserAssistedFetch(
+               url: url,
+               extractMode: extractMode,
+               waitUntil: waitUntil,
+               timeoutMilliseconds: timeoutMilliseconds,
+               renderMode: renderMode,
+               context: context
+           ) {
+            return result
+        }
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
             contentText: nativeResult.contentText,
-            contentJSON: BrowserFetchTool.encodeJSONObject([
+            contentJSON: WebToolJSON.encode([
                 "url": nativeResult.urlString,
                 "finalURL": nativeResult.finalURLString,
                 "title": nativeResult.title,
@@ -813,7 +794,7 @@ public struct NativeWebFetchTool: AgentTool {
                 toolCallID: context.toolCallID,
                 toolName: name,
                 contentText: browserResult.contentText,
-                contentJSON: BrowserFetchTool.encodeJSONObject(json),
+                contentJSON: WebToolJSON.encode(json),
                 citations: [browserResult.finalURLString.isEmpty ? browserResult.urlString : browserResult.finalURLString]
             )
         case .needsUserIntervention:
@@ -831,11 +812,22 @@ public struct NativeWebFetchTool: AgentTool {
                 toolCallID: context.toolCallID,
                 toolName: name,
                 contentText: text,
-                contentJSON: BrowserFetchTool.encodeJSONObject(json),
+                contentJSON: WebToolJSON.encode(json),
                 citations: [browserResult.urlString]
             )
         case .failed, .timedOut:
             throw AgentToolError.invalidArguments(browserResult.errorMessage ?? "Connor WKWebView web_fetch(js) failed with status \(browserResult.status.rawValue)")
         }
     }
+
+    private static func isAbsoluteWebURL(_ value: String) -> Bool {
+        guard let url = URL(string: value), let scheme = url.scheme?.lowercased() else { return false }
+        return (scheme == "http" || scheme == "https") && url.host != nil
+    }
+}
+
+private struct WebFetchBatchOutcome: Sendable {
+    var url: String
+    var result: AgentToolResult?
+    var error: String?
 }

@@ -57,6 +57,9 @@ public enum AgentEventKind: String, Codable, Sendable, Equatable {
     case permissionRequested
     case permissionResolved
     case budgetWarning
+    case compactionStarted
+    case compactionCompleted
+    case compactionFailed
     case sessionStatusChanged
     case sessionLabelsChanged
     case sessionArchived
@@ -70,6 +73,64 @@ public enum AgentEventKind: String, Codable, Sendable, Equatable {
     case graphMemoryHeld
     case runFailed
     case runCompleted
+}
+
+public struct AgentCompactionStartedEvent: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var generation: Int
+    public var iteration: Int
+    public var estimatedInputTokens: Int
+    public var maximumInputTokens: Int
+    public var startedAt: Date
+
+    public init(runID: String, sessionID: String, generation: Int, iteration: Int, estimatedInputTokens: Int, maximumInputTokens: Int, startedAt: Date = Date()) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.generation = generation
+        self.iteration = iteration
+        self.estimatedInputTokens = estimatedInputTokens
+        self.maximumInputTokens = maximumInputTokens
+        self.startedAt = startedAt
+    }
+}
+
+public struct AgentCompactionCompletedEvent: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var generation: Int
+    public var iteration: Int
+    public var inputTokensBefore: Int
+    public var inputTokensAfter: Int
+    public var compactedToolResultCount: Int
+    public var durationMilliseconds: Int
+
+    public init(runID: String, sessionID: String, generation: Int, iteration: Int, inputTokensBefore: Int, inputTokensAfter: Int, compactedToolResultCount: Int, durationMilliseconds: Int) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.generation = generation
+        self.iteration = iteration
+        self.inputTokensBefore = inputTokensBefore
+        self.inputTokensAfter = inputTokensAfter
+        self.compactedToolResultCount = compactedToolResultCount
+        self.durationMilliseconds = durationMilliseconds
+    }
+}
+
+public struct AgentCompactionFailedEvent: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var generation: Int
+    public var iteration: Int
+    public var message: String
+
+    public init(runID: String, sessionID: String, generation: Int, iteration: Int, message: String) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.generation = generation
+        self.iteration = iteration
+        self.message = message
+    }
 }
 
 public struct PersistedAgentEvent: Codable, Sendable, Equatable, Identifiable {

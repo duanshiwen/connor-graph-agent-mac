@@ -3128,6 +3128,7 @@ final class AppRuntimeLifecycle {
     }
 
     private func cancelRunningChatRun(sessionID: String, runID: String, reason: String, backend: AnyAgentBackend?) {
+        chatApprovalCoordinator.cancelPendingApprovals(runID: runID, reason: reason)
         chatRunCoordinator.cancelActive(sessionID: sessionID, runID: runID, reason: reason, backend: backend)
         appendChatCancellationPresentation(
             sessionID: sessionID,

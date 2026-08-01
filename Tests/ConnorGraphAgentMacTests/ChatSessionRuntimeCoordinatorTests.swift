@@ -218,6 +218,31 @@ struct ChatSessionRuntimeCoordinatorTests {
         #expect(model.pendingApprovals.count == 3)
     }
 
+    @Test func approvalCoordinatorCancelsPersistedApprovalsWhenRunStops() throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanup() }
+        let approval = AgentPendingApproval(
+            requestID: "request-stop",
+            runID: "run-stop",
+            sessionID: "session-stop",
+            capability: .writeWorkspaceFile
+        )
+        try fixture.approvalRepository.store.upsert(pendingApproval: approval)
+        let model = ChatApprovalModel()
+        model.pendingApprovals = [approval]
+        let coordinator = ChatApprovalCoordinator(model: model, repository: fixture.approvalRepository)
+
+        let cancelledCount = coordinator.cancelPendingApprovals(runID: approval.runID, reason: "cancelled by user")
+
+        #expect(cancelledCount == 1)
+        #expect(model.pendingApprovals.isEmpty)
+        let persisted = try #require(fixture.approvalRepository.load(runID: approval.runID).first)
+        #expect(persisted.status == .cancelled)
+        let audit = try fixture.approvalRepository.store.agentAuditEvents(runID: approval.runID)
+        #expect(audit.last?.eventType == .permissionDecision)
+        #expect(audit.last?.actor == "run-cancellation")
+    }
+
     @Test func sessionCoordinatorShutdownClearsLoadingAndRejectsNewSelection() throws {
         let fixture = try RepositoryFixture()
         defer { fixture.cleanup() }
@@ -289,6 +314,7 @@ private struct CoordinatorTestBackend: AgentBackend {
 private struct RepositoryFixture {
     let directory: URL
     let repository: AppChatSessionRepository
+    let approvalRepository: AppAgentPendingApprovalRepository
 
     init() throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("chat-runtime-coordinator-\(UUID().uuidString)", isDirectory: true)
@@ -296,6 +322,7 @@ private struct RepositoryFixture {
         try paths.ensureDirectoryHierarchy(fileManager: .default)
         let graphRepository = try AppGraphRepository.bootstrap(paths: paths)
         repository = AppChatSessionRepository(store: graphRepository.store, storagePaths: paths)
+        approvalRepository = AppAgentPendingApprovalRepository(store: graphRepository.store)
     }
 
     func cleanup() { try? FileManager.default.removeItem(at: directory) }

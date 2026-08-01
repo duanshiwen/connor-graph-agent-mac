@@ -96,8 +96,9 @@ public final class AppBackendConnectivity: ObservableObject {
 
     private func probe() async {
         guard let baseURL else { return }
-        var request = URLRequest(url: baseURL)
-        request.httpMethod = "HEAD"
+        let healthURL = baseURL.appendingPathComponent("health")
+        var request = URLRequest(url: healthURL)
+        request.httpMethod = "GET"
         request.timeoutInterval = 5
         do {
             let (_, response) = try await URLSession.shared.data(for: request)

@@ -50,19 +50,12 @@ struct CommercialReadinessReleaseGateTests {
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         let policy = LocalWorkspacePolicy(workingDirectory: workspace)
         let tools: [any AgentTool] = [
-            LocalReadFileTool(policy: policy),
-            LocalListDirectoryTool(policy: policy),
-            LocalGlobTool(policy: policy),
-            LocalGrepTool(policy: policy),
-            LocalWriteFileTool(policy: policy),
-            LocalEditFileTool(policy: policy),
-            LocalMultiEditTool(policy: policy),
-            LocalBashTool(policy: policy)
+            LocalShellTool(policy: policy),
+            LocalApplyPatchTool(policy: policy)
         ]
 
-        #expect(tools.map(\.name) == ["Read", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Bash"])
-        #expect(tools.map(\.permission).contains(.readWorkspaceFile))
-        #expect(tools.map(\.permission).contains(.writeWorkspaceFile))
+        #expect(tools.map(\.name) == ["Shell", "ApplyPatch"])
+        #expect(tools.map(\.permission).contains(.runReadOnlyShellCommand))
         #expect(tools.map(\.permission).contains(.editWorkspaceFile))
         #expect(LocalShellCommandPolicy.classify("sudo rm -rf /").risk == .destructive)
         #expect(throws: LocalWorkspacePolicyError.self) {

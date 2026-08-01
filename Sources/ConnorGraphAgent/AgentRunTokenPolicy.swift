@@ -15,32 +15,39 @@ public struct AgentRunRetrievalPlan: Sendable, Equatable {
     public var requiresContinuity: Bool
     public var requiresNoteSearch: Bool
     public var requiresFinalProfile: Bool
+    public var requiresFinalAttention: Bool
 
     public init(
         requiresCurrentTime: Bool,
         requiresContinuity: Bool,
         requiresNoteSearch: Bool,
-        requiresFinalProfile: Bool
+        requiresFinalProfile: Bool,
+        requiresFinalAttention: Bool
     ) {
         self.requiresCurrentTime = requiresCurrentTime
         self.requiresContinuity = requiresContinuity
         self.requiresNoteSearch = requiresNoteSearch
         self.requiresFinalProfile = requiresFinalProfile
+        self.requiresFinalAttention = requiresFinalAttention
     }
 
     public var instruction: String {
         let startup = [
-            requiresContinuity ? "memory_os_recent_context and memory_os_knowledge_context" : nil,
+            requiresContinuity ? "memory_os_recent_context, memory_os_knowledge_context, and memory_os_get_current_user_profile with purpose task_context" : nil,
             requiresNoteSearch ? "one initial note_search" : nil
         ].compactMap { $0 }
         let startupText = startup.isEmpty ? "No startup retrieval is required." : "Required startup retrieval: \(startup.joined(separator: ", "))."
         let profileText = requiresFinalProfile
-            ? "Before the final answer, complete the compressed memory_os_get_current_user_profile final_response pagination chain."
+            ? "Before the final answer, complete the full memory_os_get_current_user_profile final_response pagination chain."
             : "No final-response profile checkpoint is required unless this run successfully updates the current-user profile."
+        let attentionText = requiresFinalAttention
+            ? "The Runtime will complete the final calendar, mail, and RSS attention check before final synthesis; do not call generic attention tools yourself."
+            : "No final attention checkpoint is required."
         return """
         ## Runtime Retrieval Plan
         This trusted per-run plan is authoritative for which optional retrieval checkpoints are mandatory. Do not call omitted retrieval tools merely as a generic preflight.
         - \(startupText)
+        - \(attentionText)
         - \(profileText)
         """
     }
@@ -58,19 +65,16 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
                 requiresCurrentTime: false,
                 requiresContinuity: true,
                 requiresNoteSearch: true,
-                requiresFinalProfile: true
+                requiresFinalProfile: true,
+                requiresFinalAttention: true
             )
         }
-
-        let context = routingContext(for: request)
-        let memoryRelevant = containsAny(context, signals: Self.memorySignals)
-        let noteRelevant = containsAny(context, signals: Self.noteSignals)
-        let profileRelevant = memoryRelevant || containsAny(context, signals: Self.profileSignals)
         return AgentRunRetrievalPlan(
             requiresCurrentTime: false,
-            requiresContinuity: memoryRelevant,
-            requiresNoteSearch: noteRelevant,
-            requiresFinalProfile: profileRelevant
+            requiresContinuity: true,
+            requiresNoteSearch: true,
+            requiresFinalProfile: true,
+            requiresFinalAttention: true
         )
     }
 
@@ -99,6 +103,11 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
         if name == AgentNoteSearchPreflightPolicy.requiredToolName { return retrievalPlan.requiresNoteSearch }
         if name == AgentContinuityPreflightPolicy.currentUserProfileToolName { return retrievalPlan.requiresFinalProfile }
         if name == "load_attachment_context" { return !request.attachmentRefs.isEmpty || !request.attachmentContextPlan.isEmpty }
+        // The one-call attention briefing must be available on every run so the
+        // final reply can proactively remind the user, regardless of whether the
+        // conversation contains calendar or mail signals.
+        if name == "attention_brief" { return true }
+        if name == "rss_search_items" { return retrievalPlan.requiresFinalAttention }
 
         if Self.localToolNames.contains(name) || matches(name, prefixes: ["local_", "workspace_"]) { return containsAny(context, signals: Self.localFileSignals) }
         if matches(name, prefixes: ["calendar_"]) { return containsAny(context, signals: Self.calendarSignals) }
@@ -124,9 +133,10 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
     }
 
     private func routingContext(for request: AgentChatRequest) -> String {
-        ([request.userMessage] + request.recentMessages.suffix(4).map(\.content))
-            .joined(separator: "\n")
-            .lowercased()
+        // Route optional retrieval and tool families from the active instruction only.
+        // Historical messages remain in the prompt for continuity, but stale keywords
+        // must not turn an unrelated local task into a mandatory retrieval preflight.
+        request.userMessage.lowercased()
     }
 
     private func containsAny(_ text: String, signals: [String]) -> Bool {
@@ -155,7 +165,7 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
     private static let environmentSignals = ["天气", "位置", "地点", "气温", "下雨", "weather", "location", "temperature", "rain"]
     private static let multiStepSignals = ["系统地", "完整", "全面", "逐步", "多步骤", "重构", "实现", "调研", "systematically", "comprehensive", "multi-step", "multi step", "step by step", "refactor", "implement", "research"]
     private static let sessionSignals = ["会话状态", "停止", "取消", "继续运行", "session status", "cancel", "stop", "continue"]
-    fileprivate static let localToolNames: Set<String> = ["Read", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Bash"]
+    fileprivate static let localToolNames: Set<String> = ["Shell", "ApplyPatch"]
 }
 
 public struct AgentInstructionCapabilityProjector: Sendable, Equatable {
@@ -168,22 +178,6 @@ public struct AgentInstructionCapabilityProjector: Sendable, Equatable {
         let document = AgentPromptModuleCatalog.document(from: instruction)
         let capabilities = AgentPromptCapabilityResolver.capabilities(for: availableToolNames)
         return document.projected(for: capabilities)
-    }
-
-    public func phasedDocument(
-        _ instruction: String,
-        availableToolNames: Set<String>,
-        activeModuleIDs: [AgentPromptModuleID]
-    ) -> AgentPromptDocument {
-        let capabilities = AgentPromptCapabilityResolver.capabilities(for: availableToolNames)
-        let active = Set(activeModuleIDs)
-        let specifications = AgentPromptModuleCatalog.specificationByID
-        let document = AgentPromptModuleCatalog.document(from: instruction)
-        return AgentPromptDocument(modules: document.modules.filter { module in
-            guard module.id != .preamble else { return true }
-            guard active.contains(module.id) else { return false }
-            return specifications[module.id]?.loadingPolicy == .kernel || module.requirement.isSatisfied(by: capabilities)
-        })
     }
 
     public func project(_ instruction: String, availableToolNames: Set<String>) -> String {

@@ -43,10 +43,36 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
     }
 }
 
-public enum AgentChatTurnProcessState: String, Sendable, Equatable {
+public enum AgentChatTurnProcessState: String, Sendable, Equatable, Hashable {
     case running
     case completed
+    case failed
     case cancelled
+}
+
+public enum AgentChatOpenProcessStateResolver {
+    public static func resolve(
+        messages: [AgentMessage],
+        isSubmitting: Bool,
+        events: [AgentEventPresentation]
+    ) -> AgentChatTurnProcessState? {
+        guard messages.last?.role == .user else { return nil }
+        if isSubmitting { return .running }
+        guard !events.isEmpty else { return nil }
+
+        if let terminal = events.last(where: { $0.kind == "runFailed" || $0.kind == "runCompleted" }) {
+            return isCancellation(terminal) ? .cancelled : .failed
+        }
+        // A persisted run with activity but no terminal event was interrupted by
+        // process shutdown or stream loss. It must not be presented as user cancellation.
+        return .failed
+    }
+
+    private static func isCancellation(_ event: AgentEventPresentation) -> Bool {
+        event.kind == "runFailed"
+            && (event.title.localizedCaseInsensitiveContains("cancelled")
+                || event.detail.localizedCaseInsensitiveContains("cancelled"))
+    }
 }
 
 fileprivate final class AgentChatConversationHistoryStorage: @unchecked Sendable {
@@ -161,6 +187,9 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         case .running:
             self.summary = "第 \(pending.turnNumber) 轮 · 正在处理 · 完整历史 \(conversationHistoryCount) 条"
             self.title = "第 \(pending.turnNumber) 轮处理中…"
+        case .failed:
+            self.summary = "第 \(pending.turnNumber) 轮 · 未完成 · 已保留收到的运行记录"
+            self.title = "第 \(pending.turnNumber) 轮未完成"
         case .cancelled:
             self.summary = "第 \(pending.turnNumber) 轮 · 已取消 · 已保留收到的运行记录"
             self.title = "第 \(pending.turnNumber) 轮已取消"
@@ -353,7 +382,7 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
         )
     }
 
-    public static func items(messages: [AgentMessage], lastContext: AgentContext?, isSubmitting: Bool, preservesOpenProcess: Bool = false, startingTurnCursor: AgentChatTurnCursor = .initial, now: Date = Date(), calendar: Calendar = .current) -> [AgentChatTurnTimelineItem] {
+    public static func items(messages: [AgentMessage], lastContext: AgentContext?, isSubmitting: Bool, preservedOpenProcessState: AgentChatTurnProcessState? = nil, startingTurnCursor: AgentChatTurnCursor = .initial, now: Date = Date(), calendar: Calendar = .current) -> [AgentChatTurnTimelineItem] {
         let rows = AgentChatMessagePresentation.rows(
             messages: messages,
             lastContext: lastContext,
@@ -395,8 +424,8 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
                     && !continuesAssistantGroup
             ))
         }
-        if isSubmitting || preservesOpenProcess {
-            let state: AgentChatTurnProcessState = isSubmitting ? .running : .cancelled
+        if isSubmitting || preservedOpenProcessState != nil {
+            let state: AgentChatTurnProcessState = isSubmitting ? .running : (preservedOpenProcessState ?? .failed)
             let pending = AgentChatPendingAssistantPresentation(
                 messages: messages,
                 startingTurnCursor: startingTurnCursor

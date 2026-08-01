@@ -12,12 +12,23 @@ public struct LLMUsageAuditAttribution: Sendable, Equatable {
     }
 }
 
+public struct LLMUsageAuditPersistenceHealth: Sendable, Equatable {
+    public var successfulWrites: Int
+    public var failedWrites: Int
+    public var lastError: String?
+
+    public var isHealthy: Bool { failedWrites == 0 }
+}
+
 public final class FileLLMUsageAuditStore: LLMUsageAuditRecording, @unchecked Sendable {
     public let fileURL: URL
     private let fileManager: FileManager
     private let queue = DispatchQueue(label: "com.connor.llm-usage-audit", qos: .utility)
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private var successfulWrites = 0
+    private var failedWrites = 0
+    private var lastPersistenceError: String?
 
     public init(fileURL: URL, fileManager: FileManager = .default) {
         self.fileURL = fileURL
@@ -49,9 +60,23 @@ public final class FileLLMUsageAuditStore: LLMUsageAuditRecording, @unchecked Se
                 try handle.seekToEnd()
                 try handle.write(contentsOf: encoder.encode(record))
                 try handle.write(contentsOf: Data("\n".utf8))
+                successfulWrites += 1
+                lastPersistenceError = nil
             } catch {
                 // Auditing is best-effort and must never break an LLM request.
+                failedWrites += 1
+                lastPersistenceError = String(error.localizedDescription.prefix(500))
             }
+        }
+    }
+
+    public func persistenceHealth() -> LLMUsageAuditPersistenceHealth {
+        queue.sync {
+            LLMUsageAuditPersistenceHealth(
+                successfulWrites: successfulWrites,
+                failedWrites: failedWrites,
+                lastError: lastPersistenceError
+            )
         }
     }
 
@@ -103,6 +128,8 @@ public struct LLMUsageAuditSummary: Codable, Sendable, Equatable {
     public var cacheCreationInputTokens: Int
     public var cacheReadInputTokens: Int
     public var uncachedInputTokens: Int
+    public var estimatedInputTokens: Int
+    public var unmeteredCalls: Int
     public var unclassifiedCalls: Int
     public var byRequestKind: [LLMUsageAuditSummaryRow]
     public var byModel: [LLMUsageAuditSummaryRow]
@@ -154,6 +181,8 @@ public struct LLMUsageAuditQueryService: Sendable {
             cacheCreationInputTokens: records.compactMap(\.cacheCreationInputTokens).reduce(0, +),
             cacheReadInputTokens: records.compactMap(\.cacheReadInputTokens).reduce(0, +),
             uncachedInputTokens: records.compactMap(\.uncachedInputTokens).reduce(0, +),
+            estimatedInputTokens: records.map(\.estimatedInputTokens).reduce(0, +),
+            unmeteredCalls: records.filter { $0.totalTokens == nil }.count,
             unclassifiedCalls: records.filter { $0.requestKind == .unclassified }.count,
             byRequestKind: rows { $0.requestKind.rawValue },
             byModel: rows { $0.modelID },

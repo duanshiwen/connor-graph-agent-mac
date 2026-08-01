@@ -81,7 +81,7 @@ let package = Package(
             dependencies: ["ConnorGraphAppSupport", "ConnorGraphStore", "ConnorGraphCore"]
         ),
         .testTarget(name: "ConnorGraphCoreTests", dependencies: ["ConnorGraphCore"]),
-        .testTarget(name: "ConnorGraphMemoryTests", dependencies: ["ConnorGraphMemory"]),
+        .testTarget(name: "ConnorGraphMemoryTests", dependencies: ["ConnorGraphMemory", "ConnorGraphStore"]),
         .testTarget(name: "ConnorGraphStoreTests", dependencies: ["ConnorGraphStore", "ConnorGraphCore"]),
         .testTarget(name: "ConnorGraphSearchTests", dependencies: ["ConnorGraphSearch"]),
         .testTarget(name: "ConnorGraphAgentTests", dependencies: ["ConnorGraphAgent"]),

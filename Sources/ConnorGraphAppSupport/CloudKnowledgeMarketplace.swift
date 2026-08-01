@@ -131,7 +131,19 @@ public struct CloudMarketplaceSection: Decodable, Sendable, Equatable, Identifia
     private enum CodingKeys: String, CodingKey { case id, title, layout, sectionType, knowledgeBases }
     public init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: CodingKeys.self); id = try c.decode(String.self, forKey: .id); if let value = try? c.decode(String.self, forKey: .title) { title = value } else { let names = try c.decode([String: String].self, forKey: .title); title = names["zh-CN"] ?? names["en"] ?? names.values.first ?? id }; layout = try c.decodeIfPresent(String.self, forKey: .layout) ?? c.decode(String.self, forKey: .sectionType); knowledgeBases = try c.decodeIfPresent([CloudMarketplaceKnowledgeBase].self, forKey: .knowledgeBases) ?? [] }
 }
-public struct CloudMarketplaceHome: Decodable, Sendable, Equatable { public var categories: [CloudMarketplaceCategory]; public var banners: [CloudMarketplaceBanner]; public var sections: [CloudMarketplaceSection]; public init(categories: [CloudMarketplaceCategory], banners: [CloudMarketplaceBanner] = [], sections: [CloudMarketplaceSection]) { self.categories = categories; self.banners = banners; self.sections = sections } }
+public struct CloudMarketplaceHome: Decodable, Sendable, Equatable {
+    public var categories: [CloudMarketplaceCategory]
+    public var banners: [CloudMarketplaceBanner]
+    public var sections: [CloudMarketplaceSection]
+    public init(categories: [CloudMarketplaceCategory], banners: [CloudMarketplaceBanner] = [], sections: [CloudMarketplaceSection]) { self.categories = categories; self.banners = banners; self.sections = sections }
+    private enum CodingKeys: String, CodingKey { case categories, banners, sections }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        categories = try container.decodeIfPresent([CloudMarketplaceCategory].self, forKey: .categories) ?? []
+        banners = try container.decodeIfPresent([CloudMarketplaceBanner].self, forKey: .banners) ?? []
+        sections = try container.decodeIfPresent([CloudMarketplaceSection].self, forKey: .sections) ?? []
+    }
+}
 public struct CloudMarketplaceSearchRequest: Codable, Sendable, Equatable {
     public var query: String
     public var categoryID: String?
@@ -242,22 +254,31 @@ public actor CloudKnowledgeAuthorizationCache {
         guard requireNetwork() else { return }
         guard !isLoadingMarketplace else { return }
         isLoadingMarketplace = true
-        defer { isLoadingMarketplace = false }
-        await perform {
-            async let home = self.api.home()
-            async let library = self.api.library()
-            async let allKnowledgeBases = self.api.search(.init(query: "", page: 1, limit: self.searchPageSize))
-            self.home = try await home
-            self.library = try await library
-            let firstPage = try await allKnowledgeBases
+        isLoading = true
+        errorMessage = nil
+        defer {
+            isLoading = false
+            isLoadingMarketplace = false
+        }
+        let api = self.api
+        let pageSize = searchPageSize
+        async let homeResult = Self.capture { try await api.home() }
+        async let libraryResult = Self.capture { try await api.library() }
+        async let searchResult = Self.capture { try await api.search(.init(query: "", page: 1, limit: pageSize)) }
+        let (loadedHome, loadedLibrary, loadedSearch) = await (homeResult, libraryResult, searchResult)
+
+        if let value = loadedHome.value { home = value }
+        if let value = loadedLibrary.value { library = value }
+        if let firstPage = loadedSearch.value {
             self.searchQuery = ""
             self.searchCategoryID = nil
             self.searchResults = firstPage
             self.nextSearchPage = firstPage.count == self.searchPageSize ? 2 : nil
-            let subscribed = self.home.sections.flatMap(\.knowledgeBases).filter(\.subscribed) + self.library.subscribed
-            for base in subscribed { await self.cache.authorize(base.id) }
-            self.onLibraryChanged?()
         }
+        errorMessage = loadedHome.errorMessage ?? loadedLibrary.errorMessage ?? loadedSearch.errorMessage
+        let subscribed = home.sections.flatMap(\.knowledgeBases).filter(\.subscribed) + library.subscribed
+        for base in subscribed { await cache.authorize(base.id) }
+        onLibraryChanged?()
     }
     public func loadHome() async { await load() }
     public func search(query: String, categoryID: String? = nil) async {
@@ -304,12 +325,23 @@ public actor CloudKnowledgeAuthorizationCache {
             ?? library.owned.first(where: { $0.id == id })
             ?? home.sections.lazy.flatMap(\.knowledgeBases).first(where: { $0.id == id })
     }
+    private nonisolated static func capture<Value: Sendable>(
+        _ operation: @escaping @Sendable () async throws -> Value
+    ) async -> CloudMarketplaceLoadResult<Value> {
+        do { return .init(value: try await operation(), errorMessage: nil) }
+        catch { return .init(value: nil, errorMessage: error.localizedDescription) }
+    }
     @discardableResult private func requireNetwork() -> Bool {
         guard networkIsAvailable() else { errorMessage = "当前没有网络连接。"; return false }
         guard serverIsReachable() else { errorMessage = "当前无法连接到康纳服务器。"; return false }
         return true
     }
     private func perform(_ action: @escaping () async throws -> Void) async { isLoading = true; errorMessage = nil; defer { isLoading = false }; do { try await action() } catch { errorMessage = error.localizedDescription } }
+}
+
+private struct CloudMarketplaceLoadResult<Value: Sendable>: Sendable {
+    var value: Value?
+    var errorMessage: String?
 }
 
 public actor CloudKnowledgeConsumptionClient {

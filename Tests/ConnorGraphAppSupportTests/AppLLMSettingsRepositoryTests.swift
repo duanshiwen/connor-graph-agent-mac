@@ -48,6 +48,19 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     }
 }
 
+@Test func anthropicThinkingPolicyUsesAdaptiveModeForCurrentClaudeModels() {
+    #expect(AppLLMThinkingLevel.medium.anthropicThinking(modelID: "claude-sonnet-4-6") == .adaptive(display: .omitted))
+    #expect(AppLLMThinkingLevel.medium.anthropicEffort(modelID: "claude-sonnet-4-6") == "medium")
+    #expect(AppLLMThinkingLevel.xhigh.anthropicEffort(modelID: "claude-sonnet-4-6") == "high")
+    #expect(AppLLMThinkingLevel.max.anthropicEffort(modelID: "claude-sonnet-4-6") == "max")
+}
+
+@Test func anthropicThinkingPolicyKeepsBoundedManualModeForLegacyModels() {
+    #expect(AppLLMThinkingLevel.low.anthropicThinking(modelID: "claude-sonnet-4-5") == .enabled(budgetTokens: 1_024, display: .omitted))
+    #expect(AppLLMThinkingLevel.medium.anthropicThinking(modelID: "claude-sonnet-4-5") == .enabled(budgetTokens: 4_096, display: .omitted))
+    #expect(AppLLMThinkingLevel.medium.anthropicEffort(modelID: "claude-sonnet-4-5") == nil)
+}
+
 @Test func settingsRepositoryReturnsTrulyEmptySettingsWhenNoConfigurationExists() throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
 
@@ -372,6 +385,32 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(request.headers["api-key"] == "secret-key")
     #expect(request.headers["Authorization"] == nil)
     #expect(request.headers[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] == nil)
+}
+
+@Test func modelCatalogFiltersUnsupportedGitHubCopilotModels() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let connection = AppLLMConnectionConfig(
+        id: "github-copilot",
+        name: "GitHub Copilot",
+        providerMode: .openAICompatible,
+        connectionKind: .githubCopilot,
+        baseURLString: "https://api.githubcopilot.com",
+        model: "gpt-4.1",
+        selectedModel: "gpt-4.1"
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "copilot-token"
+    )
+    let body = #"{"data":[{"id":"gpt-4.1"},{"id":"gpt-5.4"},{"id":"gpt-5.6-sol"},{"id":"gpt-5.6-terra"}]}"#.data(using: .utf8)!
+    let catalog = AppLLMModelCatalog(
+        settingsRepository: repository,
+        httpClient: FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: body))
+    )
+
+    let loaded = try #require(await catalog.loadConnections().first)
+
+    #expect(loaded.models.map(\.id) == ["gpt-4.1", "gpt-5.6-sol"])
 }
 
 @Test func modelCatalogPreservesOpenAIResponsesProviderMode() async throws {

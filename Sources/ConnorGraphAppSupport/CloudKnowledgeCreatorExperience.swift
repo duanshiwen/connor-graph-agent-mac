@@ -360,6 +360,18 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
             return nil
         }
     }
+    public func makeKnowledgeBasePublic() async {
+        guard let id = snapshot.knowledgeBaseID, let creatorAPI else { return }
+        await perform {
+            var draft = self.snapshot.draft
+            draft.visibility = "public"
+            let detail = try await creatorAPI.updateKnowledgeBase(id: id, draft: draft)
+            self.snapshot.draft = draft
+            self.snapshot.latestKnowledgeBaseDetail = detail
+            self.snapshot.knowledgeBaseID = detail.id
+            self.persist()
+        }
+    }
     public func unpublishKnowledgeBase() async {
         guard let id = snapshot.knowledgeBaseID, let creatorAPI, let current = snapshot.latestKnowledgeBaseDetail else { return }
         await perform {
@@ -501,6 +513,21 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
     }
     public func canRemovePublicationHistory(id: String) -> Bool {
         snapshot.clientRunID != id || snapshot.stage == .cancelled || snapshot.stage == .completed
+    }
+    @discardableResult
+    public func restorePublicationHistory(id: String) -> Bool {
+        guard let entry = publicationHistory.first(where: { $0.id == id }),
+              entry.snapshot.stage == .completed,
+              entry.snapshot.knowledgeBaseID != nil else { return false }
+        generationTask?.cancel()
+        currentConversationID = nil
+        snapshot = entry.snapshot
+        history = []
+        nextHistoryPage = nil
+        errorMessage = nil
+        try? repository.save(snapshot)
+        recordCurrentSnapshotInHistory()
+        return true
     }
     public func removePublicationHistory(id: String) {
         guard canRemovePublicationHistory(id: id) else { return }

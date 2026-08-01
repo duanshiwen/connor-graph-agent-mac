@@ -157,22 +157,11 @@ private func makeRuntimeBridgeMCPFixtureServer(in directory: URL) throws -> URL 
 import json, sys
 
 def read_message():
-    headers = {}
-    while True:
-        line = sys.stdin.buffer.readline()
-        if not line:
-            return None
-        if line == b"\r\n":
-            break
-        key, value = line.decode("utf-8").split(":", 1)
-        headers[key.lower()] = value.strip()
-    length = int(headers["content-length"])
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
+    line = sys.stdin.buffer.readline()
+    return json.loads(line.decode("utf-8")) if line else None
 
 def send(message):
-    payload = json.dumps(message).encode("utf-8")
-    sys.stdout.buffer.write(f"Content-Length: {len(payload)}\r\n\r\n".encode("utf-8"))
-    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.write(json.dumps(message).encode("utf-8") + b"\n")
     sys.stdout.buffer.flush()
 
 while True:

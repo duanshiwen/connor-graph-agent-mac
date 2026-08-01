@@ -85,6 +85,8 @@ import ConnorGraphCore
         "Answer completed",
         "Run completed"
     ])
+    #expect(presentations.map(\.id) == events.map(\.id))
+    #expect(presentations.map(\.occurredAt) == events.map { Optional($0.createdAt) })
 }
 
 private func persisted(_ event: AgentEvent, id: String, sequence: Int?, createdAt: Date) -> PersistedAgentEvent {
@@ -105,6 +107,9 @@ private func persisted(_ event: AgentEvent, id: String, sequence: Int?, createdA
     case .permissionRequested(let payload): payloadJSON = encode(payload, using: encoder)
     case .permissionResolved(let payload): payloadJSON = encode(payload, using: encoder)
     case .budgetWarning(let payload): payloadJSON = encode(payload, using: encoder)
+    case .compactionStarted(let payload): payloadJSON = encode(payload, using: encoder)
+    case .compactionCompleted(let payload): payloadJSON = encode(payload, using: encoder)
+    case .compactionFailed(let payload): payloadJSON = encode(payload, using: encoder)
     case .sessionStatusChanged(let payload), .sessionLabelsChanged(let payload), .sessionArchived(let payload), .sessionRestored(let payload): payloadJSON = encode(payload, using: encoder)
     case .artifactCreated(let payload): payloadJSON = encode(payload, using: encoder)
     case .sourceRegistryChanged(let payload), .skillRegistryChanged(let payload): payloadJSON = encode(payload, using: encoder)

@@ -120,7 +120,6 @@ public struct AgentStrategyPlan: Codable, Sendable, Equatable {
     public var evidenceReferences: [AgentStrategyEvidenceReference]
     public var unresolvedQuestions: [String]
     public var taskMode: AgentStrategyTaskMode
-    public var requestedModuleIDs: [AgentPromptModuleID]
     public var memoryDecision: AgentStrategyMemoryDecision
     public var memoryQueries: [String]
     public var memoryPageSize: Int
@@ -133,7 +132,6 @@ public struct AgentStrategyPlan: Codable, Sendable, Equatable {
         evidenceReferences: [AgentStrategyEvidenceReference] = [],
         unresolvedQuestions: [String] = [],
         taskMode: AgentStrategyTaskMode,
-        requestedModuleIDs: [AgentPromptModuleID] = [],
         memoryDecision: AgentStrategyMemoryDecision,
         memoryQueries: [String] = [],
         memoryPageSize: Int = 20
@@ -145,7 +143,6 @@ public struct AgentStrategyPlan: Codable, Sendable, Equatable {
         self.evidenceReferences = evidenceReferences
         self.unresolvedQuestions = unresolvedQuestions
         self.taskMode = taskMode
-        self.requestedModuleIDs = requestedModuleIDs
         self.memoryDecision = memoryDecision
         self.memoryQueries = memoryQueries
         self.memoryPageSize = memoryPageSize
@@ -153,7 +150,7 @@ public struct AgentStrategyPlan: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case provisionalApproach, recommendedApproach, alternatives, constraints, evidenceReferences
-        case unresolvedQuestions, taskMode, requestedModuleIDs, memoryDecision, memoryQueries, memoryPageSize
+        case unresolvedQuestions, taskMode, memoryDecision, memoryQueries, memoryPageSize
     }
 
     public init(from decoder: Decoder) throws {
@@ -165,7 +162,6 @@ public struct AgentStrategyPlan: Codable, Sendable, Equatable {
         evidenceReferences = try container.decodeIfPresent([AgentStrategyEvidenceReference].self, forKey: .evidenceReferences) ?? []
         unresolvedQuestions = try container.decodeIfPresent([String].self, forKey: .unresolvedQuestions) ?? []
         taskMode = try container.decode(AgentStrategyTaskMode.self, forKey: .taskMode)
-        requestedModuleIDs = try container.decodeIfPresent([AgentPromptModuleID].self, forKey: .requestedModuleIDs) ?? []
         memoryDecision = try container.decode(AgentStrategyMemoryDecision.self, forKey: .memoryDecision)
         memoryQueries = try container.decodeIfPresent([String].self, forKey: .memoryQueries) ?? []
         memoryPageSize = try container.decodeIfPresent(Int.self, forKey: .memoryPageSize) ?? 20
@@ -669,21 +665,17 @@ public struct AgentEvidenceState: Codable, Sendable, Equatable {
 
 public struct AgentLoopRecoveryState: Codable, Sendable, Equatable {
     public var phase: AgentLoopPhase
-    public var activeModuleIDs: [AgentPromptModuleID]
     public var evidenceState: AgentEvidenceState
 
-    public init(phase: AgentLoopPhase, activeModuleIDs: [AgentPromptModuleID], evidenceState: AgentEvidenceState) {
+    public init(phase: AgentLoopPhase, evidenceState: AgentEvidenceState) {
         self.phase = phase
-        self.activeModuleIDs = activeModuleIDs
         self.evidenceState = evidenceState
     }
 
     public var trustedPrompt: String {
-        let modules = activeModuleIDs.map(\.rawValue).joined(separator: ", ")
         return """
         Trusted context recovery state:
         - phase: \(phase.rawValue)
-        - active Prompt Modules: \(modules)
 
         \(evidenceState.compactPrompt)
         """
@@ -693,7 +685,6 @@ public struct AgentLoopRecoveryState: Codable, Sendable, Equatable {
 public struct AgentPhasedLoopState: Sendable, Equatable {
     public private(set) var phase: AgentLoopPhase = .strategyResearch
     public private(set) var strategy: AgentStrategyPlan?
-    public var activeModuleIDs: [AgentPromptModuleID] = []
     public var evidenceState = AgentEvidenceState()
 
     public init() {}
@@ -702,16 +693,17 @@ public struct AgentPhasedLoopState: Sendable, Equatable {
         guard phase == .strategyResearch else {
             throw AgentStrategyPlanValidationError.invalidCommitPhase(phase)
         }
-        try AgentStrategyPlanValidator().validate(plan, memoryCapabilityAvailable: memoryCapabilityAvailable)
         strategy = plan
         phase = plan.memoryDecision == .query ? .memoryPreparation : .taskExecution
     }
 
     public mutating func completeMemoryPreparation() { if phase == .memoryPreparation { phase = .taskExecution } }
     public mutating func prepareFinalOutput() { if phase == .taskExecution { phase = .finalSynthesis } }
+    public mutating func invalidateFinalOutput() { if phase == .finalSynthesis { phase = .taskExecution } }
     public mutating func resumeMemoryPreparation() { phase = .memoryPreparation }
     public mutating func resumeResearch() { phase = .strategyResearch }
-    public var recoveryState: AgentLoopRecoveryState { .init(phase: phase, activeModuleIDs: activeModuleIDs, evidenceState: evidenceState) }
+    public mutating func convergeToFinalSynthesis() { phase = .finalSynthesis }
+    public var recoveryState: AgentLoopRecoveryState { .init(phase: phase, evidenceState: evidenceState) }
 }
 
 public struct AgentPromptCacheContext: Codable, Sendable, Equatable {
@@ -730,16 +722,15 @@ public struct AgentPromptCacheContext: Codable, Sendable, Equatable {
 
 public enum AgentPhaseToolContract {
     public static let commitStrategyName = "agent_commit_strategy"
-    public static let activateModuleName = "prompt_module_activate"
     public static let prepareFinalOutputName = "prepare_final_output"
-    public static let externalSearchBatchName = "external_research_search_batch"
-    public static let externalReadBatchName = "external_research_read_batch"
+    public static let externalSearchBatchName = "parallel_tool_query"
+    public static let externalReadBatchName = "parallel_tool_execute"
     public static let memoryQueryName = "memory_query"
 
     public static let definitions: [AgentToolDefinition] = [
         AgentToolDefinition(
             name: commitStrategyName,
-            description: "Commit the structured strategy, Prompt Modules, and Memory decision after research is sufficient.",
+            description: "Commit the structured strategy and Memory decision after research is sufficient.",
             inputSchema: .object(properties: [
                 "provisionalApproach": .string(description: "Approach formed from model knowledge before external research."),
                 "recommendedApproach": .string(description: "Final approach after comparing evidence."),
@@ -748,34 +739,40 @@ public enum AgentPhaseToolContract {
                 "evidenceReferences": .array(items: .object(properties: ["id": .string(description: ""), "uri": .string(description: ""), "claim": .string(description: "")], required: ["id", "claim"]), description: ""),
                 "unresolvedQuestions": .array(items: .string(description: ""), description: ""),
                 "taskMode": .stringEnumeration(values: AgentStrategyTaskMode.allRawValues, description: ""),
-                "requestedModuleIDs": .array(items: .string(description: ""), description: ""),
                 "memoryDecision": .object(properties: [
                     "action": .stringEnumeration(values: ["query", "skip"], description: "Query Memory or skip only for an enumerated Memory-specific exception."),
-                    "reason": .stringEnumeration(values: AgentMemorySkipReason.allRawValues, description: "Reason for skipping Memory. memoryCapabilityUnavailable refers only to the runtime Memory tools, never image generation or another task capability.")
+                    "reason": .stringEnumeration(values: AgentMemorySkipReason.allRawValues, description: "Reason for skipping Memory; required when action is skip.")
                 ], required: ["action"]),
                 "memoryQueries": .array(items: .string(description: ""), description: ""),
                 "memoryPageSize": .integer(description: "1...100; defaults to 20.")
             ], required: ["provisionalApproach", "recommendedApproach", "taskMode", "memoryDecision"])
         ),
         AgentToolDefinition(
-            name: activateModuleName,
-            description: "Activate trusted Prompt Modules by Catalog ID. The runtime validates IDs, capabilities, and dependencies.",
-            inputSchema: .object(properties: ["moduleIDs": .array(items: .string(description: ""), description: "")], required: ["moduleIDs"])
-        ),
-        AgentToolDefinition(
             name: prepareFinalOutputName,
-            description: "Enter Final Synthesis and internally finish final-response Profile pagination before generating a non-mechanical final output.",
+            description: "Enter Final Synthesis and internally finish final-response Profile pagination only after the requested work, proportionate verification, and the required final attention batch are complete. Call once, then return the final answer unless the profile exposes a concrete issue that changes the result. This control tool does not itself read mail, calendars, RSS, or other sources.",
             inputSchema: .object(properties: ["reason": .string(description: "")], required: ["reason"])
         ),
         AgentToolDefinition(
             name: externalSearchBatchName,
-            description: "Batch discovery across read-only Web, MCP, and knowledge sources. Returns summaries only after every item reaches a terminal state.",
-            inputSchema: .object(properties: ["requests": .array(items: .object(properties: ["sourceID": .string(description: ""), "query": .string(description: ""), "cursor": .string(description: "")], required: ["sourceID", "query"]), description: "")], required: ["requests"])
+            description: "Run model-selected independent native reads concurrently and return one aggregated result. Put every read that can be anticipated from current evidence into this one batch. Each calls item uses the exact native toolName and native arguments object. Do not repeat a completed call unless an intervening state change or explicit retry instruction makes the same call necessary.",
+            inputSchema: .object(properties: [
+                "calls": .array(items: .object(properties: [
+                    "toolName": .string(description: "Exact native tool name selected by the model."),
+                    "arguments": .object(properties: [:], required: [])
+                ], required: ["toolName", "arguments"]), description: "Independent native read calls to execute concurrently."),
+                "excludedToolNames": .array(items: .string(description: "Exact tool name that must not execute in this batch."), description: "A call that conflicts with this list is rejected.")
+            ], required: ["calls"])
         ),
         AgentToolDefinition(
             name: externalReadBatchName,
-            description: "Batch deep-read selected original resources. Returns selected content after every item reaches a terminal state.",
-            inputSchema: .object(properties: ["requests": .array(items: .object(properties: ["sourceID": .string(description: ""), "uri": .string(description: ""), "selection": .string(description: "")], required: ["sourceID", "uri"]), description: "")], required: ["requests"])
+            description: "Run model-selected native action calls as one ordered batch and return one aggregated result. Put every currently determined compatible action into this one batch. Each calls item uses the exact native toolName and native arguments object. Calls execute in listed order through normal permission and approval handling; never repeat a successful mutation merely to confirm it.",
+            inputSchema: .object(properties: [
+                "calls": .array(items: .object(properties: [
+                    "toolName": .string(description: "Exact native tool name selected by the model."),
+                    "arguments": .object(properties: [:], required: [])
+                ], required: ["toolName", "arguments"]), description: "Native mutation calls to execute in listed order."),
+                "excludedToolNames": .array(items: .string(description: "Exact tool name that must not execute in this batch."), description: "A call that conflicts with this list is rejected.")
+            ], required: ["calls"])
         ),
         AgentToolDefinition(
             name: memoryQueryName,

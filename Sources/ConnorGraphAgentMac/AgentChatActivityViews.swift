@@ -21,9 +21,15 @@ struct AgentEventTimelineView: View {
                             AgentMarkdownPreviewText(markdown: event.detail, font: AgentChatTypography.micro, lineLimit: 3)
                                 .foregroundStyle(.secondary)
                                 .frame(width: 220, alignment: .leading)
-                            Text(event.kind)
-                                .font(AgentChatTypography.monoMicro)
-                                .foregroundStyle(.tertiary)
+                            HStack(spacing: AgentChatLayout.spaceS) {
+                                Text(event.kind)
+                                    .font(AgentChatTypography.monoMicro)
+                                if let occurredAt = event.occurredAt {
+                                    Text(occurredAt.formatted(date: .omitted, time: .standard))
+                                        .font(AgentChatTypography.micro.monospacedDigit())
+                                }
+                            }
+                            .foregroundStyle(.tertiary)
                         }
                         .padding(AgentChatLayout.spaceM)
                         .frame(width: 250, alignment: .leading)

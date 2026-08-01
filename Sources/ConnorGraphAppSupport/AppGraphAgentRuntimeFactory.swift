@@ -198,7 +198,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let repository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
         guard let catalog = try? MCPClientPool.loadEnabledPersistedCatalog(
             repository: repository,
-            allowedToolNames: allowedToolNames
+            allowedToolNames: allowedToolNames,
+            workingDirectory: workingDirectory
         ), !catalog.isEmpty else { return }
         let pool = MCPClientPool(repository: repository, currentDirectoryURL: workingDirectory)
         MCPToolRegistryBridge().registerTools(catalog: catalog, into: &registry, router: pool)
@@ -278,14 +279,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 appendingTo: resolvedWorkspace.additionalAllowedDirectories
             )
         )
-        registry.register(LocalReadFileTool(policy: localWorkspacePolicy))
-        registry.register(LocalListDirectoryTool(policy: localWorkspacePolicy))
-        registry.register(LocalGlobTool(policy: localWorkspacePolicy))
-        registry.register(LocalGrepTool(policy: localWorkspacePolicy))
-        registry.register(LocalWriteFileTool(policy: localWorkspacePolicy))
-        registry.register(LocalEditFileTool(policy: localWorkspacePolicy))
-        registry.register(LocalMultiEditTool(policy: localWorkspacePolicy))
-        registry.register(LocalBashTool(policy: localWorkspacePolicy))
+        registry.register(LocalShellTool(policy: localWorkspacePolicy))
+        registry.register(LocalApplyPatchTool(policy: localWorkspacePolicy))
         if let storagePaths {
             registry.register(PresentImageAgentTool(
                 store: AppSessionAttachmentStore(paths: storagePaths),
@@ -331,7 +326,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 .fastmailCalDAV: calDAVAdapter,
                 .nextcloudCalDAV: calDAVAdapter
             ])
-            registry.registerNativeCalendarTools(runtime: CalendarSourceAgentRuntimeBridge(store: calendarStore, mutationService: calendarMutationService), recorder: nativeSourceReferenceRecorder)
+            let calendarAgentRuntime = CalendarSourceAgentRuntimeBridge(store: calendarStore, mutationService: calendarMutationService)
+            registry.registerNativeCalendarTools(runtime: calendarAgentRuntime, recorder: nativeSourceReferenceRecorder)
             let effectiveRSSRuntime = rssRuntime ?? RSSRuntime(
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
@@ -354,14 +350,18 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 contactRuntime: contactRuntime,
                 recorder: nativeSourceReferenceRecorder
             )
+            registry.register(AttentionBriefTool(
+                calendarRuntime: calendarAgentRuntime,
+                mailRuntime: effectiveMailRuntime,
+                recorder: nativeSourceReferenceRecorder
+            ))
 
             registry.registerBrowserHistoryTools(store: BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL), recorder: nativeSourceReferenceRecorder)
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
+            registry.register(AttentionBriefTool(calendarRuntime: InMemoryAgentCalendarRuntime()))
         }
         registry.registerNativeContactsAggregateTools(runtime: makePersonRegistryContactRuntime(memoryOSFacade: memoryOSFacade) ?? InMemoryAgentContactRuntime())
-        registry.register(BrowserFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
-
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(NativeImageSearchTool())
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
@@ -442,6 +442,19 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         ]
         .filter { !$0.isEmpty }
         .joined(separator: "\n\n")
+        let assistantCheckpointStore: any AssistantRunCheckpointStore
+        let assistantEffectLedger: any AssistantEffectLedger
+        if let storagePaths {
+            assistantCheckpointStore = FileAssistantRunCheckpointStore(
+                fileURL: storagePaths.runtimeLogsDirectory.appendingPathComponent("assistant-approval-checkpoints.json")
+            )
+            assistantEffectLedger = FileAssistantEffectLedger(
+                fileURL: storagePaths.runtimeLogsDirectory.appendingPathComponent("assistant-effect-ledger.json")
+            )
+        } else {
+            assistantCheckpointStore = InMemoryAssistantRunCheckpointStore()
+            assistantEffectLedger = InMemoryAssistantEffectLedger()
+        }
         return AgentLoopController(
             modelProvider: modelProvider,
             toolRegistry: registry,
@@ -454,7 +467,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             memoryQueryProvider: memoryOSFacade.map {
                 AppAgentMemoryQueryProvider(facade: $0, configuration: memoryOSContextToolConfiguration)
             },
-            automaticallySynthesizesProgressUpdates: false
+            assistantCheckpointStore: assistantCheckpointStore,
+            assistantEffectLedger: assistantEffectLedger,
+            automaticallySynthesizesProgressUpdates: false,
+            streamComplete: { provider, request in provider.streamComplete(request) }
         )
     }
 

@@ -244,24 +244,84 @@ private struct PhasedConcurrentReadTool: AgentTool {
     }
 }
 
+private struct PhasedExternalJSONTool: AgentTool {
+    let name: String
+    let probe: PhasedConcurrencyProbe
+    let permission: AgentPermissionCapability = .externalNetwork
+    let description = "external read with structured evidence"
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        await probe.begin()
+        try await Task.sleep(nanoseconds: 30_000_000)
+        await probe.end()
+        let json = #"{"fact":"Alan Turing was born in 1912."}"#
+        return AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "1 result",
+            contentJSON: json
+        )
+    }
+}
+
+private actor PhasedBatchExecutionRecorder {
+    private var values: [String] = []
+    func record(_ value: String) { values.append(value) }
+    func snapshot() -> [String] { values }
+}
+
+private struct PhasedBatchExecutionTool: AgentTool {
+    let name: String
+    let recorder: PhasedBatchExecutionRecorder
+    let permission: AgentPermissionCapability = .readGraph
+    let description = "record exact native batch arguments"
+    let inputSchema = AgentToolInputSchema.object(properties: [
+        "value": .string(description: "Native value")
+    ], required: ["value"])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let value = arguments.string("value") ?? ""
+        await recorder.record(value)
+        return AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: value
+        )
+    }
+}
+
 @Test func promptModuleCatalogHasCompleteStableAcyclicClassification() {
     #expect(AgentPromptModuleCatalog.specifications.count == 42)
     #expect(AgentPromptModuleCatalog.duplicateIDs.isEmpty)
     #expect(AgentPromptModuleCatalog.dependencyCycles.isEmpty)
-    #expect(Set(AgentPromptModuleCatalog.specifications.map(\.loadingPolicy)) == [.kernel, .eagerWhenRequired, .onDemand])
     #expect(AgentPromptModuleCatalog.specifications.allSatisfy { !$0.summary.isEmpty })
-
-    let activated = AgentPromptModuleCatalog.activatedModuleIDs(
-        requested: ["programming_precision", "programming_precision", "missing"],
-        capabilities: [.workspace]
-    )
-    #expect(activated.filter { $0 == "programming_precision" }.count == 1)
-    #expect(activated.contains("workspace_tool_rules"))
-    #expect(activated.contains("workspace_execution_rules"))
-    #expect(!activated.contains("missing"))
 }
 
-@Test func strategyCommitCombinesProvisionalEvidenceModulesAndMemoryDecision() throws {
+@Test func phaseToolContractExposesOnlyStableBatchAndControlTools() throws {
+    let definitions = AgentPhaseToolContract.definitions
+    let names = definitions.map(\.name)
+    #expect(names == names.sorted())
+    #expect(!names.contains("prompt_module_activate"))
+
+    let commit = try #require(definitions.first { $0.name == AgentPhaseToolContract.commitStrategyName })
+    let commitSchema = String(data: try JSONSerialization.data(withJSONObject: commit.inputSchema.jsonObject, options: [.sortedKeys]), encoding: .utf8) ?? ""
+    #expect(!commitSchema.contains("requestedModuleIDs"))
+
+    let query = try #require(definitions.first { $0.name == AgentPhaseToolContract.externalSearchBatchName })
+    #expect(query.description.contains("does not classify call semantics"))
+    #expect(!query.description.contains("read-only permission"))
+
+    let execute = try #require(definitions.first { $0.name == AgentPhaseToolContract.externalReadBatchName })
+    #expect(execute.description.contains("listed order"))
+    #expect(!execute.description.contains("read-only deep-read"))
+}
+
+@Test func strategyCommitCombinesProvisionalEvidenceAndMemoryDecision() throws {
     var state = AgentPhasedLoopState()
     let plan = AgentStrategyPlan(
         provisionalApproach: "Use the model's known architecture first.",
@@ -270,7 +330,6 @@ private struct PhasedConcurrentReadTool: AgentTool {
         constraints: ["no side effects during research"],
         evidenceReferences: [.init(id: "official", uri: "https://example.com/docs", claim: "cache keys use stable identity")],
         taskMode: .coding,
-        requestedModuleIDs: ["programming_precision"],
         memoryDecision: .query,
         memoryQueries: ["AgentLoop preferences"]
     )
@@ -380,7 +439,7 @@ private struct PhasedConcurrentReadTool: AgentTool {
     #expect(firstQueryAddedEvidence)
     #expect(!duplicateQueryAddedEvidence)
     evidence.conclusions = ["stable prefix"]
-    let recovery = AgentLoopRecoveryState(phase: .taskExecution, activeModuleIDs: ["programming_precision"], evidenceState: evidence)
+    let recovery = AgentLoopRecoveryState(phase: .taskExecution, evidenceState: evidence)
     let roundTrip = try JSONDecoder().decode(AgentLoopRecoveryState.self, from: JSONEncoder().encode(recovery))
     #expect(roundTrip == recovery)
 }
@@ -393,7 +452,7 @@ private struct PhasedConcurrentReadTool: AgentTool {
 }
 
 @Test func phasedAgentLoopRunsStrategyBeforeMemoryAndPreparesProfileBeforeFinalAnswer() async throws {
-    let commitJSON = #"{"provisionalApproach":"model approach","recommendedApproach":"evidence-adjusted approach","evidenceReferences":[{"id":"doc","claim":"supports approach"}],"taskMode":"coding","requestedModuleIDs":["programming_precision"],"memoryDecision":{"action":"query"},"memoryQueries":["project preference"],"memoryPageSize":20}"#
+    let commitJSON = #"{"provisionalApproach":"model approach","recommendedApproach":"evidence-adjusted approach","evidenceReferences":[{"id":"doc","claim":"supports approach"}],"taskMode":"coding","memoryDecision":{"action":"query"},"memoryQueries":["project preference"],"memoryPageSize":20}"#
     let provider = PhasedLoopModelProvider(responses: [
         .init(text: nil, toolCalls: [.init(id: "strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: commitJSON)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "memory", name: AgentPhaseToolContract.memoryQueryName, argumentsJSON: #"{"query":"project preference","pageSize":20}"#)], finishReason: .toolCalls),
@@ -420,19 +479,25 @@ private struct PhasedConcurrentReadTool: AgentTool {
     let requests = await provider.capturedRequests()
     #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .memoryPreparation, .taskExecution, .finalSynthesis])
     #expect(requests[0].messages.first?.content.contains("Strategy Research is the first model task") == true)
-    #expect(requests[0].messages.first?.content.contains("## Programming and Precision Work") == false)
+    #expect(requests[0].messages.first?.content.contains("## Programming and Precision Work") == true)
     #expect(requests[1].messages.first?.content.contains("## Programming and Precision Work") == true)
     #expect(requests[0].messages[0].content.contains("Current Time:") == false)
     #expect(requests[0].messages[1].content.contains("Current Time:") == true)
+    let initialPrompt = requests[0].messages.map(\.content).joined(separator: "\n")
+    #expect(initialPrompt.contains("The model-facing tool definitions are stable batch and phase-control entry points."))
+    #expect(initialPrompt.contains("The complete applicable Prompt Module set and native tool catalog are supplied in the initial prompt"))
+    #expect(!initialPrompt.contains("phase-hidden"))
+    #expect(!initialPrompt.contains("Available read-only external knowledge sources"))
+    #expect(!initialPrompt.contains("Trusted Prompt Module Activation"))
     #expect(requests[1].tools.map(\.name).contains(AgentPhaseToolContract.memoryQueryName))
-    #expect(requests[2].tools.map(\.name).contains(AgentPhaseToolContract.memoryQueryName) == false)
+    #expect(requests[2].tools.map(\.name).contains(AgentPhaseToolContract.memoryQueryName))
+    let stableToolNames = requests[0].tools.map(\.name)
+    #expect(requests.dropFirst().allSatisfy { $0.tools.map(\.name) == stableToolNames })
 }
 
-@Test func phasedLoopRejectsMemorySkipWhenUserExplicitlyRequiresMemory() async throws {
+@Test func phasedLoopTrustsLLMMemoryDecisionWithoutStaticStrategyRejection() async throws {
     let provider = PhasedLoopModelProvider(responses: [
-        .init(text: nil, toolCalls: [.init(id: "invalid-skip", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"general","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"}}"#)], finishReason: .toolCalls),
-        .init(text: nil, toolCalls: [.init(id: "valid-strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"general","memoryDecision":{"action":"query"},"memoryQueries":["沟通偏好"],"memoryPageSize":20}"#)], finishReason: .toolCalls),
-        .init(text: nil, toolCalls: [.init(id: "memory", name: AgentPhaseToolContract.memoryQueryName, argumentsJSON: #"{"query":"沟通偏好"}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"general","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"}}"#)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
         .init(text: "done")
     ])
@@ -445,13 +510,52 @@ private struct PhasedConcurrentReadTool: AgentTool {
     for try await _ in loop.run(.init(sessionID: "memory-required", userMessage: "必须先查询相关 Memory 再回答")) {}
 
     let requests = await provider.capturedRequests()
-    #expect(requests.map { $0.promptCacheContext?.phase } == [
-        .strategyResearch, .strategyResearch, .memoryPreparation, .taskExecution, .finalSynthesis
+    #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .taskExecution, .finalSynthesis])
+    #expect(!requests.flatMap(\.messages).contains { $0.content.contains("Strategy commit rejected") })
+}
+
+@Test func phasedLoopHonorsExplicitMemoryDisableWhenOtherToolsAreRequired() async throws {
+    let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(id: "strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"research","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"}}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
+        .init(text: "done")
     ])
-    #expect(requests[3].tools.map(\.name).contains(AgentPhaseToolContract.memoryQueryName) == false)
-    #expect(requests[1].messages.contains {
-        $0.role == .system && $0.content.contains("user explicitly requires Memory")
-    })
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        memoryQueryProvider: PhasedTestMemoryProvider()
+    )
+
+    for try await _ in loop.run(.init(
+        sessionID: "memory-disabled-other-tools-required",
+        userMessage: "必须实际调用一个 Wikidata MCP 工具，不调用本地 Memory 或任何写入工具"
+    )) {}
+
+    let requests = await provider.capturedRequests()
+    #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .taskExecution, .finalSynthesis])
+    #expect(!requests.flatMap(\.messages).contains { $0.content.contains("user explicitly requires Memory") })
+}
+
+@Test func phasedLoopHonorsExplicitMemoryDisableWithInterveningToolScope() async throws {
+    let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(id: "strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"general","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"}}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
+        .init(text: "done")
+    ])
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        memoryQueryProvider: PhasedTestMemoryProvider()
+    )
+
+    for try await _ in loop.run(.init(
+        sessionID: "memory-disabled-intervening-scope",
+        userMessage: "不要调用任何外部数据工具或本地 Memory，只用三句话回答"
+    )) {}
+
+    let requests = await provider.capturedRequests()
+    #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .taskExecution, .finalSynthesis])
+    #expect(!requests.flatMap(\.messages).contains { $0.content.contains("userExplicitlyDisabled is valid only") })
 }
 
 @Test func phasedLoopKeepsUnifiedMemoryToolAvailableWithoutConfiguredBackend() async throws {
@@ -482,8 +586,8 @@ private struct PhasedConcurrentReadTool: AgentTool {
 
 @Test func phasedLoopUsesRegisteredExternalSourceAndCompressesOlderResearch() async throws {
     let provider = PhasedLoopModelProvider(responses: [
-        .init(text: nil, toolCalls: [.init(id: "search", name: AgentPhaseToolContract.externalSearchBatchName, argumentsJSON: #"{"requests":[{"sourceID":"enterprise","query":"cache"}]}"#)], finishReason: .toolCalls),
-        .init(text: nil, toolCalls: [.init(id: "read", name: AgentPhaseToolContract.externalReadBatchName, argumentsJSON: #"{"requests":[{"sourceID":"enterprise","uri":"https://example.com/cache"}]}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "search", name: AgentPhaseToolContract.externalSearchBatchName, argumentsJSON: #"{"calls":[{"toolName":"enterprise","arguments":{"query":"cache"}}]}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "read", name: AgentPhaseToolContract.externalSearchBatchName, argumentsJSON: #"{"calls":[{"toolName":"enterprise","arguments":{"uri":"https://example.com/cache"}}]}"#)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "commit", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","evidenceReferences":[{"id":"read-0","uri":"https://example.com/cache","claim":"original source"}],"taskMode":"coding","memoryDecision":{"action":"skip","reason":"historyIndependentMechanicalOrCodingTask"}}"#)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
         .init(text: "done")
@@ -555,10 +659,11 @@ private struct PhasedConcurrentReadTool: AgentTool {
     registry.register(PhasedConcurrentReadTool(name: "read_b", probe: probe))
     let provider = PhasedLoopModelProvider(responses: [
         .init(text: nil, toolCalls: [.init(id: "commit", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"coding","memoryDecision":{"action":"skip","reason":"historyIndependentMechanicalOrCodingTask"}}"#)], finishReason: .toolCalls),
-        .init(text: nil, toolCalls: [
-            .init(id: "a", name: "read_a", argumentsJSON: #"{}"#),
-            .init(id: "b", name: "read_b", argumentsJSON: #"{}"#)
-        ], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(
+            id: "parallel-read",
+            name: AgentPhaseToolContract.externalSearchBatchName,
+            argumentsJSON: #"{"calls":[{"toolName":"read_a","arguments":{}},{"toolName":"read_b","arguments":{}}]}"#
+        )], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
         .init(text: "done")
     ])
@@ -570,6 +675,88 @@ private struct PhasedConcurrentReadTool: AgentTool {
     for try await _ in loop.run(.init(sessionID: "parallel", userMessage: "Read both")) {}
     let maximumActive = await probe.maximumActive
     #expect(maximumActive == 2)
+}
+
+@Test func strategyResearchAlwaysAllowsGenericParallelQueryWithoutNameClassification() async throws {
+    let probe = PhasedConcurrencyProbe()
+    var registry = AgentToolRegistry()
+    registry.register(PhasedConcurrentReadTool(name: "read_a", probe: probe))
+    registry.register(PhasedConcurrentReadTool(name: "read_b", probe: probe))
+    let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(
+            id: "strategy-query",
+            name: AgentPhaseToolContract.externalSearchBatchName,
+            argumentsJSON: #"{"calls":[{"toolName":"read_a","arguments":{}},{"toolName":"read_b","arguments":{}}]}"#
+        )], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "commit", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"research","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"}}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
+        .init(text: "done")
+    ])
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(.init(sessionID: "strategy-generic-query", userMessage: "Query both sources")) {}
+
+    #expect(await probe.maximumActive == 2)
+    let requests = await provider.capturedRequests()
+    #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .strategyResearch, .taskExecution, .finalSynthesis])
+}
+
+@Test func phasedParallelQueryTrustsExternalToolsAndPreservesStructuredEvidence() async throws {
+    let probe = PhasedConcurrencyProbe()
+    var registry = AgentToolRegistry()
+    registry.register(PhasedExternalJSONTool(name: "mcp__wikidata__search_items", probe: probe))
+    registry.register(PhasedExternalJSONTool(name: "cloud_kb_knowledge_context", probe: probe))
+    let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(
+            id: "strategy-query",
+            name: AgentPhaseToolContract.externalSearchBatchName,
+            argumentsJSON: #"{"calls":[{"toolName":"mcp__wikidata__search_items","arguments":{}},{"toolName":"cloud_kb_knowledge_context","arguments":{}}]}"#
+        )], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "commit", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"research","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"}}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
+        .init(text: "done")
+    ])
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(.init(sessionID: "external-json-query", userMessage: "Query both sources")) {}
+
+    #expect(await probe.maximumActive == 2)
+    let requests = await provider.capturedRequests()
+    #expect(requests[1].messages.contains {
+        $0.role == .tool && $0.toolCallID == "strategy-query"
+            && $0.content.contains("Alan Turing was born in 1912.")
+            && $0.content.contains("mcp__wikidata__search_items")
+            && $0.content.contains("cloud_kb_knowledge_context")
+    })
+}
+
+@Test func phasedBatchExecutePassesEachNativeArgumentObjectInOneModelRound() async throws {
+    let recorder = PhasedBatchExecutionRecorder()
+    var registry = AgentToolRegistry()
+    registry.register(PhasedBatchExecutionTool(name: "change_a", recorder: recorder))
+    registry.register(PhasedBatchExecutionTool(name: "change_b", recorder: recorder))
+    let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(id: "commit", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"general","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"}}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(
+            id: "batch-change",
+            name: AgentPhaseToolContract.externalReadBatchName,
+            argumentsJSON: #"{"calls":[{"toolName":"change_a","arguments":{"value":"one"}},{"toolName":"change_b","arguments":{"value":"two"}}]}"#
+        )], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
+        .init(text: "done")
+    ])
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(.init(sessionID: "batch-execute", userMessage: "Apply both changes")) {}
+
+    #expect(await recorder.snapshot() == ["one", "two"])
+    let requests = await provider.capturedRequests()
+    #expect(requests.count == 4)
+    #expect(requests.allSatisfy { $0.tools.map(\.name) == requests[0].tools.map(\.name) })
+    #expect(requests[2].messages.contains {
+        $0.role == .tool && $0.toolCallID == "batch-change"
+            && $0.content.contains("one") && $0.content.contains("two")
+    })
 }
 
 @Test func prepareFinalOutputPaginatesProfileInternallyBeforeOneFinalModelCall() async throws {
@@ -601,12 +788,12 @@ private struct PhasedConcurrentReadTool: AgentTool {
 
 @Test func finalSynthesisResearchReentersStrategyAndRequiresRecommit() async throws {
     let provider = PhasedLoopModelProvider(responses: [
-        .init(text: nil, toolCalls: [.init(id: "initial-search", name: AgentPhaseToolContract.externalSearchBatchName, argumentsJSON: #"{"requests":[{"sourceID":"enterprise","query":"initial"}]}"#)], finishReason: .toolCalls),
-        .init(text: nil, toolCalls: [.init(id: "initial-read", name: AgentPhaseToolContract.externalReadBatchName, argumentsJSON: #"{"requests":[{"sourceID":"enterprise","uri":"https://example.com/initial"}]}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "initial-search", name: AgentPhaseToolContract.externalSearchBatchName, argumentsJSON: #"{"calls":[{"toolName":"enterprise","arguments":{"query":"initial"}}]}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "initial-read", name: AgentPhaseToolContract.externalSearchBatchName, argumentsJSON: #"{"calls":[{"toolName":"enterprise","arguments":{"uri":"https://example.com/initial"}}]}"#)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "initial-commit", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p1","recommendedApproach":"r1","evidenceReferences":[{"id":"initial-read-0","uri":"https://example.com/initial","claim":"initial evidence"}],"taskMode":"coding","memoryDecision":{"action":"skip","reason":"historyIndependentMechanicalOrCodingTask"}}"#)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "prepare-1", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"check preferences"}"#)], finishReason: .toolCalls),
-        .init(text: nil, toolCalls: [.init(id: "refresh-search", name: AgentPhaseToolContract.externalSearchBatchName, argumentsJSON: #"{"requests":[{"sourceID":"enterprise","query":"preference-adjusted"}]}"#)], finishReason: .toolCalls),
-        .init(text: nil, toolCalls: [.init(id: "refresh-read", name: AgentPhaseToolContract.externalReadBatchName, argumentsJSON: #"{"requests":[{"sourceID":"enterprise","uri":"https://example.com/preference-adjusted"}]}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "refresh-search", name: AgentPhaseToolContract.externalSearchBatchName, argumentsJSON: #"{"calls":[{"toolName":"enterprise","arguments":{"query":"preference-adjusted"}}]}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "refresh-read", name: AgentPhaseToolContract.externalSearchBatchName, argumentsJSON: #"{"calls":[{"toolName":"enterprise","arguments":{"uri":"https://example.com/preference-adjusted"}}]}"#)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "recommit", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p2","recommendedApproach":"r2","evidenceReferences":[{"id":"refresh-read-0","uri":"https://example.com/preference-adjusted","claim":"updated evidence"}],"taskMode":"coding","memoryDecision":{"action":"skip","reason":"historyIndependentMechanicalOrCodingTask"}}"#)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "prepare-2", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"final answer"}"#)], finishReason: .toolCalls),
         .init(text: "updated final")

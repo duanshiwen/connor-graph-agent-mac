@@ -387,6 +387,16 @@ struct CloudKnowledgeCreatorView: View {
             .foregroundStyle(.secondary)
 
             if store.snapshot.knowledgeBaseID != nil {
+                if store.snapshot.latestKnowledgeBaseDetail?.visibility != "public" {
+                    HStack(spacing: 10) {
+                        Label("发布到知识市场前需将可见性设为公开", systemImage: "lock.open")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("设为公开") { Task { await store.makeKnowledgeBasePublic() } }
+                            .disabled(store.isWorking)
+                    }
+                }
                 HStack(spacing: 10) {
                     Toggle("", isOn: $creatorTermsAccepted)
                         .toggleStyle(.checkbox)
@@ -561,7 +571,7 @@ struct CloudKnowledgeCreatorView: View {
         case .validating: "正在检查并提交"
         case .preview: "变更预览"
         case .conflict: "并发冲突"
-        case .completed: "发布完成"
+        case .completed: "知识已提交"
         case .cancelled: "发布已取消"
         }
     }
