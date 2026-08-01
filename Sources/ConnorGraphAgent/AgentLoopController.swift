@@ -421,7 +421,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 )
                                 finalAttentionPack = pack
                                 messages.append(AgentModelMessage(
-                                    role: .system,
+                                    role: .user,
                                     content: AssistantAttentionCoordinator().render(pack)
                                         + "\n\nThe model-turn budget is exhausted. Produce the best accurate final answer now without more tools."
                                 ))
@@ -689,16 +689,16 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 : []
                             if let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools),
                                shouldApplyCorrectionContinue("continuity") {
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                messages.append(AgentModelMessage(role: .system, content: correction))
+                                messages.append(Self.assistantHistoryMessage(from: modelResponse))
+                                messages.append(AgentModelMessage(role: .user, content: correction))
                                 continue
                             }
                             if retrievalPlan.requiresNoteSearch, noteSearchPreflightPolicy.requiresAttempt(
                                 availableTools: availableToolDefinitions,
                                 didAttempt: didAttemptNoteSearch
                             ), shouldApplyCorrectionContinue("note_search") {
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                messages.append(AgentModelMessage(role: .system, content: noteSearchPreflightPolicy.correctionInstruction()))
+                                messages.append(Self.assistantHistoryMessage(from: modelResponse))
+                                messages.append(AgentModelMessage(role: .user, content: noteSearchPreflightPolicy.correctionInstruction()))
                                 continue
                             }
                             if retrievalPlan.requiresFinalAttention, finalAttentionPack == nil {
@@ -708,13 +708,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     policy: policy
                                 )
                                 finalAttentionPack = pack
-                                if pack.hasAvailableSources {
+                                if pack.hasAvailableSources, pack.hasCandidates {
+                                    messages.append(Self.assistantHistoryMessage(from: modelResponse))
                                     messages.append(AgentModelMessage(
-                                        role: .assistant,
-                                        content: modelResponse.text ?? ""
-                                    ))
-                                    messages.append(AgentModelMessage(
-                                        role: .system,
+                                        role: .user,
                                         content: [
                                             AssistantAttentionCoordinator().render(pack),
                                             "Produce the final answer now. Preserve the completed task result and add only genuinely urgent attention items. Do not call more tools."
@@ -730,10 +727,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                let correction = AgentExternalResearchAnswerValidator().correctionInstruction(
                                    answer: modelResponse.text ?? "",
                                    evidenceCitations: webEvidenceCitations
-                               ) {
+                            ) {
                                 didRequestResearchCorrection = true
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                messages.append(AgentModelMessage(role: .system, content: correction))
+                                messages.append(Self.assistantHistoryMessage(from: modelResponse))
+                                messages.append(AgentModelMessage(role: .user, content: correction))
                                 continue
                             }
                             let claimValidation = AgentMemoryClaimValidator().validate(
@@ -743,8 +740,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             )
                             if isPureMemoryTask, let correction = claimValidation.correctionInstruction, !didRequestClaimCorrection {
                                 didRequestClaimCorrection = true
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                messages.append(AgentModelMessage(role: .system, content: "Memory claim-evidence check (\(claimValidation.status.rawValue)): \(correction) Correct once, then answer conservatively."))
+                                messages.append(Self.assistantHistoryMessage(from: modelResponse))
+                                messages.append(AgentModelMessage(role: .user, content: "Memory claim-evidence check (\(claimValidation.status.rawValue)): \(correction) Correct once, then answer conservatively."))
                                 continue
                             }
                             let finalText = modelResponse.text
@@ -1389,6 +1386,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 ? evidenceState.compactPrompt
                 : "[Older research batch compressed into AgentEvidenceState.]"
         }
+    }
+
+    private static func assistantHistoryMessage(from response: AgentModelResponse) -> AgentModelMessage {
+        AgentModelMessage(
+            role: .assistant,
+            content: response.text ?? "",
+            toolCalls: response.toolCalls.isEmpty ? nil : response.toolCalls,
+            providerMetadata: response.providerMetadata
+        )
     }
 
     private static func classifyProviderError(_ error: Error) -> AgentModelProviderErrorClass {

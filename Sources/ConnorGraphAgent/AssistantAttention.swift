@@ -10,6 +10,26 @@ public struct AssistantAttentionSection: Codable, Sendable, Equatable {
         self.summary = summary
         self.error = error
     }
+
+    public var hasCandidates: Bool {
+        guard error == nil else { return false }
+        let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard let data = trimmed.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data) else {
+            return true
+        }
+        if source == "rss_search_items", let rows = value as? [Any] {
+            return !rows.isEmpty
+        }
+        if source == "attention_brief", let object = value as? [String: Any] {
+            let events = object["events"] as? [Any] ?? []
+            let mail = object["mail"] as? [String: Any]
+            let messages = mail?["messages"] as? [Any] ?? []
+            return !events.isEmpty || !messages.isEmpty
+        }
+        return true
+    }
 }
 
 public struct AssistantAttentionPack: Codable, Sendable, Equatable {
@@ -23,6 +43,10 @@ public struct AssistantAttentionPack: Codable, Sendable, Equatable {
 
     public var hasAvailableSources: Bool {
         sections.contains { $0.error != AssistantAttentionCoordinator.capabilityUnavailableError }
+    }
+
+    public var hasCandidates: Bool {
+        sections.contains { $0.hasCandidates }
     }
 }
 

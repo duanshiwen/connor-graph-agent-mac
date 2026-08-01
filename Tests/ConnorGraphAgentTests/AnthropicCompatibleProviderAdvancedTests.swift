@@ -33,6 +33,27 @@ private struct FixtureSSEClient: AgentSSEHTTPClient {
     }
 }
 
+private actor AnthropicSSECancellationState {
+    private(set) var didStart = false
+    private(set) var didTerminate = false
+
+    func markStarted() { didStart = true }
+    func markTerminated() { didTerminate = true }
+}
+
+private struct CancellationObservingSSEClient: AgentSSEHTTPClient {
+    let state: AnthropicSSECancellationState
+
+    func stream(_ request: AgentHTTPRequest) async throws -> AsyncThrowingStream<String, Error> {
+        await state.markStarted()
+        return AsyncThrowingStream { continuation in
+            continuation.onTermination = { @Sendable _ in
+                Task { await state.markTerminated() }
+            }
+        }
+    }
+}
+
 @Test func anthropicCompatibleConfigDefaultsRequestTimeoutTo180Seconds() throws {
     let config = AnthropicCompatibleConfig(
         baseURL: URL(string: "https://api.anthropic.com")!,
@@ -86,6 +107,34 @@ data: {"type":"message_stop"}
     for try await _ in provider.streamComplete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Hi")])) {}
 
     #expect(sseClient.storage.capturedRequest?.timeoutInterval == 240)
+}
+
+@Test func anthropicStreamCancellationPropagatesToUnderlyingSSERequest() async throws {
+    let state = AnthropicSSECancellationState()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            apiKey: "sk-ant-test",
+            model: "claude-sonnet-4-6"
+        ),
+        httpClient: AdvancedAnthropicCapturingHTTPClient(),
+        sseClient: CancellationObservingSSEClient(state: state)
+    )
+    let consumer = Task {
+        for try await _ in provider.streamComplete(.init(messages: [.init(role: .user, content: "Hello")])) {}
+    }
+
+    for _ in 0..<100 where !(await state.didStart) {
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(await state.didStart)
+    consumer.cancel()
+    _ = await consumer.result
+    for _ in 0..<100 where !(await state.didTerminate) {
+        try await Task.sleep(for: .milliseconds(5))
+    }
+
+    #expect(await state.didTerminate)
 }
 
 @Test func anthropicRequestIncludesManualThinkingConfig() async throws {
@@ -176,6 +225,54 @@ data: {"type":"message_stop"}
     #expect(system.map { $0["text"] as? String } == ["stable kernel", "Current Time: dynamic"])
     #expect(system[0]["cache_control"] != nil)
     #expect(system[1]["cache_control"] == nil)
+}
+
+@Test func anthropicAdaptiveThinkingSerializesEffortWithoutManualBudget() async throws {
+    let client = AdvancedAnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            apiKey: "sk-ant-test",
+            model: "claude-sonnet-4-6",
+            featureOptions: AnthropicCompatibleFeatureOptions(
+                thinking: .adaptive(display: .omitted),
+                effort: "medium"
+            )
+        ),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(.init(messages: [.init(role: .user, content: "Hello")]))
+
+    let object = try capturedJSONObject(client.storage.capturedRequest)
+    let thinking = try #require(object["thinking"] as? [String: Any])
+    let outputConfig = try #require(object["output_config"] as? [String: Any])
+    #expect(thinking["type"] as? String == "adaptive")
+    #expect(thinking["budget_tokens"] == nil)
+    #expect(outputConfig["effort"] as? String == "medium")
+}
+
+@Test func anthropicMessageDeltaCompletesWithoutWaitingForMessageStop() throws {
+    var accumulator = AnthropicStreamAccumulator()
+    _ = accumulator.append(.contentBlockStart(
+        index: 0,
+        type: "text",
+        rawJSON: #"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#
+    ))
+    _ = accumulator.append(.textDelta(index: 0, text: "Done"))
+    _ = accumulator.append(.contentBlockStop(index: 0))
+
+    let event = accumulator.append(.messageDelta(
+        stopReason: "end_turn",
+        usage: AgentModelUsage(promptTokens: 0, completionTokens: 7)
+    ))
+
+    guard case .completed(let response)? = event else {
+        Issue.record("Expected message_delta with stop_reason to complete the stream")
+        return
+    }
+    #expect(response.text == "Done")
+    #expect(response.usage?.completionTokens == 7)
 }
 
 @Test func anthropicToolDefinitionsCanBeCachedAndEagerStreamed() async throws {

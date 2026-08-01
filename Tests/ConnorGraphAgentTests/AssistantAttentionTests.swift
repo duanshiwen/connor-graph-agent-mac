@@ -48,3 +48,28 @@ private struct AttentionFixtureTool: AgentTool {
     #expect(pack.sections.allSatisfy { $0.error == "capability unavailable" })
     #expect(!pack.hasAvailableSources)
 }
+
+@Test func finalAttentionSkipsSynthesisWhenStructuredSourcesHaveNoCandidates() {
+    let pack = AssistantAttentionPack(checkedAt: Date(), sections: [
+        .init(
+            source: "attention_brief",
+            summary: #"{"events":[],"mail":{"status":"included","messages":[]}}"#
+        ),
+        .init(source: "rss_search_items", summary: "[]")
+    ])
+
+    #expect(pack.hasAvailableSources)
+    #expect(!pack.hasCandidates)
+}
+
+@Test func finalAttentionRequestsSynthesisForRealCandidates() {
+    let pack = AssistantAttentionPack(checkedAt: Date(), sections: [
+        .init(
+            source: "attention_brief",
+            summary: #"{"events":[{"eventID":"event-1"}],"mail":{"messages":[]}}"#
+        ),
+        .init(source: "rss_search_items", summary: "[]")
+    ])
+
+    #expect(pack.hasCandidates)
+}

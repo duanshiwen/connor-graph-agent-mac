@@ -48,6 +48,19 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     }
 }
 
+@Test func anthropicThinkingPolicyUsesAdaptiveModeForCurrentClaudeModels() {
+    #expect(AppLLMThinkingLevel.medium.anthropicThinking(modelID: "claude-sonnet-4-6") == .adaptive(display: .omitted))
+    #expect(AppLLMThinkingLevel.medium.anthropicEffort(modelID: "claude-sonnet-4-6") == "medium")
+    #expect(AppLLMThinkingLevel.xhigh.anthropicEffort(modelID: "claude-sonnet-4-6") == "high")
+    #expect(AppLLMThinkingLevel.max.anthropicEffort(modelID: "claude-sonnet-4-6") == "max")
+}
+
+@Test func anthropicThinkingPolicyKeepsBoundedManualModeForLegacyModels() {
+    #expect(AppLLMThinkingLevel.low.anthropicThinking(modelID: "claude-sonnet-4-5") == .enabled(budgetTokens: 1_024, display: .omitted))
+    #expect(AppLLMThinkingLevel.medium.anthropicThinking(modelID: "claude-sonnet-4-5") == .enabled(budgetTokens: 4_096, display: .omitted))
+    #expect(AppLLMThinkingLevel.medium.anthropicEffort(modelID: "claude-sonnet-4-5") == nil)
+}
+
 @Test func settingsRepositoryReturnsTrulyEmptySettingsWhenNoConfigurationExists() throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
 
