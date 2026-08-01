@@ -12,15 +12,10 @@ struct BrowserAssistedWebToolTests {
         #expect(fetchTool.name == "web_fetch")
         #expect(searchTool.description.contains("native web search client"))
         #expect(fetchTool.description.contains("native HTTP extractor"))
-        #expect(fetchTool.description.contains("normally be tried before browser_fetch"))
-        #expect(fetchTool.description.contains("HTTP 403"))
-        #expect(fetchTool.description.contains("authenticated session"))
-
-        let browserFetchTool = BrowserFetchTool()
-        #expect(browserFetchTool.description.contains("fallback when web_fetch"))
-        #expect(browserFetchTool.description.contains("HTTP 403"))
-        #expect(browserFetchTool.description.contains("authenticated browser session"))
-        #expect(browserFetchTool.description.contains("Never use it to bypass authorization"))
+        #expect(fetchTool.description.contains("up to 10 independent pages concurrently"))
+        #expect(fetchTool.description.contains("automatically falls back"))
+        #expect(fetchTool.description.contains("retained login session"))
+        #expect(fetchTool.description.contains("Never use browser assistance to bypass authorization"))
         let legacySourceName = "search-engine" + "-mcp"
         #expect(!searchTool.description.contains(legacySourceName))
         #expect(!fetchTool.description.contains(legacySourceName))
@@ -154,10 +149,10 @@ struct BrowserAssistedWebToolTests {
         )
     }
 
-    @Test func browserFetchUsesSystemBrowserHandlerWhenAvailable() async throws {
-        let tool = BrowserFetchTool(browserAssistedWebFetchHandler: { request in
+    @Test func webFetchUsesMergedSystemBrowserCapabilityWhenRequested() async throws {
+        let tool = NativeWebFetchTool(browserAssistedWebFetchHandler: { request in
             #expect(request.urlString == "https://example.com/protected")
-            #expect(request.extractMode == "text")
+            #expect(request.extractMode == "markdown")
             #expect(request.timeoutMilliseconds == 30_000)
             return BrowserAssistedWebFetchResult(
                 status: .fetched,
@@ -176,7 +171,7 @@ struct BrowserAssistedWebToolTests {
         })
 
         let result = try await tool.execute(
-            arguments: try AgentToolArguments(json: #"{"url":"https://example.com/protected"}"#),
+            arguments: try AgentToolArguments(json: #"{"url":"https://example.com/protected","renderMode":"js"}"#),
             context: Self.context()
         )
 
@@ -187,8 +182,8 @@ struct BrowserAssistedWebToolTests {
         #expect(result.contentJSON?.contains(#""browserAssisted":true"#) == true)
     }
 
-    @Test func browserFetchFailsAtItsTotalDeadline() async throws {
-        let tool = BrowserFetchTool(browserAssistedWebFetchHandler: { _ in
+    @Test func mergedBrowserFetchPathFailsAtItsPerPageDeadline() async throws {
+        let tool = NativeWebFetchTool(browserAssistedWebFetchHandler: { _ in
             try? await Task.sleep(for: .seconds(10))
             return nil
         })
@@ -197,34 +192,35 @@ struct BrowserAssistedWebToolTests {
             _ = try await tool.execute(
                 arguments: AgentToolArguments(values: [
                     "url": .string("https://example.com/slow-browser"),
+                    "renderMode": .string("js"),
                     "timeoutMs": .int(1_000)
                 ]),
                 context: Self.context()
             )
-            Issue.record("Expected browser_fetch to time out")
+            Issue.record("Expected web_fetch to time out")
         } catch {
-            #expect(error as? AgentToolError == .invalidArguments("browser_fetch timed out after 1000ms"))
+            #expect(error as? AgentToolError == .invalidArguments("web_fetch timed out after 1000ms"))
         }
     }
 
-    @Test func browserFetchDecodesGBKMetaCharsetChineseText() throws {
+    @Test func webPageDecoderDecodesGBKMetaCharsetChineseText() throws {
         let html = """
         <html><head><meta charset=\"gbk\"></head><body>科技新闻</body></html>
         """
-        let data = try #require(html.data(using: BrowserFetchTool.gb18030TestEncoding))
+        let data = try #require(html.data(using: WebPageDecodingSupport.gb18030TestEncoding))
 
-        let decoded = BrowserFetchTool.decodeWebPageText(data: data, responseEncodingName: nil)
+        let decoded = WebPageDecodingSupport.decodeWebPageText(data: data, responseEncodingName: nil)
 
         #expect(decoded.text.contains("科技新闻"))
         #expect(decoded.encodingName == "gbk")
         #expect(decoded.mojibakeRepaired == false)
     }
 
-    @Test func browserFetchRepairsLatin1DecodedGBKChineseMojibake() throws {
+    @Test func webPageDecoderRepairsLatin1DecodedGBKChineseMojibake() throws {
         let mojibake = "¿Æ¼¼ÐÂÎÅ"
         let data = try #require(mojibake.data(using: .utf8))
 
-        let decoded = BrowserFetchTool.decodeWebPageText(data: data, responseEncodingName: "utf-8")
+        let decoded = WebPageDecodingSupport.decodeWebPageText(data: data, responseEncodingName: "utf-8")
 
         #expect(decoded.text == "科技新闻")
         #expect(decoded.encodingName == "utf-8→gb18030")
@@ -251,6 +247,40 @@ struct BrowserAssistedWebToolTests {
         #expect(result.contentText.contains("Fetched by Swift."))
         #expect(result.contentJSON?.contains("native-urlsession") == true)
         #expect(result.citations == ["https://example.com/native"])
+    }
+
+    @Test func webFetchAcceptsURLsAndFetchesThemConcurrentlyInInputOrder() async throws {
+        let httpClient = ConcurrentNativeWebHTTPClient()
+        let tool = NativeWebFetchTool(nativeFetchClient: NativeWebFetchClient(httpClient: httpClient))
+        let schema = tool.inputSchema.jsonObject
+        let properties = try #require(schema["properties"] as? [String: Any])
+        let urlsSchema = try #require(properties["urls"] as? [String: Any])
+        #expect(urlsSchema["type"] as? String == "array")
+        #expect((schema["required"] as? [String])?.isEmpty == true)
+
+        let urls = [
+            "https://one.example/page",
+            "https://two.example/page",
+            "https://three.example/page"
+        ]
+        let result = try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "urls": .array(urls.map(SendableJSONValue.string)),
+                "renderMode": .string("http")
+            ]),
+            context: Self.context()
+        )
+
+        #expect(await httpClient.maximumConcurrentRequests() > 1)
+        let firstRange = try #require(result.contentText.range(of: "[1] \(urls[0])"))
+        let secondRange = try #require(result.contentText.range(of: "[2] \(urls[1])"))
+        let thirdRange = try #require(result.contentText.range(of: "[3] \(urls[2])"))
+        #expect(firstRange.lowerBound < secondRange.lowerBound)
+        #expect(secondRange.lowerBound < thirdRange.lowerBound)
+        #expect(result.contentJSON?.contains(#""requestedCount":3"#) == true)
+        #expect(result.contentJSON?.contains(#""succeededCount":3"#) == true)
+        #expect(result.contentJSON?.contains(#""maximumConcurrency":4"#) == true)
+        #expect(result.citations == urls)
     }
 
     @Test func webFetchFailsAtItsTotalDeadline() async throws {
@@ -522,6 +552,25 @@ struct BrowserAssistedWebToolTests {
         func data(for request: URLRequest) async throws -> NativeWebHTTPResponse {
             try await Task.sleep(for: delay)
             return response
+        }
+    }
+
+    private actor ConcurrentNativeWebHTTPClient: NativeWebHTTPClient {
+        private var activeRequestCount = 0
+        private var observedMaximumConcurrentRequests = 0
+
+        func data(for request: URLRequest) async throws -> NativeWebHTTPResponse {
+            activeRequestCount += 1
+            observedMaximumConcurrentRequests = max(observedMaximumConcurrentRequests, activeRequestCount)
+            defer { activeRequestCount -= 1 }
+            try await Task.sleep(for: .milliseconds(50))
+            guard let url = request.url else { throw URLError(.badURL) }
+            let title = url.host ?? "Fetched page"
+            return .html("<html><head><title>\(title)</title></head><body>\(url.absoluteString)</body></html>", url: url.absoluteString)
+        }
+
+        func maximumConcurrentRequests() -> Int {
+            observedMaximumConcurrentRequests
         }
     }
 

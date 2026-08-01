@@ -617,7 +617,7 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(!names.contains("conversation_history_search"))
     #expect(names.contains("web_search"))
     #expect(names.contains("web_fetch"))
-    #expect(names.contains("browser_fetch"))
+    #expect(!names.contains("browser_fetch"))
     #expect(names.contains("connor_skill_list"))
     #expect(names.contains("connor_skill_activate"))
     #expect(names.contains("environment_history_coverage"))

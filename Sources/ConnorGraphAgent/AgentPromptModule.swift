@@ -278,7 +278,7 @@ public enum AgentPromptCapabilityResolver {
         include(.rss) { $0.hasPrefix("rss_") }
         include(.browserHistory) { $0.hasPrefix("browser_history_") }
         include(.cloudKnowledge) { $0.hasPrefix("cloud_kb_") }
-        include(.web) { $0.hasPrefix("web_") || $0 == "browser_fetch" }
+        include(.web) { $0.hasPrefix("web_") }
         include(.images) { ["generate_image", "edit_image", "image_search", "present_image"].contains($0) }
         include(.environment) { $0 == "get_current_environment" || $0.hasPrefix("environment_") }
         include(.sessions) { $0.hasPrefix("session_") }

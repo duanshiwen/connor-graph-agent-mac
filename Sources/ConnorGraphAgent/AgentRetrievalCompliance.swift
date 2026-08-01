@@ -2,7 +2,7 @@ import Foundation
 
 /// Classifies evidence already gathered for answer-quality checks.
 public struct AgentEvidenceValidationPolicy: Sendable, Equatable {
-    public static let webEvidenceTools = ["web_search", "web_fetch", "browser_fetch"]
+    public static let webEvidenceTools = ["web_search", "web_fetch"]
     public static let memoryEvidenceTools = [
         "memory_os_recent_context",
         "memory_os_knowledge_context",
