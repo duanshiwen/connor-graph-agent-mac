@@ -160,7 +160,7 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
     private static let environmentSignals = ["天气", "位置", "地点", "气温", "下雨", "weather", "location", "temperature", "rain"]
     private static let multiStepSignals = ["系统地", "完整", "全面", "逐步", "多步骤", "重构", "实现", "调研", "systematically", "comprehensive", "multi-step", "multi step", "step by step", "refactor", "implement", "research"]
     private static let sessionSignals = ["会话状态", "停止", "取消", "继续运行", "session status", "cancel", "stop", "continue"]
-    fileprivate static let localToolNames: Set<String> = ["Read", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Bash"]
+    fileprivate static let localToolNames: Set<String> = ["Shell", "ApplyPatch"]
 }
 
 public struct AgentInstructionCapabilityProjector: Sendable, Equatable {

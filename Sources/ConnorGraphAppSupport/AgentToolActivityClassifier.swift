@@ -62,7 +62,7 @@ public struct AgentToolActivityClassifier: Sendable {
             resultJSON: nil,
             fallbackDetail: failure.message
         )
-        if activity?.rawToolName == "Bash" {
+        if activity.map({ ["Shell", "Bash"].contains($0.rawToolName) }) == true {
             activity?.icon = "xmark.octagon"
         }
         return activity
@@ -156,8 +156,16 @@ public struct AgentToolActivityClassifier: Sendable {
                 subtitle: countSubtitle(result["matches"], noun: "matches"),
                 icon: "magnifyingglass"
             )
-        case "Bash":
+        case "Shell", "Bash":
             return shellDescriptor(command: string(arguments["command"]) ?? string(result["command"]))
+        case "ApplyPatch":
+            return ToolDescriptor(
+                semanticKind: .editFile,
+                title: "Apply Patch",
+                target: countSubtitle(result["filesChanged"], noun: "files"),
+                subtitle: countSubtitle(result["operations"], noun: "operations"),
+                icon: "doc.badge.gearshape"
+            )
         case "calendar_write":
             let operation = string(arguments["operation"])
             let title: String

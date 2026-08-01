@@ -279,16 +279,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 appendingTo: resolvedWorkspace.additionalAllowedDirectories
             )
         )
-        registry.register(LocalReadFileTool(policy: localWorkspacePolicy))
-        registry.register(LocalReadManyTool(policy: localWorkspacePolicy))
-        registry.register(LocalListDirectoryTool(policy: localWorkspacePolicy))
-        registry.register(LocalGlobTool(policy: localWorkspacePolicy))
-        registry.register(LocalGrepTool(policy: localWorkspacePolicy))
-        registry.register(LocalWriteFileTool(policy: localWorkspacePolicy))
-        registry.register(LocalEditFileTool(policy: localWorkspacePolicy))
-        registry.register(LocalMultiEditTool(policy: localWorkspacePolicy))
-        registry.register(LocalWriteBatchTool(policy: localWorkspacePolicy))
-        registry.register(LocalBashTool(policy: localWorkspacePolicy))
+        registry.register(LocalShellTool(policy: localWorkspacePolicy))
+        registry.register(LocalApplyPatchTool(policy: localWorkspacePolicy))
         if let storagePaths {
             registry.register(PresentImageAgentTool(
                 store: AppSessionAttachmentStore(paths: storagePaths),
