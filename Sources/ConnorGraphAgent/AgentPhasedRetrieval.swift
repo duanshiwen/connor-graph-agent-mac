@@ -749,7 +749,7 @@ public enum AgentPhaseToolContract {
         ),
         AgentToolDefinition(
             name: prepareFinalOutputName,
-            description: "Enter Final Synthesis and internally finish final-response Profile pagination only after the requested work and proportionate verification are complete. Call once, then return the final answer unless the profile exposes a concrete issue that changes the result. This control tool does not read mail, calendars, or other unrelated sources.",
+            description: "Enter Final Synthesis and internally finish final-response Profile pagination only after the requested work, proportionate verification, and the required final attention batch are complete. Call once, then return the final answer unless the profile exposes a concrete issue that changes the result. This control tool does not itself read mail, calendars, RSS, or other sources.",
             inputSchema: .object(properties: ["reason": .string(description: "")], required: ["reason"])
         ),
         AgentToolDefinition(

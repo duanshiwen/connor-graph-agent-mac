@@ -1355,11 +1355,15 @@ public struct MemoryOSL3UpdateBeliefsTool: AgentTool {
 }
 
 public extension AgentToolRegistry {
-    /// Conversation-time registration keeps only the late-bound Profile reader. Memory search is the single phase tool `memory_query`.
+    /// Conversation-time registration exposes the three read-only continuity domains.
+    /// They remain routed through `parallel_tool_query`, so this does not add
+    /// model-facing tool schemas.
     mutating func registerMemoryOSReadTools(
         facade: AppMemoryOSFacade,
         configuration: MemoryOSContextToolConfiguration = .init()
     ) {
+        register(MemoryOSRecentContextTool(facade: facade, configuration: configuration))
+        register(MemoryOSKnowledgeContextTool(facade: facade, configuration: configuration))
         register(MemoryOSGetCurrentUserProfileTool(facade: facade, configuration: configuration))
     }
 
@@ -1369,8 +1373,6 @@ public extension AgentToolRegistry {
         configuration: MemoryOSContextToolConfiguration = .init()
     ) {
         registerMemoryOSReadTools(facade: facade, configuration: configuration)
-        register(MemoryOSRecentContextTool(facade: facade, configuration: configuration))
-        register(MemoryOSKnowledgeContextTool(facade: facade, configuration: configuration))
         // Write tools
         register(MemoryOSL2UpdateEntitiesTool(facade: facade))
         register(MemoryOSUpdateCurrentUserProfileTool(facade: facade))

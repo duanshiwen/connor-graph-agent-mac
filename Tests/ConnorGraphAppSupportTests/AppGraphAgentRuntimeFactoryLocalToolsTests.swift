@@ -606,10 +606,11 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(!names.contains("memory_os_dashboard_summary"))
     #expect(!names.contains("memory_os_ingest_observation"))
     #expect(!names.contains("memory_os_project_structured_artifact"))
-    // Conversation runtime exposes one phase-level memory_query; partition tools stay internal.
+    // Conversation runtime exposes all read-only continuity domains through the
+    // routed parallel query while keeping write primitives unavailable.
     #expect(names.contains("get_current_time"))
-    #expect(!names.contains("memory_os_recent_context"))
-    #expect(!names.contains("memory_os_knowledge_context"))
+    #expect(names.contains("memory_os_recent_context"))
+    #expect(names.contains("memory_os_knowledge_context"))
     #expect(names.contains("memory_os_get_current_user_profile"))
     #expect(!names.contains("conversation_history_search"))
     #expect(names.contains("web_search"))

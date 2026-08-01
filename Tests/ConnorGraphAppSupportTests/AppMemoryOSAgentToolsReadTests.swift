@@ -66,14 +66,9 @@ import ConnorGraphAppSupport
 
     registry.registerMemoryOSReadTools(facade: facade)
 
-    #expect(registry.definition(named: "memory_os_recent_context") == nil)
-    #expect(registry.definition(named: "memory_os_knowledge_context") == nil)
     let profileDefinition = try #require(registry.definition(named: "memory_os_get_current_user_profile"))
-    var internalRegistry = AgentToolRegistry()
-    internalRegistry.register(MemoryOSRecentContextTool(facade: facade))
-    internalRegistry.register(MemoryOSKnowledgeContextTool(facade: facade))
-    let recentDefinition = try #require(internalRegistry.definition(named: "memory_os_recent_context"))
-    let knowledgeDefinition = try #require(internalRegistry.definition(named: "memory_os_knowledge_context"))
+    let recentDefinition = try #require(registry.definition(named: "memory_os_recent_context"))
+    let knowledgeDefinition = try #require(registry.definition(named: "memory_os_knowledge_context"))
     #expect(recentDefinition.description.contains("L1") && recentDefinition.description.contains("L2"))
     #expect(recentDefinition.description.contains("query is a lexical content filter, not a natural-language question"))
     #expect(recentDefinition.description.contains("Omit query or pass an empty string to disable lexical filtering"))
@@ -121,8 +116,8 @@ import ConnorGraphAppSupport
     #expect((purposeSchema["enum"] as? [String]) == ["task_context", "final_response"])
     #expect(recentDefinition.description.contains("totalItems"))
     #expect(knowledgeDefinition.description.contains("nextPage"))
-    #expect(internalRegistry.permission(named: "memory_os_recent_context") == .readGraph)
-    #expect(internalRegistry.permission(named: "memory_os_knowledge_context") == .readGraph)
+    #expect(registry.permission(named: "memory_os_recent_context") == .readGraph)
+    #expect(registry.permission(named: "memory_os_knowledge_context") == .readGraph)
     #expect(registry.permission(named: "memory_os_get_current_user_profile") == .readGraph)
     #expect(registry.definition(named: "memory_os_context") == nil)
 
