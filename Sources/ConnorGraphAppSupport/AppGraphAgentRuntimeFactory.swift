@@ -362,8 +362,6 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.register(AttentionBriefTool(calendarRuntime: InMemoryAgentCalendarRuntime()))
         }
         registry.registerNativeContactsAggregateTools(runtime: makePersonRegistryContactRuntime(memoryOSFacade: memoryOSFacade) ?? InMemoryAgentContactRuntime())
-        registry.register(BrowserFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
-
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(NativeImageSearchTool())
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
