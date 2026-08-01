@@ -141,6 +141,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     private let automaticallySynthesizesProgressUpdates: Bool
     private let cancellationRegistry: AgentLoopCancellationRegistry
     private let approvalRegistry: AgentLoopApprovalRegistry
+    private let assistantCheckpointStore: any AssistantRunCheckpointStore
+    private let assistantEffectLedger: any AssistantEffectLedger
     private let logger = Logger(subsystem: "com.connor.agent", category: "tool-loop")
 
     public init(
@@ -154,6 +156,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         environmentStore: AgentEnvironmentSnapshotStore? = nil,
         externalKnowledgeSources: [AnyAgentExternalKnowledgeSource] = [],
         memoryQueryProvider: (any AgentMemoryQueryProvider)? = nil,
+        assistantCheckpointStore: any AssistantRunCheckpointStore = InMemoryAssistantRunCheckpointStore(),
+        assistantEffectLedger: any AssistantEffectLedger = InMemoryAssistantEffectLedger(),
         automaticallySynthesizesProgressUpdates: Bool,
         streamComplete: (@Sendable (Provider, AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error>)? = nil
     ) {
@@ -167,6 +171,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         self.environmentStore = environmentStore
         self.externalKnowledgeSources = externalKnowledgeSources
         self.memoryQueryCoordinator = memoryQueryProvider.map(AgentMemoryQueryCoordinator.init(provider:))
+        self.assistantCheckpointStore = assistantCheckpointStore
+        self.assistantEffectLedger = assistantEffectLedger
         self.automaticallySynthesizesProgressUpdates = automaticallySynthesizesProgressUpdates
         self.streamCompleteHandler = streamComplete
         self.cancellationRegistry = AgentLoopCancellationRegistry()
@@ -236,6 +242,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     }
 
     public func resolveApproval(_ approval: AgentPendingApproval, status: AgentPendingApprovalStatus) async {
+        try? await assistantCheckpointStore.resolve(requestID: approval.requestID, status: status)
         await approvalRegistry.resolve(requestID: approval.requestID, status: status)
     }
 
@@ -2100,10 +2107,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     ) async throws -> AgentToolResult {
         var executionContext = context
         var pendingRequest = initialApprovalRequest
+        var checkpointRequestID: String?
         while true {
             if pendingRequest == nil {
                 do {
-                    return try await executeRegisteredTool(call, context: executionContext)
+                    let result = try await executeRegisteredTool(call, context: executionContext)
+                    if let checkpointRequestID {
+                        try await assistantCheckpointStore.remove(requestID: checkpointRequestID)
+                    }
+                    return result
                 } catch AgentToolError.permissionNeedsApproval(let request) {
                     pendingRequest = request
                 }
@@ -2112,12 +2124,28 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             guard !executionContext.approvedCapabilities.contains(request.capability) else {
                 throw AgentToolError.permissionDenied("Tool requested approval again for an already approved capability: \(request.capability.rawValue)")
             }
+            let effectKey = AssistantEffectIdentity.key(runID: run.id, call: call)
+            let envelope = AssistantRunEnvelope(
+                runID: run.id,
+                sessionID: run.sessionID,
+                groupID: context.groupID,
+                userMessage: context.userPrompt,
+                permissionMode: configuration.permissionMode
+            )
+            try await assistantCheckpointStore.save(AssistantApprovalCheckpoint(
+                envelope: envelope,
+                call: call,
+                request: request,
+                effectKey: effectKey
+            ))
+            checkpointRequestID = request.id
             await approvalRegistry.register(requestID: request.id, runID: run.id)
             yield(.permissionRequested(request), to: continuation, recorder: eventRecorder)
             run.status = .waitingForApproval
             recordRun(run)
             let approvalWaitStartedAt = Date()
             let status = await approvalRegistry.waitForResolution(requestID: request.id)
+            try await assistantCheckpointStore.resolve(requestID: request.id, status: status)
             let approvalWaitMilliseconds = max(0, Int(Date().timeIntervalSince(approvalWaitStartedAt) * 1_000))
             if status == .cancelled {
                 await auditLog.record(AgentAuditEvent(
@@ -2166,8 +2194,21 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     ) async throws -> AgentToolResult {
         let timeoutSeconds = configuration.toolExecutionTimeoutSeconds
         let registry = toolRegistry
+        let capability = registry.permission(named: call.name)
+        let effectKey = AssistantEffectIdentity.key(runID: context.runID, call: call)
+        if capability?.assistantHasExternalSideEffect == true,
+           try await assistantEffectLedger.contains(effectKey) {
+            return AgentToolResult(
+                runID: context.runID,
+                sessionID: context.sessionID,
+                toolCallID: call.id,
+                toolName: call.name,
+                contentText: "Skipped duplicate side effect already completed in this run.",
+                contentJSON: "{\"duplicatePrevented\":true,\"effectKey\":\(Self.jsonStringLiteral(effectKey))}"
+            )
+        }
         let race = AgentToolExecutionRace()
-        return try await withTaskCancellationHandler {
+        let result = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 race.install(continuation: continuation)
                 let executionTask = Task {
@@ -2192,6 +2233,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         } onCancel: {
             race.resolve(.failure(CancellationError()))
         }
+        if capability?.assistantHasExternalSideEffect == true, result.error == nil {
+            try await assistantEffectLedger.record(effectKey)
+        }
+        return result
     }
 
     private static func invalidToolArgumentsMessage(for call: AgentToolCall) -> String? {
