@@ -1643,7 +1643,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 guard seenPages.count <= configuration.maxToolIterations else {
                     throw AgentLoopError.maxToolIterationsReached
                 }
-                let argumentsJSON = "{\"page\":\(page),\"pageSize\":500,\"purpose\":\"final_response\",\"view\":\"compressed\"}"
+                let argumentsJSON = "{\"page\":\(page),\"pageSize\":500,\"purpose\":\"final_response\"}"
                 let nestedCall = AgentToolCall(id: "\(call.id)-profile-\(page)", runID: run.id, sessionID: run.sessionID, name: AgentContinuityPreflightPolicy.currentUserProfileToolName, argumentsJSON: argumentsJSON)
                 let result = try await toolRegistry.execute(nestedCall, context: context)
                 citations.append(contentsOf: result.citations)

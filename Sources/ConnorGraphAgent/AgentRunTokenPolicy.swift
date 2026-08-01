@@ -35,7 +35,7 @@ public struct AgentRunRetrievalPlan: Sendable, Equatable {
         ].compactMap { $0 }
         let startupText = startup.isEmpty ? "No startup retrieval is required." : "Required startup retrieval: \(startup.joined(separator: ", "))."
         let profileText = requiresFinalProfile
-            ? "Before the final answer, complete the compressed memory_os_get_current_user_profile final_response pagination chain."
+            ? "Before the final answer, complete the full memory_os_get_current_user_profile final_response pagination chain."
             : "No final-response profile checkpoint is required unless this run successfully updates the current-user profile."
         return """
         ## Runtime Retrieval Plan
