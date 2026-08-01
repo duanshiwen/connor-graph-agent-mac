@@ -311,10 +311,10 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 @Test func agentLoopConfigurationDefaultsBoundTokenUsage() {
     let configuration = AgentLoopConfiguration()
 
-    #expect(configuration.maxToolIterations == 24)
+    #expect(configuration.maxToolIterations == 64)
     #expect(configuration.maxToolCallsPerIteration == 4)
     #expect(configuration.maxConsecutiveToolResultErrors == 3)
-    #expect(configuration.stopAfterTurnWhenBudgetExceeded)
+    #expect(!configuration.stopAfterTurnWhenBudgetExceeded)
     #expect(configuration.preflightMode == .contextual)
     #expect(configuration.toolExposureMode == .contextual)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
@@ -330,7 +330,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
         from: Data(#"{}"#.utf8)
     )
 
-    #expect(configuration.maxToolIterations == 24)
+    #expect(configuration.maxToolIterations == 64)
 }
 
 @Test func agentLoopConfigurationDecodesLegacyJSONWithPromptDefaults() throws {
@@ -2703,6 +2703,114 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
         return nil
     }.first { $0.stoppedAfterTurn })
     #expect(turnCompleted.stoppedAfterTurn)
+    #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopStopsAfterBudgetExceededEvenWhenFinalProfileIsIncomplete() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-budget-profile-stop", name: "echo_args", argumentsJSON: #"{"value":"budget"}"#)],
+            usage: AgentModelUsage(promptTokens: 200, completionTokens: 50),
+            finishReason: .toolCalls
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    registry.register(RetrievalEvidenceTool(name: AgentContinuityPreflightPolicy.currentUserProfileToolName))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(
+            maxToolIterations: 4,
+            stopAfterTurnWhenBudgetExceeded: true,
+            budget: AgentBudgetConfiguration(maxTotalTokens: 100, warningThresholdRatio: 0.8)
+        )
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-budget-profile-stop", userMessage: "Stop after turn")) {
+        events.append(event)
+    }
+
+    #expect(await provider.requests.count == 1)
+    let turnCompleted = try #require(events.compactMap { event -> AgentTurnCompletedEvent? in
+        if case .turnCompleted(let payload) = event { return payload }
+        return nil
+    }.last)
+    #expect(turnCompleted.stoppedAfterTurn)
+    #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopCompactsAfterSoftBudgetExceededAndContinuesToCompletion() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-soft-budget", name: "echo_args", argumentsJSON: #"{"value":"budget"}"#)],
+            usage: AgentModelUsage(promptTokens: 200, completionTokens: 50),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "Completed after compaction.",
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5)
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(
+            maxToolIterations: 6,
+            stopAfterTurnWhenBudgetExceeded: false,
+            budget: AgentBudgetConfiguration(maxTotalTokens: 100, warningThresholdRatio: 0.8)
+        )
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-soft-budget", userMessage: "Finish the task")) {
+        events.append(event)
+    }
+
+    #expect(events.map(\.kind).contains(.compactionStarted))
+    #expect(events.map(\.kind).contains(.compactionCompleted))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopCheckpointsAtIterationBoundaryAndContinuesToCompletion() async throws {
+    let responses = (0..<4).map { index in
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(
+                id: "segment-call-\(index)",
+                name: "echo_args",
+                argumentsJSON: #"{"value":"segment-\#(index)"}"#
+            )],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 2),
+            finishReason: .toolCalls
+        )
+    } + [AgentModelResponse(
+        text: "Completed across execution segments.",
+        usage: AgentModelUsage(promptTokens: 10, completionTokens: 2)
+    )]
+    let provider = ScriptedModelProvider(responses: responses)
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(maxToolIterations: 2)
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-execution-segments", userMessage: "Finish all steps")) {
+        events.append(event)
+    }
+
+    #expect(await provider.requests.count == 5)
+    #expect(events.map(\.kind).filter { $0 == .compactionCompleted }.count >= 2)
+    #expect(!events.map(\.kind).contains(.runFailed))
     #expect(events.last?.kind == .runCompleted)
 }
 

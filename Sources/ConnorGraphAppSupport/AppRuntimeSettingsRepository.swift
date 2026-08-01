@@ -481,7 +481,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
     public var updatedAt: Date
 
     public init(
-        schemaVersion: Int = 6,
+        schemaVersion: Int = 7,
         loop: AgentLoopConfiguration = AgentLoopConfiguration(),
         ui: AgentRuntimeUISettings = AgentRuntimeUISettings(),
         app: AgentRuntimeAppSettings = AgentRuntimeAppSettings(),
@@ -573,10 +573,10 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
     }
 
     private static func migrateLegacyDefaults(_ settings: AgentRuntimeSettings) -> AgentRuntimeSettings {
-        guard settings.schemaVersion < 6 else { return settings }
+        guard settings.schemaVersion < 7 else { return settings }
         var migrated = settings
-        if [256, 2_048].contains(migrated.loop.maxToolIterations) {
-            migrated.loop.maxToolIterations = 24
+        if [24, 256, 2_048].contains(migrated.loop.maxToolIterations) {
+            migrated.loop.maxToolIterations = 64
         }
         if migrated.loop.maxToolResultBytes == 1_000_000 {
             migrated.loop.maxToolResultBytes = 32 * 1_024
@@ -590,10 +590,10 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
         if migrated.loop.maxConsecutiveToolResultErrors == 0 {
             migrated.loop.maxConsecutiveToolResultErrors = 3
         }
-        migrated.loop.stopAfterTurnWhenBudgetExceeded = true
+        migrated.loop.stopAfterTurnWhenBudgetExceeded = false
         migrated.loop.preflightMode = .contextual
         migrated.loop.toolExposureMode = .contextual
-        migrated.schemaVersion = 6
+        migrated.schemaVersion = 7
         return migrated
     }
 
