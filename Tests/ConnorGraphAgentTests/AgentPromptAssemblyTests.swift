@@ -44,6 +44,16 @@ import ConnorGraphAgent
     #expect(prompt.contains("Operating system:"))
 }
 
+@Test func defaultSystemPromptPrioritizesCompletionAndLowValueToolStopping() {
+    let prompt = AgentInstructionSection.runtimeConnorInstruction
+
+    #expect(prompt.contains("Completion is the primary objective"))
+    #expect(prompt.contains("minimal completion checklist"))
+    #expect(prompt.contains("Do not call tools for reassurance"))
+    #expect(prompt.contains("Never repeat a successful mutation"))
+    #expect(prompt.contains("Token warnings and context compaction do not end the task"))
+}
+
 @Test func agentPromptAssemblyUsesGeneralPurposeConnorInstruction() {
     let assembly = AgentPromptAssembler().assemble(
         request: AgentChatRequest(sessionID: "session-prompt", userMessage: "Help me plan"),

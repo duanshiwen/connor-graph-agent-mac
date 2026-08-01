@@ -92,6 +92,10 @@ private actor ScriptedModelProvider: AgentModelProvider {
             return automatic
         }
         requests.append(request)
+        if request.tools.isEmpty,
+           request.messages.contains(where: { $0.role == .system && $0.content.contains("[TRUSTED RUNTIME CONVERGENCE]") }) {
+            return AgentModelResponse(text: "Completed from the available results.")
+        }
         return responses.removeFirst()
     }
 }
@@ -652,12 +656,12 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "call-write-approval", name: "Write", argumentsJSON: #"{"filePath":"note.txt","content":"approved"}"#)],
+            toolCalls: [AgentToolCall(id: "call-patch-approval", name: "ApplyPatch", argumentsJSON: #"{"operations":[{"op":"create","filePath":"note.txt","content":"approved"}]}"#)],
             usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
             finishReason: .toolCalls
         ),
         AgentModelResponse(
-            text: "Write completed.",
+            text: "Patch completed.",
             toolCalls: [],
             usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
             finishReason: .stop
@@ -669,7 +673,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: workspace) }
     var registry = AgentToolRegistry()
-    registry.register(LocalWriteFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    registry.register(LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: registry,
@@ -711,7 +715,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "call-bash-approval", name: "Bash", argumentsJSON: #"{"command":"touch shell-created.txt"}"#)],
+            toolCalls: [AgentToolCall(id: "call-shell-approval", name: "Shell", argumentsJSON: #"{"command":"touch shell-created.txt"}"#)],
             usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
             finishReason: .toolCalls
         ),
@@ -728,13 +732,13 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: workspace) }
     var registry = AgentToolRegistry()
-    registry.register(LocalBashTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    registry.register(LocalShellTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: registry,
         configuration: AgentLoopConfiguration(permissionMode: .askToWrite)
     )
-    let request = AgentChatRequest(runID: "run-bash-approval", sessionID: "session-bash-approval", userMessage: "Touch file", permissionMode: .askToWrite)
+    let request = AgentChatRequest(runID: "run-shell-approval", sessionID: "session-shell-approval", userMessage: "Touch file", permissionMode: .askToWrite)
 
     let task = Task { () throws -> [AgentEvent] in
         var events: [AgentEvent] = []
@@ -764,11 +768,72 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("shell-created.txt").path))
 }
 
+@Test func parallelToolQueryPropagatesWorkspaceShellApprovalAndResumes() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(
+                id: "query-shell-approval",
+                name: AgentPhaseToolContract.externalSearchBatchName,
+                argumentsJSON: #"{"calls":[{"toolName":"Shell","arguments":{"command":"touch nested-shell-created.txt"}}]}"#
+            )],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "Nested shell command completed.",
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorParallelQueryApproval-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    var registry = AgentToolRegistry()
+    registry.register(LocalShellTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(permissionMode: .askToWrite)
+    )
+    let request = AgentChatRequest(
+        runID: "run-query-shell-approval",
+        sessionID: "session-query-shell-approval",
+        userMessage: "Run a workspace shell command",
+        permissionMode: .askToWrite
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(request) {
+        events.append(event)
+        if case .permissionRequested(let approvalRequest) = event {
+            #expect(approvalRequest.capability == .runWorkspaceShellCommand)
+            Task {
+                await loop.resolveApproval(AgentPendingApproval(
+                    requestID: approvalRequest.id,
+                    runID: approvalRequest.runID,
+                    sessionID: approvalRequest.sessionID,
+                    capability: approvalRequest.capability,
+                    toolName: approvalRequest.toolName,
+                    payloadJSON: approvalRequest.payloadJSON
+                ), status: .approved)
+            }
+        }
+    }
+
+    #expect(events.map(\.kind).contains(.permissionRequested))
+    #expect(events.map(\.kind).contains(.permissionResolved))
+    #expect(events.last?.kind == .runCompleted)
+    #expect(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("nested-shell-created.txt").path))
+}
+
 @Test func agentLoopAbortDuringPendingApprovalCancelsRun() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "call-write-abort", name: "Write", argumentsJSON: #"{"filePath":"note.txt","content":"never"}"#)],
+            toolCalls: [AgentToolCall(id: "call-patch-abort", name: "ApplyPatch", argumentsJSON: #"{"operations":[{"op":"create","filePath":"note.txt","content":"never"}]}"#)],
             usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
             finishReason: .toolCalls
         )
@@ -779,7 +844,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: workspace) }
     var registry = AgentToolRegistry()
-    registry.register(LocalWriteFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    registry.register(LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: registry,
@@ -1971,7 +2036,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
 }
 
 @Test func contextualRunTokenPolicyRoutesNativeToolFamiliesAndPreservesExternalTools() {
-    let definitions = ["Read", "mail_search_messages", "web_search", "memory_os_recent_context", "external_mcp_action"].map {
+    let definitions = ["Shell", "mail_search_messages", "web_search", "memory_os_recent_context", "external_mcp_action"].map {
         AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
     }
     let request = AgentChatRequest(sessionID: "routing", userMessage: "请读取项目中的配置文件")
@@ -1984,7 +2049,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
         mode: .contextual
     ).map(\.name))
 
-    #expect(names.contains("Read"))
+    #expect(names.contains("Shell"))
     #expect(names.contains("external_mcp_action"))
     #expect(!names.contains("mail_search_messages"))
     #expect(!names.contains("web_search"))
@@ -2048,8 +2113,8 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
 @Test func instructionCapabilityProjectorRoutesRetrievalRulesByAvailableTools() {
     let projector = AgentInstructionCapabilityProjector()
     let instruction = AgentInstructionSection.defaultConnorInstruction
-    let localDocument = projector.projectedDocument(instruction, availableToolNames: ["Read"])
-    let localOnly = projector.project(instruction, availableToolNames: ["Read"])
+    let localDocument = projector.projectedDocument(instruction, availableToolNames: ["Shell"])
+    let localOnly = projector.project(instruction, availableToolNames: ["Shell"])
 
     #expect(localDocument.moduleIDs.contains(AgentPromptModuleID(rawValue: "programming_precision")))
     #expect(!localDocument.moduleIDs.contains(AgentPromptModuleID(rawValue: "web_research")))
@@ -2505,7 +2570,7 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(events.last?.kind == .runCompleted)
 }
 
-@Test func agentLoopStopsAtConfiguredConsecutiveToolResultErrorLimit() async throws {
+@Test func agentLoopConvergesAfterConfiguredConsecutiveToolResultErrorLimit() async throws {
     let provider = ScriptedModelProvider(responses: (1...3).map { index in
         AgentModelResponse(
             text: nil,
@@ -2521,22 +2586,14 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     )
 
     var events: [AgentEvent] = []
-    do {
-        for try await event in loop.run(AgentChatRequest(sessionID: "session-errors-limited", userMessage: "Stop after repeated failures")) {
-            events.append(event)
-        }
-        Issue.record("Expected the configured consecutive tool error limit to stop the run")
-    } catch {
-        #expect(error as? AgentLoopError == .consecutiveToolResultErrorsReached)
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-errors-limited", userMessage: "Stop after repeated failures")) {
+        events.append(event)
     }
 
     #expect(events.map(\.kind).filter { $0 == .toolFailed }.count == 2)
-    #expect(events.last?.kind == .runFailed)
-    let failureMessages = events.compactMap { event -> String? in
-        if case .runFailed(let failure) = event { return failure.message }
-        return nil
-    }
-    #expect(failureMessages.last?.contains("2 consecutive tool result errors") == true)
+    #expect(!events.map(\.kind).contains(.runFailed))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
 }
 
 @Test func successfulToolResultResetsConsecutiveErrorCount() async throws {
@@ -2669,14 +2726,15 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(requests.first?.tools.contains(where: { $0.name == AgentPhaseToolContract.externalReadBatchName }) == true)
 }
 
-@Test func agentLoopCanStopGracefullyAfterBudgetExceededTurn() async throws {
+@Test func legacyBudgetStopSettingStillContinuesToCompletion() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
             text: nil,
             toolCalls: [AgentToolCall(id: "call-budget-stop", name: "echo_args", argumentsJSON: #"{"value":"budget"}"#)],
             usage: AgentModelUsage(promptTokens: 200, completionTokens: 50),
             finishReason: .toolCalls
-        )
+        ),
+        AgentModelResponse(text: "Completed after the budget warning.")
     ])
     var registry = AgentToolRegistry()
     registry.register(EchoArgumentsTool())
@@ -2695,24 +2753,26 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
         events.append(event)
     }
 
-    #expect(await provider.requests.count == 1)
+    #expect(await provider.requests.count == 2)
     #expect(events.map(\.kind).contains(.budgetWarning))
-    let turnCompleted = try #require(events.compactMap { event -> AgentTurnCompletedEvent? in
+    let completedTurns = events.compactMap { event -> AgentTurnCompletedEvent? in
         if case .turnCompleted(let payload) = event { return payload }
         return nil
-    }.first { $0.stoppedAfterTurn })
-    #expect(turnCompleted.stoppedAfterTurn)
+    }
+    #expect(completedTurns.allSatisfy { !$0.stoppedAfterTurn })
+    #expect(events.map(\.kind).contains(.textComplete))
     #expect(events.last?.kind == .runCompleted)
 }
 
-@Test func agentLoopStopsAfterBudgetExceededEvenWhenFinalProfileIsIncomplete() async throws {
+@Test func budgetWarningStillCompletesFinalProfileCheckpoint() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
             text: nil,
             toolCalls: [AgentToolCall(id: "call-budget-profile-stop", name: "echo_args", argumentsJSON: #"{"value":"budget"}"#)],
             usage: AgentModelUsage(promptTokens: 200, completionTokens: 50),
             finishReason: .toolCalls
-        )
+        ),
+        AgentModelResponse(text: "Completed with profile context.")
     ])
     var registry = AgentToolRegistry()
     registry.register(EchoArgumentsTool())
@@ -2732,12 +2792,13 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
         events.append(event)
     }
 
-    #expect(await provider.requests.count == 1)
+    #expect(await provider.requests.count == 2)
     let turnCompleted = try #require(events.compactMap { event -> AgentTurnCompletedEvent? in
         if case .turnCompleted(let payload) = event { return payload }
         return nil
     }.last)
-    #expect(turnCompleted.stoppedAfterTurn)
+    #expect(!turnCompleted.stoppedAfterTurn)
+    #expect(events.map(\.kind).contains(.textComplete))
     #expect(events.last?.kind == .runCompleted)
 }
 
@@ -2813,7 +2874,7 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(events.last?.kind == .runCompleted)
 }
 
-@Test func agentLoopExposesBatchFileToolsPerPhaseAndInjectsGuidance() async throws {
+@Test func agentLoopExposesDirectWorkspaceToolsAcrossPhases() async throws {
     let workspace = FileManager.default.temporaryDirectory
         .appendingPathComponent("connor-batch-phase-visibility-")
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -2821,8 +2882,8 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     let policy = LocalWorkspacePolicy(workingDirectory: workspace)
     let provider = PhaseToolChoiceProvider()
     var registry = AgentToolRegistry()
-    registry.register(LocalReadManyTool(policy: policy))
-    registry.register(LocalWriteBatchTool(policy: policy))
+    registry.register(LocalShellTool(policy: policy))
+    registry.register(LocalApplyPatchTool(policy: policy))
     let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
 
     for try await _ in loop.run(AgentChatRequest(sessionID: "session-batch-phase", userMessage: "Do file work")) {}
@@ -2832,23 +2893,14 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     let taskExecution = try #require(requests.first { $0.promptCacheContext?.phase == .taskExecution })
     let finalSynthesis = try #require(requests.first { $0.promptCacheContext?.phase == .finalSynthesis })
 
-    // Strategy research only exposes strategy-scoped tools, so the batch file
-    // tools must not appear there.
-    #expect(strategy.tools.contains { $0.name == "ReadMany" } == false)
-    #expect(strategy.tools.contains { $0.name == "WriteBatch" } == false)
-
-    // Task execution exposes both batch tools and carries the pragmatic
-    // read/write guidance as a system message.
-    #expect(taskExecution.tools.contains { $0.name == "ReadMany" })
-    #expect(taskExecution.tools.contains { $0.name == "WriteBatch" })
-    #expect(taskExecution.messages.contains {
-        $0.role == .system && $0.content.contains("batch to minimize turns")
+    for request in [strategy, taskExecution, finalSynthesis] {
+        #expect(request.tools.contains { $0.name == "Shell" })
+        #expect(request.tools.contains { $0.name == "ApplyPatch" })
+        #expect(request.tools.contains { ["Read", "ReadMany", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "WriteBatch", "Bash"].contains($0.name) } == false)
+    }
+    #expect(strategy.messages.contains {
+        $0.role == .system && $0.content.contains("use Shell directly")
     })
-
-    // Final synthesis may still batch-read but must not mutate the workspace,
-    // so WriteBatch is filtered out while ReadMany remains.
-    #expect(finalSynthesis.tools.contains { $0.name == "ReadMany" })
-    #expect(finalSynthesis.tools.contains { $0.name == "WriteBatch" } == false)
 }
 
 @Test func agentLoopDoesNotInjectUnrequestedFinalSynthesisCalendarReminderGuidance() async throws {
@@ -3009,7 +3061,7 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(events.last?.kind == .runFailed)
 }
 
-@Test func alternatingIdenticalToolCallsTriggerLoopProtection() async throws {
+@Test func alternatingIdenticalToolCallsConvergeWithoutRunFailure() async throws {
     let responses = (0..<24).map { index in
         AgentModelResponse(
             text: nil,
@@ -3031,12 +3083,45 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
         configuration: AgentLoopConfiguration(maxToolIterations: 30)
     )
 
-    do {
-        for try await _ in loop.run(.init(sessionID: "session-alternating-loop", userMessage: "Repeat reads")) {}
-        Issue.record("Expected alternating repeated calls to trigger loop protection")
-    } catch {
-        #expect(error as? AgentLoopError == .maxToolIterationsReached)
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(sessionID: "session-alternating-loop", userMessage: "Repeat reads")) {
+        events.append(event)
     }
+
+    let repeatedBusinessToolStarts = events.compactMap { event -> String? in
+        if case .toolStarted(let call) = event, call.name == "fast_tool" || call.name == "slow_tool" {
+            return call.name
+        }
+        return nil
+    }
+    #expect(repeatedBusinessToolStarts.count == 5)
+    #expect(!events.map(\.kind).contains(.runFailed))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func reorderedJSONArgumentsCannotBypassRepeatedCallConvergence() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: nil, toolCalls: [.init(id: "ordered-1", name: "echo_args", argumentsJSON: #"{"value":"same","other":"field"}"#)], finishReason: .toolCalls),
+        AgentModelResponse(text: nil, toolCalls: [.init(id: "ordered-2", name: "echo_args", argumentsJSON: #"{"other":"field","value":"same"}"#)], finishReason: .toolCalls),
+        AgentModelResponse(text: nil, toolCalls: [.init(id: "ordered-3", name: "echo_args", argumentsJSON: #"{"value":"same","other":"field"}"#)], finishReason: .toolCalls)
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(sessionID: "session-normalized-loop", userMessage: "Repeat reordered calls")) {
+        events.append(event)
+    }
+
+    let echoStarts = events.compactMap { event -> AgentToolCall? in
+        if case .toolStarted(let call) = event, call.name == "echo_args" { return call }
+        return nil
+    }
+    #expect(echoStarts.count == 3)
+    #expect(!events.map(\.kind).contains(.runFailed))
+    #expect(events.last?.kind == .runCompleted)
 }
 
 private actor TransientFailureThenSuccessProvider: AgentModelProvider {

@@ -95,6 +95,34 @@ import ConnorGraphAgent
     #expect(activity?.icon == "arrow.triangle.branch")
 }
 
+@Test func classifiesShellAndApplyPatchTools() {
+    let shell = AgentToolCall(
+        id: "shell-search",
+        name: "Shell",
+        argumentsJSON: #"{"command":"rg -n \"AgentLoop\" Sources"}"#
+    )
+    let patch = AgentToolResult(
+        toolCallID: "apply-patch",
+        toolName: "ApplyPatch",
+        contentText: "Applied 3 operations across 2 files.",
+        contentJSON: #"{"filesChanged":2,"operations":3}"#
+    )
+
+    let classifier = AgentToolActivityClassifier()
+    let shellActivity = classifier.activity(forRequestedCall: shell)
+    let patchActivity = classifier.activity(forFinishedResult: patch)
+
+    #expect(shellActivity?.semanticKind == .searchFiles)
+    #expect(shellActivity?.title == "Shell: 搜索文本")
+    #expect(shellActivity?.icon == "magnifyingglass")
+
+    #expect(patchActivity?.semanticKind == .editFile)
+    #expect(patchActivity?.title == "Apply Patch")
+    #expect(patchActivity?.target == "2 files")
+    #expect(patchActivity?.subtitle == "3 operations")
+    #expect(patchActivity?.icon == "doc.badge.gearshape")
+}
+
 @Test func classifiesSearchAndDirectoryTools() {
     let grep = AgentToolCall(id: "grep-1", name: "Grep", argumentsJSON: "{\"pattern\":\"Tool\",\"path\":\"Sources\"}")
     let glob = AgentToolCall(id: "glob-1", name: "Glob", argumentsJSON: "{\"pattern\":\"**/*.swift\",\"path\":\"Sources\"}")

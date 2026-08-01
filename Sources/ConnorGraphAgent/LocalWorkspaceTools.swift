@@ -185,9 +185,9 @@ public struct LocalGrepTool: AgentTool {
     }
 }
 
-public struct LocalBashTool: AgentTool {
-    public let name = "Bash"
-    public let description = "Execute a focused non-interactive shell command in the configured local workspace with conservative policy classification, timeout, stdout/stderr capture, and output truncation. Prefer dedicated Read, LS, Glob, Grep, Write, Edit, and MultiEdit tools when they express the operation directly. Build, test, formatter, package-manager, and script commands may write caches or artifacts and therefore require workspace-write permission even when they primarily verify code."
+public struct LocalShellTool: AgentTool {
+    public let name = "Shell"
+    public let description = "Execute a focused non-interactive shell command in the configured local workspace. Use it to inspect and search files, query Git, and run builds, tests, formatters, package managers, or scripts. Commands are conservatively classified, sandboxed to allowed workspace roots, timed out, truncated, and audited. Commands that may write, use the network, or have unknown effects require the corresponding approval. Use ApplyPatch for file mutations."
     public let permission: AgentPermissionCapability = .runReadOnlyShellCommand
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "command": .string(description: "Shell command to execute."),
@@ -500,14 +500,14 @@ public struct LocalReadManyTool: AgentTool {
     }
 }
 
-public struct LocalWriteBatchTool: AgentTool {
-    public let name = "WriteBatch"
-    public let description = "Apply multiple file changes across the workspace in a single call, executed in the exact order you provide. Prefer this over separate Write/Edit/MultiEdit calls when a task touches several files: everything commits in one turn. Each operation is 'create' (filePath + content), 'edit' (filePath + oldText + newText), or 'multiedit' (filePath + edits[]). All operations are validated against a projected in-memory copy first; if any fails, nothing is written. Order matters: create a file before editing it, and use a single 'multiedit' for several changes to the same file instead of overlapping 'edit' operations. Deletion is not supported here."
+public struct LocalApplyPatchTool: AgentTool {
+    public let name = "ApplyPatch"
+    public let description = "Apply an ordered set of structured file changes inside the workspace. Operations are create, edit, multiedit, or delete. The complete patch is validated against projected file contents before commit; a failed commit is rolled back. Use Shell to inspect files before constructing the patch."
     public let permission: AgentPermissionCapability = .editWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "operations": .array(
             items: .closedObject(properties: [
-                "op": .string(description: "One of: create, edit, multiedit."),
+                "op": .stringEnumeration(values: ["create", "edit", "multiedit", "delete"], description: "Patch operation."),
                 "filePath": .string(description: "Path to write inside the workspace."),
                 "content": .string(description: "Full file content for 'create'."),
                 "oldText": .string(description: "Exact text to replace for 'edit'. Must occur exactly once in the projected file."),
@@ -517,7 +517,7 @@ public struct LocalWriteBatchTool: AgentTool {
                     "newText": .string(description: "Replacement text.")
                 ], required: ["oldText", "newText"]), description: "Ordered replacements for 'multiedit'.")
             ], required: ["op", "filePath"]),
-            description: "Ordered list of file operations. Applied top to bottom against a projected copy, then committed atomically."
+            description: "Ordered patch operations. Applied top to bottom against projected copies, then committed with rollback on failure."
         )
     ], required: ["operations"])
 
@@ -529,12 +529,14 @@ public struct LocalWriteBatchTool: AgentTool {
         case create(content: String)
         case edit(oldText: String, newText: String)
         case multiedit(edits: [(oldText: String, newText: String)])
+        case delete
 
         var label: String {
             switch self {
             case .create: return "create"
             case .edit: return "edit"
             case .multiedit: return "multiedit"
+            case .delete: return "delete"
             }
         }
     }
@@ -543,6 +545,11 @@ public struct LocalWriteBatchTool: AgentTool {
         var index: Int
         var path: URL
         var op: Op
+    }
+
+    private enum OriginalFileState {
+        case missing
+        case contents(Data)
     }
 
     public func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
@@ -603,14 +610,46 @@ public struct LocalWriteBatchTool: AgentTool {
                 }
                 guard !edits.isEmpty else { throw AgentToolError.invalidArguments("operation \(index) (multiedit) edits must not be empty") }
                 operations.append(ParsedOperation(index: index, path: path, op: .multiedit(edits: edits)))
+            case "delete":
+                operations.append(ParsedOperation(index: index, path: path, op: .delete))
             default:
-                throw AgentToolError.invalidArguments("operation \(index) has unsupported op '\(opName)'; use create, edit, or multiedit")
+                throw AgentToolError.invalidArguments("operation \(index) has unsupported op '\(opName)'; use create, edit, multiedit, or delete")
+            }
+        }
+
+        if operations.contains(where: { if case .delete = $0.op { true } else { false } }),
+           !context.approvedCapabilities.contains(.deleteWorkspaceFile) {
+            let payload = LocalToolJSON.encode(["operations": operations.map {
+                ["index": $0.index, "op": $0.op.label, "filePath": $0.path.path]
+            }]) ?? "{}"
+            let decision = await context.policyEngine.evaluate(
+                capability: .deleteWorkspaceFile,
+                runID: context.runID,
+                sessionID: context.sessionID,
+                toolName: name,
+                payloadJSON: payload
+            )
+            switch decision.outcome {
+            case .approved:
+                break
+            case .needsApproval:
+                throw AgentToolError.permissionNeedsApproval(AgentPermissionRequest(
+                    id: decision.requestID,
+                    runID: context.runID,
+                    sessionID: context.sessionID,
+                    capability: .deleteWorkspaceFile,
+                    toolName: name,
+                    payloadJSON: payload
+                ))
+            case .denied:
+                throw AgentToolError.permissionDenied(decision.reason)
             }
         }
 
         // Phase 1: validate every operation against a projected in-memory copy.
         // Any failure aborts the whole batch before a single byte is written.
         var projected: [String: String] = [:]
+        var deletedPaths = Set<String>()
         var seenInBatch = Set<String>()
         var orderedPaths: [String] = []
         for operation in operations {
@@ -621,27 +660,72 @@ public struct LocalWriteBatchTool: AgentTool {
                 let existsOnDisk = FileManager.default.fileExists(atPath: key)
                 try policy.validateWritablePath(operation.path, operation: (existsOnDisk || alreadyStaged) ? .overwriteFile : .createFile)
                 projected[key] = content
+                deletedPaths.remove(key)
             case .edit(let oldText, let newText):
                 try policy.validateWritablePath(operation.path, operation: .editFile)
-                let current = try projectedContent(for: operation.path, key: key, projected: projected, seenInBatch: seenInBatch)
+                let current = try projectedContent(for: operation.path, key: key, projected: projected, deletedPaths: deletedPaths)
                 projected[key] = try LocalTextEditor.replacingUnique(original: current, oldText: oldText, newText: newText)
             case .multiedit(let edits):
                 try policy.validateWritablePath(operation.path, operation: .editFile)
-                let current = try projectedContent(for: operation.path, key: key, projected: projected, seenInBatch: seenInBatch)
+                let current = try projectedContent(for: operation.path, key: key, projected: projected, deletedPaths: deletedPaths)
                 projected[key] = try LocalTextEditor.applyingAtomicEdits(original: current, edits: edits)
+            case .delete:
+                try policy.validateWritablePath(operation.path, operation: .deleteFile)
+                guard projected[key] != nil || FileManager.default.fileExists(atPath: key), !deletedPaths.contains(key) else {
+                    throw AgentToolError.invalidArguments("operation \(operation.index) (delete) requires an existing projected file")
+                }
+                projected.removeValue(forKey: key)
+                deletedPaths.insert(key)
             }
             if seenInBatch.insert(key).inserted { orderedPaths.append(key) }
         }
-        for key in orderedPaths {
-            try policy.validateWritableSize(path: URL(fileURLWithPath: key), content: projected[key] ?? "")
+        for key in orderedPaths where !deletedPaths.contains(key) {
+            guard let content = projected[key] else {
+                throw AgentToolError.invalidArguments("No projected content for \(key)")
+            }
+            try policy.validateWritableSize(path: URL(fileURLWithPath: key), content: content)
         }
 
-        // Phase 2: commit. Each unique file is written once with its final
-        // projected content; per-file content is independent across paths.
+        var originals: [String: OriginalFileState] = [:]
         for key in orderedPaths {
-            let url = URL(fileURLWithPath: key)
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try (projected[key] ?? "").write(to: url, atomically: true, encoding: .utf8)
+            originals[key] = FileManager.default.fileExists(atPath: key)
+                ? .contents(try Data(contentsOf: URL(fileURLWithPath: key)))
+                : .missing
+        }
+        var committed: [String] = []
+        do {
+            for key in orderedPaths {
+                let url = URL(fileURLWithPath: key)
+                if deletedPaths.contains(key) {
+                    try FileManager.default.removeItem(at: url)
+                } else {
+                    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try (projected[key] ?? "").write(to: url, atomically: true, encoding: .utf8)
+                }
+                committed.append(key)
+            }
+        } catch {
+            var rollbackErrors: [String] = []
+            for key in committed.reversed() {
+                let url = URL(fileURLWithPath: key)
+                do {
+                    switch originals[key] {
+                    case .contents(let data):
+                        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try data.write(to: url, options: .atomic)
+                    case .missing:
+                        if FileManager.default.fileExists(atPath: key) { try FileManager.default.removeItem(at: url) }
+                    case nil:
+                        break
+                    }
+                } catch {
+                    rollbackErrors.append("\(key): \(error)")
+                }
+            }
+            if !rollbackErrors.isEmpty {
+                throw AgentToolError.invalidArguments("Patch commit failed and rollback was incomplete: \(rollbackErrors.joined(separator: "; "))")
+            }
+            throw error
         }
 
         let operationsReport: [[String: Any]] = operations.map { operation in
@@ -660,9 +744,11 @@ public struct LocalWriteBatchTool: AgentTool {
         )
     }
 
-    private func projectedContent(for path: URL, key: String, projected: [String: String], seenInBatch: Set<String>) throws -> String {
+    private func projectedContent(for path: URL, key: String, projected: [String: String], deletedPaths: Set<String>) throws -> String {
+        guard !deletedPaths.contains(key) else {
+            throw AgentToolError.invalidArguments("Cannot edit a file after deleting it without creating it again: \(key)")
+        }
         if let staged = projected[key] { return staged }
-        if seenInBatch.contains(key) { return "" }
         try policy.validateReadablePath(path)
         return try String(contentsOf: path, encoding: .utf8)
     }

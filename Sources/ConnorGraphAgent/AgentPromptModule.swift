@@ -260,7 +260,7 @@ public enum AgentPromptModuleCatalog {
 }
 
 public enum AgentPromptCapabilityResolver {
-    private static let workspaceToolNames: Set<String> = ["Read", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Bash"]
+    private static let workspaceToolNames: Set<String> = ["Shell", "ApplyPatch"]
 
     public static func capabilities(for toolNames: Set<String>) -> Set<AgentPromptCapability> {
         var result = Set<AgentPromptCapability>()

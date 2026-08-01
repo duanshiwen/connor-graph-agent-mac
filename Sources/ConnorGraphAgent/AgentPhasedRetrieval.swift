@@ -702,6 +702,7 @@ public struct AgentPhasedLoopState: Sendable, Equatable {
     public mutating func invalidateFinalOutput() { if phase == .finalSynthesis { phase = .taskExecution } }
     public mutating func resumeMemoryPreparation() { phase = .memoryPreparation }
     public mutating func resumeResearch() { phase = .strategyResearch }
+    public mutating func convergeToFinalSynthesis() { phase = .finalSynthesis }
     public var recoveryState: AgentLoopRecoveryState { .init(phase: phase, evidenceState: evidenceState) }
 }
 
@@ -748,12 +749,12 @@ public enum AgentPhaseToolContract {
         ),
         AgentToolDefinition(
             name: prepareFinalOutputName,
-            description: "Enter Final Synthesis and internally finish final-response Profile pagination before generating a non-mechanical final output. This control tool does not read mail, calendars, or other unrelated sources.",
+            description: "Enter Final Synthesis and internally finish final-response Profile pagination only after the requested work and proportionate verification are complete. Call once, then return the final answer unless the profile exposes a concrete issue that changes the result. This control tool does not read mail, calendars, or other unrelated sources.",
             inputSchema: .object(properties: ["reason": .string(description: "")], required: ["reason"])
         ),
         AgentToolDefinition(
             name: externalSearchBatchName,
-            description: "Run model-selected native calls concurrently for information gathering and return one aggregated result. Each calls item uses the exact native toolName and the same arguments object defined for that tool. The runtime does not classify call semantics; it rejects only unavailable, recursive control, or explicitly excluded tools.",
+            description: "Run model-selected independent native reads concurrently and return one aggregated result. Put every read that can be anticipated from current evidence into this one batch. Each calls item uses the exact native toolName and native arguments object. Do not repeat a completed call unless an intervening state change or explicit retry instruction makes the same call necessary.",
             inputSchema: .object(properties: [
                 "calls": .array(items: .object(properties: [
                     "toolName": .string(description: "Exact native tool name selected by the model."),
@@ -764,7 +765,7 @@ public enum AgentPhaseToolContract {
         ),
         AgentToolDefinition(
             name: externalReadBatchName,
-            description: "Run model-selected native action calls as one ordered batch and return one aggregated result. Each calls item uses the exact native toolName and the same arguments object defined for that tool. Calls execute in listed order through the normal permission and approval flow; the model is responsible for dependencies and conflicts.",
+            description: "Run model-selected native action calls as one ordered batch and return one aggregated result. Put every currently determined compatible action into this one batch. Each calls item uses the exact native toolName and native arguments object. Calls execute in listed order through normal permission and approval handling; never repeat a successful mutation merely to confirm it.",
             inputSchema: .object(properties: [
                 "calls": .array(items: .object(properties: [
                     "toolName": .string(description: "Exact native tool name selected by the model."),

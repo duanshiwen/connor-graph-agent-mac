@@ -23,21 +23,21 @@ import ConnorGraphAgent
 @Test func bashToolExecutesReadOnlyCommandInWorkspace() async throws {
     let workspace = try makeShellTempWorkspace()
     try "hello\n".write(to: workspace.appendingPathComponent("hello.txt"), atomically: true, encoding: .utf8)
-    let tool = LocalBashTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    let tool = LocalShellTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     let result = try await tool.execute(
         arguments: try AgentToolArguments(json: #"{"command":"cat hello.txt","timeoutSeconds":15}"#),
         context: .shellToolTestContext(toolCallID: "bash-1")
     )
 
-    #expect(result.toolName == "Bash")
+    #expect(result.toolName == "Shell")
     #expect(result.contentText.contains("hello"))
     #expect(result.contentJSON?.contains(#""exitCode":0"#) == true)
 }
 
 @Test func bashToolRejectsDestructiveCommand() async throws {
     let workspace = try makeShellTempWorkspace()
-    let tool = LocalBashTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    let tool = LocalShellTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     await #expect(throws: LocalWorkspacePolicyError.self) {
         _ = try await tool.execute(
@@ -49,7 +49,7 @@ import ConnorGraphAgent
 
 @Test func bashToolTimesOutLongRunningCommand() async throws {
     let workspace = try makeShellTempWorkspace()
-    let tool = LocalBashTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    let tool = LocalShellTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     await #expect(throws: LocalWorkspacePolicyError.self) {
         _ = try await tool.execute(
@@ -61,7 +61,7 @@ import ConnorGraphAgent
 
 @Test func bashToolDrainsLargeOutputWithoutDeadlockingAndPreservesTheTail() async throws {
     let workspace = try makeShellTempWorkspace()
-    let tool = LocalBashTool(policy: LocalWorkspacePolicy(workingDirectory: workspace, maxToolOutputBytes: 4_096))
+    let tool = LocalShellTool(policy: LocalWorkspacePolicy(workingDirectory: workspace, maxToolOutputBytes: 4_096))
 
     let result = try await tool.execute(
         arguments: try AgentToolArguments(json: #"{"command":"printf 'BEGIN\\n'; yes x | head -c 200000; printf '\\nEND\\n'","timeoutSeconds":10}"#),

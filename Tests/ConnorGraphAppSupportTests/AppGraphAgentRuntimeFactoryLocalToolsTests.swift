@@ -23,21 +23,11 @@ import ConnorGraphStore
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
     let names = controller.toolRegistry.definitions.map(\.name)
 
-    #expect(names.contains("Read"))
-    #expect(names.contains("LS"))
-    #expect(names.contains("Glob"))
-    #expect(names.contains("Grep"))
-    #expect(names.contains("Write"))
-    #expect(names.contains("Edit"))
-    #expect(names.contains("MultiEdit"))
-    #expect(names.contains("Bash"))
-    #expect(names.contains("ReadMany"))
-    #expect(names.contains("WriteBatch"))
-    // Parallel-execution classification is driven purely by the tool's
-    // capability: ReadMany reuses the read capability (parallel-safe) while
-    // WriteBatch reuses the edit capability (must run sequentially).
-    #expect(controller.toolRegistry.permission(named: "ReadMany") == .readWorkspaceFile)
-    #expect(controller.toolRegistry.permission(named: "WriteBatch") == .editWorkspaceFile)
+    #expect(names.contains("Shell"))
+    #expect(names.contains("ApplyPatch"))
+    #expect(Set(names).isDisjoint(with: ["Read", "ReadMany", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "WriteBatch", "Bash"]))
+    #expect(controller.toolRegistry.permission(named: "Shell") == .runReadOnlyShellCommand)
+    #expect(controller.toolRegistry.permission(named: "ApplyPatch") == .editWorkspaceFile)
 }
 
 @Test func agentLoopRuntimeFactoryRegistersSessionStatusTools() throws {

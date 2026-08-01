@@ -215,9 +215,9 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     #expect(result.contentText.contains("\"error\""))
 }
 
-@Test func writeBatchToolAppliesCreateThenEditInOrder() async throws {
+@Test func applyPatchToolAppliesCreateThenEditInOrder() async throws {
     let workspace = try makeToolTempWorkspace()
-    let tool = LocalWriteBatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     let result = try await tool.execute(
         arguments: try AgentToolArguments(json: #"{"operations":[{"op":"create","filePath":"Sources/New.swift","content":"let value = 1\n"},{"op":"edit","filePath":"Sources/New.swift","oldText":"let value = 1","newText":"let value = 2"}]}"#),
@@ -226,15 +226,15 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
 
     let file = workspace.appendingPathComponent("Sources/New.swift")
     #expect(try String(contentsOf: file, encoding: .utf8) == "let value = 2\n")
-    #expect(result.toolName == "WriteBatch")
+    #expect(result.toolName == "ApplyPatch")
     #expect(result.contentJSON?.contains("\"success\":true") == true)
 }
 
-@Test func writeBatchToolIsAtomicWhenAnyOperationFails() async throws {
+@Test func applyPatchToolDoesNotCommitWhenValidationFails() async throws {
     let workspace = try makeToolTempWorkspace()
     let existing = workspace.appendingPathComponent("Existing.swift")
     try "let a = 1\n".write(to: existing, atomically: true, encoding: .utf8)
-    let tool = LocalWriteBatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     await #expect(throws: AgentToolError.self) {
         _ = try await tool.execute(
@@ -249,11 +249,11 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     #expect(try String(contentsOf: existing, encoding: .utf8) == "let a = 1\n")
 }
 
-@Test func writeBatchToolRejectsOverlappingEditsOnSameFile() async throws {
+@Test func applyPatchToolRejectsOverlappingEditsOnSameFile() async throws {
     let workspace = try makeToolTempWorkspace()
     let file = workspace.appendingPathComponent("App.swift")
     try "let a = 1\n".write(to: file, atomically: true, encoding: .utf8)
-    let tool = LocalWriteBatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     await #expect(throws: AgentToolError.self) {
         // The second edit's oldText no longer exists in the projected copy
@@ -266,24 +266,26 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 1\n")
 }
 
-@Test func writeBatchToolRejectsUnsupportedOp() async throws {
+@Test func applyPatchToolDeletesExistingFile() async throws {
     let workspace = try makeToolTempWorkspace()
-    let tool = LocalWriteBatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    let file = workspace.appendingPathComponent("App.swift")
+    try "let value = 1\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
-    await #expect(throws: AgentToolError.self) {
-        _ = try await tool.execute(
-            arguments: try AgentToolArguments(json: #"{"operations":[{"op":"delete","filePath":"App.swift"}]}"#),
-            context: .localToolTestContext(toolCallID: "writebatch-delete")
-        )
-    }
+    _ = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"operations":[{"op":"delete","filePath":"App.swift"}]}"#),
+        context: .localToolTestContext(toolCallID: "applypatch-delete")
+    )
+
+    #expect(!FileManager.default.fileExists(atPath: file.path))
 }
 
-@Test func writeBatchApprovalPayloadListsEveryOperation() async throws {
+@Test func applyPatchApprovalPayloadListsEveryOperation() async throws {
     let workspace = try makeToolTempWorkspace()
-    let tool = LocalWriteBatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
     var call = AgentToolCall(
         id: "writebatch-approval",
-        name: "WriteBatch",
+        name: "ApplyPatch",
         argumentsJSON: #"{"operations":[{"op":"create","filePath":"A.swift","content":"a"},{"op":"edit","filePath":"B.swift","oldText":"x","newText":"y"}]}"#
     )
     call.runID = "run-local-tools"
