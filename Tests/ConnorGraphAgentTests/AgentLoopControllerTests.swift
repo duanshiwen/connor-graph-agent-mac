@@ -77,6 +77,50 @@ private actor CapturingFinalAnswerProvider: AgentModelProvider {
     }
 }
 
+private actor AnthropicAttentionCaptureProvider: AgentModelProvider {
+    let modelID = "claude-sonnet-4-6"
+    let capabilities = AgentModelCapabilities(
+        supportsStreaming: false,
+        supportsToolCalling: true,
+        supportsParallelToolCalls: false,
+        supportsStructuredOutput: false,
+        supportsVision: false
+    )
+    private(set) var requests: [AgentModelRequest] = []
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        requests.append(request)
+        if requests.count == 1 {
+            return AgentModelResponse(
+                text: "Draft answer",
+                providerMetadata: AgentModelProviderMetadata(
+                    providerID: "anthropic-compatible",
+                    rawAssistantContentJSON: #"[{"type":"thinking","thinking":"","signature":"sig"},{"type":"text","text":"Draft answer"}]"#,
+                    stopReason: "end_turn"
+                )
+            )
+        }
+        return AgentModelResponse(text: "Final answer")
+    }
+}
+
+private struct StructuredAttentionFixtureTool: AgentTool {
+    let name: String
+    let contentJSON: String
+    let description = "Structured final attention fixture"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: contentJSON,
+            contentJSON: contentJSON
+        )
+    }
+}
+
 private actor ScriptedModelProvider: AgentModelProvider {
     let modelID = "scripted"
     let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
@@ -1720,6 +1764,46 @@ func agentLoopRequiresStartupContinuityWithoutPreloadingCurrentUserProfile() asy
     #expect(policy.missingToolNames(availableTools: definitions, invokedToolNames: Set(AgentFinalAttentionPreflightPolicy.requiredToolNames)).isEmpty)
     #expect(policy.correctionInstruction(for: ["rss_search_items"])?.contains("previous 48-hour") == true)
     #expect(policy.correctionInstruction(for: []) == nil)
+}
+
+@Test func agentLoopSkipsSecondModelCallWhenFinalAttentionHasNoCandidates() async throws {
+    let provider = AnthropicAttentionCaptureProvider()
+    var registry = AgentToolRegistry()
+    registry.register(StructuredAttentionFixtureTool(
+        name: AttentionBriefTool.toolName,
+        contentJSON: #"{"events":[],"mail":{"status":"included","messages":[]}}"#
+    ))
+    registry.register(StructuredAttentionFixtureTool(name: "rss_search_items", contentJSON: "[]"))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var finalText: String?
+    for try await event in loop.run(.init(sessionID: "attention-empty", userMessage: "Who are you?")) {
+        if case .textComplete(let completed) = event { finalText = completed.text }
+    }
+
+    #expect(await provider.requests.count == 1)
+    #expect(finalText == "Draft answer")
+}
+
+@Test func agentLoopContinuesAnthropicAttentionWithUserTurnAndRawThinkingBlocks() async throws {
+    let provider = AnthropicAttentionCaptureProvider()
+    var registry = AgentToolRegistry()
+    registry.register(StructuredAttentionFixtureTool(
+        name: AttentionBriefTool.toolName,
+        contentJSON: #"{"events":[{"eventID":"event-1"}],"mail":{"messages":[]}}"#
+    ))
+    registry.register(StructuredAttentionFixtureTool(name: "rss_search_items", contentJSON: "[]"))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(.init(sessionID: "attention-candidate", userMessage: "Who are you?")) {}
+
+    let requests = await provider.requests
+    #expect(requests.count == 2)
+    let continuation = try #require(requests.last)
+    #expect(continuation.messages.last?.role == .user)
+    #expect(continuation.messages.last?.content.contains("<assistant-final-attention>") == true)
+    let draft = try #require(continuation.messages.last { $0.role == .assistant })
+    #expect(draft.providerMetadata?.rawAssistantContentJSON?.contains(#""signature":"sig""#) == true)
 }
 
 @Test(.disabled("Note search is now completed by deterministic assistant bootstrap"))

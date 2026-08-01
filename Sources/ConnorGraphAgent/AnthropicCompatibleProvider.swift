@@ -196,7 +196,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
 
     public func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     guard config.featureOptions.streamingEnabled, let sseClient else {
                         continuation.yield(.completed(try await complete(request)))
@@ -208,7 +208,6 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                         let frames = try await sseClient.stream(httpRequest)
                         let parser = AnthropicSSEParser()
                         var accumulator = AnthropicStreamAccumulator()
-                        var didEmitCompleted = false
                         for try await frame in frames {
                             for event in parser.parse(frame) {
                                 if case .error(let message) = event {
@@ -216,12 +215,16 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                                     return
                                 }
                                 if let mapped = accumulator.append(event) {
-                                    if case .completed = mapped { didEmitCompleted = true }
+                                    if case .completed = mapped {
+                                        continuation.yield(mapped)
+                                        continuation.finish()
+                                        return
+                                    }
                                     continuation.yield(mapped)
                                 }
                             }
                         }
-                        if !didEmitCompleted { continuation.yield(.completed(accumulator.response())) }
+                        continuation.yield(.completed(accumulator.response()))
                         continuation.finish()
                     } catch AnthropicCompatibleProviderError.unsupportedVisionInput {
                         guard request.containsImageInput else { throw AnthropicCompatibleProviderError.unsupportedVisionInput(model: capabilityProfile.modelID, reason: "vision not supported") }
@@ -230,7 +233,6 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                         let frames = try await sseClient.stream(httpRequest)
                         let parser = AnthropicSSEParser()
                         var accumulator = AnthropicStreamAccumulator()
-                        var didEmitCompleted = false
                         for try await frame in frames {
                             for event in parser.parse(frame) {
                                 if case .error(let message) = event {
@@ -240,8 +242,9 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                                 if let mapped = accumulator.append(event) {
                                     if case .completed(var response) = mapped {
                                         response.warnings.append(Self.visionDegradationWarning)
-                                        didEmitCompleted = true
                                         continuation.yield(.completed(response))
+                                        continuation.finish()
+                                        return
                                     } else {
                                         continuation.yield(mapped)
                                     }
@@ -250,13 +253,14 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                         }
                         var finalResponse = accumulator.response()
                         finalResponse.warnings.append(Self.visionDegradationWarning)
-                        if !didEmitCompleted { continuation.yield(.completed(finalResponse)) }
+                        continuation.yield(.completed(finalResponse))
                         continuation.finish()
                     }
                 } catch {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
 
@@ -281,6 +285,9 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             body["thinking"] = isXiaomiMiMoEndpoint ? ["type": "enabled"] : thinking.jsonObject
         } else if isXiaomiMiMoEndpoint {
             body["thinking"] = ["type": "disabled"]
+        }
+        if !isXiaomiMiMoEndpoint, let effort = config.featureOptions.effort {
+            body["output_config"] = ["effort": effort]
         }
         if !isXiaomiMiMoEndpoint, let cache = config.featureOptions.promptCache.jsonObject {
             body["cache_control"] = cache

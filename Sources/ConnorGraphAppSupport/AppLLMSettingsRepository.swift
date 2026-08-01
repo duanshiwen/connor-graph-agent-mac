@@ -91,12 +91,51 @@ public enum AppLLMThinkingLevel: String, Sendable, Equatable, CaseIterable, Coda
     public var anthropicThinking: AnthropicThinkingConfig? {
         switch self {
         case .off: return nil
-        case .low: return .enabled(budgetTokens: 4_000, display: .omitted)
-        case .medium: return .enabled(budgetTokens: 10_000, display: .omitted)
-        case .high: return .enabled(budgetTokens: 20_000, display: .omitted)
-        case .xhigh: return .enabled(budgetTokens: 26_000, display: .omitted)
-        case .max: return .enabled(budgetTokens: 32_000, display: .omitted)
+        case .low: return .enabled(budgetTokens: 1_024, display: .omitted)
+        case .medium: return .enabled(budgetTokens: 4_096, display: .omitted)
+        case .high: return .enabled(budgetTokens: 10_000, display: .omitted)
+        case .xhigh: return .enabled(budgetTokens: 16_000, display: .omitted)
+        case .max: return .enabled(budgetTokens: 20_000, display: .omitted)
         }
+    }
+
+    public func anthropicThinking(modelID: String) -> AnthropicThinkingConfig? {
+        guard self != .off else { return nil }
+        return Self.supportsAdaptiveAnthropicThinking(modelID)
+            ? .adaptive(display: .omitted)
+            : anthropicThinking
+    }
+
+    public func anthropicEffort(modelID: String) -> String? {
+        guard Self.supportsAdaptiveAnthropicThinking(modelID) else { return nil }
+        switch self {
+        case .off: return nil
+        case .low: return "low"
+        case .medium: return "medium"
+        case .high: return "high"
+        case .xhigh:
+            return Self.supportsXHighAnthropicEffort(modelID) ? "xhigh" : "high"
+        case .max: return "max"
+        }
+    }
+
+    private static func supportsAdaptiveAnthropicThinking(_ modelID: String) -> Bool {
+        let model = modelID.lowercased().replacingOccurrences(of: ".", with: "-")
+        return [
+            "claude-opus-4-6", "claude-sonnet-4-6",
+            "claude-opus-4-7", "claude-opus-4-8",
+            "claude-opus-5", "claude-sonnet-5",
+            "claude-fable-5", "claude-mythos"
+        ].contains { model.contains($0) }
+    }
+
+    private static func supportsXHighAnthropicEffort(_ modelID: String) -> Bool {
+        let model = modelID.lowercased().replacingOccurrences(of: ".", with: "-")
+        return [
+            "claude-opus-4-7", "claude-opus-4-8",
+            "claude-opus-5", "claude-sonnet-5",
+            "claude-fable-5", "claude-mythos"
+        ].contains { model.contains($0) }
     }
 
     public static let defaultLevel: AppLLMThinkingLevel = .medium
@@ -694,13 +733,17 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         var extraHeaders = connection.extraHTTPHeaders
         extraHeaders.removeValue(forKey: Self.anthropicAuthHeaderKindMetadataKey)
         let thinkingLevel = thinkingLevelOverride ?? settings.defaultThinkingLevel
+        let model = modelOverride ?? connection.effectiveModel
         return AnthropicCompatibleConfig(
             baseURL: baseURL,
             apiKey: apiKey,
-            model: modelOverride ?? connection.effectiveModel,
+            model: model,
             authHeaderKind: authHeaderKind,
             extraHeaders: extraHeaders,
-            featureOptions: AnthropicCompatibleFeatureOptions(thinking: thinkingLevel.anthropicThinking),
+            featureOptions: AnthropicCompatibleFeatureOptions(
+                thinking: thinkingLevel.anthropicThinking(modelID: model),
+                effort: thinkingLevel.anthropicEffort(modelID: model)
+            ),
             explicitVisionSupport: connection.explicitVisionSupport
         )
     }

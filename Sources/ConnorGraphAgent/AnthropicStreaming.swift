@@ -72,6 +72,7 @@ public enum AnthropicServerTool: Codable, Sendable, Equatable {
 public struct AnthropicCompatibleFeatureOptions: Codable, Sendable, Equatable {
     public var streamingEnabled: Bool
     public var thinking: AnthropicThinkingConfig?
+    public var effort: String?
     public var promptCache: AnthropicPromptCacheConfig
     public var eagerInputStreamingToolNames: Set<String>
     public var cachedToolNames: Set<String>
@@ -82,6 +83,7 @@ public struct AnthropicCompatibleFeatureOptions: Codable, Sendable, Equatable {
     public init(
         streamingEnabled: Bool = true,
         thinking: AnthropicThinkingConfig? = nil,
+        effort: String? = nil,
         promptCache: AnthropicPromptCacheConfig = AnthropicPromptCacheConfig(),
         eagerInputStreamingToolNames: Set<String> = [],
         cachedToolNames: Set<String> = [],
@@ -91,6 +93,7 @@ public struct AnthropicCompatibleFeatureOptions: Codable, Sendable, Equatable {
     ) {
         self.streamingEnabled = streamingEnabled
         self.thinking = thinking
+        self.effort = effort
         self.promptCache = promptCache
         self.eagerInputStreamingToolNames = eagerInputStreamingToolNames
         self.cachedToolNames = cachedToolNames
@@ -219,7 +222,7 @@ public struct AnthropicStreamAccumulator: Sendable, Equatable {
         case .messageDelta(let stopReason, let usage):
             if let stopReason { self.stopReason = stopReason }
             if let usage { self.usage = Self.mergedUsage(self.usage, usage) }
-            return nil
+            return stopReason == nil ? nil : .completed(response())
         case .messageStart(let rawJSON):
             // message_start carries the request-side usage (input_tokens plus
             // cache creation/read); message_delta later only updates outputs.
@@ -347,7 +350,7 @@ public struct URLSessionAgentSSEHTTPClient: AgentSSEHTTPClient, Sendable, Equata
             )
         }
         return AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     var frame = ""
                     for try await line in bytes.lines {
@@ -366,6 +369,7 @@ public struct URLSessionAgentSSEHTTPClient: AgentSSEHTTPClient, Sendable, Equata
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
 }
