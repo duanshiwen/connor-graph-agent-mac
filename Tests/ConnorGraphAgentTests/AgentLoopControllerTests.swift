@@ -315,17 +315,17 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 @Test func agentLoopConfigurationDefaultsBoundTokenUsage() {
     let configuration = AgentLoopConfiguration()
 
-    #expect(configuration.maxToolIterations == 64)
+    #expect(configuration.maxToolIterations == 12)
     #expect(configuration.maxToolCallsPerIteration == 4)
     #expect(configuration.maxConsecutiveToolResultErrors == 3)
     #expect(!configuration.stopAfterTurnWhenBudgetExceeded)
     #expect(configuration.preflightMode == .contextual)
     #expect(configuration.toolExposureMode == .contextual)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
-    #expect(configuration.promptMaxEstimatedTokens == 200_000)
-    #expect(configuration.maxToolResultBytes == 32 * 1_024)
+    #expect(configuration.promptMaxEstimatedTokens == 64_000)
+    #expect(configuration.maxToolResultBytes == 8 * 1_024)
     #expect(configuration.toolExecutionTimeoutSeconds == 300)
-    #expect(configuration.budget.maxTotalTokens == 300_000)
+    #expect(configuration.budget.maxTotalTokens == 80_000)
 }
 
 @Test func agentLoopConfigurationDecodesMissingToolIterationLimitWithCurrentDefault() throws {
@@ -334,7 +334,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
         from: Data(#"{}"#.utf8)
     )
 
-    #expect(configuration.maxToolIterations == 64)
+    #expect(configuration.maxToolIterations == 12)
 }
 
 @Test func agentLoopConfigurationDecodesLegacyJSONWithPromptDefaults() throws {
@@ -354,7 +354,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 
     #expect(configuration.maxToolIterations == 32)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
-    #expect(configuration.promptMaxEstimatedTokens == 200_000)
+    #expect(configuration.promptMaxEstimatedTokens == 64_000)
     #expect(configuration.maxToolResultBytes == 4096)
     #expect(configuration.budget.maxTotalTokens == 10_000)
     #expect(configuration.maxConsecutiveToolResultErrors == 3)

@@ -575,17 +575,17 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
     private static func migrateLegacyDefaults(_ settings: AgentRuntimeSettings) -> AgentRuntimeSettings {
         guard settings.schemaVersion < 7 else { return settings }
         var migrated = settings
-        if [24, 256, 2_048].contains(migrated.loop.maxToolIterations) {
-            migrated.loop.maxToolIterations = 64
+        if [24, 64, 256, 2_048].contains(migrated.loop.maxToolIterations) {
+            migrated.loop.maxToolIterations = 12
         }
-        if migrated.loop.maxToolResultBytes == 1_000_000 {
-            migrated.loop.maxToolResultBytes = 32 * 1_024
+        if [32 * 1_024, 1_000_000].contains(migrated.loop.maxToolResultBytes) {
+            migrated.loop.maxToolResultBytes = 8 * 1_024
         }
-        if [160_000, 1_000_000].contains(migrated.loop.promptMaxEstimatedTokens) {
-            migrated.loop.promptMaxEstimatedTokens = 200_000
+        if [160_000, 200_000, 1_000_000].contains(migrated.loop.promptMaxEstimatedTokens) {
+            migrated.loop.promptMaxEstimatedTokens = 64_000
         }
-        if [120_000, 10_000_000].contains(migrated.loop.budget.maxTotalTokens) {
-            migrated.loop.budget.maxTotalTokens = 300_000
+        if [120_000, 300_000, 10_000_000].contains(migrated.loop.budget.maxTotalTokens) {
+            migrated.loop.budget.maxTotalTokens = 80_000
         }
         if migrated.loop.maxConsecutiveToolResultErrors == 0 {
             migrated.loop.maxConsecutiveToolResultErrors = 3
