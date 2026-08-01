@@ -20,10 +20,15 @@ public struct AssistantAttentionPack: Codable, Sendable, Equatable {
         self.checkedAt = checkedAt
         self.sections = sections
     }
+
+    public var hasAvailableSources: Bool {
+        sections.contains { $0.error != AssistantAttentionCoordinator.capabilityUnavailableError }
+    }
 }
 
 public struct AssistantAttentionCoordinator: Sendable {
     public static let internalToolNames: Set<String> = ["attention_brief", "rss_search_items"]
+    public static let capabilityUnavailableError = "capability unavailable"
 
     public var maximumSectionCharacters: Int
     public var maximumPackTokens: Int
@@ -44,7 +49,7 @@ public struct AssistantAttentionCoordinator: Sendable {
         await withTaskGroup(of: AssistantAttentionSection.self) { group in
             for spec in specs {
                 guard registry.definition(named: spec.name) != nil else {
-                    sections.append(.init(source: spec.name, summary: "", error: "capability unavailable"))
+                    sections.append(.init(source: spec.name, summary: "", error: Self.capabilityUnavailableError))
                     continue
                 }
                 group.addTask {
