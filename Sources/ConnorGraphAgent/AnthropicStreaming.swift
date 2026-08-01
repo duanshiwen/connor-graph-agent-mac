@@ -222,7 +222,7 @@ public struct AnthropicStreamAccumulator: Sendable, Equatable {
         case .messageDelta(let stopReason, let usage):
             if let stopReason { self.stopReason = stopReason }
             if let usage { self.usage = Self.mergedUsage(self.usage, usage) }
-            return stopReason == nil ? nil : .completed(response())
+            return nil
         case .messageStart(let rawJSON):
             // message_start carries the request-side usage (input_tokens plus
             // cache creation/read); message_delta later only updates outputs.
