@@ -131,24 +131,24 @@ extension AnthropicCompatibleProviderError: LocalizedError {
     }
 }
 
-private final class AnthropicStreamingCompatibilityState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var streamingIsDisabled = false
-
-    var shouldAttemptStreaming: Bool {
-        lock.withLock { !streamingIsDisabled }
-    }
-
-    func markIncompatible() {
-        lock.withLock { streamingIsDisabled = true }
-    }
-}
-
 public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider, StreamingAgentModelProvider, Sendable {
+    private final class StreamingCompatibilityState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var streamingIsDisabled = false
+
+        var shouldAttemptStreaming: Bool {
+            lock.withLock { !streamingIsDisabled }
+        }
+
+        func markIncompatible() {
+            lock.withLock { streamingIsDisabled = true }
+        }
+    }
+
     public var config: AnthropicCompatibleConfig
     public var httpClient: Client
     public var sseClient: (any AgentSSEHTTPClient)?
-    private let streamingCompatibility = AnthropicStreamingCompatibilityState()
+    private let streamingCompatibility = StreamingCompatibilityState()
 
     public var modelID: String { config.requestModel }
     public var capabilityProfile: AgentModelCapabilityProfile {
