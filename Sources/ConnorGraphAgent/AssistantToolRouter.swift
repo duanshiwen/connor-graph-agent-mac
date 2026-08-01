@@ -18,12 +18,14 @@ public struct AssistantToolRoute: Sendable, Equatable {
 
 public struct AssistantToolRouter: Sendable, Equatable {
     public static let directToolNames: Set<String> = ["Shell", "ApplyPatch"]
+    public static let runtimeInternalToolNames = AssistantBootstrapCoordinator.internalToolNames
+        .union(AssistantAttentionCoordinator.internalToolNames)
 
     public init() {}
 
     public func route(definitions: [AgentToolDefinition]) -> AssistantToolRoute {
         let publicDefinitions = definitions.filter {
-            !AssistantBootstrapCoordinator.internalToolNames.contains($0.name)
+            !Self.runtimeInternalToolNames.contains($0.name)
         }
         let direct = publicDefinitions.filter { Self.directToolNames.contains($0.name) }
         let discoverable = publicDefinitions.filter { !Self.directToolNames.contains($0.name) }

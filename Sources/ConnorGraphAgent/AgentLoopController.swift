@@ -357,8 +357,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var didAttemptNoteSearch = assistantBootstrap.attemptedToolNames.contains(
                     AgentNoteSearchPreflightPolicy.requiredToolName
                 )
-                let finalAttentionPreflightPolicy = AgentFinalAttentionPreflightPolicy()
-                var invokedFinalAttentionToolNames = Set<String>()
+                var finalAttentionPack: AssistantAttentionPack?
                 // Startup tool visibility is fixed for the whole run so the serialized
                 // tool array stays prefix-stable for provider prompt caching. Usage
                 // discipline is enforced through corrective instructions and call
@@ -606,7 +605,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             modelResponse = try await completeModelRequest(
                                 modelRequest,
                                 run: run,
-                                publishesTextDeltas: isFinalResponseProfileComplete,
+                                publishesTextDeltas: isFinalResponseProfileComplete && finalAttentionPack != nil,
                                 continuation: continuation
                             )
                         } catch {
@@ -630,7 +629,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             modelResponse = try await completeModelRequest(
                                 recoveredRequest,
                                 run: run,
-                                publishesTextDeltas: isFinalResponseProfileComplete,
+                                publishesTextDeltas: isFinalResponseProfileComplete && finalAttentionPack != nil,
                                 continuation: continuation
                             )
                         }
@@ -691,17 +690,26 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(role: .system, content: noteSearchPreflightPolicy.correctionInstruction()))
                                 continue
                             }
-                            let missingFinalAttentionTools = retrievalPlan.requiresFinalAttention
-                                ? finalAttentionPreflightPolicy.missingToolNames(
-                                    availableTools: availableToolDefinitions,
-                                    invokedToolNames: invokedFinalAttentionToolNames
+                            if retrievalPlan.requiresFinalAttention, finalAttentionPack == nil {
+                                let pack = await AssistantAttentionCoordinator().run(
+                                    request: request,
+                                    registry: toolRegistry,
+                                    policy: policy
                                 )
-                                : []
-                            if phasedState.phase == .taskExecution,
-                               let correction = finalAttentionPreflightPolicy.correctionInstruction(for: missingFinalAttentionTools),
-                               shouldApplyCorrectionContinue("final_attention") {
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                messages.append(AgentModelMessage(role: .system, content: correction))
+                                finalAttentionPack = pack
+                                messages.append(AgentModelMessage(
+                                    role: .assistant,
+                                    content: modelResponse.text ?? ""
+                                ))
+                                messages.append(AgentModelMessage(
+                                    role: .system,
+                                    content: [
+                                        AssistantAttentionCoordinator().render(pack),
+                                        "Produce the final answer now. Preserve the completed task result and add only genuinely urgent attention items. Do not call more tools."
+                                    ].joined(separator: "\n\n")
+                                ))
+                                phasedState.convergeToFinalSynthesis()
+                                forceFinalSynthesisWithoutTools = true
                                 continue
                             }
                             if evidencePolicy.requiresWebResearch(request.userMessage),
@@ -809,31 +817,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 continue
                             }
                         }
-                        let missingFinalAttentionTools = retrievalPlan.requiresFinalAttention
-                            ? finalAttentionPreflightPolicy.missingToolNames(
-                                availableTools: availableToolDefinitions,
-                                invokedToolNames: invokedFinalAttentionToolNames
-                            )
-                            : []
-                        let requestedFinalPreparation = calls.contains {
-                            $0.name == AgentPhaseToolContract.prepareFinalOutputName
-                        }
-                        if requestedFinalPreparation, !missingFinalAttentionTools.isEmpty {
-                            let requiredNames = Set(AgentFinalAttentionPreflightPolicy.requiredToolNames)
-                            let attentionCalls = calls.filter {
-                                !Self.selectedNativeToolNames(in: [$0]).isDisjoint(with: requiredNames)
-                            }
-                            if attentionCalls.isEmpty {
-                                if shouldApplyCorrectionContinue("final_attention"),
-                                   let correction = finalAttentionPreflightPolicy.correctionInstruction(for: missingFinalAttentionTools) {
-                                    messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                    messages.append(AgentModelMessage(role: .system, content: correction))
-                                    continue
-                                }
-                            } else {
-                                calls = attentionCalls
-                            }
-                        }
                         if phasedState.phase == .strategyResearch {
                             let researchCalls = calls.filter {
                                 $0.name == AgentPhaseToolContract.externalSearchBatchName
@@ -863,9 +846,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         if selectedNativeToolNames.contains(AgentNoteSearchPreflightPolicy.requiredToolName) {
                             didAttemptNoteSearch = true
                         }
-                        invokedFinalAttentionToolNames.formUnion(selectedNativeToolNames.filter(
-                            AgentFinalAttentionPreflightPolicy.requiredToolNames.contains
-                        ))
                         logger.info("Executing \(calls.count) tool calls: \(calls.map(\.name).joined(separator: ", "))")
 
                         var didPublishUserFacingMessage = false
@@ -1110,15 +1090,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 role: .system,
                                 content: noteSearchPreflightPolicy.correctionInstruction()
                             ))
-                        } else if phasedState.phase == .taskExecution,
-                                  retrievalPlan.requiresFinalAttention,
-                                  let correction = finalAttentionPreflightPolicy.correctionInstruction(for:
-                                    finalAttentionPreflightPolicy.missingToolNames(
-                                        availableTools: availableToolDefinitions,
-                                        invokedToolNames: invokedFinalAttentionToolNames
-                                    )
-                                  ) {
-                            messages.append(AgentModelMessage(role: .system, content: correction))
                         }
 
                         let reachedToolErrorLimit = configuration.maxConsecutiveToolResultErrors > 0
