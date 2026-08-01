@@ -41,7 +41,7 @@ public struct AgentRunRetrievalPlan: Sendable, Equatable {
             ? "Before the final answer, complete the full memory_os_get_current_user_profile final_response pagination chain."
             : "No final-response profile checkpoint is required unless this run successfully updates the current-user profile."
         let attentionText = requiresFinalAttention
-            ? "Before prepare_final_output, complete one final attention batch containing every available attention_brief and rss_search_items checkpoint."
+            ? "The Runtime will complete the final calendar, mail, and RSS attention check before final synthesis; do not call generic attention tools yourself."
             : "No final attention checkpoint is required."
         return """
         ## Runtime Retrieval Plan
