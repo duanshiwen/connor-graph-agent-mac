@@ -103,14 +103,13 @@ import ConnorGraphMemory
 
 
 @Test func backgroundJobKindsSeparateL1AndAllExecutableKinds() throws {
-    #expect(MemoryOSBackgroundJobKind.allCases == [.l1SynthesizeKnowledge, .l1UnifiedProjection, .preferenceCompaction])
+    #expect(MemoryOSBackgroundJobKind.allCases == [.l1SynthesizeKnowledge, .l1UnifiedProjection])
     #expect(MemoryOSBackgroundJobKind.l1ExecutableRawValues == [
         MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
         MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue
     ])
     #expect(MemoryOSBackgroundJobKind.executableRawValues == [
         MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
-        MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue,
-        MemoryOSBackgroundJobKind.preferenceCompaction.rawValue
+        MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue
     ])
 }

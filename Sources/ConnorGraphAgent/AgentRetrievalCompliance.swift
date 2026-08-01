@@ -94,7 +94,7 @@ public struct AgentNoteSearchPreflightPolicy: Sendable, Equatable {
     }
 }
 
-/// Enforces startup continuity retrieval and the late compressed-profile checkpoint.
+/// Enforces startup continuity retrieval and the late full-profile checkpoint.
 public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
     public static let currentUserProfileToolName = "memory_os_get_current_user_profile"
     public static let finalResponsePurpose = "final_response"

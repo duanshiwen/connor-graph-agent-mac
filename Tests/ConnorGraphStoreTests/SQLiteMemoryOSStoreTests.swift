@@ -90,7 +90,7 @@ private func temporaryMemoryOSDatabaseURL(_ name: String = UUID().uuidString) ->
     let columns = Set(try store.query(sql: "PRAGMA table_info(memory_l1_capture_events);").map { $0[1] })
     #expect(columns.contains("retrieval_text"))
     #expect(columns.contains("normalization_status"))
-    #expect(try store.schemaUserVersion() == 8)
+    #expect(try store.schemaUserVersion() == 9)
     #expect(try store.tableNames().contains("memory_l1_retrieval_fts"))
 }
 

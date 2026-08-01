@@ -144,8 +144,6 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
         let source: String
         if MemoryOSBackgroundJobKind.isL1KnowledgeKind(request.kind) {
             source = "l1_capture_events"
-        } else if request.kind == MemoryOSBackgroundJobKind.preferenceCompaction.rawValue {
-            source = "profile_preferences"
         } else {
             source = "l2_statements"
         }

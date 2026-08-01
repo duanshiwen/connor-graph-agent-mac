@@ -91,35 +91,6 @@ struct MemoryOSBackgroundAgentModelAdapterTests {
         #expect(response.assistantText == "{\"artifactType\":\"memory.l1.unified_projection\"}")
     }
 
-    @Test func preferenceCompactionUsesDedicatedAuditAttribution() async throws {
-        let recorder = AgentModelRequestRecorder()
-        let provider = AnyAgentModelProvider(modelID: "compaction-model") { request in
-            await recorder.record(request)
-            return AgentModelResponse(text: #"{"items":[],"sourceDispositions":[],"retiredItemKeys":[]}"#)
-        }
-        let model = AgentModelBackgroundToolLoopModel(provider: provider)
-        _ = try model.complete(MemoryOSBackgroundLoopModelRequest(
-            runID: "compaction-run",
-            job: MemoryOSBackgroundModelRequest(
-                jobID: "compaction-job",
-                kind: MemoryOSBackgroundJobKind.preferenceCompaction.rawValue,
-                schemaName: "MemoryOSPreferenceCompactionOutput",
-                artifactType: "memory_os_preference_compaction",
-                prompt: "Compact preferences",
-                metadata: ["batch_count": "60"]
-            ),
-            messages: [MemoryOSBackgroundLoopMessage(role: .user, content: "Compact preferences")],
-            availableTools: []
-        ))
-
-        let request = try #require(await recorder.lastRequest)
-        #expect(request.auditContext.requestKind == .personalPreferenceCompaction)
-        #expect(request.auditContext.operation == "MemoryOSPreferenceCompactionWorker.compact")
-        #expect(request.auditContext.initiator == .background)
-        #expect(request.auditContext.metadata["batch_count"] == "60")
-        #expect(request.auditContext.metadata["background_job_kind"] == MemoryOSBackgroundJobKind.preferenceCompaction.rawValue)
-    }
-
     @Test("Completes when invoked from an actor", .timeLimit(.minutes(1)))
     func agentModelBackgroundToolLoopModelDoesNotDeadlockCallingActor() async throws {
         let provider = AnyAgentModelProvider(modelID: "actor-test-model") { _ in

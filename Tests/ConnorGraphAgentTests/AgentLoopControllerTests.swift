@@ -890,7 +890,6 @@ private struct PaginatedCurrentUserProfileTool: AgentTool {
         properties: [
             "page": .integer(description: "Sequential page"),
             "pageSize": .integer(description: "Page size"),
-            "view": .string(description: "Profile view"),
             "purpose": .string(description: "Lookup purpose")
         ],
         required: []
@@ -1721,7 +1720,7 @@ func agentLoopDefersProfileUntilFinalizationAndAllowsMissingInformationToolsAfte
             toolCalls: [AgentToolCall(
                 id: "profile-page-1",
                 name: names[2],
-                argumentsJSON: #"{"purpose":"final_response","view":"compressed","page":1,"pageSize":500}"#
+                argumentsJSON: #"{"purpose":"final_response","page":1,"pageSize":500}"#
             )],
             finishReason: .toolCalls
         ),
@@ -1730,7 +1729,7 @@ func agentLoopDefersProfileUntilFinalizationAndAllowsMissingInformationToolsAfte
             toolCalls: [AgentToolCall(
                 id: "profile-page-2",
                 name: names[2],
-                argumentsJSON: #"{"purpose":"final_response","view":"compressed","page":2,"pageSize":500}"#
+                argumentsJSON: #"{"purpose":"final_response","page":2,"pageSize":500}"#
             )],
             finishReason: .toolCalls
         ),
@@ -1789,12 +1788,12 @@ func agentLoopDoesNotTreatTaskContextProfileAsFinalResponseCheckpoint() async th
         AgentModelResponse(text: "Draft after task-context profile"),
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "profile-final", name: names[2], argumentsJSON: #"{"purpose":"final_response","view":"compressed","page":1,"pageSize":500}"#)],
+            toolCalls: [AgentToolCall(id: "profile-final", name: names[2], argumentsJSON: #"{"purpose":"final_response","page":1,"pageSize":500}"#)],
             finishReason: .toolCalls
         ),
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "profile-final-page-2", name: names[2], argumentsJSON: #"{"purpose":"final_response","view":"compressed","page":2,"pageSize":500}"#)],
+            toolCalls: [AgentToolCall(id: "profile-final-page-2", name: names[2], argumentsJSON: #"{"purpose":"final_response","page":2,"pageSize":500}"#)],
             finishReason: .toolCalls
         ),
         AgentModelResponse(text: "Final-response profile grounded answer")
@@ -1838,7 +1837,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
         ),
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "profile-before-update", name: names[2], argumentsJSON: #"{"purpose":"final_response","view":"compressed"}"#)],
+            toolCalls: [AgentToolCall(id: "profile-before-update", name: names[2], argumentsJSON: #"{"purpose":"final_response"}"#)],
             finishReason: .toolCalls
         ),
         AgentModelResponse(
@@ -1849,7 +1848,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
         AgentModelResponse(text: "Draft after changing preferences"),
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "profile-after-update", name: names[2], argumentsJSON: #"{"purpose":"final_response","view":"compressed"}"#)],
+            toolCalls: [AgentToolCall(id: "profile-after-update", name: names[2], argumentsJSON: #"{"purpose":"final_response"}"#)],
             finishReason: .toolCalls
         ),
         AgentModelResponse(text: "Answer using the updated preferences")
