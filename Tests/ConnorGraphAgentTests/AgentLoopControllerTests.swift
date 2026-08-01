@@ -401,9 +401,9 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 
     let requestWithTool = try #require(await providerWithTool.lastRequest)
     let promptWithTool = requestWithTool.messages.map(\.content).joined(separator: "\n")
-    #expect(requestWithTool.tools.contains { $0.name == ShareProgressUpdateTool.toolName })
-    #expect(promptWithTool.contains("## Conversational Progress Updates"))
-    #expect(promptWithTool.contains("the final response must be complete and self-contained"))
+    #expect(!requestWithTool.tools.contains { $0.name == ShareProgressUpdateTool.toolName })
+    #expect(promptWithTool.contains("## Tool Discovery"))
+    #expect(promptWithTool.contains("- share: 1 tools"))
 
     let providerWithoutTool = CapturingFinalAnswerProvider()
     let loopWithoutTool = AgentLoopController(
@@ -419,7 +419,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     let requestWithoutTool = try #require(await providerWithoutTool.lastRequest)
     let promptWithoutTool = requestWithoutTool.messages.map(\.content).joined(separator: "\n")
     #expect(!requestWithoutTool.tools.contains { $0.name == ShareProgressUpdateTool.toolName })
-    #expect(!promptWithoutTool.contains("## Conversational Progress Updates"))
+    #expect(!promptWithoutTool.contains("- share: 1 tools"))
 }
 
 @Test func agentLoopEmitsTextDeltaForStreamingProvider() async throws {
@@ -1366,7 +1366,9 @@ private struct InstructionPromotionTool: AgentTool {
     let requests = await provider.requests
     #expect(requests.count == 3)
     #expect(AgentModelContextGuard().estimatedInputTokens(requests[2]) < AgentModelContextGuard().estimatedInputTokens(requests[1]))
-    #expect(requests[2].messages.contains { $0.role == .tool && $0.content.contains("truncated tool result to fit context") })
+    let originalToolContent = try #require(requests[1].messages.first { $0.role == .tool }?.content)
+    let recoveredToolContent = try #require(requests[2].messages.first { $0.role == .tool }?.content)
+    #expect(recoveredToolContent.count < originalToolContent.count)
     #expect(events.last?.kind == .runCompleted)
 }
 
@@ -1720,7 +1722,8 @@ func agentLoopRequiresStartupContinuityWithoutPreloadingCurrentUserProfile() asy
     #expect(policy.correctionInstruction(for: []) == nil)
 }
 
-@Test func noteSearchPreflightPolicyRequiresOneAvailableAttempt() {
+@Test(.disabled("Note search is now completed by deterministic assistant bootstrap"))
+func noteSearchPreflightPolicyRequiresOneAvailableAttempt() {
     var registry = AgentToolRegistry()
     registry.register(RetrievalEvidenceTool(name: "unrelated_tool"))
     registry.register(RetrievalEvidenceTool(name: AgentNoteSearchPreflightPolicy.requiredToolName))
@@ -2384,7 +2387,7 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
 
     #expect(await provider.requests.count == 3)
     #expect(completed?.text.contains("存在冲突") == true)
-    #expect(completed?.citations.count == 2)
+    #expect(completed?.citations.count == names.count)
 }
 
 @Test func modelReliabilityRegistryKeysOverridesByExactModelID() {
@@ -2725,7 +2728,8 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(completedTurns.last?.toolCallCount == 0)
 }
 
-@Test func phasedAgentLoopRequiresToolsUntilFinalSynthesis() async throws {
+@Test(.disabled("The assistant runtime no longer exposes or requires legacy phase-control tools"))
+func phasedAgentLoopRequiresToolsUntilFinalSynthesis() async throws {
     let provider = PhaseToolChoiceProvider()
     var registry = AgentToolRegistry()
     registry.register(RetrievalEvidenceTool(name: "graph_search"))
@@ -2853,7 +2857,8 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(events.last?.kind == .runCompleted)
 }
 
-@Test func agentLoopCheckpointsAtIterationBoundaryAndContinuesToCompletion() async throws {
+@Test(.disabled("The assistant runtime now enforces one bounded model-turn budget per run"))
+func agentLoopCheckpointsAtIterationBoundaryAndContinuesToCompletion() async throws {
     let responses = (0..<4).map { index in
         AgentModelResponse(
             text: nil,
@@ -2914,7 +2919,7 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
         #expect(request.tools.contains { ["Read", "ReadMany", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "WriteBatch", "Bash"].contains($0.name) } == false)
     }
     #expect(strategy.messages.contains {
-        $0.role == .system && $0.content.contains("use Shell directly")
+        $0.role == .system && $0.content.contains("Shell and ApplyPatch are direct workspace tools")
     })
 }
 
@@ -2984,17 +2989,14 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     for try await _ in loop.run(.init(sessionID: "session-stable-tools", userMessage: "查看今天的笔记")) {}
 
     let requests = await provider.requests
-    let strategyToolNames = requests
-        .filter { $0.promptCacheContext?.phase == .strategyResearch }
-        .map { $0.tools.map(\.name) }
-    #expect(strategyToolNames.count >= 2)
-    // The serialized tool array must stay identical across iterations of the
-    // same phase so provider prefix caching survives startup-tool invocation.
-    #expect(Set(strategyToolNames).count == 1)
-    #expect(strategyToolNames.first?.contains(AgentNoteSearchPreflightPolicy.requiredToolName) == true)
+    let toolNameBundles = requests.map { $0.tools.map(\.name) }
+    #expect(!toolNameBundles.isEmpty)
+    #expect(Set(toolNameBundles).count == 1)
+    #expect(toolNameBundles.allSatisfy { !$0.contains(AgentNoteSearchPreflightPolicy.requiredToolName) })
 }
 
-@Test func agentLoopUsesContextualRetrievalPlanInsideStrategyPhase() async throws {
+@Test(.disabled("Contextual Note retrieval moved from model-visible strategy preflight to deterministic bootstrap"))
+func agentLoopUsesContextualRetrievalPlanInsideStrategyPhase() async throws {
     let provider = ContextualPreflightProvider()
     var registry = AgentToolRegistry()
     registry.register(GetCurrentTimeTool())
@@ -3241,7 +3243,8 @@ private actor StubbornPlainTextProvider: AgentModelProvider {
     }
 }
 
-@Test func agentLoopCapsPhaseProtocolCorrectionsAndAcceptsFinalText() async throws {
+@Test(.disabled("Legacy phase-protocol correction turns were removed from the assistant runtime"))
+func agentLoopCapsPhaseProtocolCorrectionsAndAcceptsFinalText() async throws {
     let provider = StubbornPlainTextProvider()
     let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
 
