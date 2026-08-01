@@ -102,6 +102,37 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     #expect(object["tool_choice"] as? String == "required")
 }
 
+@Test func openAICompatibleProviderOmitsAutomaticToolChoiceForThinkingCompatibility() async throws {
+    let body = #"{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}"#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://llm.example.com/v1")!,
+            apiKey: "test-key",
+            model: "thinking-model",
+            reasoningEffort: "high"
+        ),
+        httpClient: client
+    )
+    let tool = AgentToolDefinition(
+        name: "assistant_tool_search",
+        description: "Discover tools",
+        inputSchema: .object(properties: [:], required: [])
+    )
+
+    _ = try await provider.completeWithTools(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "discover")],
+        tools: [tool],
+        toolChoice: .auto
+    ))
+
+    let captured = try #require(client.storage.capturedBody)
+    let object = try #require(try JSONSerialization.jsonObject(with: captured) as? [String: Any])
+    #expect(object["tools"] != nil)
+    #expect(object["tool_choice"] == nil)
+    #expect(object["reasoning_effort"] as? String == "high")
+}
+
 @Test func openAICompatibleProviderPreservesClosedObjectBooleanOnWire() async throws {
     let body = #"""
     {
