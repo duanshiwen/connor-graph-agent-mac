@@ -444,6 +444,19 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         ]
         .filter { !$0.isEmpty }
         .joined(separator: "\n\n")
+        let assistantCheckpointStore: any AssistantRunCheckpointStore
+        let assistantEffectLedger: any AssistantEffectLedger
+        if let storagePaths {
+            assistantCheckpointStore = FileAssistantRunCheckpointStore(
+                fileURL: storagePaths.runtimeLogsDirectory.appendingPathComponent("assistant-approval-checkpoints.json")
+            )
+            assistantEffectLedger = FileAssistantEffectLedger(
+                fileURL: storagePaths.runtimeLogsDirectory.appendingPathComponent("assistant-effect-ledger.json")
+            )
+        } else {
+            assistantCheckpointStore = InMemoryAssistantRunCheckpointStore()
+            assistantEffectLedger = InMemoryAssistantEffectLedger()
+        }
         return AgentLoopController(
             modelProvider: modelProvider,
             toolRegistry: registry,
@@ -456,6 +469,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             memoryQueryProvider: memoryOSFacade.map {
                 AppAgentMemoryQueryProvider(facade: $0, configuration: memoryOSContextToolConfiguration)
             },
+            assistantCheckpointStore: assistantCheckpointStore,
+            assistantEffectLedger: assistantEffectLedger,
             automaticallySynthesizesProgressUpdates: false,
             streamComplete: { provider, request in provider.streamComplete(request) }
         )

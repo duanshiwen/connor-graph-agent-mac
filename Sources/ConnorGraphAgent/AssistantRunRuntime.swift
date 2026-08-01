@@ -29,6 +29,24 @@ public struct AssistantRunEnvelope: Codable, Sendable, Equatable {
         startedAt = now
         timeZoneIdentifier = timeZone.identifier
     }
+
+    public init(
+        runID: String,
+        sessionID: String,
+        groupID: String,
+        userMessage: String,
+        permissionMode: AgentPermissionMode,
+        startedAt: Date = Date(),
+        timeZone: TimeZone = .current
+    ) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.groupID = groupID
+        self.userMessage = userMessage
+        self.permissionMode = permissionMode
+        self.startedAt = startedAt
+        self.timeZoneIdentifier = timeZone.identifier
+    }
 }
 
 public struct AssistantRunBudget: Codable, Sendable, Equatable {
