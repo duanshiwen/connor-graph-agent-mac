@@ -281,7 +281,7 @@ import ConnorGraphAppSupport
 @Test func agentChatTurnTimelinePreservesOpenProcessAfterCancellation() {
     let messages = [AgentMessage(id: "user-1", role: .user, content: "cancel midway")]
 
-    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false, preservesOpenProcess: true)
+    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false, preservedOpenProcessState: .cancelled)
 
     #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-pending-assistant"])
     #expect(items.map(\.kindLabel) == ["timestamp", "message", "process"])
@@ -290,6 +290,53 @@ import ConnorGraphAppSupport
     #expect(items[2].process?.title == "第 1 轮已取消")
     #expect(items[2].process?.sourceUserMessageID == "user-1")
     #expect(items[2].process?.assistantMessageID == nil)
+}
+
+@Test func agentChatTurnTimelineShowsFailedStateForAbnormalOpenTurn() {
+    let messages = [AgentMessage(id: "user-1", role: .user, content: "provider returned no message")]
+
+    let items = AgentChatTurnTimelineItem.items(
+        messages: messages,
+        lastContext: nil,
+        isSubmitting: false,
+        preservedOpenProcessState: .failed
+    )
+
+    #expect(items.last?.process?.state == .failed)
+    #expect(items.last?.process?.title == "第 1 轮未完成")
+    #expect(items.last?.process?.summary.contains("未完成") == true)
+}
+
+@Test func agentChatOpenProcessResolverOnlyMarksExplicitCancellationAsCancelled() {
+    let messages = [AgentMessage(id: "user-1", role: .user, content: "run")]
+    let cancelled = AgentEventPresentation(
+        kind: "runFailed",
+        title: "Run cancelled",
+        detail: "cancelled by user",
+        severity: .warning,
+        runID: "run-1",
+        sessionID: "session-1"
+    )
+    let failed = AgentEventPresentation(
+        kind: "runFailed",
+        title: "Run failed",
+        detail: "provider response did not include an assistant message",
+        severity: .error,
+        runID: "run-2",
+        sessionID: "session-1"
+    )
+    let orphaned = AgentEventPresentation(
+        kind: "runStarted",
+        title: "Run started",
+        detail: "Model: deepseek-v4-flash",
+        severity: .info,
+        runID: "run-3",
+        sessionID: "session-1"
+    )
+
+    #expect(AgentChatOpenProcessStateResolver.resolve(messages: messages, isSubmitting: false, events: [cancelled]) == .cancelled)
+    #expect(AgentChatOpenProcessStateResolver.resolve(messages: messages, isSubmitting: false, events: [failed]) == .failed)
+    #expect(AgentChatOpenProcessStateResolver.resolve(messages: messages, isSubmitting: false, events: [orphaned]) == .failed)
 }
 
 @Test func agentChatAssistantTurnMetadataSummarizesPromptInspection() {

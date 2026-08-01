@@ -98,6 +98,28 @@ import ConnorGraphCore
     #expect(summary.subtitle == "执行终端命令失败：Call 1 · command timed out · 执行终端命令")
 }
 
+@Test func marksExplicitlyCancelledRunAsCancelledInsteadOfFailed() {
+    let process = makeProcess(state: .cancelled, turnNumber: 14)
+    let events = [
+        event(kind: "runFailed", title: "Run cancelled", detail: "cancelled by user", severity: .warning)
+    ]
+
+    let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
+
+    #expect(summary.state == .cancelled)
+    #expect(summary.statusText == "已取消")
+    #expect(summary.subtitle == "运行已取消 · 未调用工具")
+}
+
+@Test func marksOpenTurnFailedFromExplicitProcessState() {
+    let process = makeProcess(state: .failed, turnNumber: 15)
+
+    let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: [])
+
+    #expect(summary.state == .failed)
+    #expect(summary.statusText == "已失败")
+}
+
 @Test func summarizesManyToolsWithCompactText() {
     let process = makeProcess(state: .completed, turnNumber: 4)
     let events: [AgentEventPresentation] = [
