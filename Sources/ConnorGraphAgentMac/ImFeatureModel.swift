@@ -81,6 +81,8 @@ final class ImFeatureModel {
     @ObservationIgnored private let store: SQLiteImStore
     @ObservationIgnored private let center: ImMessageCenter
     @ObservationIgnored private let identityStore: AppUserIdentityStore
+    /// Auto-creates/reuses a 人际关系 person profile for every Connor friend.
+    @ObservationIgnored private let friendProvisioner: ImFriendPersonProvisioner?
     /// Live Memory OS facade (rebuilt at runtime, hence a closure).
     @ObservationIgnored private let forwardFacade: @MainActor () -> AppMemoryOSFacade?
     /// Submit into a brand-new AI session; returns the created session id.
@@ -96,6 +98,7 @@ final class ImFeatureModel {
         store: SQLiteImStore,
         center: ImMessageCenter,
         identityStore: AppUserIdentityStore,
+        friendProvisioner: ImFriendPersonProvisioner? = nil,
         forwardFacade: @escaping @MainActor () -> AppMemoryOSFacade?,
         forwardToNewSession: @escaping @MainActor (String) async -> String?,
         forwardToExistingSession: @escaping @MainActor (String, String) async -> String?
@@ -103,6 +106,7 @@ final class ImFeatureModel {
         self.store = store
         self.center = center
         self.identityStore = identityStore
+        self.friendProvisioner = friendProvisioner
         self.forwardFacade = forwardFacade
         self.forwardToNewSession = forwardToNewSession
         self.forwardToExistingSession = forwardToExistingSession
@@ -197,6 +201,7 @@ final class ImFeatureModel {
             }
         case .friends:
             friends = (try? await store.loadFriends()) ?? []
+            await reconcileFriendProfiles()
         case .friendRequests:
             friendRequests = (try? await store.loadFriendRequests()) ?? []
         case .forwardAliases:
@@ -208,6 +213,7 @@ final class ImFeatureModel {
         conversations = (try? await store.loadConversations()) ?? []
         friends = (try? await store.loadFriends()) ?? []
         friendRequests = (try? await store.loadFriendRequests()) ?? []
+        await reconcileFriendProfiles()
         if let selectedConversationId {
             messages = (try? await store.messages(conversationId: selectedConversationId)) ?? []
         } else {
@@ -282,6 +288,8 @@ final class ImFeatureModel {
 
     func refreshContacts() async {
         await center.refreshAll()
+        friends = (try? await store.loadFriends()) ?? []
+        await reconcileFriendProfiles()
     }
 
     /// Contact-list "发消息": ensure the peer conversation exists, then open it.
@@ -325,6 +333,8 @@ final class ImFeatureModel {
     func acceptFriendRequest(requestId: Int64) async {
         do {
             try await center.acceptFriendRequest(requestId: requestId)
+            friends = (try? await store.loadFriends()) ?? []
+            await reconcileFriendProfiles()
             contactMessage = "已同意好友请求"
         } catch {
             contactMessage = "操作失败：\(error.localizedDescription)"
@@ -343,6 +353,7 @@ final class ImFeatureModel {
     func removeFriend(userId: Int64) async {
         do {
             try await center.removeFriend(userId: userId)
+            friends = (try? await store.loadFriends()) ?? []
             contactMessage = "已删除好友"
         } catch {
             contactMessage = "删除好友失败：\(error.localizedDescription)"
@@ -353,9 +364,23 @@ final class ImFeatureModel {
     func bindFriendPerson(userId: Int64, personProfileID: String?) async {
         do {
             try await center.bindFriendPerson(userId: userId, personProfileID: personProfileID)
+            friends = (try? await store.loadFriends()) ?? friends
             contactMessage = personProfileID == nil ? "已解除人物关联" : "已关联人物"
         } catch {
             contactMessage = "关联人物失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// Auto-provisions person profiles for unbound friends. Creating a profile
+    /// posts the person-profile store change notification, which refreshes the
+    /// 人际关系 feature model automatically.
+    private func reconcileFriendProfiles() async {
+        guard let friendProvisioner, !friends.isEmpty else { return }
+        do {
+            _ = try await friendProvisioner.reconcile(friends: friends)
+            friends = (try? await store.loadFriends()) ?? friends
+        } catch {
+            contactMessage = "同步好友人物档案失败：\(error.localizedDescription)"
         }
     }
 

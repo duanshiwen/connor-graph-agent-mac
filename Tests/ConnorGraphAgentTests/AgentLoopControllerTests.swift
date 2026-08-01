@@ -9,22 +9,40 @@ private func automaticPhaseResponse(
     nextResponse: AgentModelResponse? = nil
 ) -> AgentModelResponse? {
     guard request.auditContext.operation == "AgentLoopController.completeModelRequest" else { return nil }
-    let startupNames = Set(AgentContinuityPreflightPolicy.requiredToolNames + [AgentNoteSearchPreflightPolicy.requiredToolName])
-    // Startup tools stay visible for the whole run (prefix-stable tool array);
-    // a well-behaved model only calls the ones it has not already executed.
-    let alreadyInvokedToolNames = Set(request.messages.compactMap { $0.role == .tool ? $0.name : nil })
-    let startupTools = request.tools.filter { startupNames.contains($0.name) && !alreadyInvokedToolNames.contains($0.name) }
-    if request.promptCacheContext?.phase == .strategyResearch, !startupTools.isEmpty {
-        return AgentModelResponse(
-            text: nil,
-            toolCalls: startupTools.map { definition in
-                let arguments = definition.name == AgentNoteSearchPreflightPolicy.requiredToolName
+    let correctionText = request.messages
+        .filter { $0.role == .system }
+        .map(\.content)
+        .last(where: { $0.contains("Mandatory continuity preflight") || $0.contains("Mandatory Note preflight") })
+    if request.promptCacheContext?.phase == .strategyResearch, let correctionText {
+        let invokedNames = Set(request.messages.flatMap { message -> [String] in
+            guard message.role == .assistant else { return [] }
+            return (message.toolCalls ?? []).flatMap { call -> [String] in
+                guard call.name == AgentPhaseToolContract.externalSearchBatchName,
+                      let data = call.argumentsJSON.data(using: .utf8),
+                      let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let nestedCalls = root["calls"] as? [[String: Any]] else { return [] }
+                return nestedCalls.compactMap { $0["toolName"] as? String }
+            }
+        })
+        let selectedNames = (AgentContinuityPreflightPolicy.requiredToolNames + [AgentNoteSearchPreflightPolicy.requiredToolName])
+            .filter { correctionText.contains($0) && !invokedNames.contains($0) }
+        if !selectedNames.isEmpty {
+            let calls = selectedNames.map { name in
+                let arguments = name == AgentNoteSearchPreflightPolicy.requiredToolName
                     ? #"{"query":""}"#
                     : "{}"
-                return AgentToolCall(id: "automatic-startup-\(definition.name)", name: definition.name, argumentsJSON: arguments)
-            },
-            finishReason: .toolCalls
-        )
+                return #"{"toolName":"\#(name)","arguments":\#(arguments)}"#
+            }.joined(separator: ",")
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [.init(
+                    id: "automatic-startup-batch",
+                    name: AgentPhaseToolContract.externalSearchBatchName,
+                    argumentsJSON: #"{"calls":[\#(calls)]}"#
+                )],
+                finishReason: .toolCalls
+            )
+        }
     }
     switch request.promptCacheContext?.phase {
     case .strategyResearch:
@@ -96,6 +114,38 @@ private actor PhaseToolChoiceProvider: AgentModelProvider {
             )
         default:
             return AgentModelResponse(text: "done")
+        }
+    }
+}
+
+private actor BatchedStartupProvider: AgentModelProvider {
+    let modelID = "batched-startup"
+    let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+    private(set) var requests: [AgentModelRequest] = []
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        requests.append(request)
+        switch requests.count {
+        case 1:
+            return .init(text: nil, toolCalls: [.init(
+                id: "startup-query",
+                name: AgentPhaseToolContract.externalSearchBatchName,
+                argumentsJSON: #"{"calls":[{"toolName":"memory_os_recent_context","arguments":{}},{"toolName":"memory_os_knowledge_context","arguments":{}},{"toolName":"note_search","arguments":{"query":"之前的笔记 偏好"}}]}"#
+            )], finishReason: .toolCalls)
+        case 2:
+            return .init(text: nil, toolCalls: [.init(
+                id: "startup-strategy",
+                name: AgentPhaseToolContract.commitStrategyName,
+                argumentsJSON: #"{"provisionalApproach":"use startup evidence","recommendedApproach":"use startup evidence","taskMode":"general","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"}}"#
+            )], finishReason: .toolCalls)
+        case 3:
+            return .init(text: nil, toolCalls: [.init(
+                id: "startup-prepare",
+                name: AgentPhaseToolContract.prepareFinalOutputName,
+                argumentsJSON: #"{"reason":"ready"}"#
+            )], finishReason: .toolCalls)
+        default:
+            return .init(text: "done")
         }
     }
 }
@@ -1453,8 +1503,11 @@ private struct InstructionPromotionTool: AgentTool {
         AgentModelResponse(
             text: nil,
             toolCalls: [
-                AgentToolCall(id: "activate-review-1", name: "connor_skill_activate", argumentsJSON: "{}"),
-                AgentToolCall(id: "activate-review-2", name: "connor_skill_activate", argumentsJSON: "{}")
+                AgentToolCall(
+                    id: "activate-review-batch",
+                    name: AgentPhaseToolContract.externalSearchBatchName,
+                    argumentsJSON: #"{"calls":[{"toolName":"connor_skill_activate","arguments":{}},{"toolName":"connor_skill_activate","arguments":{}}]}"#
+                )
             ],
             finishReason: .toolCalls
         ),
@@ -1488,7 +1541,11 @@ private struct InstructionPromotionTool: AgentTool {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "ordinary-call", name: "ordinary_tool", argumentsJSON: "{}")],
+            toolCalls: [AgentToolCall(
+                id: "ordinary-batch",
+                name: AgentPhaseToolContract.externalSearchBatchName,
+                argumentsJSON: #"{"calls":[{"toolName":"ordinary_tool","arguments":{}}]}"#
+            )],
             finishReason: .toolCalls
         ),
         AgentModelResponse(text: "Done")
@@ -1582,12 +1639,8 @@ func agentLoopRequiresStartupContinuityWithoutPreloadingCurrentUserProfile() asy
     #expect(policy.correctionInstruction(for: []) == nil)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("current-user profile is intentionally excluded") == true)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("successful empty result still counts") == true)
-    #expect(!policy.call(AgentToolCall(id: "profile-task-context", name: names[2], argumentsJSON: #"{"purpose":"task_context"}"#), matchesRequiredCurrentUserProfilePage: 1))
-    #expect(policy.call(AgentToolCall(id: "profile-final-default-page", name: names[2], argumentsJSON: #"{"purpose":"final_response","view":"compressed"}"#), matchesRequiredCurrentUserProfilePage: 1))
-    #expect(policy.call(AgentToolCall(id: "profile-final-exact-page", name: names[2], argumentsJSON: #"{"purpose":"final_response","view":"compressed","page":2}"#), matchesRequiredCurrentUserProfilePage: 2))
-    #expect(!policy.call(AgentToolCall(id: "profile-raw-page", name: names[2], argumentsJSON: #"{"purpose":"final_response","page":2,"view":"raw"}"#), matchesRequiredCurrentUserProfilePage: 2))
-    #expect(!policy.call(AgentToolCall(id: "profile-wrong-page", name: names[2], argumentsJSON: #"{"purpose":"final_response","page":3}"#), matchesRequiredCurrentUserProfilePage: 2))
-    #expect(policy.currentUserProfileCorrectionInstruction(requiredPage: 1).contains("You may and should call any other needed tools"))
+    #expect(policy.correctionInstruction(for: [names[0]])?.contains("parallel_tool_query") == true)
+    #expect(policy.correctionInstruction(for: [names[0]])?.contains("prepare_final_output") == true)
 }
 
 @Test func noteSearchPreflightPolicyRequiresOneAvailableAttempt() {
@@ -1937,6 +1990,38 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(!names.contains("mail_search_messages"))
     #expect(!names.contains("web_search"))
     #expect(!names.contains("memory_os_recent_context"))
+}
+
+@Test func agentLoopAcceptsMemoryAndNotePreflightInsideOneParallelQuery() async throws {
+    let provider = BatchedStartupProvider()
+    var registry = AgentToolRegistry()
+    registry.register(RetrievalEvidenceTool(name: "memory_os_recent_context"))
+    registry.register(RetrievalEvidenceTool(name: "memory_os_knowledge_context"))
+    registry.register(RetrievalEvidenceTool(name: "note_search"))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: .init(preflightMode: .contextual, toolExposureMode: .all)
+    )
+
+    for try await _ in loop.run(.init(
+        sessionID: "batched-memory-note-preflight",
+        userMessage: "请回忆我们之前的偏好，也查找之前的笔记，然后回答"
+    )) {}
+
+    let requests = await provider.requests
+    #expect(requests.count == 4)
+    let afterStartup = try #require(requests.dropFirst().first)
+    #expect(afterStartup.messages.contains {
+        $0.role == .system
+            && ($0.content.contains("Mandatory continuity preflight") || $0.content.contains("Mandatory Note preflight"))
+    } == false)
+    let startupResult = try #require(afterStartup.messages.first {
+        $0.role == .tool && $0.toolCallID == "startup-query"
+    })
+    #expect(startupResult.content.contains("memory_os_recent_context"))
+    #expect(startupResult.content.contains("memory_os_knowledge_context"))
+    #expect(startupResult.content.contains("note_search"))
 }
 
 @Test func instructionCapabilityProjectorRemovesUnavailableCapabilitySections() {
@@ -2581,8 +2666,8 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(requests.map(\.promptCacheContext?.phase) == [.strategyResearch, .taskExecution, .finalSynthesis])
     #expect(requests.map(\.toolChoice) == [.required, .required, .auto])
     #expect(requests.first?.tools.contains(where: { $0.name == "graph_search" }) == false)
-    #expect(requests.first?.tools.contains(where: { $0.name == AgentPhaseToolContract.externalSearchBatchName }) == false)
-    #expect(requests.first?.tools.contains(where: { $0.name == AgentPhaseToolContract.externalReadBatchName }) == false)
+    #expect(requests.first?.tools.contains(where: { $0.name == AgentPhaseToolContract.externalSearchBatchName }) == true)
+    #expect(requests.first?.tools.contains(where: { $0.name == AgentPhaseToolContract.externalReadBatchName }) == true)
 }
 
 @Test func agentLoopCanStopGracefullyAfterBudgetExceededTurn() async throws {
@@ -2659,7 +2744,7 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(finalSynthesis.tools.contains { $0.name == "WriteBatch" } == false)
 }
 
-@Test func agentLoopInjectsFinalSynthesisCalendarReminderGuidanceWhenUpcomingToolAvailable() async throws {
+@Test func agentLoopDoesNotInjectUnrequestedFinalSynthesisCalendarReminderGuidance() async throws {
     let provider = PhaseToolChoiceProvider()
     var registry = AgentToolRegistry()
     registry.register(CalendarUpcomingEventsTool(runtime: InMemoryAgentCalendarRuntime()))
@@ -2671,20 +2756,16 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     let taskExecution = try #require(requests.first { $0.promptCacheContext?.phase == .taskExecution })
     let finalSynthesis = try #require(requests.first { $0.promptCacheContext?.phase == .finalSynthesis })
 
-    // The all-calendars upcoming-events tool is exposed for calendar-relevant runs.
-    #expect(finalSynthesis.tools.contains { $0.name == "calendar_upcoming_events" })
-
-    // The proactive-reminder guidance is injected once on entry to final
-    // synthesis, not during task execution.
+    #expect(finalSynthesis.tools.contains { $0.name == "calendar_upcoming_events" } == false)
     #expect(taskExecution.messages.contains {
         $0.role == .system && $0.content.contains("proactive schedule reminders")
     } == false)
     #expect(finalSynthesis.messages.contains {
         $0.role == .system && $0.content.contains("proactive schedule reminders")
-    })
+    } == false)
 }
 
-@Test func agentLoopEmbedsAttentionBriefInsidePrepareFinalOutputResult() async throws {
+@Test func agentLoopDoesNotEmbedAttentionBriefInsidePrepareFinalOutputResult() async throws {
     let provider = PhaseToolChoiceProvider()
     var registry = AgentToolRegistry()
     let calendar = CalendarID(rawValue: "calendar-brief")
@@ -2706,22 +2787,15 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     let requests = await provider.requests
     let finalSynthesis = try #require(requests.first { $0.promptCacheContext?.phase == .finalSynthesis })
 
-    // attention_brief bypasses contextual routing even without calendar or
-    // mail signals in the conversation.
-    #expect(finalSynthesis.tools.contains { $0.name == AttentionBriefTool.toolName })
-
-    // The prepare_final_output tool result already embeds the briefing, so
-    // final synthesis needs no extra calendar/mail tool turns.
+    #expect(finalSynthesis.tools.contains { $0.name == AttentionBriefTool.toolName } == false)
     let prepareResult = try #require(finalSynthesis.messages.first {
         $0.role == .tool && $0.name == AgentPhaseToolContract.prepareFinalOutputName
     })
-    #expect(prepareResult.content.contains("attentionBrief"))
-    #expect(prepareResult.content.contains("event-brief"))
-
-    // The attention-brief flavored guidance replaces the calendar-only one.
+    #expect(prepareResult.content.contains("attentionBrief") == false)
+    #expect(prepareResult.content.contains("event-brief") == false)
     #expect(finalSynthesis.messages.contains {
         $0.role == .system && $0.content.contains("proactive attention reminders")
-    })
+    } == false)
     #expect(finalSynthesis.messages.contains {
         $0.role == .system && $0.content.contains("proactive schedule reminders")
     } == false)

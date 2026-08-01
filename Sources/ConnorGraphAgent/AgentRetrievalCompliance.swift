@@ -89,7 +89,7 @@ public struct AgentNoteSearchPreflightPolicy: Sendable, Equatable {
 
     public func correctionInstruction() -> String {
         """
-        Mandatory Note preflight is incomplete. Before task-specific tool use or a final answer, call `note_search` once using compact topic keywords, entity names, or a subject phrase tied to the latest actual user request. Use an empty `query` only when no meaningful search terms can be formed. This is a one-attempt requirement: a successful empty result or a real failure satisfies the startup attempt, and later focused searches of Notes or either Memory OS context source must not restart already completed startup tools.
+        Mandatory Note preflight is incomplete. Before task-specific tool use or a final answer, include one `note_search` native call inside `parallel_tool_query`, using compact topic keywords, entity names, or a subject phrase tied to the latest actual user request. Use an empty `query` only when no meaningful search terms can be formed. This is a one-attempt requirement: a successful empty result or a real failure satisfies the startup attempt. Inspect candidates first; put only selected `note_get` calls into a later `parallel_tool_query` batch alongside any selected Web or other detail reads.
         """
     }
 }
@@ -118,27 +118,8 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
         guard !missingToolNames.isEmpty else { return nil }
         let names = missingToolNames.map { "`\($0)`" }.joined(separator: ", ")
         return """
-        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, call every still-missing available continuity tool: \(names). These are independent paginated sources. Do not substitute one for another. Repeat calls only when pagination metadata or the task's evidence needs justify them. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory. The current-user profile is intentionally excluded from startup continuity and is loaded separately near finalization.
+        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, include every still-missing available continuity read in one `parallel_tool_query` batch: \(names). Each `calls` item uses the exact native tool name and native arguments object. These are independent paginated sources; do not substitute one for another. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory. The current-user profile is intentionally excluded from startup continuity and is loaded internally by `prepare_final_output` near finalization.
         """
-    }
-
-    public func requiresFinalResponseProfile(
-        availableTools: [AgentToolDefinition],
-        isComplete: Bool
-    ) -> Bool {
-        !isComplete && availableTools.contains { $0.name == Self.currentUserProfileToolName }
-    }
-
-    public func call(_ call: AgentToolCall, matchesRequiredCurrentUserProfilePage requiredPage: Int) -> Bool {
-        guard call.name == Self.currentUserProfileToolName,
-              let arguments = try? AgentToolArguments(json: call.argumentsJSON) else {
-            return false
-        }
-        let view = arguments.string("view") ?? "compressed"
-        let purpose = arguments.string("purpose") ?? "task_context"
-        return purpose == Self.finalResponsePurpose
-            && view == "compressed"
-            && (arguments.int("page") ?? 1) == requiredPage
     }
 
     public func nextRequiredCurrentUserProfilePage(after result: AgentToolResult) -> Int? {
@@ -153,11 +134,6 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
         return response.nextPage
     }
 
-    public func currentUserProfileCorrectionInstruction(requiredPage: Int) -> String {
-        """
-        The final-response preference checkpoint is incomplete. Before sending the complete final answer, call `memory_os_get_current_user_profile` with `purpose: final_response`, `view: compressed`, and `page` set to the exact JSON integer \(requiredPage). Use `pageSize: 500` on the initial page and preserve purpose, pageSize, and view while following exact non-null `nextPage` values through `nextPage: null`. After the profile is loaded, reassess whether the task has enough information. You may and should call any other needed tools before answering; doing so does not invalidate the loaded profile or require another profile read. Never use raw, guess pages, or stop the profile chain early.
-        """
-    }
 }
 
 private struct CurrentUserProfilePaginationResponse: Decodable {

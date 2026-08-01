@@ -45,15 +45,27 @@ struct AgentToolInvocationDetailOverlay: View {
 
     private var header: some View {
         HStack(spacing: AgentChatLayout.spaceS) {
-            Label("Tool Invocation", systemImage: invocation.icon)
+            Label(invocation.toolName, systemImage: invocation.icon)
                 .font(AgentChatTypography.meta.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
                 .padding(.horizontal, AgentChatLayout.spaceS)
                 .frame(height: AgentChatLayout.chipHeight)
                 .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                        .stroke(severityColor.opacity(0.28), lineWidth: 1)
+                    .stroke(severityColor.opacity(0.28), lineWidth: 1)
                 )
+
+            Text(AgentToolDisplayNameResolver.categoryName(
+                rawToolName: invocation.toolName,
+                semanticKind: invocation.semanticKind
+            ))
+                .font(AgentChatTypography.monoMicro)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7)
+                .frame(height: AgentChatLayout.chipHeight)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
 
             Text(invocation.phase.rawValue)
                 .font(AgentChatTypography.monoMicro)
@@ -110,6 +122,7 @@ struct AgentToolInvocationDetailOverlay: View {
                 metadataLine("Call ID", invocation.callID)
                 metadataLine("Run ID", invocation.runID ?? "—")
                 metadataLine("Session ID", invocation.sessionID ?? "—")
+                metadataLine("工具类别", AgentToolDisplayNameResolver.categoryName(rawToolName: invocation.toolName, semanticKind: invocation.semanticKind))
                 metadataLine("Semantic kind", invocation.semanticKind.rawValue)
                 metadataLine("Output artifact", invocation.outputArtifactPath ?? "—")
                 metadataLine("Truncated", invocation.isOutputTruncated ? "yes" : "no")

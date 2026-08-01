@@ -219,10 +219,15 @@ final class AppCompositionRoot: ObservableObject {
         }
 
         let chatActions = runtime.graph.chatActions
+        let friendProvisioner = ImFriendPersonProvisioner(
+            profileStore: runtime.graph.contacts.agentProfileStore,
+            imStore: imStore
+        )
         let imFeature = ImFeatureModel(
             store: imStore,
             center: center,
             identityStore: identityStore,
+            friendProvisioner: friendProvisioner,
             forwardFacade: { [weak runtime] in runtime?.imForwardMemoryFacade },
             forwardToNewSession: { prompt in
                 await chatActions.run.submitNewChat(prompt: prompt, displayPrompt: nil)

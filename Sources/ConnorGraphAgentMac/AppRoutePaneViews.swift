@@ -9,6 +9,14 @@ struct CraftListPaneView: View {
         listRouteView(selection ?? .agentChat)
     }
 
+    private var openPeerChat: (Int64) -> Void {
+        { peerId in
+            guard let im = graph.im else { return }
+            Task { await im.openPeerConversation(peerId: peerId) }
+            _ = graph.shell.select(.agentChat)
+        }
+    }
+
     private func listRouteView(_ route: SidebarItem) -> some View {
         Group {
             switch route {
@@ -25,12 +33,10 @@ struct CraftListPaneView: View {
             case .calendar:
                 CraftCalendarListPane(model: graph.calendar)
             case .contacts:
-                CraftContactsListPane(model: graph.contacts)
-            case .imContacts:
-                CraftSimpleListPane(
-                    title: "通讯录",
-                    subtitle: "好友与好友请求",
-                    rows: (graph.im?.friends ?? []).map(\.displayName)
+                CraftContactsListPane(
+                    model: graph.contacts,
+                    im: graph.im,
+                    onOpenPeerChat: openPeerChat
                 )
             case .rss:
                 RSSListRouteView(model: graph.rss)
@@ -89,6 +95,14 @@ struct CraftDetailPaneView: View {
         detailRouteView(selection)
     }
 
+    private var openPeerChat: (Int64) -> Void {
+        { peerId in
+            guard let im = graph.im else { return }
+            Task { await im.openPeerConversation(peerId: peerId) }
+            _ = graph.shell.select(.agentChat)
+        }
+    }
+
     private func detailRouteView(_ route: SidebarItem) -> some View {
         Group {
             switch route {
@@ -125,24 +139,11 @@ struct CraftDetailPaneView: View {
             case .calendar:
                 CalendarSourceSettingsView(model: graph.calendar)
             case .contacts:
-                ContactsSourceSettingsView(model: graph.contacts)
-            case .imContacts:
-                if let im = graph.im {
-                    ImContactsDetailView(
-                        model: im,
-                        contacts: graph.contacts,
-                        onOpenPeerChat: { peerId in
-                            Task { await im.openPeerConversation(peerId: peerId) }
-                            _ = graph.shell.select(.agentChat)
-                        }
-                    )
-                } else {
-                    ContentUnavailableView(
-                        "通讯录不可用",
-                        systemImage: "person.crop.circle.badge.exclamationmark",
-                        description: Text("登录康纳账号后即可添加好友聊天。")
-                    )
-                }
+                ContactsSourceSettingsView(
+                    model: graph.contacts,
+                    im: graph.im,
+                    onOpenPeerChat: openPeerChat
+                )
             case .mail:
                 MailDetailRouteView(model: graph.mail)
             case .rss:

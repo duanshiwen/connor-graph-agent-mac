@@ -27,6 +27,8 @@ public enum AgentToolSemanticKind: String, Codable, Sendable, Equatable {
     case browser
     case calendar
     case mcp
+    case parallelQuery
+    case batchExecution
     case unknown
 }
 
@@ -70,27 +72,45 @@ public enum AgentToolDisplayNameResolver {
 
     public static func displayName(rawToolName: String, semanticKind: AgentToolSemanticKind, fallbackTitle: String? = nil) -> String {
         let normalized = rawToolName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let fallback = fallbackTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if semanticKind == .parallelQuery || semanticKind == .batchExecution {
+            return fallback.isEmpty ? semanticDisplayName(semanticKind) : fallback
+        }
+        if normalized.hasPrefix("mcp__") { return rawToolName }
         if normalized == "bash", semanticKind != .unknown, semanticKind != .shellCommand {
             return semanticDisplayName(semanticKind)
         }
         if let localized = catalog[normalized] { return localized }
         if semanticKind != .unknown { return semanticDisplayName(semanticKind) }
 
-        let fallback = fallbackTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if fallback.range(of: #"\p{Han}"#, options: .regularExpression) != nil { return fallback }
-        if normalized.hasPrefix("mcp__") { return "调用外部工具" }
-        if normalized.hasPrefix("memory_os_") { return "执行记忆操作" }
-        if normalized.hasPrefix("cloud_kb_") { return "执行知识库操作" }
-        if normalized.hasPrefix("mail_") { return "执行邮件操作" }
-        if normalized.hasPrefix("rss_") { return "执行 RSS 操作" }
-        if normalized.hasPrefix("calendar_") { return "执行日历操作" }
-        if normalized.hasPrefix("contact") { return "执行联系人操作" }
-        if normalized.hasPrefix("browser_") || normalized.hasPrefix("web_") { return "执行网页操作" }
-        if normalized.hasPrefix("science_") { return "执行科学计算" }
-        if normalized.hasPrefix("session_") { return "执行会话操作" }
-        if normalized.hasPrefix("tasks_") { return "执行任务操作" }
-        if normalized.hasPrefix("connor_skill_") { return "执行技能操作" }
-        return "执行工具操作"
+        if !fallback.isEmpty { return fallback }
+        return rawToolName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public static func categoryName(rawToolName: String, semanticKind: AgentToolSemanticKind) -> String {
+        switch semanticKind {
+        case .readFile, .writeFile, .editFile, .listDirectory, .findFiles, .searchFiles: return "文件"
+        case .shellCommand: return "终端"
+        case .swiftBuild, .swiftTest, .swiftRun, .xcodeBuild, .git, .packageManager, .python, .node: return "开发工具"
+        case .browser: return "网页"
+        case .calendar: return "日历"
+        case .mcp: return "MCP"
+        case .parallelQuery: return "并行查询"
+        case .batchExecution: return "批量执行"
+        case .unknown:
+            let name = rawToolName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if name.hasPrefix("memory_os_") || name == "memory_query" { return "记忆" }
+            if name.hasPrefix("cloud_kb_") { return "知识库" }
+            if name.hasPrefix("mail_") { return "邮件" }
+            if name.hasPrefix("rss_") { return "RSS" }
+            if name.hasPrefix("contact") || name.hasPrefix("person") { return "人际关系" }
+            if name.hasPrefix("session_") { return "会话" }
+            if name.hasPrefix("tasks_") { return "任务" }
+            if name.hasPrefix("connor_skill_") || name.hasPrefix("skill_") { return "技能" }
+            if name.hasPrefix("science_") { return "计算" }
+            if name.hasPrefix("browser_") || name.hasPrefix("web_") { return "网页" }
+            return "其他"
+        }
     }
 
     private static func semanticDisplayName(_ semanticKind: AgentToolSemanticKind) -> String {
@@ -113,6 +133,8 @@ public enum AgentToolDisplayNameResolver {
         case .browser: return "浏览网页"
         case .calendar: return "操作日历"
         case .mcp: return "调用外部工具"
+        case .parallelQuery: return "并行查询"
+        case .batchExecution: return "批量执行"
         case .unknown: return "执行工具操作"
         }
     }

@@ -119,13 +119,38 @@ import ConnorGraphAgent
     let unknownActivity = classifier.activity(forRequestedCall: unknown)
 
     #expect(mcpActivity?.semanticKind == .mcp)
-    #expect(mcpActivity?.title == "MCP: kb-source")
+    #expect(mcpActivity?.title == "mcp__kb-source__kb_search")
     #expect(mcpActivity?.target == "kb_search")
+    #expect(mcpActivity?.subtitle == "MCP · kb-source")
     #expect(mcpActivity?.icon == "server.rack")
 
     #expect(unknownActivity?.semanticKind == .unknown)
     #expect(unknownActivity?.title == "custom_tool")
     #expect(unknownActivity?.icon == "wrench.and.screwdriver")
+}
+
+@Test func batchToolsExposeExactNativeNamesAndCategories() {
+    let classifier = AgentToolActivityClassifier()
+    let query = AgentToolCall(
+        id: "batch-query",
+        name: "parallel_tool_query",
+        argumentsJSON: #"{"calls":[{"toolName":"mcp__lark__search","arguments":{}},{"toolName":"cloud_kb_knowledge_context","arguments":{}},{"toolName":"mail_search_messages","arguments":{}}]}"#
+    )
+    let queryActivity = classifier.activity(forRequestedCall: query)
+    #expect(queryActivity?.semanticKind == .parallelQuery)
+    #expect(queryActivity?.title == "mcp__lark__search、cloud_kb_knowledge_context、mail_search_messages")
+    #expect(queryActivity?.subtitle == "并行查询 · MCP · 知识库 · 邮件")
+
+    let execution = AgentToolResult(
+        toolCallID: "batch-execute",
+        toolName: "parallel_tool_execute",
+        contentText: "done",
+        contentJSON: #"{"results":[{"sourceID":"WriteBatch","title":"WriteBatch","summary":"done"},{"sourceID":"calendar_write","title":"calendar_write","summary":"done"}]}"#
+    )
+    let executionActivity = classifier.activity(forFinishedResult: execution)
+    #expect(executionActivity?.semanticKind == .batchExecution)
+    #expect(executionActivity?.title == "WriteBatch、calendar_write")
+    #expect(executionActivity?.subtitle == "批量执行 · 文件修改 · 日历")
 }
 
 @Test func classifiesCalendarMutationRequestsAndFailures() {

@@ -506,53 +506,106 @@ private struct CalendarEventButton: View {
 
 struct CraftContactsListPane: View {
     @Bindable var model: ContactsFeatureModel
+    var im: ImFeatureModel?
+    var onOpenPeerChat: (Int64) -> Void
+    @State private var isAddingConnorFriend = false
 
     var body: some View {
         VStack(spacing: 0) {
             AppListPaneHeader(title: "人际关系") {
-                Button(action: { model.presentNewProfileEditor() }) {
+                Menu {
+                    Button("添加康纳好友", systemImage: "person.crop.circle.badge.plus") {
+                        isAddingConnorFriend = true
+                    }
+                    .disabled(im == nil)
+                    Button("添加一条人际关系", systemImage: "person.badge.plus") {
+                        model.presentNewProfileEditor()
+                    }
+                } label: {
                     Image(systemName: "plus")
                 }
-                .buttonStyle(.appIcon)
-                .help("新建人物")
-                .accessibilityLabel("新建人物")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .font(.system(size: AppButtonLayout.iconSize, weight: .semibold))
+                .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
+                .help("添加人际关系")
+                .accessibilityLabel("添加人际关系")
             }
 
-            if model.presentation.rows.isEmpty {
+            if model.presentation.rows.isEmpty && !showsFriendSections {
                 ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
                     .padding(.top, 80)
             } else {
-                ContactsRowsScrollView(
-                    rows: model.presentation.rows,
-                    selectedID: model.selectedContactID,
-                    imageURL: { model.imageURLs(for: $0).first },
-                    onSelect: { model.selectedContactID = $0 },
-                    onLoadMore: { id in Task { await model.loadMoreProfilesIfNeeded(currentProfileID: id) } }
-                )
+                contactsScroll
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task {
+            guard let im else { return }
+            await im.refreshContacts()
+        }
     }
-}
 
-private struct ContactsRowsScrollView: View {
-    var rows: [NativeContactRowPresentation]
-    var selectedID: ContactID?
-    var imageURL: (ContactID) -> URL?
-    var onSelect: (ContactID) -> Void
-    var onLoadMore: (ContactID) -> Void
+    /// Friend requests and the explicitly opened friend search share the person list.
+    private var showsFriendSections: Bool {
+        guard let im else { return false }
+        return !incomingRequests(im).isEmpty
+            || !outgoingRequests(im).isEmpty
+            || isAddingConnorFriend
+            || !im.userSearchResults.isEmpty
+    }
 
-    var body: some View {
+    private func incomingRequests(_ im: ImFeatureModel) -> [ImFriendRequest] {
+        guard let selfId = im.selfUserId else { return [] }
+        return im.friendRequests.filter { $0.receiverId == selfId && $0.status == "pending" }
+    }
+
+    private func outgoingRequests(_ im: ImFeatureModel) -> [ImFriendRequest] {
+        guard let selfId = im.selfUserId else { return [] }
+        return im.friendRequests.filter { $0.senderId == selfId && $0.status == "pending" }
+    }
+
+    private var friendProfileIDs: Set<String> {
+        Set(im?.friends.compactMap(\.personProfileID) ?? [])
+    }
+
+    private var contactsScroll: some View {
         ScrollView {
-            LazyVStack(spacing: AppListCardLayout.spacing) {
-                ForEach(rows) { row in
-                    ContactRowButton(
-                        row: row,
-                        imageURL: imageURL(row.id),
-                        isSelected: row.id == selectedID,
-                        onSelect: { onSelect(row.id) }
+            LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
+                if let im {
+                    if !incomingRequests(im).isEmpty || !outgoingRequests(im).isEmpty {
+                        ImFriendRequestSection(
+                            incoming: incomingRequests(im),
+                            outgoing: outgoingRequests(im),
+                            onAccept: { requestId in Task { await im.acceptFriendRequest(requestId: requestId) } },
+                            onReject: { requestId in Task { await im.rejectFriendRequest(requestId: requestId) } }
+                        )
+                    }
+                    if isAddingConnorFriend || !im.userSearchResults.isEmpty {
+                        ImAddFriendSection(
+                            model: im,
+                            onClose: {
+                                isAddingConnorFriend = false
+                                im.clearUserSearch()
+                            }
+                        )
+                    }
+                }
+
+                if model.presentation.rows.isEmpty {
+                    if im == nil {
+                        ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
+                            .padding(.top, 40)
+                    }
+                } else {
+                    ContactsRowsScrollView(
+                        rows: model.presentation.rows,
+                        selectedID: model.selectedContactID,
+                        friendProfileIDs: friendProfileIDs,
+                        imageURL: { model.imageURLs(for: $0).first },
+                        onSelect: { model.selectedContactID = $0 },
+                        onLoadMore: { id in Task { await model.loadMoreProfilesIfNeeded(currentProfileID: id) } }
                     )
-                        .onAppear { onLoadMore(row.id) }
                 }
             }
             .padding(.horizontal, AppListCardLayout.horizontalInset)
@@ -562,10 +615,35 @@ private struct ContactsRowsScrollView: View {
     }
 }
 
+private struct ContactsRowsScrollView: View {
+    var rows: [NativeContactRowPresentation]
+    var selectedID: ContactID?
+    var friendProfileIDs: Set<String> = []
+    var imageURL: (ContactID) -> URL?
+    var onSelect: (ContactID) -> Void
+    var onLoadMore: (ContactID) -> Void
+
+    var body: some View {
+        LazyVStack(spacing: AppListCardLayout.spacing) {
+            ForEach(rows) { row in
+                ContactRowButton(
+                    row: row,
+                    imageURL: imageURL(row.id),
+                    isSelected: row.id == selectedID,
+                    isConnorFriend: friendProfileIDs.contains(row.id.rawValue),
+                    onSelect: { onSelect(row.id) }
+                )
+                    .onAppear { onLoadMore(row.id) }
+            }
+        }
+    }
+}
+
 private struct ContactRowButton: View {
     var row: NativeContactRowPresentation
     var imageURL: URL?
     var isSelected: Bool
+    var isConnorFriend: Bool
     var onSelect: () -> Void
 
     var body: some View {
@@ -574,10 +652,20 @@ private struct ContactRowButton: View {
                 ContactProfileThumbnail(imageURL: imageURL, displayName: row.displayName)
 
                 VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
-                    Text(row.displayName)
-                        .font(AppListTypography.rowTitle)
-                        .foregroundStyle(.primary)
-                        .lineLimit(AppListCardLayout.titleLineLimit)
+                    HStack(spacing: 6) {
+                        Text(row.displayName)
+                            .font(AppListTypography.rowTitle)
+                            .foregroundStyle(.primary)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
+                        if isConnorFriend {
+                            Text("康纳好友")
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.12), in: Capsule())
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
                     Text(row.subtitle)
                         .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
@@ -590,6 +678,121 @@ private struct ContactRowButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityHint("打开人物详情")
+    }
+}
+
+/// Pending incoming/outgoing friend requests, merged into the 人际关系 list.
+private struct ImFriendRequestSection: View {
+    var incoming: [ImFriendRequest]
+    var outgoing: [ImFriendRequest]
+    var onAccept: (Int64) -> Void
+    var onReject: (Int64) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("好友请求")
+                .font(.headline)
+            ForEach(incoming) { request in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(request.senderNickname.isEmpty ? request.senderUsername : request.senderNickname)
+                            .font(.body)
+                        if !request.message.isEmpty {
+                            Text(request.message)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button("同意") { onAccept(request.id) }
+                        .buttonStyle(.borderedProminent)
+                    Button("拒绝") { onReject(request.id) }
+                }
+                .padding(.vertical, 2)
+            }
+            ForEach(outgoing) { request in
+                HStack {
+                    Text(request.receiverNickname.isEmpty ? request.receiverUsername : request.receiverNickname)
+                        .font(.body)
+                    Spacer()
+                    Text("等待对方同意")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .contactsSectionCard()
+    }
+}
+
+/// Add-friend user search, merged into the 人际关系 list.
+private struct ImAddFriendSection: View {
+    let model: ImFeatureModel
+    var onClose: () -> Void
+    @State private var searchQuery = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("添加康纳好友")
+                    .font(.headline)
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+                .help("关闭")
+                .accessibilityLabel("关闭添加康纳好友")
+            }
+            HStack(spacing: 8) {
+                TextField("搜索用户名 / 昵称", text: $searchQuery)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await model.searchUsers(query: searchQuery) } }
+                Button("搜索") {
+                    Task { await model.searchUsers(query: searchQuery) }
+                }
+            }
+            if let message = model.contactMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(model.userSearchResults, id: \.id) { user in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(user.nickname.isEmpty ? user.username : user.nickname)
+                            .font(.body)
+                        Text("@\(user.username)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if model.friends.contains(where: { $0.userId == user.id }) {
+                        Text("已是好友")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button("加好友") {
+                            Task { await model.sendFriendRequest(username: user.username) }
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .contactsSectionCard()
+    }
+}
+
+private extension View {
+    func contactsSectionCard() -> some View {
+        padding(12)
+            .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                    .stroke(AppShellColors.hairline, lineWidth: 1)
+            )
     }
 }
 
@@ -2323,7 +2526,11 @@ private extension CalendarAttendeeResponseStatus {
 
 struct ContactsSourceSettingsView: View {
     @Bindable var model: ContactsFeatureModel
+    var im: ImFeatureModel?
+    var onOpenPeerChat: (Int64) -> Void
     @State private var imageImporter = ContactImageImporterState()
+    @State private var pendingFriendRemoval: ImFriend?
+    @State private var pendingFriendMergeTarget: PersonProfile?
 
     var body: some View {
         Group {
@@ -2334,7 +2541,16 @@ struct ContactsSourceSettingsView: View {
                             row: selected,
                             onEdit: { model.presentEditProfile(selected.id) },
                             onAddRelationship: { model.presentNewRelationshipEditor(sourcePersonID: selected.id) },
-                            onDelete: { model.pendingProfileDeletionID = selected.id }
+                            onDelete: { model.pendingProfileDeletionID = selected.id },
+                            friendDisplayName: selectedFriend?.displayName,
+                            onMessage: selectedFriend.map { friend in
+                                { onOpenPeerChat(friend.userId) }
+                            },
+                            onRemoveFriend: selectedFriend.map { friend in
+                                { pendingFriendRemoval = friend }
+                            },
+                            mergeCandidates: selectedFriend == nil ? [] : model.profiles.filter { $0.id != selected.id },
+                            onRequestMergeInto: { pendingFriendMergeTarget = $0 }
                         )
 
                         let imageURLs = model.imageURLs(for: selected.id)
@@ -2412,6 +2628,39 @@ struct ContactsSourceSettingsView: View {
         } message: {
             Text("删除后，该人物不会再出现在人物列表和默认人物上下文中。")
         }
+        .confirmationDialog("删除康纳好友？", isPresented: Binding(
+            get: { pendingFriendRemoval != nil },
+            set: { if !$0 { pendingFriendRemoval = nil } }
+        )) {
+            Button("删除好友", role: .destructive) {
+                guard let friend = pendingFriendRemoval, let im else { return }
+                pendingFriendRemoval = nil
+                Task { @MainActor in await im.removeFriend(userId: friend.userId) }
+            }
+            Button("取消", role: .cancel) { pendingFriendRemoval = nil }
+        } message: {
+            Text("将解除与对方的康纳好友关系并移除聊天会话；人物档案仍会保留在人际关系中。")
+        }
+        .confirmationDialog("合并康纳好友人物？", isPresented: Binding(
+            get: { pendingFriendMergeTarget != nil },
+            set: { if !$0 { pendingFriendMergeTarget = nil } }
+        )) {
+            Button("合并", role: .destructive) {
+                guard let target = pendingFriendMergeTarget,
+                      let sourceID = model.selectedContactID,
+                      let friend = selectedFriend,
+                      let im
+                else { return }
+                pendingFriendMergeTarget = nil
+                Task { @MainActor in
+                    guard await model.mergeProfile(sourceID: sourceID, targetID: target.id) else { return }
+                    await im.bindFriendPerson(userId: friend.userId, personProfileID: target.id.rawValue)
+                }
+            }
+            Button("取消", role: .cancel) { pendingFriendMergeTarget = nil }
+        } message: {
+            Text("好友人物的资料与关系将合并到“\(pendingFriendMergeTarget?.displayName ?? "所选人物")”，聊天也会改为关联该人物。")
+        }
         .fileImporter(
             isPresented: $imageImporter.isPresented,
             allowedContentTypes: [.image],
@@ -2426,6 +2675,11 @@ struct ContactsSourceSettingsView: View {
     private var selectedContactRow: NativeContactRowPresentation? {
         guard let id = model.selectedContactID else { return nil }
         return model.presentation.rows.first { $0.id == id }
+    }
+
+    private var selectedFriend: ImFriend? {
+        guard let im, let id = model.selectedContactID else { return nil }
+        return im.friends.first { $0.personProfileID == id.rawValue }
     }
 
 }
@@ -2545,6 +2799,11 @@ private struct PersonProfileDetailHero: View {
     var onEdit: () -> Void
     var onAddRelationship: () -> Void
     var onDelete: () -> Void
+    var friendDisplayName: String?
+    var onMessage: (() -> Void)?
+    var onRemoveFriend: (() -> Void)?
+    var mergeCandidates: [PersonProfile]
+    var onRequestMergeInto: (PersonProfile) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
@@ -2562,6 +2821,9 @@ private struct PersonProfileDetailHero: View {
                     if row.primaryEmail != nil {
                         PersonProfileStatusPill(status: "邮箱", color: .teal, systemImage: "envelope")
                     }
+                    if let friendDisplayName {
+                        PersonProfileStatusPill(status: "康纳好友 · \(friendDisplayName)", color: .accentColor, systemImage: "person.2.fill")
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
 
@@ -2578,15 +2840,35 @@ private struct PersonProfileDetailHero: View {
                 }
 
                 HStack(spacing: AppShellLayout.spaceS) {
+                    if let onMessage {
+                        Button("发消息", systemImage: "bubble.left.fill", action: onMessage)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(AppButtonLayout.controlSize)
+                    }
                     Button("编辑", action: onEdit)
                         .buttonStyle(.bordered)
                         .controlSize(AppButtonLayout.controlSize)
                     Button("添加关系", action: onAddRelationship)
                         .buttonStyle(.bordered)
                         .controlSize(AppButtonLayout.controlSize)
-                    Button("删除", role: .destructive, action: onDelete)
-                        .buttonStyle(.bordered)
-                        .controlSize(AppButtonLayout.controlSize)
+                    Menu {
+                        if !mergeCandidates.isEmpty {
+                            Menu("合并到已有人物") {
+                                ForEach(mergeCandidates) { profile in
+                                    Button(profile.displayName) { onRequestMergeInto(profile) }
+                                }
+                            }
+                        }
+                        if let onRemoveFriend {
+                            Button("删除好友", role: .destructive, action: onRemoveFriend)
+                        }
+                        Button("删除人物", role: .destructive, action: onDelete)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(AppButtonLayout.controlSize)
+                    .help("更多操作")
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
             }

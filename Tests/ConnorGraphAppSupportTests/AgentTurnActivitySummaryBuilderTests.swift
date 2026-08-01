@@ -165,8 +165,11 @@ import ConnorGraphCore
     #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "mail_send_draft", semanticKind: .unknown) == "发送邮件")
     #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "rss_sync_source", semanticKind: .unknown) == "同步 RSS 订阅源")
     #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "memory_os_l4_neighbors", semanticKind: .unknown) == "查看实体关系")
-    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "cloud_kb_future_operation", semanticKind: .unknown) == "执行知识库操作")
-    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "mcp__lark__search", semanticKind: .unknown) == "调用外部工具")
+    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "cloud_kb_future_operation", semanticKind: .unknown) == "cloud_kb_future_operation")
+    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "mcp__lark__search", semanticKind: .unknown) == "mcp__lark__search")
+    #expect(AgentToolDisplayNameResolver.categoryName(rawToolName: "mcp__lark__search", semanticKind: .mcp) == "MCP")
+    #expect(AgentToolDisplayNameResolver.categoryName(rawToolName: "cloud_kb_future_operation", semanticKind: .unknown) == "知识库")
+    #expect(AgentToolDisplayNameResolver.categoryName(rawToolName: "parallel_tool_query", semanticKind: .parallelQuery) == "并行查询")
 }
 
 @Test func toolSummaryCountsInvocationsInsteadOfLifecycleEvents() {
