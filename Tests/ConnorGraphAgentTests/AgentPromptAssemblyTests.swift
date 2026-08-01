@@ -278,10 +278,10 @@ import ConnorGraphAgent
     #expect(prompt.contains("## Core Startup and Final Preference Checkpoint"))
     #expect(prompt.contains("Only checkpoints named by the Runtime Retrieval Plan are mandatory"))
     #expect(prompt.contains("omitted checkpoints must not be performed merely as generic preflight"))
-    #expect(prompt.contains("startup continuity includes the named available `memory_os_recent_context`, `memory_os_knowledge_context`, and/or one initial `note_search`"))
+    #expect(prompt.contains("startup continuity includes every available `memory_os_recent_context`, `memory_os_knowledge_context`, `memory_os_get_current_user_profile`"))
     #expect(prompt.contains("none substitutes for another"))
-    #expect(prompt.contains("current-user profile is not a startup source"))
-    #expect(prompt.contains("`prepare_final_output` loads its final-response view internally"))
+    #expect(prompt.contains("`purpose: task_context`"))
+    #expect(prompt.contains("`prepare_final_output` separately owns the late final-response view"))
     #expect(prompt.contains("`prepare_final_output` owns final-response Profile pagination"))
     #expect(prompt.contains("For recent context and durable knowledge, choose how many consecutive pages to read"))
     #expect(prompt.contains("A required retrieval call that succeeds with no records, returns `success: false`, is blocked, or fails still satisfies its attempt requirement"))
@@ -371,7 +371,7 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptConditionallyUsesMemoryAndWebSearch() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("When selected by the Runtime Retrieval Plan, startup continuity includes the named available"))
+    #expect(prompt.contains("On every user run, startup continuity includes every available"))
     #expect(prompt.contains("give the two context tools only compact topic keywords, entity names, or subject phrases tied to the actual user request"))
     #expect(prompt.contains("Use `web_search` when the user asks to search, research, look up, verify, or consult external sources"))
     #expect(prompt.contains("strongly prefer checking current authoritative guidance and established external best practices"))
@@ -417,12 +417,12 @@ import ConnorGraphAgent
     #expect(!AgentEvidenceValidationPolicy.memoryEvidenceTools.contains("note_get"))
 }
 
-@Test func defaultSystemPromptUsesCalendarOnlyWhenRelevantToRequestedWork() {
+@Test func defaultSystemPromptSeparatesContextualCalendarReadsFromFinalAttention() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("Use calendar reads only when the user asks about scheduling"))
-    #expect(prompt.contains("Do not perform a generic 48-hour calendar check for an unrelated request"))
-    #expect(prompt.contains("put only selected `calendar_read` detail calls into the next read batch"))
+    #expect(prompt.contains("Task-specific calendar reads remain contextual"))
+    #expect(prompt.contains("required generic two-day calendar scan"))
+    #expect(prompt.contains("Put only selected `calendar_read` detail calls into a later batch"))
 }
 
 @Test func defaultSystemPromptExcludesProjectsFromCurrentUserProfilePurpose() {

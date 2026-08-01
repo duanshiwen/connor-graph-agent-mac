@@ -41,9 +41,14 @@ import ConnorGraphCore
         #expect(mail["status"] as? String == "included")
         let messages = try #require(mail["messages"] as? [[String: Any]])
         #expect(messages.first?["messageID"] as? String == "mail-1")
-        let recentRequest = await mailRuntime.lastRecentRequest
-        #expect(recentRequest?.accountID == nil)
-        #expect(recentRequest?.direction == .received)
+        let searchRequest = await mailRuntime.lastSearchRequest
+        #expect(searchRequest?.accountID == nil)
+        #expect(searchRequest?.startDate != nil)
+        #expect(searchRequest?.endDate != nil)
+        #expect(searchRequest?.timeSort == NativeSearchTemporalSort.timeDescThenRelevance.rawValue)
+        if let startDate = searchRequest?.startDate, let endDate = searchRequest?.endDate {
+            #expect(abs(endDate.timeIntervalSince(startDate) - 2 * 86_400) < 2)
+        }
         #expect(result.contentText.contains("all calendars"))
         #expect(result.contentText.contains("Invoice due"))
     }
@@ -99,7 +104,7 @@ import ConnorGraphCore
         let exposed = policy.exposedTools(
             from: [definition],
             request: AgentChatRequest(sessionID: "session-exposure", userMessage: "tell me a joke"),
-            retrievalPlan: AgentRunRetrievalPlan(requiresCurrentTime: false, requiresContinuity: false, requiresNoteSearch: false, requiresFinalProfile: false),
+            retrievalPlan: AgentRunRetrievalPlan(requiresCurrentTime: false, requiresContinuity: false, requiresNoteSearch: false, requiresFinalProfile: false, requiresFinalAttention: true),
             mode: .contextual
         )
         #expect(exposed.map(\.name) == ["attention_brief"])
@@ -137,7 +142,7 @@ import ConnorGraphCore
 private actor StubMailRuntime: AgentMailRuntime {
     private let messages: [MailMessageSummary]
     private let shouldThrow: Bool
-    private(set) var lastRecentRequest: MailRuntimeRecentMessagesRequestBridge?
+    private(set) var lastSearchRequest: MailRuntimeSearchRequestBridge?
 
     init(messages: [MailMessageSummary] = [], shouldThrow: Bool = false) {
         self.messages = messages
@@ -150,12 +155,12 @@ private actor StubMailRuntime: AgentMailRuntime {
 
     func searchMessages(_ request: MailRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] {
         if shouldThrow { throw StubFailure() }
+        lastSearchRequest = request
         return messages
     }
 
     func listRecentMessages(_ request: MailRuntimeRecentMessagesRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] {
         if shouldThrow { throw StubFailure() }
-        lastRecentRequest = request
         return messages
     }
 

@@ -1697,14 +1697,27 @@ func agentLoopRequiresStartupContinuityWithoutPreloadingCurrentUserProfile() asy
     registry.register(RetrievalEvidenceTool(name: names[0]))
     let policy = AgentContinuityPreflightPolicy()
 
-    #expect(policy.missingToolNames(availableTools: registry.definitions, invokedToolNames: []) == [names[0]])
-    #expect(policy.missingToolNames(availableTools: registry.definitions, invokedToolNames: [names[0]]) == [])
+    #expect(policy.missingToolNames(availableTools: registry.definitions, invokedToolNames: []) == [names[0], names[2]])
+    #expect(policy.missingToolNames(availableTools: registry.definitions, invokedToolNames: [names[0]]) == [names[2]])
     #expect(policy.missingToolNames(availableTools: registry.definitions, invokedToolNames: Set(names)) == [])
     #expect(policy.correctionInstruction(for: []) == nil)
-    #expect(policy.correctionInstruction(for: [names[0]])?.contains("current-user profile is intentionally excluded") == true)
+    #expect(policy.correctionInstruction(for: [names[2]])?.contains("purpose: \"task_context\"") == true)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("successful empty result still counts") == true)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("parallel_tool_query") == true)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("prepare_final_output") == true)
+}
+
+@Test func finalAttentionPreflightRequiresEveryAvailableAssistantCheckpoint() {
+    let definitions = [AttentionBriefTool.toolName, "rss_search_items", "unrelated_tool"].map {
+        AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
+    }
+    let policy = AgentFinalAttentionPreflightPolicy()
+
+    #expect(policy.missingToolNames(availableTools: definitions, invokedToolNames: []) == [AttentionBriefTool.toolName, "rss_search_items"])
+    #expect(policy.missingToolNames(availableTools: definitions, invokedToolNames: [AttentionBriefTool.toolName]) == ["rss_search_items"])
+    #expect(policy.missingToolNames(availableTools: definitions, invokedToolNames: Set(AgentFinalAttentionPreflightPolicy.requiredToolNames)).isEmpty)
+    #expect(policy.correctionInstruction(for: ["rss_search_items"])?.contains("previous 48-hour") == true)
+    #expect(policy.correctionInstruction(for: []) == nil)
 }
 
 @Test func noteSearchPreflightPolicyRequiresOneAvailableAttempt() {
@@ -1960,16 +1973,17 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(policy.correctionInstruction().contains("do not retry automatically"))
 }
 
-@Test func contextualRunTokenPolicySkipsUnrelatedRetrievalAndSelectsRelevantCheckpoints() {
+@Test func contextualRunTokenPolicyAlwaysSelectsAssistantContinuityCheckpoints() {
     let policy = AgentRunTokenPolicy()
     let ordinary = policy.retrievalPlan(
         for: AgentChatRequest(sessionID: "ordinary", userMessage: "请把这段话改得更简洁"),
         mode: .contextual
     )
     #expect(!ordinary.requiresCurrentTime)
-    #expect(!ordinary.requiresContinuity)
-    #expect(!ordinary.requiresNoteSearch)
-    #expect(!ordinary.requiresFinalProfile)
+    #expect(ordinary.requiresContinuity)
+    #expect(ordinary.requiresNoteSearch)
+    #expect(ordinary.requiresFinalProfile)
+    #expect(ordinary.requiresFinalAttention)
 
     let personalizedMemory = policy.retrievalPlan(
         for: AgentChatRequest(sessionID: "memory", userMessage: "请回忆我们之前讨论的偏好，并按我的风格推荐"),
@@ -1977,7 +1991,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     )
     #expect(personalizedMemory.requiresContinuity)
     #expect(personalizedMemory.requiresFinalProfile)
-    #expect(!personalizedMemory.requiresNoteSearch)
+    #expect(personalizedMemory.requiresNoteSearch)
 
     let datedNote = policy.retrievalPlan(
         for: AgentChatRequest(sessionID: "note", userMessage: "查看今天的笔记"),
@@ -2008,9 +2022,10 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
             ),
             mode: .contextual
         )
-        #expect(!plan.requiresContinuity)
-        #expect(!plan.requiresNoteSearch)
-        #expect(!plan.requiresFinalProfile)
+        #expect(plan.requiresContinuity)
+        #expect(plan.requiresNoteSearch)
+        #expect(plan.requiresFinalProfile)
+        #expect(plan.requiresFinalAttention)
     }
 
     let continuation = policy.retrievalPlan(
@@ -2053,7 +2068,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(names.contains("external_mcp_action"))
     #expect(!names.contains("mail_search_messages"))
     #expect(!names.contains("web_search"))
-    #expect(!names.contains("memory_os_recent_context"))
+    #expect(names.contains("memory_os_recent_context"))
 }
 
 @Test func agentLoopAcceptsMemoryAndNotePreflightInsideOneParallelQuery() async throws {

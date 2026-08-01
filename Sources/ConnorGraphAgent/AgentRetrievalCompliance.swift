@@ -97,10 +97,9 @@ public struct AgentNoteSearchPreflightPolicy: Sendable, Equatable {
 /// Enforces startup continuity retrieval and the late full-profile checkpoint.
 public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
     public static let currentUserProfileToolName = "memory_os_get_current_user_profile"
+    public static let taskContextPurpose = "task_context"
     public static let finalResponsePurpose = "final_response"
-    public static let requiredToolNames = AgentEvidenceValidationPolicy.memoryEvidenceTools.filter {
-        $0 != currentUserProfileToolName
-    }
+    public static let requiredToolNames = AgentEvidenceValidationPolicy.memoryEvidenceTools
 
     public init() {}
 
@@ -118,7 +117,7 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
         guard !missingToolNames.isEmpty else { return nil }
         let names = missingToolNames.map { "`\($0)`" }.joined(separator: ", ")
         return """
-        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, include every still-missing available continuity read in one `parallel_tool_query` batch: \(names). Each `calls` item uses the exact native tool name and native arguments object. These are independent paginated sources; do not substitute one for another. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory. The current-user profile is intentionally excluded from startup continuity and is loaded internally by `prepare_final_output` near finalization.
+        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, include every still-missing available continuity read in one `parallel_tool_query` batch: \(names). Each `calls` item uses the exact native tool name and native arguments object. Call `memory_os_get_current_user_profile` with `purpose: "task_context"`. These are independent paginated sources; do not substitute one for another. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory. `prepare_final_output` separately owns the late `final_response` profile checkpoint.
         """
     }
 
@@ -134,6 +133,31 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
         return response.nextPage
     }
 
+}
+
+/// Enforces the personal-assistant attention check before final synthesis.
+public struct AgentFinalAttentionPreflightPolicy: Sendable, Equatable {
+    public static let requiredToolNames = [AttentionBriefTool.toolName, "rss_search_items"]
+
+    public init() {}
+
+    public func missingToolNames(
+        availableTools: [AgentToolDefinition],
+        invokedToolNames: Set<String>
+    ) -> [String] {
+        let availableNames = Set(availableTools.map(\.name))
+        return Self.requiredToolNames.filter {
+            availableNames.contains($0) && !invokedToolNames.contains($0)
+        }
+    }
+
+    public func correctionInstruction(for missingToolNames: [String]) -> String? {
+        guard !missingToolNames.isEmpty else { return nil }
+        let names = missingToolNames.map { "`\($0)`" }.joined(separator: ", ")
+        return """
+        Mandatory final attention check is incomplete. Before `prepare_final_output`, put every still-missing available read in one `parallel_tool_query` batch: \(names). Use `attention_brief` with `days: 2`. Use `rss_search_items` with an empty query, the trusted Runtime Context's previous 48-hour ISO-8601 bounds, newest-first sorting, and a small limit. A successful empty result or a real failure satisfies the one-attempt checkpoint. Do not repeat a completed check, do not read full bodies by default, and mention the results only when the user has an immediate action or preparation need.
+        """
+    }
 }
 
 private struct CurrentUserProfilePaginationResponse: Decodable {

@@ -15,32 +15,39 @@ public struct AgentRunRetrievalPlan: Sendable, Equatable {
     public var requiresContinuity: Bool
     public var requiresNoteSearch: Bool
     public var requiresFinalProfile: Bool
+    public var requiresFinalAttention: Bool
 
     public init(
         requiresCurrentTime: Bool,
         requiresContinuity: Bool,
         requiresNoteSearch: Bool,
-        requiresFinalProfile: Bool
+        requiresFinalProfile: Bool,
+        requiresFinalAttention: Bool
     ) {
         self.requiresCurrentTime = requiresCurrentTime
         self.requiresContinuity = requiresContinuity
         self.requiresNoteSearch = requiresNoteSearch
         self.requiresFinalProfile = requiresFinalProfile
+        self.requiresFinalAttention = requiresFinalAttention
     }
 
     public var instruction: String {
         let startup = [
-            requiresContinuity ? "memory_os_recent_context and memory_os_knowledge_context" : nil,
+            requiresContinuity ? "memory_os_recent_context, memory_os_knowledge_context, and memory_os_get_current_user_profile with purpose task_context" : nil,
             requiresNoteSearch ? "one initial note_search" : nil
         ].compactMap { $0 }
         let startupText = startup.isEmpty ? "No startup retrieval is required." : "Required startup retrieval: \(startup.joined(separator: ", "))."
         let profileText = requiresFinalProfile
             ? "Before the final answer, complete the full memory_os_get_current_user_profile final_response pagination chain."
             : "No final-response profile checkpoint is required unless this run successfully updates the current-user profile."
+        let attentionText = requiresFinalAttention
+            ? "Before prepare_final_output, complete one final attention batch containing every available attention_brief and rss_search_items checkpoint."
+            : "No final attention checkpoint is required."
         return """
         ## Runtime Retrieval Plan
         This trusted per-run plan is authoritative for which optional retrieval checkpoints are mandatory. Do not call omitted retrieval tools merely as a generic preflight.
         - \(startupText)
+        - \(attentionText)
         - \(profileText)
         """
     }
@@ -58,19 +65,16 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
                 requiresCurrentTime: false,
                 requiresContinuity: true,
                 requiresNoteSearch: true,
-                requiresFinalProfile: true
+                requiresFinalProfile: true,
+                requiresFinalAttention: true
             )
         }
-
-        let context = routingContext(for: request)
-        let memoryRelevant = containsAny(context, signals: Self.memorySignals)
-        let noteRelevant = containsAny(context, signals: Self.noteSignals)
-        let profileRelevant = memoryRelevant || containsAny(context, signals: Self.profileSignals)
         return AgentRunRetrievalPlan(
             requiresCurrentTime: false,
-            requiresContinuity: memoryRelevant,
-            requiresNoteSearch: noteRelevant,
-            requiresFinalProfile: profileRelevant
+            requiresContinuity: true,
+            requiresNoteSearch: true,
+            requiresFinalProfile: true,
+            requiresFinalAttention: true
         )
     }
 
@@ -103,6 +107,7 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
         // final reply can proactively remind the user, regardless of whether the
         // conversation contains calendar or mail signals.
         if name == "attention_brief" { return true }
+        if name == "rss_search_items" { return retrievalPlan.requiresFinalAttention }
 
         if Self.localToolNames.contains(name) || matches(name, prefixes: ["local_", "workspace_"]) { return containsAny(context, signals: Self.localFileSignals) }
         if matches(name, prefixes: ["calendar_"]) { return containsAny(context, signals: Self.calendarSignals) }
