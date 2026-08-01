@@ -23,13 +23,13 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var compaction: AgentLoopCompactionConfiguration
 
     public init(
-        maxToolIterations: Int = 24,
+        maxToolIterations: Int = 64,
         maxToolCallsPerIteration: Int = 4,
         maxRunDurationSeconds: Int = 1800,
         toolExecutionTimeoutSeconds: Int = 300,
         maxToolResultBytes: Int = 32 * 1_024,
         maxConsecutiveToolResultErrors: Int = 3,
-        stopAfterTurnWhenBudgetExceeded: Bool = true,
+        stopAfterTurnWhenBudgetExceeded: Bool = false,
         preflightMode: AgentPreflightMode = .contextual,
         toolExposureMode: AgentToolExposureMode = .contextual,
         promptProjectionMode: AgentPromptProjectionMode = .legacySingleUserMessage,
@@ -82,13 +82,13 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.maxToolIterations = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 24)
+        self.maxToolIterations = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 64)
         self.maxToolCallsPerIteration = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 4)
         self.maxRunDurationSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800)
         self.toolExecutionTimeoutSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .toolExecutionTimeoutSeconds) ?? 300)
         self.maxToolResultBytes = max(0, try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1_024)
         self.maxConsecutiveToolResultErrors = max(0, try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 3)
-        self.stopAfterTurnWhenBudgetExceeded = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded) ?? true
+        self.stopAfterTurnWhenBudgetExceeded = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded) ?? false
         self.preflightMode = try container.decodeIfPresent(AgentPreflightMode.self, forKey: .preflightMode) ?? .contextual
         self.toolExposureMode = try container.decodeIfPresent(AgentToolExposureMode.self, forKey: .toolExposureMode) ?? .contextual
         self.promptProjectionMode = try container.decodeIfPresent(AgentPromptProjectionMode.self, forKey: .promptProjectionMode) ?? .legacySingleUserMessage
@@ -358,6 +358,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     var compactionGeneration = 0
                     var lastCompactionEstimateAfter: Int?
                     var hasCheckpointForCurrentPressure = false
+                    var budgetCompactionRequested = false
+                    var nextBudgetCompactionTokenThreshold = max(1, configuration.budget.maxTotalTokens)
+                    var executionSegment = 1
+                    var segmentIterationCount = 0
+                    var segmentCompactionRequested = false
 
                     func shouldApplyCorrectionContinue(_ category: String) -> Bool {
                         let count = correctionContinueCounts[category, default: 0] + 1
@@ -377,9 +382,16 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         return recentToolCallSignatures.lazy.filter { $0 == signature }.count >= maxConsecutiveIdenticalToolCalls
                     }
 
-                    for _ in 0..<configuration.maxToolIterations {
+                    while true {
+                        if segmentIterationCount >= configuration.maxToolIterations {
+                            executionSegment += 1
+                            segmentIterationCount = 0
+                            segmentCompactionRequested = true
+                            logger.info("Starting execution segment \(executionSegment); checkpointing completed work before continuing")
+                        }
                         iterationCount += 1
-                        logger.info("Turn \(iterationCount)/\(configuration.maxToolIterations)")
+                        segmentIterationCount += 1
+                        logger.info("Turn \(iterationCount) (segment \(executionSegment), turn \(segmentIterationCount)/\(configuration.maxToolIterations))")
                         yield(.turnStarted(AgentTurnStartedEvent(
                             runID: run.id,
                             sessionID: run.sessionID,
@@ -431,12 +443,20 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         // handled by rolling summaries. This policy is exclusively for tool trace
                         // accumulated inside the current run.
                         let hasCurrentRunToolTrace = iterationCount > 1 && modelRequest.messages.contains { $0.role == .tool }
-                        let compactionDecision = hasCurrentRunToolTrace
-                            ? compactionPolicy.decision(
-                                for: compactionSnapshot,
-                                hasCheckpointForCurrentPressure: hasCheckpointForCurrentPressure
-                            )
-                            : .none
+                        let shouldCompactForExceededBudget = hasCurrentRunToolTrace
+                            && budgetCompactionRequested
+                        let shouldCompactForExecutionSegment = hasCurrentRunToolTrace
+                            && segmentCompactionRequested
+                        let shouldForceCompaction = shouldCompactForExceededBudget
+                            || shouldCompactForExecutionSegment
+                        let compactionDecision = shouldForceCompaction
+                            ? AgentLoopCompactionDecision.compact
+                            : hasCurrentRunToolTrace
+                                ? compactionPolicy.decision(
+                                    for: compactionSnapshot,
+                                    hasCheckpointForCurrentPressure: hasCheckpointForCurrentPressure
+                                )
+                                : .none
                         if compactionDecision == .checkpoint {
                             runCheckpoint = AgentRunCheckpointBuilder().build(
                                 generation: max(1, compactionGeneration + 1),
@@ -494,6 +514,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 hasCheckpointForCurrentPressure = true
                                 localInputEstimate = localContextGuard.estimatedInputTokens(compactedRequest)
                                 lastCompactionEstimateAfter = localInputEstimate
+                                if shouldCompactForExceededBudget {
+                                    budgetCompactionRequested = false
+                                }
+                                if shouldCompactForExecutionSegment {
+                                    segmentCompactionRequested = false
+                                }
                                 yield(.compactionCompleted(AgentCompactionCompletedEvent(
                                     runID: run.id,
                                     sessionID: run.sessionID,
@@ -588,6 +614,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                         let budgetSnapshot = await budgetMeter.record(modelResponse.usage)
                         let budgetExceeded = budgetSnapshot.status == .exceeded
+                        if budgetExceeded,
+                           !configuration.stopAfterTurnWhenBudgetExceeded,
+                           budgetSnapshot.totalTokens >= nextBudgetCompactionTokenThreshold {
+                            budgetCompactionRequested = true
+                            let interval = max(1, configuration.budget.maxTotalTokens)
+                            while nextBudgetCompactionTokenThreshold <= budgetSnapshot.totalTokens {
+                                nextBudgetCompactionTokenThreshold += interval
+                            }
+                        }
                         if budgetSnapshot.status == .warning || budgetExceeded {
                             let label = budgetExceeded ? "Token budget exceeded" : "Token budget warning"
                             let suffix = configuration.stopAfterTurnWhenBudgetExceeded && budgetExceeded
@@ -1023,7 +1058,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             && consecutiveToolResultErrors >= configuration.maxConsecutiveToolResultErrors
                         let shouldStopAfterTurn = configuration.stopAfterTurnWhenBudgetExceeded
                             && budgetExceeded
-                            && isFinalResponseProfileComplete
                         yield(.turnCompleted(AgentTurnCompletedEvent(
                             runID: run.id,
                             sessionID: run.sessionID,
@@ -1057,12 +1091,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             return
                         }
                     }
-                    let failure = AgentRunFailure(runID: run.id, sessionID: run.sessionID, message: "Max tool iterations reached")
-                    run.status = .failed
-                    run.completedAt = Date()
-                    recordRun(run)
-                    yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
-                    continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
                 } catch is CancellationError {
                     let didTimeOut = cancellationRegistry.isTimedOut(runID: run.id)
                     run.status = didTimeOut ? .failed : .cancelled
