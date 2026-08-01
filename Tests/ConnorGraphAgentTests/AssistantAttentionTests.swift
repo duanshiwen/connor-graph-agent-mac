@@ -33,6 +33,7 @@ private struct AttentionFixtureTool: AgentTool {
 
     #expect(pack.sections.map(\.source) == ["attention_brief", "rss_search_items"])
     #expect(pack.sections.allSatisfy { $0.error == nil })
+    #expect(pack.hasAvailableSources)
 }
 
 @Test func unavailableAttentionCapabilitiesRemainExplicit() async {
@@ -45,4 +46,5 @@ private struct AttentionFixtureTool: AgentTool {
 
     #expect(pack.sections.count == 2)
     #expect(pack.sections.allSatisfy { $0.error == "capability unavailable" })
+    #expect(!pack.hasAvailableSources)
 }

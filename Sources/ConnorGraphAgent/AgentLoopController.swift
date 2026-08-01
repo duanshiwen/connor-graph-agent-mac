@@ -358,6 +358,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     AgentNoteSearchPreflightPolicy.requiredToolName
                 )
                 var finalAttentionPack: AssistantAttentionPack?
+                let hasAvailableAttentionSource = !AssistantAttentionCoordinator.internalToolNames.isDisjoint(
+                    with: Set(toolRegistry.definitions.map(\.name))
+                )
                 // Startup tool visibility is fixed for the whole run so the serialized
                 // tool array stays prefix-stable for provider prompt caching. Usage
                 // discipline is enforced through corrective instructions and call
@@ -611,7 +614,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             modelResponse = try await completeModelRequest(
                                 modelRequest,
                                 run: run,
-                                publishesTextDeltas: isFinalResponseProfileComplete && finalAttentionPack != nil,
+                                publishesTextDeltas: isFinalResponseProfileComplete
+                                    && (finalAttentionPack != nil || !hasAvailableAttentionSource),
                                 continuation: continuation
                             )
                         } catch {
@@ -635,7 +639,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             modelResponse = try await completeModelRequest(
                                 recoveredRequest,
                                 run: run,
-                                publishesTextDeltas: isFinalResponseProfileComplete && finalAttentionPack != nil,
+                                publishesTextDeltas: isFinalResponseProfileComplete
+                                    && (finalAttentionPack != nil || !hasAvailableAttentionSource),
                                 continuation: continuation
                             )
                         }
@@ -703,20 +708,22 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     policy: policy
                                 )
                                 finalAttentionPack = pack
-                                messages.append(AgentModelMessage(
-                                    role: .assistant,
-                                    content: modelResponse.text ?? ""
-                                ))
-                                messages.append(AgentModelMessage(
-                                    role: .system,
-                                    content: [
-                                        AssistantAttentionCoordinator().render(pack),
-                                        "Produce the final answer now. Preserve the completed task result and add only genuinely urgent attention items. Do not call more tools."
-                                    ].joined(separator: "\n\n")
-                                ))
-                                phasedState.convergeToFinalSynthesis()
-                                forceFinalSynthesisWithoutTools = true
-                                continue
+                                if pack.hasAvailableSources {
+                                    messages.append(AgentModelMessage(
+                                        role: .assistant,
+                                        content: modelResponse.text ?? ""
+                                    ))
+                                    messages.append(AgentModelMessage(
+                                        role: .system,
+                                        content: [
+                                            AssistantAttentionCoordinator().render(pack),
+                                            "Produce the final answer now. Preserve the completed task result and add only genuinely urgent attention items. Do not call more tools."
+                                        ].joined(separator: "\n\n")
+                                    ))
+                                    phasedState.convergeToFinalSynthesis()
+                                    forceFinalSynthesisWithoutTools = true
+                                    continue
+                                }
                             }
                             if evidencePolicy.requiresWebResearch(request.userMessage),
                                !didRequestResearchCorrection,
