@@ -281,6 +281,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     for: request,
                     mode: configuration.preflightMode
                 )
+                let assistantBootstrap = await AssistantBootstrapCoordinator(configuration: .init(
+                    maximumContextTokens: min(4_000, configuration.promptMaxEstimatedTokens)
+                )).run(
+                    request: request,
+                    registry: toolRegistry,
+                    policy: policy
+                )
                 let exposedToolDefinitions = tokenPolicy.exposedTools(
                     from: toolRegistry.definitions,
                     request: request,
@@ -319,8 +326,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 let dynamicRuntime = [
                     runtimeContext.trustedPrompt,
                     environmentText,
+                    AssistantEvidenceReducer().render(assistantBootstrap.contextPack),
                     Self.nativeToolCatalogPrompt(from: routedToolDefinitions),
-                    "The local memory_query tool is always available. It internally queries recent and long-term Memory concurrently and reports backend dependency failures in its errors field. Shell and ApplyPatch are direct workspace tools. Other applicable native tools are supplied through the routed catalog above. Tool exposure remains stable throughout this run."
+                    "Memory, user-profile context, and Note candidates were already loaded once by the deterministic assistant bootstrap. Do not repeat those generic startup reads. Shell and ApplyPatch are direct workspace tools. Other applicable native tools are supplied through the routed catalog above."
                 ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")
                 let auditEstimator = AgentModelContextGuard().estimator
                 let stablePromptEstimatedTokens = modelRequest.messages.first.map {
@@ -341,19 +349,20 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var didRequestResearchCorrection = false
                 var promotedSkillIdentifiers = Set<String>()
                 let continuityPreflightPolicy = AgentContinuityPreflightPolicy()
-                var invokedContinuityToolNames = Set<String>()
+                var invokedContinuityToolNames = assistantBootstrap.attemptedToolNames.intersection(
+                    AgentContinuityPreflightPolicy.requiredToolNames
+                )
                 let noteSearchPreflightPolicy = AgentNoteSearchPreflightPolicy()
-                var didAttemptNoteSearch = false
+                var didAttemptNoteSearch = assistantBootstrap.attemptedToolNames.contains(
+                    AgentNoteSearchPreflightPolicy.requiredToolName
+                )
                 let finalAttentionPreflightPolicy = AgentFinalAttentionPreflightPolicy()
                 var invokedFinalAttentionToolNames = Set<String>()
                 // Startup tool visibility is fixed for the whole run so the serialized
                 // tool array stays prefix-stable for provider prompt caching. Usage
                 // discipline is enforced through corrective instructions and call
                 // filtering below, not by removing definitions after they are used.
-                let hasCurrentUserProfileTool = availableToolDefinitions.contains {
-                    $0.name == AgentContinuityPreflightPolicy.currentUserProfileToolName
-                }
-                var isFinalResponseProfileComplete = !hasCurrentUserProfileTool
+                var isFinalResponseProfileComplete = true
                 if let diagnostics = modelRequest.promptDiagnostics {
                     yield(.promptAssembled(promptAssembledEvent(
                         runID: run.id,
@@ -917,13 +926,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 case AgentPhaseToolContract.commitStrategyName:
                                     let plan = try AgentStrategyPlanDecoder.decode(argumentsJSON: batchResult.call.argumentsJSON)
                                     try phasedState.commitStrategy(plan, memoryCapabilityAvailable: memoryCapabilityAvailable)
+                                    phasedState.completeMemoryPreparation()
                                     phasedState.evidenceState.merge(AgentEvidenceState(
                                         conclusions: [plan.recommendedApproach],
                                         references: plan.evidenceReferences,
                                         conflicts: [],
                                         unresolvedQuestions: plan.unresolvedQuestions
                                     ))
-                                    messages.append(AgentModelMessage(role: .system, content: "Trusted phase transition: LLM strategy accepted. Current phase: \(phasedState.phase.rawValue). Execute the committed plan; perform only LLM-authored Memory queries during Memory Preparation."))
+                                    messages.append(AgentModelMessage(role: .system, content: "Trusted phase transition: strategy accepted. Current phase: \(phasedState.phase.rawValue). The deterministic bootstrap already completed Memory and Note preparation; execute the committed plan without repeating generic startup retrieval."))
                                 case AgentPhaseToolContract.memoryQueryName:
                                     if phasedState.phase == .finalSynthesis { phasedState.resumeMemoryPreparation() }
                                     phasedState.completeMemoryPreparation()
@@ -1686,37 +1696,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentToolResult {
         if call.name == AgentPhaseToolContract.prepareFinalOutputName {
-            guard toolRegistry.definition(named: AgentContinuityPreflightPolicy.currentUserProfileToolName) != nil else {
-                let payload: [String: Any] = ["profileAvailable": false, "success": true]
-                let encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-                let json = String(data: encoded, encoding: .utf8) ?? #"{"profileAvailable":false,"success":true}"#
-                return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id, toolName: call.name, contentText: "Final Synthesis prepared; Profile capability is unavailable.", contentJSON: json)
-            }
-            var page = 1
-            var seenPages = Set<Int>()
-            var profilePages: [Any] = []
-            var citations: [String] = []
-            let paginationPolicy = AgentContinuityPreflightPolicy()
-            while seenPages.insert(page).inserted {
-                let argumentsJSON = "{\"page\":\(page),\"pageSize\":500,\"purpose\":\"final_response\"}"
-                let nestedCall = AgentToolCall(id: "\(call.id)-profile-\(page)", runID: run.id, sessionID: run.sessionID, name: AgentContinuityPreflightPolicy.currentUserProfileToolName, argumentsJSON: argumentsJSON)
-                let result = try await toolRegistry.execute(nestedCall, context: context)
-                citations.append(contentsOf: result.citations)
-                if let json = result.contentJSON,
-                   let data = json.data(using: .utf8),
-                   let object = try? JSONSerialization.jsonObject(with: data) {
-                    profilePages.append(object)
-                } else {
-                    profilePages.append(["content": result.contentText])
-                }
-                guard let next = paginationPolicy.nextRequiredCurrentUserProfilePage(after: result) else { break }
-                page = next
-            }
-            let payload: [String: Any] = ["profileAvailable": true, "profilePages": profilePages, "success": true]
-            let encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-            let json = String(data: encoded, encoding: .utf8) ?? "{}"
-            let gated = AgentToolResultGate(configuration: .init(maxResultCharacters: configuration.maxToolResultBytes)).gatedContent(for: AgentToolResult(toolCallID: call.id, toolName: call.name, contentText: json, contentJSON: json))
-            return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id, toolName: call.name, contentText: gated, contentJSON: json, citations: citations)
+            let json = #"{"bootstrapProfileLoaded":true,"success":true}"#
+            return AgentToolResult(
+                runID: run.id,
+                sessionID: run.sessionID,
+                toolCallID: call.id,
+                toolName: call.name,
+                contentText: "Final synthesis prepared. The bounded task-relevant profile was loaded during deterministic bootstrap.",
+                contentJSON: json
+            )
         }
         if call.name == AgentPhaseToolContract.externalSearchBatchName || call.name == AgentPhaseToolContract.externalReadBatchName {
             let arguments = try AgentExternalBatchArguments.decode(call.argumentsJSON)
