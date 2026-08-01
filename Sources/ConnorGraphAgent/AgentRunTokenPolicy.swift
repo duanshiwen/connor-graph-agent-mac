@@ -175,22 +175,6 @@ public struct AgentInstructionCapabilityProjector: Sendable, Equatable {
         return document.projected(for: capabilities)
     }
 
-    public func phasedDocument(
-        _ instruction: String,
-        availableToolNames: Set<String>,
-        activeModuleIDs: [AgentPromptModuleID]
-    ) -> AgentPromptDocument {
-        let capabilities = AgentPromptCapabilityResolver.capabilities(for: availableToolNames)
-        let active = Set(activeModuleIDs)
-        let specifications = AgentPromptModuleCatalog.specificationByID
-        let document = AgentPromptModuleCatalog.document(from: instruction)
-        return AgentPromptDocument(modules: document.modules.filter { module in
-            guard module.id != .preamble else { return true }
-            guard active.contains(module.id) else { return false }
-            return specifications[module.id]?.loadingPolicy == .kernel || module.requirement.isSatisfied(by: capabilities)
-        })
-    }
-
     public func project(_ instruction: String, availableToolNames: Set<String>) -> String {
         projectedDocument(instruction, availableToolNames: availableToolNames).renderedText
     }

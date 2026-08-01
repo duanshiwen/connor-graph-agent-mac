@@ -138,19 +138,20 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     #expect(object["tool_choice"] as? String == "required")
 }
 
-@Test func openAIResponsesPromptCacheKeyUsesStablePhaseIdentityInsteadOfDynamicSystemText() async throws {
+@Test func openAIResponsesPromptCacheKeyStaysStableAcrossAgentLoopPhases() async throws {
     let responseBody = #"{"id":"r","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}"#.data(using: .utf8)!
     let firstClient = ResponsesCapturingHTTPClient(responseBody: responseBody)
     let secondClient = ResponsesCapturingHTTPClient(responseBody: responseBody)
     let config = OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "key", model: "gpt-test")
-    let cache = AgentPromptCacheContext(phase: .taskExecution, promptVersion: "v3", stableToolBundleVersion: "a,b", explicitBreakpointIndex: 1)
+    let firstCache = AgentPromptCacheContext(phase: .strategyResearch, promptVersion: "v3", stableToolBundleVersion: "a,b", explicitBreakpointIndex: 1)
+    let secondCache = AgentPromptCacheContext(phase: .finalSynthesis, promptVersion: "v3", stableToolBundleVersion: "a,b", explicitBreakpointIndex: 1)
     _ = try await OpenAIResponsesProvider(config: config, httpClient: firstClient).complete(.init(
         messages: [.init(role: .system, content: "Current Time: first")],
-        promptCacheContext: cache
+        promptCacheContext: firstCache
     ))
     _ = try await OpenAIResponsesProvider(config: config, httpClient: secondClient).complete(.init(
         messages: [.init(role: .system, content: "Current Time: second")],
-        promptCacheContext: cache
+        promptCacheContext: secondCache
     ))
     let firstBody = try #require(firstClient.captured?.body)
     let secondBody = try #require(secondClient.captured?.body)

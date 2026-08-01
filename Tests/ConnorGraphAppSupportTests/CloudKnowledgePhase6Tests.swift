@@ -23,6 +23,20 @@ struct CloudKnowledgePhase6Tests {
         #expect(body["knowledge_base_i_ds"] == nil)
     }
 
+    @Test func marketplaceHomeTreatsNullCollectionsAsEmpty() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        let home = try decoder.decode(
+            CloudMarketplaceHome.self,
+            from: Data(#"{"categories":null,"banners":null,"sections":null}"#.utf8)
+        )
+
+        #expect(home.categories.isEmpty)
+        #expect(home.banners.isEmpty)
+        #expect(home.sections.isEmpty)
+    }
+
     @Test func marketplaceLibraryKeepsSubscribedOwnedKnowledgeBaseInBothSections() throws {
         let json = #"{"subscribed":[{"id":"kb-owned","name":"Owned","subscribed":true,"owned":true,"publication_status":"published"}],"owned":[]}"#
         let decoder = JSONDecoder()
@@ -62,6 +76,19 @@ struct CloudKnowledgePhase6Tests {
         #expect(store.searchResults.map(\.id) == ["kb-1"])
         #expect(await api.searchRequests == [.init(query: "", page: 1, limit: 50)])
         #expect(await cache.isAuthorized("kb-1"))
+    }
+
+    @Test @MainActor func marketplaceLoadKeepsLibraryWhenHomeFails() async {
+        let api = MarketplaceFakeAPI()
+        await api.setHomeFailure(true)
+        await api.setOwnedLibraryEnabled(true)
+        let store = CloudKnowledgeMarketplaceStore(api: api)
+
+        await store.load()
+
+        #expect(store.library.owned.map(\.id) == ["owned-kb"])
+        #expect(store.searchResults.map(\.id) == ["kb-1"])
+        #expect(store.errorMessage == CloudKnowledgeError.invalidResponse.localizedDescription)
     }
 
     @Test @MainActor func marketplaceSearchLoadsEveryPageWithoutDuplicates() async throws {
@@ -281,8 +308,16 @@ private actor MarketplaceFakeAPI: CloudKnowledgeMarketplaceAPI {
     var contextChannels: [CloudKnowledgeSearchChannel] = []
     var contextIsUnreachable = false
     var searchResultCount = 1
-    func home() async throws -> CloudMarketplaceHome { .init(categories: [.init(id: "agent", name: "AI Agent", parentID: nil, icon: nil), .init(id: "economics", name: "经济学", parentID: nil, icon: nil)], banners: [.init(id: "b", title: "本周精选", subtitle: nil, imageURL: nil, actionURL: nil)], sections: [.init(id: "hero", title: "精选", layout: "hero", knowledgeBases: [base]), .init(id: "new", title: "最新", layout: "grid", knowledgeBases: [])]) }
+    var homeFailure = false
+    var ownedLibraryEnabled = false
+    func home() async throws -> CloudMarketplaceHome {
+        if homeFailure { throw CloudKnowledgeError.invalidResponse }
+        return .init(categories: [.init(id: "agent", name: "AI Agent", parentID: nil, icon: nil), .init(id: "economics", name: "经济学", parentID: nil, icon: nil)], banners: [.init(id: "b", title: "本周精选", subtitle: nil, imageURL: nil, actionURL: nil)], sections: [.init(id: "hero", title: "精选", layout: "hero", knowledgeBases: [base]), .init(id: "new", title: "最新", layout: "grid", knowledgeBases: [])])
+    }
     func categories() async throws -> [CloudMarketplaceCategory] { try await home().categories }
+    func library() async throws -> CloudMarketplaceLibrary {
+        .init(owned: ownedLibraryEnabled ? [.init(id: "owned-kb", name: "Owned", owned: true, publicationStatus: "unpublished")] : [])
+    }
     func search(_ request: CloudMarketplaceSearchRequest) async throws -> [CloudMarketplaceKnowledgeBase] {
         searchRequests.append(request)
         let start = min((request.page - 1) * request.limit, searchResultCount)
@@ -292,6 +327,8 @@ private actor MarketplaceFakeAPI: CloudKnowledgeMarketplaceAPI {
         }
     }
     func setSearchResultCount(_ count: Int) { searchResultCount = count }
+    func setHomeFailure(_ value: Bool) { homeFailure = value }
+    func setOwnedLibraryEnabled(_ value: Bool) { ownedLibraryEnabled = value }
     func rejectDetails() { rejectsDetails = true }
     func detail(id: String) async throws -> CloudMarketplaceKnowledgeBase {
         if rejectsDetails { throw CloudKnowledgeError.unauthorized }

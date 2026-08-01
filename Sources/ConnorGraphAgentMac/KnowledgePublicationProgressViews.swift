@@ -383,6 +383,11 @@ struct KnowledgePublicationHistoryView: View {
                         Spacer()
                         if entry.id == store.snapshot.clientRunID {
                             Button("打开当前流程", systemImage: "arrow.up.right.square", action: onOpenCurrentPublication)
+                        } else if entry.snapshot.stage == .completed, entry.snapshot.knowledgeBaseID != nil {
+                            Button("继续发布", systemImage: "arrow.up.right.square") {
+                                guard store.restorePublicationHistory(id: entry.id) else { return }
+                                onOpenCurrentPublication()
+                            }
                         }
                         Button(role: .destructive) { pendingRemovalID = entry.id } label: {
                             Image(systemName: "trash")

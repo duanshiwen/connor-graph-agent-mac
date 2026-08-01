@@ -521,6 +521,17 @@ struct AgentToolActivityRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
+                Text(AgentToolDisplayNameResolver.categoryName(
+                    rawToolName: activity.rawToolName,
+                    semanticKind: activity.semanticKind
+                ))
+                    .font(AgentChatTypography.monoMicro)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 6)
+                    .frame(height: AgentChatLayout.chipHeight)
+                    .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+
                 if let visibleTarget {
                     Text(visibleTarget)
                         .font(AgentChatTypography.monoMicro)

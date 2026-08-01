@@ -166,3 +166,33 @@ private struct OpenAIStreamingFallbackHTTPClient: AgentHTTPClient {
     #expect(completed.toolCalls == [AgentToolCall(id: "call_1", name: "graph_search", argumentsJSON: "{\"query\":memory\"}")])
     #expect(completed.providerMetadata?.reasoningContent == "I should search the graph.")
 }
+
+@Test func openAICompatibleProviderDoesNotOverwriteStreamedToolNameWithEmptyDelta() async throws {
+    let sseClient = OpenAIStreamingCapturingSSEClient(frames: [
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"agent_commit_strategy\",\"arguments\":\"{\\\"taskMode\\\":\"}}]}}]}\n",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"\",\"arguments\":\"\\\"mechanical\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n",
+        "data: [DONE]\n"
+    ])
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://llm.example.com/v1")!,
+            apiKey: "test-key",
+            model: "gpt-test"
+        ),
+        httpClient: OpenAIStreamingFallbackHTTPClient(),
+        sseClient: sseClient
+    )
+
+    var events: [AgentModelStreamEvent] = []
+    for try await event in provider.streamComplete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Plan")])) {
+        events.append(event)
+    }
+
+    let completed = try #require(events.compactMap { event -> AgentModelResponse? in
+        if case .completed(let response) = event { return response }
+        return nil
+    }.last)
+    #expect(completed.toolCalls == [
+        AgentToolCall(id: "call_1", name: "agent_commit_strategy", argumentsJSON: "{\"taskMode\":\"mechanical\"}")
+    ])
+}

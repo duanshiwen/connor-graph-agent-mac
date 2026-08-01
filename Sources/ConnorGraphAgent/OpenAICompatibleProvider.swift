@@ -802,7 +802,7 @@ private struct OpenAIChatCompletionStreamAccumulator {
             for toolCall in choice.delta.toolCalls ?? [] {
                 var state = toolCalls[toolCall.index] ?? ToolCallState()
                 if let id = toolCall.id { state.id = id }
-                if let name = toolCall.function?.name { state.name = name }
+                if let name = toolCall.function?.name, !name.isEmpty { state.name = name }
                 let arguments = toolCall.function?.arguments ?? ""
                 if !arguments.isEmpty { state.arguments += arguments }
                 toolCalls[toolCall.index] = state
@@ -816,7 +816,7 @@ private struct OpenAIChatCompletionStreamAccumulator {
 
     func response() -> AgentModelResponse {
         let structuredCalls = toolCalls.keys.sorted().compactMap { index -> AgentToolCall? in
-            guard let state = toolCalls[index], let name = state.name else { return nil }
+            guard let state = toolCalls[index], let name = state.name, !name.isEmpty else { return nil }
             return AgentToolCall(id: state.id ?? "call_\(index)", name: name, argumentsJSON: state.arguments)
         }
         let recovered = OpenAITextualToolCallParser.parse(text.isEmpty ? nil : text)
