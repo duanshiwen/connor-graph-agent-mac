@@ -140,15 +140,17 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
         // or continue producing a final answer. Only an explicit run-level failure should mark
         // the whole turn as failed. This prevents an in-progress turn from showing “已失败”
         // just because one tool invocation failed along the way.
-        if events.contains(where: { $0.kind == "runFailed" }) {
-            return .failed
+        if events.contains(where: { $0.kind == "runFailed" && $0.title.localizedCaseInsensitiveContains("cancelled") }) {
+            return .cancelled
         }
+        if events.contains(where: { $0.kind == "runFailed" }) { return .failed }
         if hasPermissionRequest && !events.contains(where: { $0.kind == "permissionResolved" && $0.severity == .success }) {
             return .waitingForPermission
         }
         if process.state == .cancelled || events.contains(where: { $0.title.localizedCaseInsensitiveContains("cancelled") }) {
             return .cancelled
         }
+        if process.state == .failed { return .failed }
         if process.state == .running {
             return .running
         }
