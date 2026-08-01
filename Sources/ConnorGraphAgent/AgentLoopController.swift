@@ -294,21 +294,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     retrievalPlan: retrievalPlan,
                     mode: configuration.toolExposureMode
                 ).sorted { $0.name < $1.name }
-                let directWorkspaceToolNames: Set<String> = ["Shell", "ApplyPatch"]
-                let directWorkspaceToolDefinitions = exposedToolDefinitions.filter {
-                    directWorkspaceToolNames.contains($0.name)
-                }
-                let routedToolDefinitions = exposedToolDefinitions.filter {
-                    !directWorkspaceToolNames.contains($0.name)
-                }
+                let assistantToolRouter = AssistantToolRouter()
+                let assistantToolRoute = assistantToolRouter.route(definitions: exposedToolDefinitions)
                 let availableToolDefinitions: [AgentToolDefinition] = {
-                    let merged = exposedToolDefinitions + AgentPhaseToolContract.definitions
+                    let merged = exposedToolDefinitions + AssistantDecisionToolContract.definitions
                     return Dictionary(grouping: merged, by: \.name)
                         .compactMap { $0.value.first }
                         .sorted { $0.name < $1.name }
                 }()
-                let modelFacingToolDefinitions = (AgentPhaseToolContract.definitions + directWorkspaceToolDefinitions)
-                    .sorted { $0.name < $1.name }
+                let modelFacingToolDefinitions = assistantToolRoute.modelVisibleDefinitions
                 let memoryCapabilityAvailable = true
                 let promptAssembly = await buildPromptAssembly(
                     for: request,
@@ -327,7 +321,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     runtimeContext.trustedPrompt,
                     environmentText,
                     AssistantEvidenceReducer().render(assistantBootstrap.contextPack),
-                    Self.nativeToolCatalogPrompt(from: routedToolDefinitions),
+                    assistantToolRouter.compactCatalogSummary(definitions: toolRegistry.definitions),
                     "Memory, user-profile context, and Note candidates were already loaded once by the deterministic assistant bootstrap. Do not repeat those generic startup reads. Shell and ApplyPatch are direct workspace tools. Other applicable native tools are supplied through the routed catalog above."
                 ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")
                 let auditEstimator = AgentModelContextGuard().estimator
@@ -456,7 +450,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         // provider can reuse the prompt prefix. Phase safety is enforced before
                         // execution instead of by mutating the advertised tool array.
                         modelRequest.tools = forceFinalSynthesisWithoutTools ? [] : modelFacingToolDefinitions
-                        modelRequest.toolChoice = forceFinalSynthesisWithoutTools || phasedState.phase == .finalSynthesis ? .auto : .required
+                        modelRequest.toolChoice = .auto
                         let localContextGuard = AgentModelContextGuard()
                         let localContextWindowTokens = configuration.modelContextWindowTokens
                             ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
@@ -701,14 +695,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                shouldApplyCorrectionContinue("final_attention") {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 messages.append(AgentModelMessage(role: .system, content: correction))
-                                continue
-                            }
-                            if phasedState.phase != .finalSynthesis,
-                               phasedState.strategy?.taskMode != .mechanical,
-                               shouldApplyCorrectionContinue("phase_protocol") {
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                let required = phasedState.phase == .strategyResearch ? AgentPhaseToolContract.commitStrategyName : AgentPhaseToolContract.prepareFinalOutputName
-                                messages.append(AgentModelMessage(role: .system, content: "The phased protocol is incomplete. Call \(required) before producing this non-mechanical final output."))
                                 continue
                             }
                             if evidencePolicy.requiresWebResearch(request.userMessage),
@@ -1630,7 +1616,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 throw AgentToolError.invalidArguments(invalidArgumentsMessage)
             }
             let result: AgentToolResult
-            if AgentPhaseToolContract.definitions.contains(where: { $0.name == call.name }) {
+            if AgentPhaseToolContract.definitions.contains(where: { $0.name == call.name })
+                || AssistantDecisionToolContract.definitions.contains(where: { $0.name == call.name }) {
                 result = try await executePhaseTool(
                     call: call,
                     context: context,
@@ -1695,6 +1682,37 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         run: inout AgentRun,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentToolResult {
+        if call.name == AssistantDecisionToolContract.searchName {
+            let arguments = try AgentToolArguments(json: call.argumentsJSON)
+            let query = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !query.isEmpty else { throw AgentToolError.invalidArguments("query is required") }
+            let definitions = AssistantToolRouter().discover(
+                query: query,
+                definitions: toolRegistry.definitions,
+                maximumResults: arguments.int("maxResults") ?? 8
+            )
+            let tools: [[String: Any]] = definitions.map { definition in
+                [
+                    "name": definition.name,
+                    "description": definition.description,
+                    "parameters": definition.inputSchema.jsonObject
+                ]
+            }
+            let data = try JSONSerialization.data(withJSONObject: [
+                "query": query,
+                "returnedItems": tools.count,
+                "tools": tools
+            ], options: [.sortedKeys])
+            let json = String(data: data, encoding: .utf8) ?? "{}"
+            return AgentToolResult(
+                runID: run.id,
+                sessionID: run.sessionID,
+                toolCallID: call.id,
+                toolName: call.name,
+                contentText: json,
+                contentJSON: json
+            )
+        }
         if call.name == AgentPhaseToolContract.prepareFinalOutputName {
             let json = #"{"bootstrapProfileLoaded":true,"success":true}"#
             return AgentToolResult(
@@ -1749,7 +1767,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
                     }
                     guard toolRegistry.definition(named: sourceID) != nil,
-                          !AgentPhaseToolContract.definitions.contains(where: { $0.name == sourceID }) else {
+                          !AgentPhaseToolContract.definitions.contains(where: { $0.name == sourceID }),
+                          !AssistantDecisionToolContract.definitions.contains(where: { $0.name == sourceID }) else {
                         return .completed([.init(id: "\(call.id)-\(index)", sourceID: sourceID, uri: resourceURI, title: "Unavailable source", summary: "", error: "Unknown tool or recursive batch/control call")])
                     }
                     let nestedCall = AgentToolCall(id: "\(call.id)-\(index)", runID: nestedRunID, sessionID: nestedSessionID, name: sourceID, argumentsJSON: item.argumentsJSON)
@@ -1855,7 +1874,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     let resourceURI = Self.firstString(in: nativeArguments, keys: ["uri", "url", "resourceURI", "id"])
                     guard toolRegistry.definition(named: toolName) != nil,
                           toolRegistry.permission(named: toolName) != nil,
-                          !AgentPhaseToolContract.definitions.contains(where: { $0.name == toolName }) else {
+                          !AgentPhaseToolContract.definitions.contains(where: { $0.name == toolName }),
+                          !AssistantDecisionToolContract.definitions.contains(where: { $0.name == toolName }) else {
                         executed.append([.init(id: "\(call.id)-\(index)", sourceID: toolName, uri: resourceURI, title: "Unavailable tool", summary: "", error: "Unknown tool or recursive batch/control call")])
                         continue
                     }
