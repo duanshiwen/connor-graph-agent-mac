@@ -43,7 +43,10 @@ struct InteractiveWebPlatformTests {
             storagePaths: fixture.paths,
             accountID: "account",
             api: nil,
-            previewHandler: { status, sessionID in await recorder.record(status, sessionID: sessionID) }
+            previewHandler: { status, sessionID in
+                await recorder.record(status, sessionID: sessionID)
+                return "preview-tab-1"
+            }
         )
         let created = try await runtime.createDraft(
             sessionID: "session-1",
@@ -55,8 +58,11 @@ struct InteractiveWebPlatformTests {
 
         let previewed = try await runtime.preview(projectID: created.projectID, sessionID: "session-1")
         let routed = await recorder.value
-        #expect(routed?.0 == previewed)
+        #expect(routed?.0.projectID == previewed.projectID)
+        #expect(routed?.0.manifestHash == previewed.manifestHash)
+        #expect(routed?.0.previewTabID == nil)
         #expect(routed?.1 == "session-1")
+        #expect(previewed.previewTabID == "preview-tab-1")
         let managedProjectsRoot = fixture.paths.artifactsDirectory
             .appendingPathComponent("interactive-web/projects", isDirectory: true)
             .standardizedFileURL.path + "/"

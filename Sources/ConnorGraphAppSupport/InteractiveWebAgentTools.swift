@@ -3,7 +3,7 @@ import ConnorGraphAgent
 import ConnorGraphCore
 
 public actor InteractiveWebToolRuntime {
-    public typealias PreviewHandler = @Sendable (InteractiveWebProjectStatus, String) async -> Void
+    public typealias PreviewHandler = @Sendable (InteractiveWebProjectStatus, String) async -> String?
 
     private let projectsRoot: URL
     private let exportsRoot: URL
@@ -117,8 +117,8 @@ public actor InteractiveWebToolRuntime {
     }
 
     public func preview(projectID: String, sessionID: String) async throws -> InteractiveWebProjectStatus {
-        let current = try await status(projectID: projectID)
-        await previewHandler?(current, sessionID)
+        var current = try await status(projectID: projectID)
+        current.previewTabID = await previewHandler?(current, sessionID)
         return current
     }
 
@@ -204,7 +204,8 @@ public actor InteractiveWebToolRuntime {
             remoteProjectID: project.remoteProjectID,
             remoteSiteID: project.remoteSiteID,
             latestDeploymentID: project.latestDeploymentID,
-            publishedURL: project.publishedURL
+            publishedURL: project.publishedURL,
+            previewTabID: nil
         )
     }
 
@@ -321,7 +322,7 @@ public struct InteractiveWebAgentTool: AgentTool {
         case .createDraft: "Create a local interactive webpage draft from complete HTML, CSS, and JavaScript generated in the current model response. The tool writes these files into the app-managed user-data sandbox; no selected workspace, local file tool, staging file, or documentation lookup is required. This does not publish anything."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash."
         case .updateDraft: "Atomically update an app-managed interactive webpage draft using exact text edits or full file replacements. Pass expectedManifestHash from interactive_web_get_draft to prevent overwriting a newer revision."
-        case .preview: "Return the current local preview target and exact artifact hash for the secure preview runtime."
+        case .preview: "Open the current draft in the secure preview runtime and return its exact artifact hash plus previewTabID. Use that previewTabID with browser_snapshot, browser_interact, and browser_quality_audit."
         case .getStatus: "Read the current local and published status of an interactive webpage project."
         case .publish: "Publish the exact reviewed webpage revision to the internet. Always requires native human approval; copy manifestHash exactly from a prior tool result."
         case .rollback: "Rollback a published webpage to a specific deployment. Always requires native human approval."
@@ -454,7 +455,7 @@ public struct InteractiveWebAgentTool: AgentTool {
             json = try encode(result); text = "Interactive webpage records exported to \(result.fileURL.path)."
         }
         if let status { json = try encode(status) }
-        let suffix = status.map { " projectID=\($0.projectID), revision=\($0.revision), manifestHash=\($0.manifestHash)" + ($0.publishedURL.map { ", url=\($0.absoluteString)" } ?? "") } ?? ""
+        let suffix = status.map { " projectID=\($0.projectID), revision=\($0.revision), manifestHash=\($0.manifestHash)" + ($0.previewTabID.map { ", previewTabID=\($0)" } ?? "") + ($0.publishedURL.map { ", url=\($0.absoluteString)" } ?? "") } ?? ""
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: text + suffix, contentJSON: json)
     }
 

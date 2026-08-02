@@ -108,6 +108,35 @@ public struct InteractiveWebProjectStatus: Codable, Sendable, Equatable {
     public var remoteSiteID: String?
     public var latestDeploymentID: String?
     public var publishedURL: URL?
+    public var previewTabID: String?
+
+    public init(
+        projectID: String,
+        name: String,
+        rootURL: URL,
+        revision: Int,
+        manifestHash: String,
+        fileCount: Int,
+        totalBytes: Int64,
+        remoteProjectID: String? = nil,
+        remoteSiteID: String? = nil,
+        latestDeploymentID: String? = nil,
+        publishedURL: URL? = nil,
+        previewTabID: String? = nil
+    ) {
+        self.projectID = projectID
+        self.name = name
+        self.rootURL = rootURL
+        self.revision = revision
+        self.manifestHash = manifestHash
+        self.fileCount = fileCount
+        self.totalBytes = totalBytes
+        self.remoteProjectID = remoteProjectID
+        self.remoteSiteID = remoteSiteID
+        self.latestDeploymentID = latestDeploymentID
+        self.publishedURL = publishedURL
+        self.previewTabID = previewTabID
+    }
 }
 
 public struct InteractiveWebDraftSource: Codable, Sendable, Equatable {

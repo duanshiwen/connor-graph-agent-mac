@@ -42,6 +42,59 @@ struct BrowserFeatureModelTests {
         #expect(fixture.model.errorMessage?.contains("不在当前工作区范围内") == true)
     }
 
+    @Test func interactiveWebPreviewIsAvailableToBrowserAutomation() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let projectRoot = fixture.root.appendingPathComponent("interactive-preview", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectRoot, withIntermediateDirectories: true)
+        try "<!doctype html><html><head><title>Auditable preview</title></head><body><main><h1>Ready</h1></main></body></html>"
+            .write(to: projectRoot.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+        let status = InteractiveWebProjectStatus(
+            projectID: "project-1",
+            name: "Preview",
+            rootURL: projectRoot,
+            revision: 1,
+            manifestHash: "hash",
+            fileCount: 1,
+            totalBytes: 100,
+            remoteProjectID: nil,
+            remoteSiteID: nil,
+            latestDeploymentID: nil,
+            publishedURL: nil,
+            previewTabID: nil
+        )
+
+        let tabID = fixture.model.openInteractiveWebPreview(status: status, preferredSessionID: "session-1")
+        let listed = try await fixture.model.performBrowserControl(BrowserControlRequest(
+            operation: .listTabs,
+            sessionID: "session-1"
+        ))
+        #expect(listed.contentJSON?.contains(tabID) == true)
+
+        for _ in 0..<100 {
+            let webView = try #require(fixture.model.interactiveWebPreviewRuntime?.webView)
+            if !webView.isLoading,
+               (try? await webView.callAsyncJavaScript("return document.title;", arguments: [:], in: nil, contentWorld: .page) as? String) == "Auditable preview" {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let audit = try await fixture.model.performBrowserControl(BrowserControlRequest(
+            operation: .qualityAudit,
+            sessionID: "session-1",
+            tabID: tabID,
+            fullPage: false,
+            viewportWidth: 390,
+            viewportHeight: 844
+        ))
+        let auditData = try #require(audit.contentJSON?.data(using: .utf8))
+        let report = try #require(JSONSerialization.jsonObject(with: auditData) as? [String: Any])
+        let viewport = try #require(report["viewport"] as? [String: Any])
+        #expect(viewport["width"] as? Int == 390)
+        #expect(viewport["height"] as? Int == 844)
+        #expect(audit.modelContentParts?.first?.kind == .imageDataURL)
+    }
+
     @Test func workspaceOpenPersistsSnapshotAndEmitsTypedIntent() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

@@ -406,6 +406,19 @@ final class BrowserLiveWebViewStore {
         entries[key] = Entry(key: key, webView: webView, coordinator: coordinator, lastAccessedAt: now, lastVisibleAt: isVisible ? now : nil, isVisible: isVisible, restorationStatus: .live)
     }
 
+    func adoptExternalWebView(key: BrowserLiveWebViewKey, webView: WKWebView, isVisible: Bool) {
+        let now = Date()
+        entries[key] = Entry(
+            key: key,
+            webView: webView,
+            coordinator: WebViewCoordinator(),
+            lastAccessedAt: now,
+            lastVisibleAt: isVisible ? now : nil,
+            isVisible: isVisible,
+            restorationStatus: .live
+        )
+    }
+
     func leaseAutomationWebView(
         key: BrowserLiveWebViewKey,
         onNavigationStateChanged: @escaping (WebNavigationState) -> Void,
