@@ -25,4 +25,12 @@ struct InteractiveWebPlatformTests {
         ])
         #expect(manifest.collections.first?.name == "registrations")
     }
+
+    @Test func accessModesRemainProtocolStable() {
+        #expect([
+            InteractiveWebAccessMode.public.rawValue,
+            InteractiveWebAccessMode.password.rawValue,
+            InteractiveWebAccessMode.private.rawValue
+        ] == ["public", "password", "private"])
+    }
 }
