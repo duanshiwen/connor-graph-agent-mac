@@ -9,18 +9,6 @@ struct AppFeatureFlagsTests {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let flags = AppFeatureFlags.load(environment: [:], userDefaults: defaults)
         #expect(flags.noteImportEnabled)
-        #expect(flags.interactiveWebSuggestionsEnabled)
-    }
-
-    @Test("Environment override can disable proactive interactive webpage suggestions")
-    func interactiveWebSuggestionsEnvironmentOverride() {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
-        let flags = AppFeatureFlags.load(
-            environment: [AppFeatureFlags.interactiveWebSuggestionsEnvironmentKey: "false"],
-            userDefaults: defaults
-        )
-        #expect(!flags.interactiveWebSuggestionsEnabled)
-        #expect(flags.noteImportEnabled)
     }
 
     @Test("Environment override can disable note import")

@@ -849,7 +849,6 @@ final class AppRuntimeLifecycle {
                         )
                     }
                 },
-                interactiveWebSuggestionsEnabled: AppFeatureFlags.load().interactiveWebSuggestionsEnabled,
                 browserAssistedSearchHandler: { [weak self] request in
                     await MainActor.run {
                         guard let self else { return nil }
