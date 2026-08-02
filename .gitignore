@@ -73,3 +73,9 @@ DerivedData/
 **/target/
 **/*.rs.bk
 Cargo.lock
+
+# Build artifacts
+*.dmg
+*.pkg
+*.zip
+*.tar.gz
