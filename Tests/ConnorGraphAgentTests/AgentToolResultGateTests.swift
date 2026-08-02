@@ -34,6 +34,21 @@ import ConnorGraphAgent
     #expect(!gated.contains("truncated"))
 }
 
+@Test func toolResultGateDoesNotApplyFixedByteLimitToCompleteNoteGetResult() {
+    let body = String(repeating: "完整笔记。", count: 2_000)
+    let result = AgentToolResult(
+        toolCallID: "call-note-get",
+        toolName: "note_get",
+        contentText: body
+    )
+    let gate = AgentToolResultGate(configuration: .init(maxResultCharacters: 128))
+
+    let gated = gate.gatedContent(for: result)
+
+    #expect(gated == body)
+    #expect(!gated.contains("truncated tool result"))
+}
+
 @Test func toolResultGatePreservesTextAndJSONWhenBothAreAvailable() {
     let result = AgentToolResult(
         toolCallID: "call-bash-1",

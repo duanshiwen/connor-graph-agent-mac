@@ -122,10 +122,8 @@ public struct NoteGetToolResponse: Codable, Sendable, Equatable {
 
 public struct NoteGetTool: AgentTool {
     public static let maximumBatchSize = 10
-    public static let maximumBodyCharacters = 12_000
-    public static let maximumTotalBodyCharacters = 20_000
     public let name = "note_get"
-    public let description = "Read full details for one or more selected Notes using exact noteID values copied unchanged from note_search. The tool is strictly read-only, preserves request order, deduplicates repeated IDs, and reports found, not_found, deleted, or invalid per item. It never substitutes a title, result number, sessionID, or similar ID. A body limited by the result budget explicitly reports isTruncated, returnedCharacters, and totalCharacters."
+    public let description = "Read full details, including the complete body, for one or more selected Notes using exact noteID values copied unchanged from note_search. The tool is strictly read-only, preserves request order, deduplicates repeated IDs, and reports found, not_found, deleted, or invalid per item. It never substitutes a title, result number, sessionID, or similar ID. For every found Note, isTruncated is false and returnedCharacters equals totalCharacters."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "noteIDs": .array(items: .string(description: "Exact noteID copied from note_search."), description: "One through 10 exact Note IDs.")
@@ -148,7 +146,6 @@ public struct NoteGetTool: AgentTool {
         let validIDs = ids.filter(Self.isValidNoteID)
         let found = Dictionary(uniqueKeysWithValues: try repository.notes(ids: validIDs).map { ($0.id, $0) })
         var records: [NoteGetToolItem] = []
-        var remainingBodyCharacters = Self.maximumTotalBodyCharacters
         for id in ids {
             guard Self.isValidNoteID(id) else { records.append(Self.missing(id, status: "invalid")); continue }
             guard let note = found[id] else {
@@ -156,15 +153,12 @@ public struct NoteGetTool: AgentTool {
                 continue
             }
             let total = note.body.count
-            let allowance = min(Self.maximumBodyCharacters, remainingBodyCharacters)
-            let returnedBody = String(note.body.prefix(allowance))
-            remainingBodyCharacters -= returnedBody.count
             records.append(NoteGetToolItem(
                 requestedNoteID: id, status: "found", noteID: note.id, sessionID: note.sessionID,
-                sourceMessageID: note.sourceMessageID, title: note.title, body: returnedBody,
+                sourceMessageID: note.sourceMessageID, title: note.title, body: note.body,
                 createdAt: note.createdAt, updatedAt: note.sourceUpdatedAt, originKind: note.originKind.rawValue,
-                sourceKind: note.sourceKind, isTruncated: total > returnedBody.count,
-                returnedCharacters: returnedBody.count, totalCharacters: total
+                sourceKind: note.sourceKind, isTruncated: false,
+                returnedCharacters: total, totalCharacters: total
             ))
         }
         let successCount = records.filter { $0.status == "found" }.count

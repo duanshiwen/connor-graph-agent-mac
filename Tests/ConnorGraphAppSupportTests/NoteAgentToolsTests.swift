@@ -73,22 +73,23 @@ private func noteToolFixture(count: Int = 1) throws -> (AppNoteRepository, NoteS
     #expect(response.records[0].sourceMessageID == "message-0")
 }
 
-@Test func noteGetToolReportsBodyTruncationExplicitly() async throws {
+@Test func noteGetToolReturnsCompleteLongBody() async throws {
     let (repository, _, tool) = try noteToolFixture()
     var note = try #require(try repository.note(sessionID: "session-0"))
-    note.body = String(repeating: "x", count: NoteGetTool.maximumBodyCharacters + 100)
+    note.body = String(repeating: "完整正文段落。", count: 10_000)
     note.contentHash = AppNoteProjectionService.contentHash(note.body)
     try repository.upsert(note)
 
     let result = try await tool.execute(arguments: AgentToolArguments(values: [
         "noteIDs": .array([.string(note.id)])
-    ]), context: noteToolContext("truncated"))
+    ]), context: noteToolContext("complete"))
     let data = try #require(result.contentJSON?.data(using: .utf8))
     let response = try JSONDecoder.noteTool.decode(NoteGetToolResponse.self, from: data)
 
-    #expect(response.records[0].isTruncated)
-    #expect(response.records[0].returnedCharacters == NoteGetTool.maximumBodyCharacters)
-    #expect(response.records[0].totalCharacters == NoteGetTool.maximumBodyCharacters + 100)
+    #expect(response.records[0].body == note.body)
+    #expect(!response.records[0].isTruncated)
+    #expect(response.records[0].returnedCharacters == note.body.count)
+    #expect(response.records[0].totalCharacters == note.body.count)
 }
 
 private extension JSONDecoder {

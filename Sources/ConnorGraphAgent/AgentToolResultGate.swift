@@ -19,6 +19,10 @@ public struct AgentToolResultGateConfiguration: Codable, Sendable, Equatable {
 }
 
 public struct AgentToolResultGate: Sendable, Equatable {
+    private static let completeResultToolNames: Set<String> = [
+        "memory_os_get_current_user_profile",
+        "note_get"
+    ]
     private static let memoryEvidenceToolNames: Set<String> = [
         "memory_os_recent_context",
         "memory_os_knowledge_context",
@@ -38,7 +42,8 @@ public struct AgentToolResultGate: Sendable, Equatable {
 
     public func gatedContent(for result: AgentToolResult) -> String {
         let base = modelVisibleContent(for: result)
-        let limit = max(0, configuration.perToolCharacterLimits[result.toolName] ?? configuration.maxResultCharacters)
+        let configuredLimit = configuration.perToolCharacterLimits[result.toolName] ?? configuration.maxResultCharacters
+        let limit = Self.completeResultToolNames.contains(result.toolName) ? Int.max : max(0, configuredLimit)
         let isMemoryEvidence = Self.memoryEvidenceToolNames.contains(result.toolName)
         let prefix = isMemoryEvidence
             ? Self.memoryEvidenceBoundary + "\n"

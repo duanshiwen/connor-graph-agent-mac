@@ -1096,12 +1096,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             } else {
                                 allocatedTokens = currentDemand
                             }
+                            let maximumVisibleToolResultTokens = batchResult.result.toolName == "note_get"
+                                ? allocatedTokens
+                                : min(allocatedTokens, AssistantRunBudget().maximumVisibleToolResultTokens)
                             let modelVisibleToolContent = toolResultGate.gatedContent(
                                 for: batchResult.result,
-                                maximumEstimatedTokens: min(
-                                    allocatedTokens,
-                                    AssistantRunBudget().maximumVisibleToolResultTokens
-                                ),
+                                maximumEstimatedTokens: maximumVisibleToolResultTokens,
                                 estimator: contextGuard.estimator
                             )
                             remainingToolContentDemand = max(0, remainingToolContentDemand - currentDemand)
