@@ -396,6 +396,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     var budgetCompactionRequested = false
                     var nextBudgetCompactionTokenThreshold = max(1, configuration.budget.maxTotalTokens)
                     var artifactWasProduced = false
+                    var unavailableDiscoveryNamespaces = Set<String>()
 
                     func shouldApplyCorrectionContinue(_ category: String) -> Bool {
                         let count = correctionContinueCounts[category, default: 0] + 1
@@ -830,6 +831,24 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(role: .system, content: noteSearchPreflightPolicy.correctionInstruction()))
                                 continue
                             }
+                        }
+                        if let discoveryCall = calls.first(where: { $0.name == AssistantDecisionToolContract.searchName }),
+                           let arguments = try? AgentToolArguments(json: discoveryCall.argumentsJSON),
+                           let query = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines),
+                           !query.isEmpty {
+                            let discovery = assistantToolRouter.discovery(
+                                query: query,
+                                definitions: assistantToolRoute.discoverableDefinitions,
+                                maximumResults: arguments.int("maxResults") ?? 8
+                            )
+                            let unavailable = Set(discovery.unavailableNamespaces)
+                            let repeatedUnavailable = unavailable.intersection(unavailableDiscoveryNamespaces)
+                            if !repeatedUnavailable.isEmpty {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .system, content: "Tool discovery was not repeated because these capability namespaces are unavailable in the current run: \(repeatedUnavailable.sorted().joined(separator: ", ")). Do not search for them again with different wording. Continue with available capabilities, or report the concrete blocker if the missing capability is essential."))
+                                continue
+                            }
+                            unavailableDiscoveryNamespaces.formUnion(unavailable)
                         }
                         if let strategyCall = calls.first(where: { $0.name == AgentPhaseToolContract.commitStrategyName }) {
                             do {
@@ -1763,6 +1782,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 ]
             }
             let matchStatus = tools.isEmpty ? "no_match" : "matched"
+            let retryAdvice: String
+            if !discovery.unavailableNamespaces.isEmpty {
+                retryAdvice = "do_not_retry"
+            } else if tools.isEmpty {
+                retryAdvice = "retry_once_with_available_namespace"
+            } else {
+                retryAdvice = "use_returned_tools"
+            }
             let suggestedQueries = discovery.availableNamespaces.prefix(8).map { "\($0) tools" }
             let discoveryLatencyMilliseconds = max(0, Int(Date().timeIntervalSince(discoveryStartedAt) * 1_000))
             let auditData = try JSONSerialization.data(withJSONObject: [
@@ -1771,7 +1798,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 "catalogToolCount": discoverableToolDefinitions.count,
                 "initiallyExposedToolCount": initiallyExposedToolCount,
                 "returnedItems": tools.count,
+                "requestedNamespaces": discovery.requestedNamespaces,
                 "matchedNamespaces": discovery.matchedNamespaces,
+                "unavailableNamespaces": discovery.unavailableNamespaces,
                 "availableNamespaces": discovery.availableNamespaces,
                 "returnedTools": discovery.tools.map(\.name),
                 "discoveryLatencyMilliseconds": discoveryLatencyMilliseconds
@@ -1786,12 +1815,17 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             let data = try JSONSerialization.data(withJSONObject: [
                 "success": true,
                 "matchStatus": matchStatus,
+                "retryAdvice": retryAdvice,
                 "reason": tools.isEmpty
-                    ? "No tools matched the query. Retry once using one or more names from availableNamespaces."
+                    ? discovery.unavailableNamespaces.isEmpty
+                        ? "No tools matched the query. Retry at most once using one or more exact names from availableNamespaces."
+                        : "The requested capability namespaces are unavailable in this run. Do not retry them with different wording."
                     : "Matched callable tools. Invoke the returned exact names and schemas to perform the underlying operation.",
                 "query": query,
                 "returnedItems": tools.count,
+                "requestedNamespaces": discovery.requestedNamespaces,
                 "matchedNamespaces": discovery.matchedNamespaces,
+                "unavailableNamespaces": discovery.unavailableNamespaces,
                 "availableNamespaces": discovery.availableNamespaces,
                 "suggestedQueries": suggestedQueries,
                 "tools": tools

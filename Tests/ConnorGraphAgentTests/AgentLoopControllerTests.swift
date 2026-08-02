@@ -2271,6 +2271,52 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect((payload["initiallyExposedToolCount"] as? Int ?? 0) > 0)
 }
 
+@Test func agentLoopBlocksRepeatedDiscoveryOfUnavailableCapabilityNamespace() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [.init(
+                id: "discover-missing-workspace",
+                name: AssistantDecisionToolContract.searchName,
+                argumentsJSON: #"{"query":"读取本地工作区文件"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [.init(
+                id: "rediscover-missing-workspace",
+                name: AssistantDecisionToolContract.searchName,
+                argumentsJSON: #"{"query":"workspace filesystem tools"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "当前运行没有工作区能力。", finishReason: .stop)
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(DiscoveryNetworkTool())
+    let audit = InMemoryAgentAuditLog()
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        auditLog: audit
+    )
+
+    for try await _ in loop.run(AgentChatRequest(
+        runID: "run-missing-workspace-discovery",
+        sessionID: "session-missing-workspace-discovery",
+        userMessage: "继续"
+    )) {}
+
+    let discoveryEvents = await audit.events.filter { $0.eventType == .toolDiscovery }
+    #expect(discoveryEvents.count == 1)
+    let requests = await provider.requests
+    #expect(requests.count == 3)
+    #expect(requests[2].messages.contains {
+        $0.role == .system && $0.content.contains("Do not search for them again")
+    })
+}
+
 @Test func agentLoopAcceptsMemoryAndNotePreflightInsideOneParallelQuery() async throws {
     let provider = BatchedStartupProvider()
     var registry = AgentToolRegistry()

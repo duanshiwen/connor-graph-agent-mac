@@ -134,8 +134,23 @@ import Testing
     let result = AssistantToolRouter().discovery(query: "量子纠缠实验", definitions: definitions)
 
     #expect(result.tools.isEmpty)
+    #expect(result.requestedNamespaces.isEmpty)
     #expect(result.matchedNamespaces.isEmpty)
     #expect(result.availableNamespaces == ["calendar", "mail"])
+}
+
+@Test func toolDiscoveryReportsRequestedButUnavailableNamespace() {
+    let definitions = [
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let result = AssistantToolRouter().discovery(query: "读取本地工作区文件", definitions: definitions)
+
+    #expect(result.tools.isEmpty)
+    #expect(result.requestedNamespaces == ["workspace"])
+    #expect(result.matchedNamespaces.isEmpty)
+    #expect(result.unavailableNamespaces == ["workspace"])
+    #expect(result.availableNamespaces == ["mail"])
 }
 
 @Test func toolDiscoveryDoesNotReportNamespacesOutsideTheExposedDefinitions() {
