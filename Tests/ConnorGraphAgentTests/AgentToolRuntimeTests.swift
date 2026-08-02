@@ -193,7 +193,8 @@ private struct NetworkReadTool: AgentTool {
 
     let names = Set(await registry.definitions(availableUnder: policy).map(\.name))
 
-    #expect(names == ["echo"])
+    #expect(names == ["approval_aware", "echo"])
+    #expect(!names.contains("web_search"))
     #expect(await audit.events.isEmpty)
 }
 
