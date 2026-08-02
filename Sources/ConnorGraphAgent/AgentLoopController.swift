@@ -301,10 +301,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     retrievalPlan: retrievalPlan,
                     mode: configuration.toolExposureMode
                 ).sorted { $0.name < $1.name }
+                let registeredToolDefinitions = toolRegistry.definitions
                 let assistantToolRouter = AssistantToolRouter()
-                let assistantToolRoute = assistantToolRouter.route(definitions: exposedToolDefinitions)
+                let assistantToolRoute = assistantToolRouter.route(
+                    initiallyExposedDefinitions: exposedToolDefinitions,
+                    catalogDefinitions: registeredToolDefinitions
+                )
                 let availableToolDefinitions: [AgentToolDefinition] = {
-                    let merged = exposedToolDefinitions + AssistantDecisionToolContract.definitions
+                    let merged = registeredToolDefinitions + AssistantDecisionToolContract.definitions
                     return Dictionary(grouping: merged, by: \.name)
                         .compactMap { $0.value.first }
                         .sorted { $0.name < $1.name }
@@ -328,7 +332,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     runtimeContext.trustedPrompt,
                     environmentText,
                     AssistantEvidenceReducer().render(assistantBootstrap.contextPack),
-                    assistantToolRouter.compactCatalogSummary(definitions: exposedToolDefinitions),
+                    assistantToolRouter.compactCatalogSummary(definitions: registeredToolDefinitions),
                     "Memory, user-profile context, and Note candidates were already loaded once by the deterministic assistant bootstrap. Do not repeat those generic startup reads. Shell and ApplyPatch are direct workspace tools. Other applicable native tools are supplied through the routed catalog above."
                 ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")
                 let auditEstimator = AgentModelContextGuard().estimator
@@ -901,7 +905,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             request: request,
                             run: &run,
                             policy: policy,
-                            discoverableToolDefinitions: exposedToolDefinitions,
+                            discoverableToolDefinitions: assistantToolRoute.discoverableDefinitions,
                             continuation: continuation
                         )
 

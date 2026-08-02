@@ -44,6 +44,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
     public static let directToolNames: Set<String> = ["Shell", "ApplyPatch"]
     public static let runtimeInternalToolNames = AssistantBootstrapCoordinator.internalToolNames
         .union(AssistantAttentionCoordinator.internalToolNames)
+        .union([AgentCurrentTimePreflightPolicy.requiredToolName])
 
     public init() {}
 
@@ -61,11 +62,21 @@ public struct AssistantToolRouter: Sendable, Equatable {
     ]
 
     public func route(definitions: [AgentToolDefinition]) -> AssistantToolRoute {
-        let publicDefinitions = definitions.filter {
+        route(initiallyExposedDefinitions: definitions, catalogDefinitions: definitions)
+    }
+
+    public func route(
+        initiallyExposedDefinitions: [AgentToolDefinition],
+        catalogDefinitions: [AgentToolDefinition]
+    ) -> AssistantToolRoute {
+        let publicExposedDefinitions = initiallyExposedDefinitions.filter {
             !Self.runtimeInternalToolNames.contains($0.name)
         }
-        let direct = publicDefinitions.filter { Self.directToolNames.contains($0.name) }
-        let discoverable = publicDefinitions.filter { !Self.directToolNames.contains($0.name) }
+        let publicCatalogDefinitions = catalogDefinitions.filter {
+            !Self.runtimeInternalToolNames.contains($0.name)
+        }
+        let direct = publicExposedDefinitions.filter { Self.directToolNames.contains($0.name) }
+        let discoverable = publicCatalogDefinitions.filter { !Self.directToolNames.contains($0.name) }
         return AssistantToolRoute(
             modelVisibleDefinitions: (AssistantDecisionToolContract.definitions + direct).sorted { $0.name < $1.name },
             discoverableDefinitions: discoverable.sorted { $0.name < $1.name }
