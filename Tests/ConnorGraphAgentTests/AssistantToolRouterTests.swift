@@ -71,3 +71,31 @@ import Testing
     #expect(route.discoverableDefinitions.contains { $0.name == "rss_search_items" })
     #expect(matches.map(\.name) == ["rss_search_items"])
 }
+
+@Test func toolDiscoveryReportsRecoverableNamespaceMetadataForNoMatch() {
+    let definitions = [
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "calendar_search_events", description: "Search calendar events", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let result = AssistantToolRouter().discovery(query: "量子纠缠实验", definitions: definitions)
+
+    #expect(result.tools.isEmpty)
+    #expect(result.matchedNamespaces.isEmpty)
+    #expect(result.availableNamespaces == ["calendar", "mail"])
+}
+
+@Test func toolDiscoveryDoesNotReportNamespacesOutsideTheExposedDefinitions() {
+    let exposedDefinitions = [
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let result = AssistantToolRouter().discovery(
+        query: "读取日历和邮件",
+        definitions: exposedDefinitions
+    )
+
+    #expect(result.matchedNamespaces == ["mail"])
+    #expect(result.availableNamespaces == ["mail"])
+    #expect(result.tools.map(\.name) == ["mail_search_messages"])
+}
