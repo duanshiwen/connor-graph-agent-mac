@@ -93,11 +93,29 @@ public struct InteractiveWebManifestFile: Codable, Sendable, Equatable {
     public var sizeBytes: Int64
 }
 
+public struct InteractiveWebCollectionField: Codable, Sendable, Equatable {
+    public var name: String
+    public var type: String
+    public var required: Bool
+    public var maxLength: Int
+    public var `enum`: [String]
+    public init(name: String, type: String, required: Bool = false, maxLength: Int = 0, enum: [String] = []) { self.name = name; self.type = type; self.required = required; self.maxLength = maxLength; self.enum = `enum` }
+}
+
+public struct InteractiveWebCollectionDefinition: Codable, Sendable, Equatable {
+    public var name: String
+    public var fields: [InteractiveWebCollectionField]
+    public var anonymousCreate: Bool
+    public var anonymousRead: Bool
+    public init(name: String, fields: [InteractiveWebCollectionField], anonymousCreate: Bool = false, anonymousRead: Bool = false) { self.name = name; self.fields = fields; self.anonymousCreate = anonymousCreate; self.anonymousRead = anonymousRead }
+}
+
 public struct InteractiveWebManifest: Codable, Sendable, Equatable {
     public var entryPoint = "index.html"
     public var componentVersion = "1"
     public var files: [InteractiveWebManifestFile]
-    public init(files: [InteractiveWebManifestFile]) { self.files = files }
+    public var collections: [InteractiveWebCollectionDefinition]
+    public init(files: [InteractiveWebManifestFile], collections: [InteractiveWebCollectionDefinition] = []) { self.files = files; self.collections = collections }
 }
 
 public struct InteractiveWebPackager: Sendable {
