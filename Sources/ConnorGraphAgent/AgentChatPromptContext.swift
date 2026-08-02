@@ -20,31 +20,22 @@ public struct AgentChatPromptContext: Sendable, Equatable {
     public var sessionSummary: AgentSessionSummary?
     public var recentMessages: [AgentMessage]
     public var explicitPersonContexts: [PersonContextSnapshot]
-    /// Compression anchor state — takes priority over `sessionSummary`
-    /// when both are present.
-    public var anchorState: SessionAnchorState?
-
     public init(
         userPrompt: String,
         sessionSummary: AgentSessionSummary? = nil,
         recentMessages: [AgentMessage] = [],
-        explicitPersonContexts: [PersonContextSnapshot] = [],
-        anchorState: SessionAnchorState? = nil
+        explicitPersonContexts: [PersonContextSnapshot] = []
     ) {
         self.userPrompt = userPrompt
         self.sessionSummary = sessionSummary
         self.recentMessages = recentMessages
         self.explicitPersonContexts = explicitPersonContexts
-        self.anchorState = anchorState
     }
 
     public var renderedPrompt: String {
         var blocks: [String] = []
 
-        // Anchor state takes priority over session summary
-        if let anchor = anchorState, anchor.compressionCycles > 0 {
-            blocks.append(renderAnchorState(anchor))
-        } else if !trimmedSummaryContent.isEmpty {
+        if !trimmedSummaryContent.isEmpty {
             blocks.append("""
             Previous session summary:
             \(trimmedSummaryContent)
@@ -80,7 +71,7 @@ public struct AgentChatPromptContext: Sendable, Equatable {
         let estimator = AgentPromptBudgetEstimator()
         let estimate = estimator.estimate(renderedPrompt)
         return AgentChatPromptInspection(
-            includesSummary: !trimmedSummaryContent.isEmpty || anchorState != nil,
+            includesSummary: !trimmedSummaryContent.isEmpty,
             recentMessageCount: recentMessages.count,
             currentRequest: userPrompt,
             renderedPrompt: renderedPrompt,
@@ -88,11 +79,6 @@ public struct AgentChatPromptContext: Sendable, Equatable {
             estimatedPromptTokenCount: estimate.estimatedTokenCount,
             promptBudgetStatus: estimator.status(estimatedTokenCount: estimate.estimatedTokenCount)
         )
-    }
-
-    /// Whether this context was built from a compression anchor.
-    public var isCompressed: Bool {
-        (anchorState?.compressionCycles ?? 0) > 0
     }
 
     // MARK: - Private
@@ -152,26 +138,6 @@ public struct AgentChatPromptContext: Sendable, Equatable {
                 parts.append("memory_stable_key: \(memoryStableKey)")
             }
             lines.append(parts.joined(separator: "; "))
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    private func renderAnchorState(_ anchor: SessionAnchorState) -> String {
-        var lines: [String] = [
-            "Session context (compressed from \(anchor.compressionCycles) prior rounds):",
-            "- Intent: \(anchor.intent)",
-        ]
-        if !anchor.decisions.isEmpty {
-            lines.append("- Key decisions: \(anchor.decisions.joined(separator: "; "))")
-        }
-        if !anchor.changes.isEmpty {
-            lines.append("- Changes made: \(anchor.changes.joined(separator: "; "))")
-        }
-        if !anchor.pendingWork.isEmpty {
-            lines.append("- Pending work: \(anchor.pendingWork.joined(separator: "; "))")
-        }
-        if !anchor.preservedDetails.isEmpty {
-            lines.append("- Important details: \(anchor.preservedDetails)")
         }
         return lines.joined(separator: "\n")
     }

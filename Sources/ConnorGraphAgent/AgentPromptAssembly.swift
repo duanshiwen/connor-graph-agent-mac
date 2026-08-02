@@ -367,18 +367,15 @@ public struct AgentMemorySection: Sendable, Equatable {
 public struct AgentConversationSection: Sendable, Equatable {
     public var sessionSummary: AgentSessionSummary?
     public var recentMessages: [AgentMessage]
-    public var anchorState: SessionAnchorState?
     public var rollingSummaryState: ConversationSummaryState?
 
     public init(
         sessionSummary: AgentSessionSummary? = nil,
         recentMessages: [AgentMessage] = [],
-        anchorState: SessionAnchorState? = nil,
         rollingSummaryState: ConversationSummaryState? = nil
     ) {
         self.sessionSummary = sessionSummary
         self.recentMessages = recentMessages
-        self.anchorState = anchorState
         self.rollingSummaryState = rollingSummaryState
     }
 
@@ -386,8 +383,7 @@ public struct AgentConversationSection: Sendable, Equatable {
         AgentChatPromptContext(
             userPrompt: userPrompt,
             sessionSummary: sessionSummary,
-            recentMessages: recentMessages,
-            anchorState: anchorState
+            recentMessages: recentMessages
         ).renderedPrompt
     }
 
@@ -494,7 +490,6 @@ public struct AgentPromptAssembler: Sendable {
             conversation: AgentConversationSection(
                 sessionSummary: request.sessionSummary,
                 recentMessages: request.recentMessages,
-                anchorState: request.anchorState,
                 rollingSummaryState: request.conversationSummaryState
             ),
             userRequest: AgentUserRequestSection(text: request.userMessage),

@@ -295,16 +295,19 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     registry: toolRegistry,
                     policy: policy
                 )
-                let exposedToolDefinitions = tokenPolicy.exposedTools(
-                    from: toolRegistry.definitions,
+                let availableRegisteredToolDefinitions = await toolRegistry.definitions(availableUnder: policy)
+                let exposedToolDefinitions = tokenPolicy.initiallyExposedTools(
+                    from: availableRegisteredToolDefinitions,
                     request: request,
-                    retrievalPlan: retrievalPlan,
                     mode: configuration.toolExposureMode
                 ).sorted { $0.name < $1.name }
                 let assistantToolRouter = AssistantToolRouter()
-                let assistantToolRoute = assistantToolRouter.route(definitions: exposedToolDefinitions)
+                let assistantToolRoute = assistantToolRouter.route(
+                    initiallyExposedDefinitions: exposedToolDefinitions,
+                    catalogDefinitions: availableRegisteredToolDefinitions
+                )
                 let availableToolDefinitions: [AgentToolDefinition] = {
-                    let merged = exposedToolDefinitions + AssistantDecisionToolContract.definitions
+                    let merged = availableRegisteredToolDefinitions + AssistantDecisionToolContract.definitions
                     return Dictionary(grouping: merged, by: \.name)
                         .compactMap { $0.value.first }
                         .sorted { $0.name < $1.name }
@@ -328,7 +331,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     runtimeContext.trustedPrompt,
                     environmentText,
                     AssistantEvidenceReducer().render(assistantBootstrap.contextPack),
-                    assistantToolRouter.compactCatalogSummary(definitions: exposedToolDefinitions),
+                    assistantToolRouter.compactCatalogSummary(definitions: availableRegisteredToolDefinitions),
                     "Memory, user-profile context, and Note candidates were already loaded once by the deterministic assistant bootstrap. Do not repeat those generic startup reads. Shell and ApplyPatch are direct workspace tools. Other applicable native tools are supplied through the routed catalog above."
                 ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")
                 let auditEstimator = AgentModelContextGuard().estimator
@@ -901,7 +904,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             request: request,
                             run: &run,
                             policy: policy,
-                            discoverableToolDefinitions: exposedToolDefinitions,
+                            discoverableToolDefinitions: assistantToolRoute.discoverableDefinitions,
+                            initiallyExposedToolCount: modelFacingToolDefinitions.count,
                             continuation: continuation
                         )
 
@@ -1460,6 +1464,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         run: inout AgentRun,
         policy: AgentPolicyEngine,
         discoverableToolDefinitions: [AgentToolDefinition],
+        initiallyExposedToolCount: Int,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> [AgentToolBatchResult] {
         if canExecuteInParallel(calls) {
@@ -1480,6 +1485,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 run: &run,
                 policy: policy,
                 discoverableToolDefinitions: discoverableToolDefinitions,
+                initiallyExposedToolCount: initiallyExposedToolCount,
                 continuation: continuation
             )
             results.append(AgentToolBatchResult(call: call, result: result))
@@ -1587,6 +1593,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         run: inout AgentRun,
         policy: AgentPolicyEngine,
         discoverableToolDefinitions: [AgentToolDefinition],
+        initiallyExposedToolCount: Int,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentToolResult {
         yield(.toolRequested(call), to: continuation, recorder: eventRecorder)
@@ -1627,6 +1634,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     context: context,
                     run: &run,
                     discoverableToolDefinitions: discoverableToolDefinitions,
+                    initiallyExposedToolCount: initiallyExposedToolCount,
                     continuation: continuation
                 )
             } else {
@@ -1686,9 +1694,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         context: AgentToolExecutionContext,
         run: inout AgentRun,
         discoverableToolDefinitions: [AgentToolDefinition],
+        initiallyExposedToolCount: Int,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentToolResult {
         if call.name == AssistantDecisionToolContract.searchName {
+            let discoveryStartedAt = Date()
             let arguments = try AgentToolArguments(json: call.argumentsJSON)
             let query = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !query.isEmpty else { throw AgentToolError.invalidArguments("query is required") }
@@ -1706,6 +1716,25 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             }
             let matchStatus = tools.isEmpty ? "no_match" : "matched"
             let suggestedQueries = discovery.availableNamespaces.prefix(8).map { "\($0) tools" }
+            let discoveryLatencyMilliseconds = max(0, Int(Date().timeIntervalSince(discoveryStartedAt) * 1_000))
+            let auditData = try JSONSerialization.data(withJSONObject: [
+                "query": query,
+                "matchStatus": matchStatus,
+                "catalogToolCount": discoverableToolDefinitions.count,
+                "initiallyExposedToolCount": initiallyExposedToolCount,
+                "returnedItems": tools.count,
+                "matchedNamespaces": discovery.matchedNamespaces,
+                "availableNamespaces": discovery.availableNamespaces,
+                "returnedTools": discovery.tools.map(\.name),
+                "discoveryLatencyMilliseconds": discoveryLatencyMilliseconds
+            ], options: [.sortedKeys])
+            await auditLog.record(AgentAuditEvent(
+                runID: run.id,
+                sessionID: run.sessionID,
+                eventType: .toolDiscovery,
+                toolName: AssistantDecisionToolContract.searchName,
+                payloadJSON: String(data: auditData, encoding: .utf8) ?? "{}"
+            ))
             let data = try JSONSerialization.data(withJSONObject: [
                 "success": true,
                 "matchStatus": matchStatus,
@@ -1896,6 +1925,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         continue
                     }
                     let nestedCall = AgentToolCall(id: "\(call.id)-\(index)", runID: run.id, sessionID: run.sessionID, name: toolName, argumentsJSON: item.argumentsJSON)
+                    yield(.toolRequested(nestedCall), to: continuation, recorder: eventRecorder)
+                    yield(.toolStarted(nestedCall), to: continuation, recorder: eventRecorder)
                     do {
                         let result = try await executeToolWithApprovalIfNeeded(
                             call: nestedCall,
@@ -1911,6 +1942,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             run: &run,
                             continuation: continuation
                         )
+                        yield(.toolFinished(result), to: continuation, recorder: eventRecorder)
                         if toolName == "connor_skill_activate", let promotion = result.instructionPromotion {
                             await promotionCollector.record(promotion)
                         }
@@ -1927,6 +1959,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
+                        yield(.toolFailed(AgentToolFailure(
+                            runID: run.id,
+                            sessionID: run.sessionID,
+                            toolCallID: nestedCall.id,
+                            toolName: nestedCall.name,
+                            message: String(describing: error)
+                        )), to: continuation, recorder: eventRecorder)
                         executed.append([.init(id: nestedCall.id, sourceID: toolName, uri: resourceURI, title: "Execution failed", summary: "", error: String(describing: error))])
                     }
                 }

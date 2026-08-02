@@ -141,9 +141,15 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let configuredContextWindow = settings
             .connection(id: sessionLLMOverride?.connectionID)?
             .contextWindowTokens
-        let resolvedContextWindow = SessionContextBudget.resolvedContextWindowSize(
-            modelID: intentProvider.modelID,
-            configuredOverride: configuredContextWindow
+        let resolvedContextWindow = configuration.modelContextWindowTokens
+            ?? SessionContextBudget.resolvedContextWindowSize(
+                modelID: intentProvider.modelID,
+                configuredOverride: configuredContextWindow
+            )
+        let maximumInputTokens = AgentModelContextGuard().maximumInputTokens(
+            contextWindowTokens: resolvedContextWindow,
+            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+            reservedOutputTokens: configuration.reservedOutputTokens
         )
         let summaryProvider = AnyLLMProvider { prompt, _ in
             let response = try await intentProvider.complete(AgentModelRequest(
@@ -167,7 +173,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             permissionMode: permissionMode,
             memoryOSFacade: makeMemoryOSFacade(),
             memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: intentProvider)),
-            contextWindowSize: resolvedContextWindow,
+            maximumInputTokens: maximumInputTokens,
             rollingSummaryProvider: summaryProvider,
             rollingSummaryModelID: intentProvider.modelID
         )
@@ -714,7 +720,6 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         return AnyLLMProvider { prompt, context in
             let kind: AgentLLMRequestKind
             switch context.query {
-            case "Compress context": kind = .contextCompression
             case "Summarize chat session": kind = .sessionSummary
             case "Update rolling conversation summary": kind = .conversationRollingSummary
             default: kind = .unclassified

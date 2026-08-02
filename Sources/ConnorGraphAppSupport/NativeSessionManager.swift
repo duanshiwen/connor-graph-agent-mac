@@ -74,8 +74,8 @@ public struct NativeSessionManager: Sendable {
 
     // MARK: - Conversation Summary
 
-    /// Model's context window size in tokens (for percentage-based budget).
-    public var contextWindowSize: Int
+    /// Maximum tokens available to the assembled model input after prompt and output limits.
+    public var maximumInputTokens: Int
     public private(set) var conversationSummaryState: ConversationSummaryState?
     private let rollingSummaryProvider: AnyLLMProvider?
     private let rollingSummaryModelID: String?
@@ -97,7 +97,7 @@ public struct NativeSessionManager: Sendable {
         memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer? = nil,
         eventRecorder: AgentEventRecorder? = nil,
         pendingApprovalRepository: (any AgentPendingApprovalRepository)? = nil,
-        contextWindowSize: Int = 200_000,
+        maximumInputTokens: Int = 64_000,
         conversationSummaryState: ConversationSummaryState? = nil,
         rollingSummaryProvider: AnyLLMProvider? = nil,
         rollingSummaryModelID: String? = nil
@@ -116,7 +116,7 @@ public struct NativeSessionManager: Sendable {
         self.memoryOSIngestionWriter = memoryOSFacade.map { MemoryOSIngestionWriter(facade: $0, intentNormalizer: memoryOSIntentNormalizer) }
         self.eventRecorder = eventRecorder
         self.pendingApprovalRepository = pendingApprovalRepository
-        self.contextWindowSize = contextWindowSize
+        self.maximumInputTokens = max(1, maximumInputTokens)
         self.conversationSummaryState = conversationSummaryState
         self.rollingSummaryProvider = rollingSummaryProvider
         self.rollingSummaryModelID = rollingSummaryModelID
@@ -129,6 +129,14 @@ public struct NativeSessionManager: Sendable {
         groupID: String = "default",
         memoryOSFacade: AppMemoryOSFacade? = nil
     ) {
+        let configuration = loopController.configuration
+        let contextWindowTokens = configuration.modelContextWindowTokens
+            ?? SessionContextBudget.inferContextWindowSize(modelID: loopController.modelProvider.modelID)
+        let maximumInputTokens = AgentModelContextGuard().maximumInputTokens(
+            contextWindowTokens: contextWindowTokens,
+            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+            reservedOutputTokens: configuration.reservedOutputTokens
+        )
         self.init(
             backend: AgentLoopBackend(loopController: loopController),
             sessionRepository: sessionRepository,
@@ -136,7 +144,8 @@ public struct NativeSessionManager: Sendable {
             groupID: groupID,
             permissionMode: loopController.configuration.permissionMode,
             memoryOSFacade: memoryOSFacade,
-            memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: AnyAgentModelProvider(loopController.modelProvider)))
+            memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: AnyAgentModelProvider(loopController.modelProvider))),
+            maximumInputTokens: maximumInputTokens
         )
     }
 
@@ -219,7 +228,6 @@ public struct NativeSessionManager: Sendable {
             permissionMode: permissionMode,
             attachmentRefs: attachments,
             attachmentContextPlan: routedAttachmentContextPlan,
-            anchorState: nil,
             conversationSummaryState: conversationSummaryState,
             explicitPersonContexts: explicitPersonContexts,
             skillInstructions: skillInstructions,
@@ -575,14 +583,14 @@ public struct NativeSessionManager: Sendable {
             let validState = selection.summaryState
             let liveTokenCount = SessionTokenCounter().estimate(messages: selection.messages).totalTokenCount
                 + (validState?.summaryTokenEstimate ?? 0)
-            let budget = SessionContextBudget(contextWindowSize: contextWindowSize)
+            let budget = SessionContextBudget(contextWindowSize: maximumInputTokens)
             guard budget.status(tokenCount: liveTokenCount) >= .shouldCompress else { return }
             let plan = try ConversationCompactionPlanner().plan(
                 messages: conversation,
                 existingState: validState,
-                contextWindowTokens: contextWindowSize
+                contextWindowTokens: maximumInputTokens
             )
-            let maximumSummaryTokens = min(8_000, max(512, Int(Double(contextWindowSize) * 0.05)))
+            let maximumSummaryTokens = min(8_000, max(512, Int(Double(maximumInputTokens) * 0.05)))
             var summarizedAttachmentIDs = Set<String>()
             let attachmentDescriptions: [ConversationSummaryAttachment] = plan.deltaMessages.flatMap(\.attachments).compactMap { attachment in
                 guard summarizedAttachmentIDs.insert(attachment.id).inserted else { return nil }

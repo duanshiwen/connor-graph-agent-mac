@@ -16,6 +16,26 @@ import Testing
     #expect(!route.modelVisibleDefinitions.contains { $0.name == "mail_search_messages" })
 }
 
+@Test func toolRouterKeepsTheCompleteCatalogDiscoverableWithoutExpandingTheStableSurface() {
+    let exposedDefinitions = [
+        AgentToolDefinition(name: "Shell", description: "Run shell", inputSchema: .object(properties: [:], required: []))
+    ]
+    let catalogDefinitions = exposedDefinitions + [
+        AgentToolDefinition(name: "web_search", description: "Search the public web", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "get_current_time", description: "Internal time preflight", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let route = AssistantToolRouter().route(
+        initiallyExposedDefinitions: exposedDefinitions,
+        catalogDefinitions: catalogDefinitions
+    )
+
+    #expect(route.modelVisibleDefinitions.contains { $0.name == "Shell" })
+    #expect(!route.modelVisibleDefinitions.contains { $0.name == "web_search" })
+    #expect(route.discoverableDefinitions.contains { $0.name == "web_search" })
+    #expect(!route.discoverableDefinitions.contains { $0.name == "get_current_time" })
+}
+
 @Test func toolSearchReturnsRelevantFullSchemasOnly() {
     let definitions = [
         AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: ["query": .string(description: "query")], required: ["query"])),
@@ -45,6 +65,25 @@ import Testing
         "mail_list_recent_messages",
         "rss_list_items"
     ])
+}
+
+@Test func toolSearchDiscoversNonWebFamiliesUsingChineseCapabilityNames() {
+    let definitions = [
+        AgentToolDefinition(name: "science_compute", description: "Evaluate an expression", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "image_search", description: "Find images", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "connor_skill_list", description: "List installed skills", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "get_current_environment", description: "Read environment context", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "Read", description: "Read a workspace file", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let result = AssistantToolRouter().discovery(
+        query: "科学计算、图片、技能、天气和工作区文件",
+        definitions: definitions,
+        maximumResults: 8
+    )
+
+    #expect(Set(result.tools.map(\.name)) == Set(definitions.map(\.name)))
+    #expect(Set(result.matchedNamespaces) == ["environment", "image", "science", "skill", "workspace"])
 }
 
 @Test func toolCatalogIncludesNamespacePurposeInsteadOfCountsAlone() {

@@ -34,11 +34,10 @@ public enum SessionTokenBudgetStatus: Int, Comparable, Sendable, CaseIterable {
 /// | Claude Code (CLI)      | 95%       | 190K   |
 /// | Claude Code (VSCode)   | ~65%      | ~130K  |
 /// | MorphLLM recommendation| 80%       | 160K   |
-/// | **This implementation**| **70%**   | 140K   |
+/// | **This implementation**| **35%**   | 70K    |
 ///
-/// The 70% default balances the Hermes conservative approach with
-/// the MorphLLM aggressive approach.  Warning fires at 50% to give
-/// the user early notice.
+/// The 35% default leaves room for the rolling summary, current input,
+/// tool definitions, and the active run. Warning fires at 25%.
 public struct SessionContextBudget: Sendable, Equatable {
     /// The model's total context window in tokens.
     public let contextWindowSize: Int
