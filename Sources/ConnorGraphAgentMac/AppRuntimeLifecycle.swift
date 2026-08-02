@@ -1925,15 +1925,14 @@ final class AppRuntimeLifecycle {
 
     private func sessionLLMProvider(sessionID: String) throws -> AnyLLMProvider {
         let provider = try sessionAgentModelProvider(sessionID: sessionID)
-        return AnyLLMProvider { prompt, context in
-            let requestKind: AgentLLMRequestKind = context.query == "Compress context" ? .contextCompression : .sessionSummary
+        return AnyLLMProvider { prompt, _ in
             let response = try await provider.complete(AgentModelRequest(messages: [
                 AgentModelMessage(role: .system, content: AgentInstructionSection.runtimeConnorInstruction),
                 AgentModelMessage(role: .user, content: "Question:\n\(prompt)")
             ], auditContext: AgentLLMRequestAuditContext(
-                requestKind: requestKind,
+                requestKind: .sessionSummary,
                 sessionID: sessionID,
-                operation: requestKind == .contextCompression ? "ContextCompressionPipeline.compress" : "AgentSessionSummarizer.summarize",
+                operation: "AgentSessionSummarizer.summarize",
                 initiator: .background
             )))
             return LLMResponse(text: response.text ?? "", citations: [])

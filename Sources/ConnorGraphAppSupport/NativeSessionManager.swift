@@ -219,7 +219,6 @@ public struct NativeSessionManager: Sendable {
             permissionMode: permissionMode,
             attachmentRefs: attachments,
             attachmentContextPlan: routedAttachmentContextPlan,
-            anchorState: nil,
             conversationSummaryState: conversationSummaryState,
             explicitPersonContexts: explicitPersonContexts,
             skillInstructions: skillInstructions,
