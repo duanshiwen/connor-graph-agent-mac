@@ -243,3 +243,40 @@ private func anthropicNativeTemporaryDatabaseURL(_ name: String = UUID().uuidStr
     #expect(provider.modelID == "claude-sonnet-4-5")
     #expect(provider.capabilities.supportsToolCalling == true)
 }
+
+@Test func nativeSessionRollingSummaryUsesEffectiveMaximumInputTokens() throws {
+    let store = try SQLiteGraphKernelStore(path: anthropicNativeTemporaryDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: AnthropicNativeSettingsStore(),
+        credentialStore: AnthropicNativeCredentialStore()
+    )
+    let connection = AppLLMConnectionConfig(
+        id: "anthropic-budget",
+        name: "Claude",
+        providerMode: .anthropicMessages,
+        connectionKind: .anthropicCompatible,
+        baseURLString: "https://api.anthropic.com/v1",
+        model: "claude-sonnet-4-5",
+        selectedModel: "claude-sonnet-4-5"
+    )
+    try settingsRepository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "anthropic-key"
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository)
+
+    let manager = factory.makeNativeSessionManager(configuration: AgentLoopConfiguration(
+        promptMaxEstimatedTokens: 64_000,
+        modelContextWindowTokens: 200_000,
+        reservedOutputTokens: 8_192
+    ))
+    let outputLimitedManager = factory.makeNativeSessionManager(configuration: AgentLoopConfiguration(
+        promptMaxEstimatedTokens: 64_000,
+        modelContextWindowTokens: 60_000,
+        reservedOutputTokens: 8_192
+    ))
+
+    #expect(manager.maximumInputTokens == 64_000)
+    #expect(outputLimitedManager.maximumInputTokens == 51_808)
+}
