@@ -113,6 +113,11 @@ public struct LLMUsageAuditSummaryRow: Codable, Sendable, Equatable {
     public var failed: Int
     public var cancelled: Int
     public var totalTokens: Int
+    public var promptTokens: Int
+    public var cacheCreationInputTokens: Int
+    public var cacheReadInputTokens: Int
+    public var cacheReadRatio: Double
+    public var averageFirstTokenLatencyMilliseconds: Int?
 }
 
 public struct LLMUsageAuditSummary: Codable, Sendable, Equatable {
@@ -127,12 +132,15 @@ public struct LLMUsageAuditSummary: Codable, Sendable, Equatable {
     public var totalTokens: Int
     public var cacheCreationInputTokens: Int
     public var cacheReadInputTokens: Int
+    public var cacheReadRatio: Double
+    public var averageFirstTokenLatencyMilliseconds: Int?
     public var uncachedInputTokens: Int
     public var estimatedInputTokens: Int
     public var unmeteredCalls: Int
     public var unclassifiedCalls: Int
     public var byRequestKind: [LLMUsageAuditSummaryRow]
     public var byModel: [LLMUsageAuditSummaryRow]
+    public var byProvider: [LLMUsageAuditSummaryRow]
     public var byOperation: [LLMUsageAuditSummaryRow]
 }
 
@@ -159,33 +167,47 @@ public struct LLMUsageAuditQueryService: Sendable {
         let records = store.records().filter { since == nil || $0.startedAt >= since! }
         func rows(_ key: (LLMUsageAuditRecord) -> String) -> [LLMUsageAuditSummaryRow] {
             Dictionary(grouping: records, by: key).map { name, values in
-                LLMUsageAuditSummaryRow(
+                let promptTokens = values.compactMap(\.promptTokens).reduce(0, +)
+                let cacheReadTokens = values.compactMap(\.cacheReadInputTokens).reduce(0, +)
+                let firstTokenLatencies = values.compactMap(\.firstTokenLatencyMilliseconds)
+                return LLMUsageAuditSummaryRow(
                     key: name,
                     calls: values.count,
                     succeeded: values.filter { $0.status == .succeeded }.count,
                     failed: values.filter { $0.status == .failed }.count,
                     cancelled: values.filter { $0.status == .cancelled }.count,
-                    totalTokens: values.compactMap(\.totalTokens).reduce(0, +)
+                    totalTokens: values.compactMap(\.totalTokens).reduce(0, +),
+                    promptTokens: promptTokens,
+                    cacheCreationInputTokens: values.compactMap(\.cacheCreationInputTokens).reduce(0, +),
+                    cacheReadInputTokens: cacheReadTokens,
+                    cacheReadRatio: promptTokens > 0 ? Double(cacheReadTokens) / Double(promptTokens) : 0,
+                    averageFirstTokenLatencyMilliseconds: firstTokenLatencies.isEmpty ? nil : firstTokenLatencies.reduce(0, +) / firstTokenLatencies.count
                 )
             }.sorted { $0.calls == $1.calls ? $0.key < $1.key : $0.calls > $1.calls }
         }
         let succeeded = records.filter { $0.status == .succeeded }.count
+        let promptTokens = records.compactMap(\.promptTokens).reduce(0, +)
+        let cacheReadTokens = records.compactMap(\.cacheReadInputTokens).reduce(0, +)
+        let firstTokenLatencies = records.compactMap(\.firstTokenLatencyMilliseconds)
         return LLMUsageAuditSummary(
             generatedAt: Date(), calls: records.count, succeeded: succeeded,
             failed: records.filter { $0.status == .failed }.count,
             cancelled: records.filter { $0.status == .cancelled }.count,
             successRate: records.isEmpty ? 0 : Double(succeeded) / Double(records.count),
-            promptTokens: records.compactMap(\.promptTokens).reduce(0, +),
+            promptTokens: promptTokens,
             completionTokens: records.compactMap(\.completionTokens).reduce(0, +),
             totalTokens: records.compactMap(\.totalTokens).reduce(0, +),
             cacheCreationInputTokens: records.compactMap(\.cacheCreationInputTokens).reduce(0, +),
-            cacheReadInputTokens: records.compactMap(\.cacheReadInputTokens).reduce(0, +),
+            cacheReadInputTokens: cacheReadTokens,
+            cacheReadRatio: promptTokens > 0 ? Double(cacheReadTokens) / Double(promptTokens) : 0,
+            averageFirstTokenLatencyMilliseconds: firstTokenLatencies.isEmpty ? nil : firstTokenLatencies.reduce(0, +) / firstTokenLatencies.count,
             uncachedInputTokens: records.compactMap(\.uncachedInputTokens).reduce(0, +),
             estimatedInputTokens: records.map(\.estimatedInputTokens).reduce(0, +),
             unmeteredCalls: records.filter { $0.totalTokens == nil }.count,
             unclassifiedCalls: records.filter { $0.requestKind == .unclassified }.count,
             byRequestKind: rows { $0.requestKind.rawValue },
             byModel: rows { $0.modelID },
+            byProvider: rows { $0.providerID ?? $0.providerMode ?? "(unknown provider)" },
             byOperation: rows { $0.operation ?? "(unclassified operation)" }.sorted {
                 $0.totalTokens == $1.totalTokens ? $0.calls > $1.calls : $0.totalTokens > $1.totalTokens
             }
@@ -256,12 +278,22 @@ public struct AuditedAgentModelProvider: StreamingAgentModelProvider, AgentGener
             let task = Task {
                 do {
                     var completedResponse: AgentModelResponse?
+                    var firstTokenAt: Date?
                     for try await event in provider.streamComplete(request) {
+                        if firstTokenAt == nil, Self.isFirstTokenEvent(event) { firstTokenAt = Date() }
                         if case .completed(let response) = event { completedResponse = response }
                         continuation.yield(event)
                     }
                     let response = completedResponse ?? AgentModelResponse(text: nil, finishReason: .unknown)
-                    recorder.record(Self.record(request: request, response: response, modelID: modelID, attribution: attribution, mode: .streaming, startedAt: startedAt))
+                    recorder.record(Self.record(
+                        request: request,
+                        response: response,
+                        modelID: modelID,
+                        attribution: attribution,
+                        mode: .streaming,
+                        startedAt: startedAt,
+                        firstTokenAt: firstTokenAt
+                    ))
                     continuation.finish()
                 } catch {
                     recorder.record(Self.record(request: request, error: error, modelID: modelID, attribution: attribution, mode: .streaming, startedAt: startedAt))
@@ -293,7 +325,7 @@ public struct AuditedAgentModelProvider: StreamingAgentModelProvider, AgentGener
         }
     }
 
-    private static func record(request: AgentModelRequest, response: AgentModelResponse? = nil, error: Error? = nil, modelID: String, attribution: LLMUsageAuditAttribution, mode: LLMUsageAuditExecutionMode, startedAt: Date) -> LLMUsageAuditRecord {
+    private static func record(request: AgentModelRequest, response: AgentModelResponse? = nil, error: Error? = nil, modelID: String, attribution: LLMUsageAuditAttribution, mode: LLMUsageAuditExecutionMode, startedAt: Date, firstTokenAt: Date? = nil) -> LLMUsageAuditRecord {
         let completedAt = Date()
         let characters = request.messages.reduce(0) { total, message in
             total + message.content.count + (message.toolCalls?.reduce(0) { $0 + $1.name.count + $1.argumentsJSON.count } ?? 0)
@@ -309,12 +341,26 @@ public struct AuditedAgentModelProvider: StreamingAgentModelProvider, AgentGener
             promptTokens: response?.usage?.promptTokens, completionTokens: response?.usage?.completionTokens, totalTokens: response?.usage?.totalTokens,
             cacheCreationInputTokens: response?.usage?.cacheCreationInputTokens, cacheReadInputTokens: response?.usage?.cacheReadInputTokens,
             uncachedInputTokens: response?.usage?.uncachedInputTokens,
+            firstTokenLatencyMilliseconds: firstTokenAt.map { max(0, Int($0.timeIntervalSince(startedAt) * 1_000)) },
             estimatedInputTokens: max(1, characters / 4), messageCount: request.messages.count, inputCharacterCount: characters,
             toolDefinitionCount: request.tools.count, containsImages: request.messages.contains { $0.contentParts?.contains { $0.kind == .imageDataURL } == true },
             outputCharacterCount: response?.text?.count, toolCallCount: response?.toolCalls.count, finishReason: response?.finishReason.rawValue,
             generatedByteCount: nil, errorType: error.map { String(reflecting: type(of: $0)) }, errorMessage: sanitized(error?.localizedDescription),
             metadata: request.auditContext.metadata
         )
+    }
+
+    private static func isFirstTokenEvent(_ event: AgentModelStreamEvent) -> Bool {
+        switch event {
+        case .textDelta(let text), .thinkingDelta(let text):
+            return !text.isEmpty
+        case .toolInputDelta(_, _, let partialJSON):
+            return !partialJSON.isEmpty
+        case .completed:
+            return true
+        case .rawProviderEvent:
+            return false
+        }
     }
 
     private static func mediaRecord(request: AgentGeneratedMediaRequest, byteCount: Int64? = nil, error: Error? = nil, modelID: String, attribution: LLMUsageAuditAttribution, startedAt: Date) -> LLMUsageAuditRecord {

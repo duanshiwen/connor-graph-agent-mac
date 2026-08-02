@@ -5,7 +5,6 @@ public enum AgentLLMRequestKind: String, Codable, Sendable, Equatable, CaseItera
     case conversationProgressUpdate = "conversation_progress_update"
     case conversationIntentNormalization = "conversation_intent_normalization"
     case conversationRollingSummary = "conversation_rolling_summary"
-    case contextCompression = "context_compression"
     case sessionSummary = "session_summary"
     case sessionTitleGeneration = "session_title_generation"
     case memoryL1Extraction = "memory_l1_extraction"
@@ -98,6 +97,7 @@ public struct LLMUsageAuditRecord: Codable, Sendable, Equatable, Identifiable {
     public var cacheCreationInputTokens: Int?
     public var cacheReadInputTokens: Int?
     public var uncachedInputTokens: Int?
+    public var firstTokenLatencyMilliseconds: Int?
     public var estimatedInputTokens: Int
     public var messageCount: Int
     public var inputCharacterCount: Int
@@ -118,6 +118,7 @@ public struct LLMUsageAuditRecord: Codable, Sendable, Equatable, Identifiable {
         sessionID: String?, runID: String?, backgroundJobID: String?, correlationID: String?, iteration: Int?,
         operation: String?, initiator: AgentLLMRequestInitiator, relatedToolNames: [String],
         promptTokens: Int?, completionTokens: Int?, totalTokens: Int?, cacheCreationInputTokens: Int?, cacheReadInputTokens: Int?, uncachedInputTokens: Int? = nil,
+        firstTokenLatencyMilliseconds: Int? = nil,
         estimatedInputTokens: Int, messageCount: Int, inputCharacterCount: Int, toolDefinitionCount: Int, containsImages: Bool,
         outputCharacterCount: Int?, toolCallCount: Int?, finishReason: String?, generatedByteCount: Int64?,
         errorType: String?, errorMessage: String?, metadata: [String: String]
@@ -147,6 +148,7 @@ public struct LLMUsageAuditRecord: Codable, Sendable, Equatable, Identifiable {
         self.cacheCreationInputTokens = cacheCreationInputTokens
         self.cacheReadInputTokens = cacheReadInputTokens
         self.uncachedInputTokens = uncachedInputTokens
+        self.firstTokenLatencyMilliseconds = firstTokenLatencyMilliseconds
         self.estimatedInputTokens = estimatedInputTokens
         self.messageCount = messageCount
         self.inputCharacterCount = inputCharacterCount
@@ -159,6 +161,11 @@ public struct LLMUsageAuditRecord: Codable, Sendable, Equatable, Identifiable {
         self.errorType = errorType
         self.errorMessage = errorMessage
         self.metadata = metadata
+    }
+
+    public var cacheReadRatio: Double? {
+        guard let promptTokens, promptTokens > 0, let cacheReadInputTokens else { return nil }
+        return Double(cacheReadInputTokens) / Double(promptTokens)
     }
 }
 

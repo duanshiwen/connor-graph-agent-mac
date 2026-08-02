@@ -86,7 +86,7 @@ import ConnorGraphCore
         #expect(mail["status"] as? String == "failed")
     }
 
-    @Test func attentionBriefSchemaIsArgumentFreeReadOnlyAndAlwaysExposed() throws {
+    @Test func attentionBriefSchemaIsArgumentFreeAndReadOnly() throws {
         let tool = AttentionBriefTool(calendarRuntime: InMemoryAgentCalendarRuntime())
         #expect(tool.name == "attention_brief")
         #expect(tool.permission == .readCalendar)
@@ -96,18 +96,6 @@ import ConnorGraphCore
         }
         #expect(required.isEmpty)
         #expect(properties["days"] != nil)
-        // Unconditional exposure: no calendar/mail signals in the context.
-        var registry = AgentToolRegistry()
-        registry.register(tool)
-        let definition = try #require(registry.definition(named: AttentionBriefTool.toolName))
-        let policy = AgentRunTokenPolicy()
-        let exposed = policy.exposedTools(
-            from: [definition],
-            request: AgentChatRequest(sessionID: "session-exposure", userMessage: "tell me a joke"),
-            retrievalPlan: AgentRunRetrievalPlan(requiresCurrentTime: false, requiresContinuity: false, requiresNoteSearch: false, requiresFinalProfile: false, requiresFinalAttention: true),
-            mode: .contextual
-        )
-        #expect(exposed.map(\.name) == ["attention_brief"])
     }
 
     private static func message(id: String, subject: String) -> MailMessageSummary {

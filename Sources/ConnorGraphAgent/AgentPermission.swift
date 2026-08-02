@@ -59,6 +59,10 @@ public actor AgentPolicyEngine: Sendable {
         return decision
     }
 
+    public func discoveryOutcome(for capability: AgentPermissionCapability) -> AgentPermissionOutcome {
+        outcome(for: capability)
+    }
+
     private func outcome(for capability: AgentPermissionCapability) -> AgentPermissionOutcome {
         if permissionMode == .trustedWrite || permissionMode == .allowAll {
             return .approved

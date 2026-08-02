@@ -14,7 +14,7 @@ public enum LLMUsageAuditCLIError: Error, LocalizedError {
 }
 
 public enum LLMUsageAuditCLIRouter {
-    public static let usage = "connor llm-audit [summary|list|show <id>|top] [--kind <kind>] [--model <model>] [--status succeeded|failed|cancelled] [--since 24h|7d|ISO-8601] [--limit N] [--group-by operation|kind|model|tool] [--json]"
+    public static let usage = "connor llm-audit [summary|list|show <id>|top] [--kind <kind>] [--model <model>] [--status succeeded|failed|cancelled] [--since 24h|7d|ISO-8601] [--limit N] [--group-by operation|kind|model|provider|tool] [--json]"
 
     public static func route(args: [String], storagePaths: AppStoragePaths, encoder: JSONEncoder) throws -> String {
         let json = args.contains("--json")
@@ -90,7 +90,8 @@ public enum LLMUsageAuditCLIRouter {
         var lines = [
             "LLM Usage Audit",
             "Calls: \(summary.calls)  Success: \(percent(summary.successRate))  Failed: \(summary.failed)  Cancelled: \(summary.cancelled)",
-            "Tokens: \(summary.totalTokens)  Input: \(summary.promptTokens)  Output: \(summary.completionTokens)  Cache read: \(summary.cacheReadInputTokens)",
+            "Tokens: \(summary.totalTokens)  Input: \(summary.promptTokens)  Output: \(summary.completionTokens)  Cache read: \(summary.cacheReadInputTokens) (\(percent(summary.cacheReadRatio)))",
+            "Average first token: \(summary.averageFirstTokenLatencyMilliseconds.map { "\($0) ms" } ?? "n/a")",
             "Coverage: \(summary.calls - summary.unmeteredCalls)/\(summary.calls) calls metered  Estimated input: \(summary.estimatedInputTokens)",
             "Unclassified: \(summary.unclassifiedCalls)\(summary.unclassifiedCalls > 0 ? "  ACTION REQUIRED" : "")",
             "",
@@ -118,7 +119,8 @@ public enum LLMUsageAuditCLIRouter {
             "Operation: \(record.operation ?? "-")", "Model: \(record.modelID)", "Provider: \(record.providerID ?? record.providerMode ?? "-")",
             "Connection: \(record.connectionID ?? "-")", "Session: \(record.sessionID ?? "-")", "Run: \(record.runID ?? "-")", "Background job: \(record.backgroundJobID ?? "-")",
             "Tokens: \(record.totalTokens.map(String.init) ?? "n/a") (input \(record.promptTokens.map(String.init) ?? "n/a"), output \(record.completionTokens.map(String.init) ?? "n/a"))",
-            "Cache: create \(record.cacheCreationInputTokens.map(String.init) ?? "n/a"), read \(record.cacheReadInputTokens.map(String.init) ?? "n/a"), uncached input \(record.uncachedInputTokens.map(String.init) ?? "n/a")",
+            "Cache: create \(record.cacheCreationInputTokens.map(String.init) ?? "n/a"), read \(record.cacheReadInputTokens.map(String.init) ?? "n/a"), hit ratio \(record.cacheReadRatio.map(percent) ?? "n/a"), uncached input \(record.uncachedInputTokens.map(String.init) ?? "n/a")",
+            "First token: \(record.firstTokenLatencyMilliseconds.map { "\($0) ms" } ?? "n/a")",
             "Request shape: \(record.messageCount) messages, \(record.toolDefinitionCount) tool definitions, \(record.inputCharacterCount) characters, images \(record.containsImages)",
             "Related tools: \(tools)", "Finish: \(record.finishReason ?? "-")", "Error: \(record.errorMessage ?? "-")"
         ].joined(separator: "\n")
@@ -133,7 +135,7 @@ public enum LLMUsageAuditCLIRouter {
     }
 
     private static func topRows(records: [LLMUsageAuditRecord], groupBy: String, limit: Int) throws -> [TopRow] {
-        guard ["operation", "kind", "model", "tool"].contains(groupBy) else { throw LLMUsageAuditCLIError.invalidArgument("--group-by \(groupBy)") }
+        guard ["operation", "kind", "model", "provider", "tool"].contains(groupBy) else { throw LLMUsageAuditCLIError.invalidArgument("--group-by \(groupBy)") }
         return topRowsUnchecked(records: records, groupBy: groupBy, limit: limit)
     }
 
@@ -144,6 +146,7 @@ public enum LLMUsageAuditCLIRouter {
             switch groupBy {
             case "kind": keys = [record.requestKind.rawValue]
             case "model": keys = [record.modelID]
+            case "provider": keys = [record.providerID ?? record.providerMode ?? "(unknown provider)"]
             case "tool": keys = record.relatedToolNames.isEmpty ? ["(no related tool)"] : record.relatedToolNames
             default: keys = [record.operation ?? "(unclassified operation)"]
             }

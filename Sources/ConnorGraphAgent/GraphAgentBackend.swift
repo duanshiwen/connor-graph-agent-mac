@@ -12,8 +12,6 @@ public struct AgentChatRequest: Sendable, Equatable {
     public var permissionMode: AgentPermissionMode
     public var attachmentRefs: [AgentMessageAttachmentRef]
     public var attachmentContextPlan: AttachmentContextPlan
-    /// Compression anchor state from prior rounds.
-    public var anchorState: SessionAnchorState?
     public var conversationSummaryState: ConversationSummaryState?
     /// Relationship-aware Person Registry entries explicitly mentioned in the current user turn.
     public var explicitPersonContexts: [PersonContextSnapshot]
@@ -36,7 +34,6 @@ public struct AgentChatRequest: Sendable, Equatable {
         permissionMode: AgentPermissionMode = .askToWrite,
         attachmentRefs: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
-        anchorState: SessionAnchorState? = nil,
         conversationSummaryState: ConversationSummaryState? = nil,
         explicitPersonContexts: [PersonContextSnapshot] = [],
         skillInstructions: String? = nil,
@@ -54,7 +51,6 @@ public struct AgentChatRequest: Sendable, Equatable {
             permissionMode: permissionMode,
             attachmentRefs: attachmentRefs,
             attachmentContextPlan: attachmentContextPlan,
-            anchorState: anchorState,
             conversationSummaryState: conversationSummaryState,
             explicitPersonContexts: explicitPersonContexts,
             skillInstructions: skillInstructions,
@@ -75,7 +71,6 @@ public struct AgentChatRequest: Sendable, Equatable {
         permissionMode: AgentPermissionMode = .askToWrite,
         attachmentRefs: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
-        anchorState: SessionAnchorState? = nil,
         conversationSummaryState: ConversationSummaryState? = nil,
         explicitPersonContexts: [PersonContextSnapshot] = [],
         skillInstructions: String? = nil,
@@ -93,7 +88,6 @@ public struct AgentChatRequest: Sendable, Equatable {
         self.permissionMode = permissionMode
         self.attachmentRefs = attachmentRefs
         self.attachmentContextPlan = attachmentContextPlan
-        self.anchorState = anchorState
         self.conversationSummaryState = conversationSummaryState
         self.explicitPersonContexts = explicitPersonContexts
         self.skillInstructions = skillInstructions
@@ -113,7 +107,6 @@ public struct AgentChatRequest: Sendable, Equatable {
             sessionSummary: sessionSummary,
             recentMessages: recentMessages,
             explicitPersonContexts: explicitPersonContexts,
-            anchorState: anchorState
         ).renderedPrompt
         guard let skillInstructions = skillInstructions?.trimmingCharacters(in: .whitespacesAndNewlines), !skillInstructions.isEmpty else {
             return basePrompt

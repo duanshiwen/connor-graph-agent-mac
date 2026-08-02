@@ -37,6 +37,17 @@ private struct ApprovalAwareTool: AgentTool {
     }
 }
 
+private struct NetworkReadTool: AgentTool {
+    let name = "web_search"
+    let description = "Search the public web."
+    let permission: AgentPermissionCapability = .externalNetwork
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "network")
+    }
+}
+
 @Test func browserPermissionsSeparateReadingNavigationInteractionAndCommit() async {
     let readOnly = AgentPolicyEngine(permissionMode: .readOnly)
     #expect(await readOnly.evaluate(capability: .readBrowserPage, runID: "run", sessionID: "session").outcome == .approved)
@@ -170,6 +181,31 @@ private struct ApprovalAwareTool: AgentTool {
     #expect(readOnlyDecision.outcome == .denied)
     #expect(askToWriteDecision.outcome == .approved)
     #expect(trustedDecision.outcome == .approved)
+}
+
+@Test func discoverableRegistryDefinitionsExcludeDeniedCapabilitiesWithoutWritingAuditEvents() async {
+    var registry = AgentToolRegistry()
+    registry.register(EchoTool())
+    registry.register(ApprovalAwareTool())
+    registry.register(NetworkReadTool())
+    let audit = InMemoryAgentAuditLog()
+    let policy = AgentPolicyEngine(permissionMode: .readOnly, auditLog: audit)
+
+    let names = Set(await registry.definitions(availableUnder: policy).map(\.name))
+
+    #expect(names == ["approval_aware", "echo"])
+    #expect(!names.contains("web_search"))
+    #expect(await audit.events.isEmpty)
+}
+
+@Test func discoverableRegistryDefinitionsIncludeCapabilitiesThatNeedApproval() async {
+    var registry = AgentToolRegistry()
+    registry.register(ApprovalAwareTool())
+    let policy = AgentPolicyEngine(permissionMode: .askToWrite)
+
+    let names = await registry.definitions(availableUnder: policy).map(\.name)
+
+    #expect(names == ["approval_aware"])
 }
 
 @Test func getCurrentTimeToolReturnsDeterministicTimeForRequestedTimeZone() async throws {

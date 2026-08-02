@@ -2,21 +2,25 @@ import SwiftUI
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
+enum GlobalSearchOverlayLayout {
+    static let width: CGFloat = 640
+    static let maximumHeight: CGFloat = 640
+
+    static func shouldScroll(contentHeight: CGFloat) -> Bool {
+        contentHeight > maximumHeight
+    }
+}
+
 struct AppGlobalSearchOverlayView: View {
     @Bindable var model: GlobalSearchFeatureModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var browserHistoryPage: Int = 0
     @State private var contentHeight: CGFloat = 0
 
-    private enum Layout {
-        static let width: CGFloat = 640
-        static let maxHeight: CGFloat = 760
-    }
-
     private let browserHistoryPageSize = 3
     private var state: GlobalSearchPreviewState { model.previewState }
     private var query: String { model.query.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var shouldScroll: Bool { contentHeight > Layout.maxHeight }
+    private var shouldScroll: Bool { GlobalSearchOverlayLayout.shouldScroll(contentHeight: contentHeight) }
 
     var body: some View {
         Group {
@@ -25,14 +29,15 @@ struct AppGlobalSearchOverlayView: View {
                     overlayContent
                 }
                 .scrollIndicators(.visible)
-                .frame(width: Layout.width, height: Layout.maxHeight, alignment: .topLeading)
+                .frame(
+                    width: GlobalSearchOverlayLayout.width,
+                    height: GlobalSearchOverlayLayout.maximumHeight,
+                    alignment: .topLeading
+                )
             } else {
                 overlayContent
-                    .frame(width: Layout.width, alignment: .topLeading)
+                    .frame(width: GlobalSearchOverlayLayout.width, alignment: .topLeading)
             }
-        }
-        .background(alignment: .topLeading) {
-            measuredOverlayContent
         }
         .background(.regularMaterial, in: overlayShape)
         .overlay(glassEdgeHighlight)
@@ -101,19 +106,11 @@ struct AppGlobalSearchOverlayView: View {
         }
         .padding(AppShellLayout.spaceS)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var measuredOverlayContent: some View {
-        overlayContent
-            .frame(width: Layout.width, alignment: .topLeading)
-            .fixedSize(horizontal: false, vertical: true)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: GlobalSearchOverlayContentHeightKey.self, value: proxy.size.height)
-                }
-            )
-            .hidden()
-            .allowsHitTesting(false)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: GlobalSearchOverlayContentHeightKey.self, value: proxy.size.height)
+            }
+        )
     }
 
     private var recentSearchesSection: some View {
