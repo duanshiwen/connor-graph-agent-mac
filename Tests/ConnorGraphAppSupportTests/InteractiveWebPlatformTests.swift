@@ -90,6 +90,69 @@ struct InteractiveWebPlatformTests {
         }
     }
 
+    @Test func draftSourceSupportsExactEditsAndRejectsStaleUpdates() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let created = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<h1>Hello</h1>",
+            css: "h1 { color: red; }",
+            javascript: nil
+        )
+
+        let source = try await runtime.draftSource(projectID: created.projectID, fileName: "index.html")
+        #expect(source.content == "<h1>Hello</h1>")
+        #expect(source.manifestHash == created.manifestHash)
+
+        let updated = try await runtime.updateDraft(
+            projectID: created.projectID,
+            expectedManifestHash: source.manifestHash,
+            replacements: [:],
+            edits: ["index.html": [(oldText: "Hello", newText: "Finished")]]
+        )
+        #expect(updated.revision == 2)
+        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("index.html"), encoding: .utf8) == "<h1>Finished</h1>")
+        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("style.css"), encoding: .utf8) == "h1 { color: red; }")
+
+        await #expect(throws: AgentToolError.self) {
+            _ = try await runtime.updateDraft(
+                projectID: created.projectID,
+                expectedManifestHash: source.manifestHash,
+                replacements: ["style.css": "h1 { color: blue; }"],
+                edits: [:]
+            )
+        }
+    }
+
+    @Test func invalidMultiFileEditLeavesDraftUnchanged() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let created = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<h1>Hello</h1>",
+            css: "h1 { color: red; }",
+            javascript: nil
+        )
+
+        await #expect(throws: AgentToolError.self) {
+            _ = try await runtime.updateDraft(
+                projectID: created.projectID,
+                expectedManifestHash: created.manifestHash,
+                replacements: ["style.css": "h1 { color: blue; }"],
+                edits: ["index.html": [(oldText: "Missing", newText: "Finished")]]
+            )
+        }
+        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("index.html"), encoding: .utf8) == "<h1>Hello</h1>")
+        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("style.css"), encoding: .utf8) == "h1 { color: red; }")
+        let status = try await runtime.status(projectID: created.projectID)
+        #expect(status.revision == 1)
+        #expect(status.manifestHash == created.manifestHash)
+    }
+
     @Test func publishingToolApprovalPayloadBindsRevisionHashAndSize() async throws {
         let fixture = try makeRuntimeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

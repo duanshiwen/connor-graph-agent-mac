@@ -110,6 +110,22 @@ public struct InteractiveWebProjectStatus: Codable, Sendable, Equatable {
     public var publishedURL: URL?
 }
 
+public struct InteractiveWebDraftSource: Codable, Sendable, Equatable {
+    public var projectID: String
+    public var revision: Int
+    public var manifestHash: String
+    public var fileName: String
+    public var content: String
+
+    public init(projectID: String, revision: Int, manifestHash: String, fileName: String, content: String) {
+        self.projectID = projectID
+        self.revision = revision
+        self.manifestHash = manifestHash
+        self.fileName = fileName
+        self.content = content
+    }
+}
+
 public struct InteractiveWebExportResult: Codable, Sendable, Equatable {
     public var projectID: String
     public var collection: String
