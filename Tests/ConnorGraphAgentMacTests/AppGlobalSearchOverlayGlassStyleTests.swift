@@ -2,6 +2,13 @@ import Testing
 @testable import ConnorGraphAgentMac
 
 struct AppGlobalSearchOverlayGlassStyleTests {
+    @Test func resultPanelOnlyScrollsAfterReachingItsMaximumHeight() {
+        #expect(GlobalSearchOverlayLayout.maximumHeight == 640)
+        #expect(!GlobalSearchOverlayLayout.shouldScroll(contentHeight: 320))
+        #expect(!GlobalSearchOverlayLayout.shouldScroll(contentHeight: 640))
+        #expect(GlobalSearchOverlayLayout.shouldScroll(contentHeight: 641))
+    }
+
     @Test func rowHighlightOpacityIsStrongEnoughForDarkBackdrops() {
         #expect(GlobalSearchOverlayGlassStyle.selectedAccentOpacity >= 0.18)
         #expect(GlobalSearchOverlayGlassStyle.hoverAccentOpacity >= 0.10)
