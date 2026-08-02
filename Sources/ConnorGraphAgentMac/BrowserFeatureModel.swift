@@ -129,6 +129,8 @@ final class BrowserFeatureModel {
     var historySearchQuery = ""
     var internalBrowserEnabled = true
     private(set) var errorMessage: String?
+    private(set) var interactiveWebPreviewRuntime: InteractiveWebPreviewRuntime?
+    private(set) var interactiveWebPreviewStatus: InteractiveWebProjectStatus?
 
     @ObservationIgnored private let historyStore: BrowserHistoryStore?
     @ObservationIgnored private let bookmarkStore: BrowserBookmarkStore?
@@ -487,6 +489,20 @@ final class BrowserFeatureModel {
         }
     }
 
+    func openInteractiveWebPreview(status: InteractiveWebProjectStatus, preferredSessionID: String? = nil) {
+        let runtime = InteractiveWebPreviewRuntime(projectRoot: status.rootURL)
+        interactiveWebPreviewRuntime = runtime
+        interactiveWebPreviewStatus = status
+        runtime.load()
+        showWorkspace(for: preferredSessionID ?? currentSessionID)
+    }
+
+    func closeInteractiveWebPreview() {
+        interactiveWebPreviewRuntime?.webView.stopLoading()
+        interactiveWebPreviewRuntime = nil
+        interactiveWebPreviewStatus = nil
+    }
+
     func showWorkspace() {
         showWorkspace(for: currentSessionID)
     }
@@ -522,6 +538,7 @@ final class BrowserFeatureModel {
     }
 
     func resetWorkspaceBinding() {
+        closeInteractiveWebPreview()
         workspaceSessionID = nil
         isVisible = false
         workspaceSessionBinding = BrowserWorkspaceSessionBinding()
@@ -981,6 +998,7 @@ final class BrowserFeatureModel {
     func shutdown() {
         guard !isShutdown else { return }
         isShutdown = true
+        closeInteractiveWebPreview()
         automationRuntime.shutdown()
         for task in assistedFetchTimeoutTasksByID.values { task.cancel() }
         assistedFetchTimeoutTasksByID.removeAll()

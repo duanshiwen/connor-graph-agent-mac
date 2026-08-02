@@ -302,6 +302,27 @@ import ConnorGraphStore
     #expect(instruction.contains("先给结论"))
 }
 
+@Test func interactiveWebGuidanceIsConditionalOnRegisteredTools() throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryInteractiveWebInstruction-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let store = try SQLiteGraphKernelStore(path: appDirectory.appendingPathComponent("store.sqlite").path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(settingsStore: LocalToolsSettingsStore(), credentialStore: LocalToolsCredentialStore())
+    let disabled = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings)
+        .makeAgentLoopController().configuration.instructionAppendix
+    let paths = AppStoragePaths(applicationSupportDirectory: appDirectory.appendingPathComponent("data", isDirectory: true))
+    try paths.ensureDirectoryHierarchy()
+    let enabled = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: paths)
+        .makeAgentLoopController().configuration.instructionAppendix
+
+    #expect(!disabled.contains("interactive_web_publish"))
+    #expect(enabled.contains("share or showcase a result"))
+    #expect(enabled.contains("interactive_web_publish"))
+}
+
 @Test func agentLoopRuntimeFactoryRejectsPreviousWorkspaceAfterReplacement() async throws {
     let tempBase = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorFactoryWorkspaceReplacement-", isDirectory: true)

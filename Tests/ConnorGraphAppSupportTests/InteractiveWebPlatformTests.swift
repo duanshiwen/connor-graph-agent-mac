@@ -1,0 +1,135 @@
+import Foundation
+import Testing
+import ConnorGraphAgent
+@testable import ConnorGraphAppSupport
+
+struct InteractiveWebPlatformTests {
+    @Test func validatesChoiceBatch() throws {
+        let request = InteractiveWebChoiceRequest(choiceRequestID: "cr", accountID: "account", conversationID: "conversation", contextRevision: 1, selectors: [
+            .init(id: "access", prompt: "访问方式", mode: .single, options: [.init(id: "public", label: "公开")])
+        ])
+        try InteractiveWebChoiceValidator.validate(.init(choiceRequestID: "cr", selections: [.init(selectorID: "access", optionIDs: ["public"])]), for: request)
+        #expect(throws: InteractiveWebChoiceError.self) { try InteractiveWebChoiceValidator.validate(.init(choiceRequestID: "cr", selections: []), for: request) }
+    }
+
+    @Test func packagesStaticFilesDeterministically() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: root) }
+        try Data("<h1>Hello</h1>".utf8).write(to: root.appendingPathComponent("index.html")); try Data("body{}".utf8).write(to: root.appendingPathComponent("style.css"))
+        let manifest = try InteractiveWebPackager().package(rootURL: root)
+        #expect(manifest.files.map(\.path) == ["index.html", "style.css"])
+    }
+
+    @Test func manifestCarriesRegistrationSchema() {
+        let manifest = InteractiveWebManifest(files: [], collections: [
+            .init(name: "registrations", fields: [.init(name: "name", type: "string", required: true, maxLength: 80)], anonymousCreate: true)
+        ])
+        #expect(manifest.collections.first?.name == "registrations")
+    }
+
+    @Test func accessModesRemainProtocolStable() {
+        #expect([
+            InteractiveWebAccessMode.public.rawValue,
+            InteractiveWebAccessMode.password.rawValue,
+            InteractiveWebAccessMode.private.rawValue
+        ] == ["public", "password", "private"])
+    }
+
+    @Test func previewRoutesExactStatusToNativeHandler() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let recorder = InteractiveWebPreviewRecorder()
+        let runtime = InteractiveWebToolRuntime(
+            storagePaths: fixture.paths,
+            accountID: "account",
+            api: nil,
+            previewHandler: { status, sessionID in await recorder.record(status, sessionID: sessionID) }
+        )
+        let created = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<h1>Hello</h1>",
+            css: nil,
+            javascript: nil
+        )
+
+        let previewed = try await runtime.preview(projectID: created.projectID, sessionID: "session-1")
+        let routed = await recorder.value
+        #expect(routed?.0 == previewed)
+        #expect(routed?.1 == "session-1")
+    }
+
+    @Test func publishRejectsDraftChangedAfterApprovalBeforeNetworkAccess() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let approved = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<h1>Approved</h1>",
+            css: nil,
+            javascript: nil
+        )
+        try Data("<h1>Changed</h1>".utf8).write(
+            to: approved.rootURL.appendingPathComponent("index.html"),
+            options: .atomic
+        )
+
+        await #expect(throws: AgentToolError.self) {
+            _ = try await runtime.publish(
+                projectID: approved.projectID,
+                expectedManifestHash: approved.manifestHash,
+                accessMode: .private,
+                password: nil
+            )
+        }
+    }
+
+    @Test func publishingToolApprovalPayloadBindsRevisionHashAndSize() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let status = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<h1>Hello</h1>",
+            css: nil,
+            javascript: nil
+        )
+        let tool = InteractiveWebAgentTool(operation: .publish, runtime: runtime)
+        let call = AgentToolCall(
+            name: tool.name,
+            argumentsJSON: "{\"projectID\":\"\(status.projectID)\",\"manifestHash\":\"\(status.manifestHash)\",\"accessMode\":\"private\"}"
+        )
+        let context = AgentToolExecutionContext(
+            runID: "run-1",
+            sessionID: "session-1",
+            groupID: "account",
+            userPrompt: "publish",
+            toolCallID: "call-1",
+            policyEngine: AgentPolicyEngine(permissionMode: .askToWrite)
+        )
+
+        let payload = await tool.approvalPayloadJSON(for: call, context: context)
+        let object = try #require(JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any])
+        #expect(object["revision"] as? Int == status.revision)
+        #expect(object["manifestHash"] as? String == status.manifestHash)
+        #expect(object["fileCount"] as? Int == status.fileCount)
+        #expect((object["totalBytes"] as? NSNumber)?.int64Value == status.totalBytes)
+        #expect(object["accessMode"] as? String == "private")
+    }
+
+    private func makeRuntimeFixture() throws -> (paths: AppStoragePaths, root: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ConnorInteractiveWebRuntime-", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        return (paths, root)
+    }
+}
+
+private actor InteractiveWebPreviewRecorder {
+    private(set) var value: (InteractiveWebProjectStatus, String)?
+    func record(_ status: InteractiveWebProjectStatus, sessionID: String) { value = (status, sessionID) }
+}
