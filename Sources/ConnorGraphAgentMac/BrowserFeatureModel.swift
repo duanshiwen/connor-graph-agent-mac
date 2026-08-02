@@ -513,8 +513,10 @@ final class BrowserFeatureModel {
             webView: runtime.webView,
             isVisible: true
         )
+        var previewStatus = status
+        previewStatus.previewTabID = tabID.uuidString
         interactiveWebPreviewRuntime = runtime
-        interactiveWebPreviewStatus = status
+        interactiveWebPreviewStatus = previewStatus
         interactiveWebPreviewTabID = tabID
         interactiveWebPreviewSessionID = sessionID
         runtime.load()

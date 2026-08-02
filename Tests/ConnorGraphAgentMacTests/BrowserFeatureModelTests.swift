@@ -65,6 +65,7 @@ struct BrowserFeatureModelTests {
         )
 
         let tabID = fixture.model.openInteractiveWebPreview(status: status, preferredSessionID: "session-1")
+        #expect(fixture.model.interactiveWebPreviewStatus?.previewTabID == tabID)
         let listed = try await fixture.model.performBrowserControl(BrowserControlRequest(
             operation: .listTabs,
             sessionID: "session-1"
