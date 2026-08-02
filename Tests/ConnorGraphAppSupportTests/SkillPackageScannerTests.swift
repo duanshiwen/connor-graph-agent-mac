@@ -26,6 +26,22 @@ private func writeCommercialSkill(root: URL, slug: String, name: String, extraFr
 
 @Suite("Commercial Skill Package Scanner Tests")
 struct SkillPackageScannerTests {
+    @Test func applicationDefaultIncludesWebQualityInspector() throws {
+        let root = temporarySkillScannerRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storagePaths = AppStoragePaths(
+            applicationSupportDirectory: root,
+            skillsDirectory: root.appendingPathComponent("user", isDirectory: true)
+        )
+
+        let snapshot = SkillPackageScanner.applicationDefault().scan(storagePaths: storagePaths)
+
+        let package = try #require(snapshot.resolution(slug: "web-quality-inspector")?.selected)
+        #expect(package.sourceTier == .bundled)
+        #expect(package.manifest.allowedTools.contains("browser_quality_audit"))
+        #expect(package.instructions.contains("Evidence matrix"))
+    }
+
     @Test func scansOnlyApplicationUserSkillsByDefault() throws {
         let root = temporarySkillScannerRoot()
         defer { try? FileManager.default.removeItem(at: root) }

@@ -28,7 +28,7 @@ public struct SkillChatPromptAugmentor {
 
     public init(
         storagePaths: AppStoragePaths,
-        scanner: SkillPackageScanner = SkillPackageScanner(),
+        scanner: SkillPackageScanner = .applicationDefault(),
         parser: SkillInvocationParser = SkillInvocationParser(),
         runtime: SkillInvocationRuntime = SkillInvocationRuntime()
     ) {

@@ -46,6 +46,13 @@ public struct SkillPackageScanner {
         self.bundledSkillsDirectory = bundledSkillsDirectory
     }
 
+    public static func applicationDefault(fileManager: FileManager = .default) -> SkillPackageScanner {
+        SkillPackageScanner(
+            fileManager: fileManager,
+            bundledSkillsDirectory: Bundle.module.url(forResource: "Skills", withExtension: nil)
+        )
+    }
+
     public func defaultRoots(storagePaths: AppStoragePaths) -> [SkillPackageScanRoot] {
         var roots: [SkillPackageScanRoot] = []
         if let bundledSkillsDirectory { roots.append(SkillPackageScanRoot(tier: .bundled, rootURL: bundledSkillsDirectory)) }

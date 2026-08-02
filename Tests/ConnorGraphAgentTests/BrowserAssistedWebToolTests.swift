@@ -28,7 +28,11 @@ struct BrowserAssistedWebToolTests {
         let recorder = Recorder()
         let handler: BrowserControlHandler = { request in
             recorder.request = request
-            return BrowserControlResponse(contentText: "snapshot", contentJSON: #"{"nodes":[]}"#)
+            return BrowserControlResponse(
+                contentText: "snapshot",
+                contentJSON: #"{"nodes":[]}"#,
+                modelContentParts: [.imageDataURL("data:image/png;base64,AA==", mimeType: "image/png")]
+            )
         }
         let tool = BrowserSnapshotTool(handler: handler)
         let result = try await tool.execute(
@@ -44,6 +48,7 @@ struct BrowserAssistedWebToolTests {
         #expect(recorder.request?.tabID == "tab-1")
         #expect(recorder.request?.maxNodes == 500)
         #expect(result.contentText == "snapshot")
+        #expect(result.modelContentParts?.first?.kind == .imageDataURL)
 
         let tabsTool = BrowserTabsTool(handler: handler)
         #expect(tabsTool.description.contains("tabID"))

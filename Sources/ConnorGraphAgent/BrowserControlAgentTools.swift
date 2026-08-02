@@ -63,11 +63,18 @@ public struct BrowserControlResponse: Sendable, Equatable {
     public var contentText: String
     public var contentJSON: String?
     public var citations: [String]
+    public var modelContentParts: [AgentModelMessageContentPart]?
 
-    public init(contentText: String, contentJSON: String? = nil, citations: [String] = []) {
+    public init(
+        contentText: String,
+        contentJSON: String? = nil,
+        citations: [String] = [],
+        modelContentParts: [AgentModelMessageContentPart]? = nil
+    ) {
         self.contentText = contentText
         self.contentJSON = contentJSON
         self.citations = citations
+        self.modelContentParts = modelContentParts
     }
 }
 
@@ -115,7 +122,8 @@ private enum BrowserControlToolSupport {
             toolName: toolName,
             contentText: response.contentText,
             contentJSON: response.contentJSON,
-            citations: response.citations
+            citations: response.citations,
+            modelContentParts: response.modelContentParts
         )
     }
 

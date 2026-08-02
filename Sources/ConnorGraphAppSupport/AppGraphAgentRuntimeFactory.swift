@@ -407,7 +407,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             allowedToolNames: allowedMCPToolNames
         )
         if let storagePaths {
-            let scanner = SkillPackageScanner()
+            let scanner = SkillPackageScanner.applicationDefault()
             let snapshot = scanner.scan(storagePaths: storagePaths)
             registry.register(SkillActivateTool(packages: snapshot.packages))
             registry.register(SkillListTool(packages: snapshot.packages))

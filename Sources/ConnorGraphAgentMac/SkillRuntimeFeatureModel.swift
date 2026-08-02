@@ -299,7 +299,7 @@ final class SkillRuntimeFeatureModel {
         guard let storagePaths else {
             return Self.emptyPresentation(warnings: ["Storage paths are not initialized."])
         }
-        let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths)
+        let snapshot = SkillPackageScanner.applicationDefault().scan(storagePaths: storagePaths)
         return SkillCommercialUIPresentationBuilder().build(snapshot: snapshot)
     }
 

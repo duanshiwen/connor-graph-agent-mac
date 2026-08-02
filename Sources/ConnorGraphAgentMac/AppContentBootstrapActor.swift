@@ -105,7 +105,7 @@ actor AppContentBootstrapActor {
     private nonisolated static func loadSkills(paths: AppStoragePaths) -> StartupDomainResult<SkillRuntimeContentSnapshot> {
         do {
             let definitions = try AppSkillRuntimeRepository(storagePaths: paths).list()
-            let scanSnapshot = SkillPackageScanner().scan(storagePaths: paths)
+            let scanSnapshot = SkillPackageScanner.applicationDefault().scan(storagePaths: paths)
             let presentation = SkillCommercialUIPresentationBuilder().build(snapshot: scanSnapshot)
             return .success(SkillRuntimeContentSnapshot(
                 definitions: definitions,

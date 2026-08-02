@@ -40,6 +40,9 @@ let package = Package(
                 "ConnorGraphAgent",
                 .product(name: "MailCore", package: "MailCoreSPM")
             ],
+            resources: [
+                .copy("Resources/Skills")
+            ],
             linkerSettings: [
                 .linkedFramework("EventKit"),
                 .linkedFramework("Contacts"),

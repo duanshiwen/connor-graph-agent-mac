@@ -336,7 +336,10 @@ final class BrowserAutomationRuntime {
         return BrowserControlResponse(
             contentText: "Browser screenshot saved to \(url.path)",
             contentJSON: Self.jsonString(["path": url.path, "fullPage": request.fullPage, "tabID": resolved.tab.id.uuidString]),
-            citations: webView.url.map { [$0.absoluteString] } ?? []
+            citations: webView.url.map { [$0.absoluteString] } ?? [],
+            modelContentParts: [
+                .imageDataURL("data:image/png;base64,\(png.base64EncodedString())", mimeType: "image/png", detail: "auto")
+            ]
         )
     }
 
@@ -385,7 +388,8 @@ final class BrowserAutomationRuntime {
         return BrowserControlResponse(
             contentText: "Web quality audit completed at \(viewportWidth)x\(viewportHeight): \(issueCount) issue(s), \(errorCount) captured runtime error(s). Screenshot evidence: \(screenshotResponse.contentText)",
             contentJSON: json,
-            citations: webView.url.map { [$0.absoluteString] } ?? []
+            citations: webView.url.map { [$0.absoluteString] } ?? [],
+            modelContentParts: screenshotResponse.modelContentParts
         )
     }
 
