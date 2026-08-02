@@ -51,7 +51,7 @@ public struct AssistantAttentionPack: Codable, Sendable, Equatable {
 }
 
 public struct AssistantAttentionCoordinator: Sendable {
-    public static let internalToolNames: Set<String> = ["attention_brief", "rss_search_items"]
+    public static let internalToolNames: Set<String> = ["attention_brief"]
     public static let capabilityUnavailableError = "capability unavailable"
 
     public var maximumSectionCharacters: Int
