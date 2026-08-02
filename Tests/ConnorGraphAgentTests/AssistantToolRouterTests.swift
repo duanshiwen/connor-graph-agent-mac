@@ -27,3 +27,75 @@ import Testing
     #expect(matches.map(\.name) == ["mail_search_messages"])
     #expect(matches.first?.inputSchema.jsonObject["properties"] != nil)
 }
+
+@Test func toolSearchMatchesChineseAndMixedLanguageQueries() {
+    let definitions = [
+        AgentToolDefinition(name: "mail_list_recent_messages", description: "List recent mail messages", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "calendar_upcoming_events", description: "List upcoming calendar events", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "rss_list_items", description: "List RSS item summaries", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let matches = AssistantToolRouter().discover(
+        query: "读取今日日历、近两日邮件和近48小时RSS",
+        definitions: definitions
+    )
+
+    #expect(Set(matches.map(\.name)) == [
+        "calendar_upcoming_events",
+        "mail_list_recent_messages",
+        "rss_list_items"
+    ])
+}
+
+@Test func toolCatalogIncludesNamespacePurposeInsteadOfCountsAlone() {
+    let definitions = [
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let catalog = AssistantToolRouter().compactCatalogSummary(definitions: definitions)
+
+    #expect(catalog.contains("mail accounts, recent messages"))
+    #expect(catalog.contains("邮件、邮箱与收件箱"))
+}
+
+@Test func finalAttentionRSSSearchRemainsPubliclyDiscoverable() {
+    let definitions = [
+        AgentToolDefinition(name: "attention_brief", description: "Internal attention aggregation", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "rss_search_items", description: "Search RSS items", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let route = AssistantToolRouter().route(definitions: definitions)
+    let matches = AssistantToolRouter().discover(query: "近48小时RSS", definitions: definitions)
+
+    #expect(!route.discoverableDefinitions.contains { $0.name == "attention_brief" })
+    #expect(route.discoverableDefinitions.contains { $0.name == "rss_search_items" })
+    #expect(matches.map(\.name) == ["rss_search_items"])
+}
+
+@Test func toolDiscoveryReportsRecoverableNamespaceMetadataForNoMatch() {
+    let definitions = [
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "calendar_search_events", description: "Search calendar events", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let result = AssistantToolRouter().discovery(query: "量子纠缠实验", definitions: definitions)
+
+    #expect(result.tools.isEmpty)
+    #expect(result.matchedNamespaces.isEmpty)
+    #expect(result.availableNamespaces == ["calendar", "mail"])
+}
+
+@Test func toolDiscoveryDoesNotReportNamespacesOutsideTheExposedDefinitions() {
+    let exposedDefinitions = [
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let result = AssistantToolRouter().discovery(
+        query: "读取日历和邮件",
+        definitions: exposedDefinitions
+    )
+
+    #expect(result.matchedNamespaces == ["mail"])
+    #expect(result.availableNamespaces == ["mail"])
+    #expect(result.tools.map(\.name) == ["mail_search_messages"])
+}

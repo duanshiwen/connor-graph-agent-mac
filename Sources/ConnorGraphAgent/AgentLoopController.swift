@@ -328,7 +328,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     runtimeContext.trustedPrompt,
                     environmentText,
                     AssistantEvidenceReducer().render(assistantBootstrap.contextPack),
-                    assistantToolRouter.compactCatalogSummary(definitions: toolRegistry.definitions),
+                    assistantToolRouter.compactCatalogSummary(definitions: exposedToolDefinitions),
                     "Memory, user-profile context, and Note candidates were already loaded once by the deterministic assistant bootstrap. Do not repeat those generic startup reads. Shell and ApplyPatch are direct workspace tools. Other applicable native tools are supplied through the routed catalog above."
                 ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")
                 let auditEstimator = AgentModelContextGuard().estimator
@@ -901,6 +901,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             request: request,
                             run: &run,
                             policy: policy,
+                            discoverableToolDefinitions: exposedToolDefinitions,
                             continuation: continuation
                         )
 
@@ -1458,6 +1459,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         request: AgentChatRequest,
         run: inout AgentRun,
         policy: AgentPolicyEngine,
+        discoverableToolDefinitions: [AgentToolDefinition],
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> [AgentToolBatchResult] {
         if canExecuteInParallel(calls) {
@@ -1477,6 +1479,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 request: request,
                 run: &run,
                 policy: policy,
+                discoverableToolDefinitions: discoverableToolDefinitions,
                 continuation: continuation
             )
             results.append(AgentToolBatchResult(call: call, result: result))
@@ -1583,6 +1586,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         request: AgentChatRequest,
         run: inout AgentRun,
         policy: AgentPolicyEngine,
+        discoverableToolDefinitions: [AgentToolDefinition],
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentToolResult {
         yield(.toolRequested(call), to: continuation, recorder: eventRecorder)
@@ -1622,6 +1626,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     call: call,
                     context: context,
                     run: &run,
+                    discoverableToolDefinitions: discoverableToolDefinitions,
                     continuation: continuation
                 )
             } else {
@@ -1680,27 +1685,38 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         call: AgentToolCall,
         context: AgentToolExecutionContext,
         run: inout AgentRun,
+        discoverableToolDefinitions: [AgentToolDefinition],
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentToolResult {
         if call.name == AssistantDecisionToolContract.searchName {
             let arguments = try AgentToolArguments(json: call.argumentsJSON)
             let query = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !query.isEmpty else { throw AgentToolError.invalidArguments("query is required") }
-            let definitions = AssistantToolRouter().discover(
+            let discovery = AssistantToolRouter().discovery(
                 query: query,
-                definitions: toolRegistry.definitions,
+                definitions: discoverableToolDefinitions,
                 maximumResults: arguments.int("maxResults") ?? 8
             )
-            let tools: [[String: Any]] = definitions.map { definition in
+            let tools: [[String: Any]] = discovery.tools.map { definition in
                 [
                     "name": definition.name,
                     "description": definition.description,
                     "parameters": definition.inputSchema.jsonObject
                 ]
             }
+            let matchStatus = tools.isEmpty ? "no_match" : "matched"
+            let suggestedQueries = discovery.availableNamespaces.prefix(8).map { "\($0) tools" }
             let data = try JSONSerialization.data(withJSONObject: [
+                "success": true,
+                "matchStatus": matchStatus,
+                "reason": tools.isEmpty
+                    ? "No tools matched the query. Retry once using one or more names from availableNamespaces."
+                    : "Matched callable tools. Invoke the returned exact names and schemas to perform the underlying operation.",
                 "query": query,
                 "returnedItems": tools.count,
+                "matchedNamespaces": discovery.matchedNamespaces,
+                "availableNamespaces": discovery.availableNamespaces,
+                "suggestedQueries": suggestedQueries,
                 "tools": tools
             ], options: [.sortedKeys])
             let json = String(data: data, encoding: .utf8) ?? "{}"
