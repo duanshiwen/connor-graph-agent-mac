@@ -26,6 +26,13 @@ struct BrowserWorkspaceChatActions {
     var reportError: (String) -> Void
 }
 
+private struct InteractiveWebPreviewWebView: NSViewRepresentable {
+    let webView: WKWebView
+
+    func makeNSView(context: Context) -> WKWebView { webView }
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
+}
+
 struct BrowserWorkspaceView: View {
     @Bindable var model: BrowserFeatureModel
     var chat: BrowserWorkspaceChatActions
@@ -49,6 +56,7 @@ struct BrowserWorkspaceView: View {
     @State private var isVerticalTabSidebarHovered = false
     @State private var verticalTabFilter = ""
     @State private var collapsedVerticalTabGroupIDs: Set<String> = []
+    @State private var interactiveWebAccessMode = "public"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -237,6 +245,77 @@ struct BrowserWorkspaceView: View {
             markVisibleTabInLiveStore()
             questionText = ""
         }
+        .overlay {
+            if let runtime = model.interactiveWebPreviewRuntime,
+               let status = model.interactiveWebPreviewStatus {
+                interactiveWebPreview(runtime: runtime, status: status)
+            }
+        }
+    }
+
+    private func interactiveWebPreview(
+        runtime: InteractiveWebPreviewRuntime,
+        status: InteractiveWebProjectStatus
+    ) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button(action: closeInteractiveWebPreview) {
+                    Image(systemName: "chevron.left")
+                }
+                .buttonStyle(.plain)
+                .help("关闭预览")
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(status.name).font(.headline).lineLimit(1)
+                    Text("本地安全预览 · 版本 \(status.revision)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 54)
+            .background(Color(nsColor: .windowBackgroundColor))
+
+            Divider()
+            InteractiveWebPreviewWebView(webView: runtime.webView)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
+
+            HStack(spacing: 12) {
+                Picker("访问方式", selection: $interactiveWebAccessMode) {
+                    Text("公开访问").tag("public")
+                    Text("仅自己").tag("private")
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+
+                Spacer()
+                Button("确认发布到网上", systemImage: "arrow.up.circle.fill") {
+                    requestInteractiveWebPublish(status)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(chat.isSubmitting)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 58)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func requestInteractiveWebPublish(_ status: InteractiveWebProjectStatus) {
+        let accessMode = interactiveWebAccessMode
+        model.closeInteractiveWebPreview()
+        Task {
+            let prompt = "请发布当前互动网页。projectID=\(status.projectID)，manifestHash=\(status.manifestHash)，accessMode=\(accessMode)。请调用 interactive_web_publish，并以工具结果为准。"
+            _ = await chat.submit(prompt, "发布互动网页")
+        }
+    }
+
+    private func closeInteractiveWebPreview() {
+        model.closeInteractiveWebPreview()
+        model.returnFromWorkspace()
     }
 
     private var activeSessionID: String {

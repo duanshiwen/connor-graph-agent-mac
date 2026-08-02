@@ -3,6 +3,8 @@ import ConnorGraphAgent
 import ConnorGraphCore
 
 public actor InteractiveWebToolRuntime {
+    public typealias PreviewHandler = @Sendable (InteractiveWebProjectStatus, String) async -> Void
+
     private let projectsRoot: URL
     private let exportsRoot: URL
     private let accountID: String
@@ -10,11 +12,13 @@ public actor InteractiveWebToolRuntime {
     private let api: InteractiveWebAPIClient?
     private let packager: InteractiveWebPackager
     private let fileManager: FileManager
+    private let previewHandler: PreviewHandler?
 
     public init(
         storagePaths: AppStoragePaths,
         accountID: String,
         api: InteractiveWebAPIClient?,
+        previewHandler: PreviewHandler? = nil,
         packager: InteractiveWebPackager = InteractiveWebPackager(),
         fileManager: FileManager = .default
     ) {
@@ -24,6 +28,7 @@ public actor InteractiveWebToolRuntime {
         self.accountID = accountID
         self.store = InteractiveWebLocalStore(storagePaths: storagePaths)
         self.api = api
+        self.previewHandler = previewHandler
         self.packager = packager
         self.fileManager = fileManager
     }
@@ -57,6 +62,12 @@ public actor InteractiveWebToolRuntime {
     public func status(projectID: String) async throws -> InteractiveWebProjectStatus {
         let project = try await requireProject(projectID)
         return try status(project)
+    }
+
+    public func preview(projectID: String, sessionID: String) async throws -> InteractiveWebProjectStatus {
+        let current = try await status(projectID: projectID)
+        await previewHandler?(current, sessionID)
+        return current
     }
 
     public func publish(projectID: String, expectedManifestHash: String, accessMode: InteractiveWebAccessMode, password: String?) async throws -> InteractiveWebProjectStatus {
@@ -265,7 +276,7 @@ public struct InteractiveWebAgentTool: AgentTool {
             status = try await runtime.updateDraft(projectID: requiredString("projectID", arguments), html: html, css: css, javascript: javascript)
             text = "Local webpage draft updated."
         case .preview:
-            status = try await runtime.status(projectID: requiredString("projectID", arguments)); text = "Secure local preview is ready."
+            status = try await runtime.preview(projectID: requiredString("projectID", arguments), sessionID: context.sessionID); text = "Secure local preview is ready."
         case .getStatus:
             status = try await runtime.status(projectID: requiredString("projectID", arguments)); text = "Interactive webpage status loaded."
         case .publish:

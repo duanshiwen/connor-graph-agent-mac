@@ -841,6 +841,14 @@ final class AppRuntimeLifecycle {
                 rssRuntime: rssFeatureModel.agentRuntime,
                 cloudKnowledgeConsumptionClient: cloudKnowledgeConsumptionClient,
                 interactiveWebAPIClient: interactiveWebAPIClient,
+                interactiveWebPreviewHandler: { [weak self] status, sessionID in
+                    await MainActor.run {
+                        self?.browserFeatureModel.openInteractiveWebPreview(
+                            status: status,
+                            preferredSessionID: sessionID
+                        )
+                    }
+                },
                 browserAssistedSearchHandler: { [weak self] request in
                     await MainActor.run {
                         guard let self else { return nil }
