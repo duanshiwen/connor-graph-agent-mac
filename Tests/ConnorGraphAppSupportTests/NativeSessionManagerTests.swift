@@ -191,7 +191,7 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
         backend: AgentLoopBackend(loopController: loop),
         sessionRepository: repository,
         session: session,
-        contextWindowSize: 100,
+        maximumInputTokens: 100,
         rollingSummaryProvider: AnyLLMProvider(compressionProvider),
         rollingSummaryModelID: "summary-test-model"
     )
