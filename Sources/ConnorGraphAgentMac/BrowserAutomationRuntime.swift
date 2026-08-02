@@ -75,6 +75,7 @@ final class BrowserAutomationRuntime {
             case .navigate: return try navigate(request)
             case .wait: return try await wait(request)
             case .screenshot: return try await screenshot(request)
+            case .qualityAudit: return try await qualityAudit(request)
             case .interact: return try await interact(request, allowSubmit: false, uploadOnly: false, downloadOnly: false)
             case .submit: return try await interact(request, allowSubmit: true, uploadOnly: false, downloadOnly: false)
             case .upload: return try await interact(request, allowSubmit: false, uploadOnly: true, downloadOnly: false)
@@ -335,7 +336,60 @@ final class BrowserAutomationRuntime {
         return BrowserControlResponse(
             contentText: "Browser screenshot saved to \(url.path)",
             contentJSON: Self.jsonString(["path": url.path, "fullPage": request.fullPage, "tabID": resolved.tab.id.uuidString]),
-            citations: webView.url.map { [$0.absoluteString] } ?? []
+            citations: webView.url.map { [$0.absoluteString] } ?? [],
+            modelContentParts: [
+                .imageDataURL("data:image/png;base64,\(png.base64EncodedString())", mimeType: "image/png", detail: "auto")
+            ]
+        )
+    }
+
+    private func qualityAudit(_ request: BrowserControlRequest) async throws -> BrowserControlResponse {
+        guard let viewportWidth = request.viewportWidth, let viewportHeight = request.viewportHeight else {
+            throw BrowserAutomationRuntimeError.invalidRequest("browser_quality_audit requires viewportWidth and viewportHeight")
+        }
+        let resolved = try resolveTab(request)
+        let webView = ensureWebView(
+            sessionID: request.sessionID,
+            tabID: resolved.tab.id,
+            initialURLString: resolved.tab.restoredURLString
+        ).webView
+        let originalFrame = webView.frame
+        webView.setFrameSize(NSSize(width: viewportWidth, height: viewportHeight))
+        defer { webView.frame = originalFrame }
+
+        try await Task.sleep(for: .milliseconds(120))
+        let value = try await webView.callAsyncJavaScript(
+            Self.qualityAuditScript,
+            arguments: [:],
+            in: nil,
+            contentWorld: .page
+        )
+        guard let auditJSON = value as? String,
+              var audit = Self.jsonObject(auditJSON)
+        else {
+            throw BrowserAutomationRuntimeError.pageRejected("The page did not return a web quality audit.")
+        }
+
+        let screenshotRequest = BrowserControlRequest(
+            operation: .screenshot,
+            sessionID: request.sessionID,
+            tabID: resolved.tab.id.uuidString,
+            fullPage: request.fullPage
+        )
+        let screenshotResponse = try await screenshot(screenshotRequest)
+        if let screenshotJSON = screenshotResponse.contentJSON,
+           let screenshot = Self.jsonObject(screenshotJSON) {
+            audit["screenshot"] = screenshot
+        }
+        audit["requestedViewport"] = ["width": viewportWidth, "height": viewportHeight]
+        let json = Self.jsonString(audit)
+        let issueCount = (audit["issues"] as? [Any])?.count ?? 0
+        let errorCount = (audit["runtimeErrors"] as? [Any])?.count ?? 0
+        return BrowserControlResponse(
+            contentText: "Web quality audit completed at \(viewportWidth)x\(viewportHeight): \(issueCount) issue(s), \(errorCount) captured runtime error(s). Screenshot evidence: \(screenshotResponse.contentText)",
+            contentJSON: json,
+            citations: webView.url.map { [$0.absoluteString] } ?? [],
+            modelContentParts: screenshotResponse.modelContentParts
         )
     }
 
@@ -719,5 +773,108 @@ final class BrowserAutomationRuntime {
     element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     element.focus();
     return JSON.stringify({ ok: true, nodeRef: reference });
+    """#
+
+    private static let qualityAuditScript = #"""
+    const issues = [];
+    const limit = 80;
+    const clean = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 180);
+    const add = (code, severity, message, element) => {
+      if (issues.length >= limit) return;
+      const rect = element?.getBoundingClientRect?.();
+      issues.push({
+        code,
+        severity,
+        message,
+        element: element ? {
+          tag: element.tagName?.toLowerCase() || '',
+          id: clean(element.id),
+          text: clean(element.getAttribute?.('aria-label') || element.innerText || element.alt || element.title),
+          bounds: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null
+        } : null
+      });
+    };
+    const visible = element => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0 && rect.width > 0 && rect.height > 0;
+    };
+    const accessibleName = element => {
+      const labelledBy = element.getAttribute('aria-labelledby');
+      if (labelledBy) {
+        const value = labelledBy.split(/\s+/).map(id => document.getElementById(id)?.innerText || '').join(' ');
+        if (clean(value)) return clean(value);
+      }
+      if (element.getAttribute('aria-label')) return clean(element.getAttribute('aria-label'));
+      if (element.labels?.length) return clean(Array.from(element.labels).map(label => label.innerText).join(' '));
+      return clean(element.alt || element.title || element.innerText || element.value);
+    };
+
+    const root = document.documentElement;
+    if (Math.max(root.scrollWidth, document.body?.scrollWidth || 0) > innerWidth + 1) {
+      add('horizontal-overflow', 'error', 'Page content is wider than the viewport.', root);
+    }
+    if (!document.querySelector('meta[name="viewport"]')) add('missing-viewport-meta', 'error', 'Missing responsive viewport metadata.', null);
+    if (!clean(root.getAttribute('lang'))) add('missing-document-language', 'warning', 'The document does not declare a language.', root);
+    if (!document.querySelector('main,[role="main"]')) add('missing-main-landmark', 'warning', 'No main content landmark was found.', null);
+
+    const idCounts = new Map();
+    for (const element of Array.from(document.querySelectorAll('[id]')).slice(0, 2000)) {
+      idCounts.set(element.id, (idCounts.get(element.id) || 0) + 1);
+    }
+    for (const [id, count] of idCounts) {
+      if (id && count > 1) add('duplicate-id', 'error', `ID "${clean(id)}" is used ${count} times.`, document.getElementById(id));
+    }
+
+    for (const image of Array.from(document.images).slice(0, 300)) {
+      if (visible(image) && !image.hasAttribute('alt')) add('missing-image-alt', 'error', 'Visible image is missing an alt attribute.', image);
+    }
+    const fields = Array.from(document.querySelectorAll('input:not([type="hidden"]),select,textarea')).slice(0, 300);
+    for (const field of fields) {
+      if (visible(field) && !accessibleName(field)) add('unlabeled-field', 'error', 'Visible form field has no accessible name.', field);
+    }
+    const controls = Array.from(document.querySelectorAll('button,a[href],[role="button"],[role="link"]')).slice(0, 500);
+    for (const control of controls) {
+      if (!visible(control)) continue;
+      const rect = control.getBoundingClientRect();
+      if (!accessibleName(control)) add('unnamed-control', 'error', 'Interactive control has no accessible name.', control);
+      if (rect.width < 24 || rect.height < 24) add('small-target', 'warning', 'Interactive target is smaller than 24 by 24 CSS pixels.', control);
+    }
+
+    const content = Array.from(document.querySelectorAll('body *')).slice(0, 1800);
+    for (const element of content) {
+      if (!visible(element)) continue;
+      const rect = element.getBoundingClientRect();
+      if (rect.right > innerWidth + 1 || rect.left < -1) add('offscreen-content', 'error', 'Visible content extends outside the horizontal viewport.', element);
+      const style = getComputedStyle(element);
+      const clipsX = ['hidden', 'clip'].includes(style.overflowX) && element.scrollWidth > element.clientWidth + 1;
+      const clipsY = ['hidden', 'clip'].includes(style.overflowY) && element.scrollHeight > element.clientHeight + 1;
+      if ((clipsX || clipsY) && clean(element.innerText) && !['INPUT', 'TEXTAREA'].includes(element.tagName)) {
+        add('clipped-content', 'warning', 'Rendered text is clipped by its container.', element);
+      }
+    }
+
+    let previousHeading = 0;
+    for (const heading of Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).filter(visible).slice(0, 200)) {
+      const level = Number(heading.tagName.slice(1));
+      if (previousHeading && level > previousHeading + 1) add('heading-order', 'warning', `Heading level jumps from h${previousHeading} to h${level}.`, heading);
+      previousHeading = level;
+    }
+    const diagnostics = Array.isArray(globalThis.__connorBrowserDiagnostics) ? globalThis.__connorBrowserDiagnostics : [];
+    const runtimeErrors = diagnostics.slice(-50).map(entry => ({
+      level: clean(entry.level),
+      message: clean(entry.message),
+      timestamp: clean(entry.timestamp)
+    }));
+    return JSON.stringify({
+      url: location.href || '',
+      title: document.title || '',
+      viewport: { width: innerWidth || 0, height: innerHeight || 0 },
+      document: { width: Math.max(root.scrollWidth, document.body?.scrollWidth || 0), height: Math.max(root.scrollHeight, document.body?.scrollHeight || 0) },
+      issueCount: issues.length,
+      truncated: issues.length >= limit,
+      issues,
+      runtimeErrors
+    });
     """#
 }

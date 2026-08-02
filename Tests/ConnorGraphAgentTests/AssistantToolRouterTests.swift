@@ -48,6 +48,20 @@ import Testing
     #expect(matches.first?.inputSchema.jsonObject["properties"] != nil)
 }
 
+@Test func toolSearchCanRecoverDirectWorkspaceToolSchemas() {
+    let definitions = [
+        AgentToolDefinition(name: "Shell", description: "Inspect and search workspace files", inputSchema: .closedObject(properties: ["command": .string(description: "Command")], required: ["command"])),
+        AgentToolDefinition(name: "ApplyPatch", description: "Edit workspace files", inputSchema: .closedObject(properties: [:], required: [])),
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .closedObject(properties: [:], required: []))
+    ]
+
+    let result = AssistantToolRouter().discovery(query: "本地文件读取工具", definitions: definitions)
+
+    #expect(Set(result.tools.map(\.name)) == ["Shell", "ApplyPatch"])
+    #expect(result.matchedNamespaces == ["workspace"])
+    #expect(result.availableNamespaces.contains("workspace"))
+}
+
 @Test func toolSearchMatchesChineseAndMixedLanguageQueries() {
     let definitions = [
         AgentToolDefinition(name: "mail_list_recent_messages", description: "List recent mail messages", inputSchema: .object(properties: [:], required: [])),
@@ -120,8 +134,23 @@ import Testing
     let result = AssistantToolRouter().discovery(query: "量子纠缠实验", definitions: definitions)
 
     #expect(result.tools.isEmpty)
+    #expect(result.requestedNamespaces.isEmpty)
     #expect(result.matchedNamespaces.isEmpty)
     #expect(result.availableNamespaces == ["calendar", "mail"])
+}
+
+@Test func toolDiscoveryReportsRequestedButUnavailableNamespace() {
+    let definitions = [
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let result = AssistantToolRouter().discovery(query: "读取本地工作区文件", definitions: definitions)
+
+    #expect(result.tools.isEmpty)
+    #expect(result.requestedNamespaces == ["workspace"])
+    #expect(result.matchedNamespaces.isEmpty)
+    #expect(result.unavailableNamespaces == ["workspace"])
+    #expect(result.availableNamespaces == ["mail"])
 }
 
 @Test func toolDiscoveryDoesNotReportNamespacesOutsideTheExposedDefinitions() {

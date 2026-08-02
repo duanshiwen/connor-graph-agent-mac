@@ -91,8 +91,9 @@ public struct LocalInteractiveWebProject: Codable, Sendable, Equatable, Identifi
     public var latestDeploymentID: String?
     public var publishedURL: URL?
     public var revision: Int?
-    public init(id: String = UUID().uuidString, accountID: String, name: String, rootURL: URL, conversationID: String, remoteProjectID: String? = nil, remoteSiteID: String? = nil, latestDeploymentID: String? = nil, publishedURL: URL? = nil, revision: Int? = 1) {
-        self.id = id; self.accountID = accountID; self.name = name; self.rootURL = rootURL; self.conversationID = conversationID; self.remoteProjectID = remoteProjectID; self.remoteSiteID = remoteSiteID; self.latestDeploymentID = latestDeploymentID; self.publishedURL = publishedURL; self.revision = revision
+    public var qualityReview: InteractiveWebQualityReview?
+    public init(id: String = UUID().uuidString, accountID: String, name: String, rootURL: URL, conversationID: String, remoteProjectID: String? = nil, remoteSiteID: String? = nil, latestDeploymentID: String? = nil, publishedURL: URL? = nil, revision: Int? = 1, qualityReview: InteractiveWebQualityReview? = nil) {
+        self.id = id; self.accountID = accountID; self.name = name; self.rootURL = rootURL; self.conversationID = conversationID; self.remoteProjectID = remoteProjectID; self.remoteSiteID = remoteSiteID; self.latestDeploymentID = latestDeploymentID; self.publishedURL = publishedURL; self.revision = revision; self.qualityReview = qualityReview
     }
 }
 
@@ -108,6 +109,87 @@ public struct InteractiveWebProjectStatus: Codable, Sendable, Equatable {
     public var remoteSiteID: String?
     public var latestDeploymentID: String?
     public var publishedURL: URL?
+    public var previewTabID: String?
+    public var qualityReview: InteractiveWebQualityReview?
+
+    public init(
+        projectID: String,
+        name: String,
+        rootURL: URL,
+        revision: Int,
+        manifestHash: String,
+        fileCount: Int,
+        totalBytes: Int64,
+        remoteProjectID: String? = nil,
+        remoteSiteID: String? = nil,
+        latestDeploymentID: String? = nil,
+        publishedURL: URL? = nil,
+        previewTabID: String? = nil,
+        qualityReview: InteractiveWebQualityReview? = nil
+    ) {
+        self.projectID = projectID
+        self.name = name
+        self.rootURL = rootURL
+        self.revision = revision
+        self.manifestHash = manifestHash
+        self.fileCount = fileCount
+        self.totalBytes = totalBytes
+        self.remoteProjectID = remoteProjectID
+        self.remoteSiteID = remoteSiteID
+        self.latestDeploymentID = latestDeploymentID
+        self.publishedURL = publishedURL
+        self.previewTabID = previewTabID
+        self.qualityReview = qualityReview
+    }
+}
+
+public enum InteractiveWebQualityReviewOutcome: String, Codable, Sendable, Equatable {
+    case passed
+    case failed
+}
+
+public struct InteractiveWebViewportReview: Codable, Sendable, Equatable {
+    public var width: Int
+    public var height: Int
+    public var issueCount: Int
+    public var runtimeErrorCount: Int
+
+    public init(width: Int, height: Int, issueCount: Int, runtimeErrorCount: Int) {
+        self.width = width
+        self.height = height
+        self.issueCount = issueCount
+        self.runtimeErrorCount = runtimeErrorCount
+    }
+}
+
+public struct InteractiveWebQualityReview: Codable, Sendable, Equatable {
+    public var manifestHash: String
+    public var outcome: InteractiveWebQualityReviewOutcome
+    public var reviewedAt: Date
+    public var viewports: [InteractiveWebViewportReview]
+
+    public init(manifestHash: String, outcome: InteractiveWebQualityReviewOutcome, reviewedAt: Date = Date(), viewports: [InteractiveWebViewportReview]) {
+        self.manifestHash = manifestHash
+        self.outcome = outcome
+        self.reviewedAt = reviewedAt
+        self.viewports = viewports
+    }
+}
+
+public struct InteractiveWebDraftSource: Codable, Sendable, Equatable {
+    public var projectID: String
+    public var revision: Int
+    public var manifestHash: String
+    public var fileName: String
+    public var content: String
+
+    public init(projectID: String, revision: Int, manifestHash: String, fileName: String, content: String) {
+        self.projectID = projectID
+        self.revision = revision
+        self.manifestHash = manifestHash
+        self.fileName = fileName
+        self.content = content
+    }
 }
 
 public struct InteractiveWebExportResult: Codable, Sendable, Equatable {
@@ -146,7 +228,8 @@ public struct InteractiveWebManifest: Codable, Sendable, Equatable {
     public var componentVersion = "1"
     public var files: [InteractiveWebManifestFile]
     public var collections: [InteractiveWebCollectionDefinition]
-    public init(files: [InteractiveWebManifestFile], collections: [InteractiveWebCollectionDefinition] = []) { self.files = files; self.collections = collections }
+    public var qualityReview: InteractiveWebQualityReview?
+    public init(files: [InteractiveWebManifestFile], collections: [InteractiveWebCollectionDefinition] = [], qualityReview: InteractiveWebQualityReview? = nil) { self.files = files; self.collections = collections; self.qualityReview = qualityReview }
 }
 
 public struct InteractiveWebPackager: Sendable {

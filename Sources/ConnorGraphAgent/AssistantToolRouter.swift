@@ -24,13 +24,25 @@ public struct AssistantToolNamespaceDescriptor: Sendable, Equatable {
 
 public struct AssistantToolDiscoveryResult: Sendable, Equatable {
     public var tools: [AgentToolDefinition]
+    public var requestedNamespaces: [String]
     public var matchedNamespaces: [String]
     public var availableNamespaces: [String]
 
-    public init(tools: [AgentToolDefinition], matchedNamespaces: [String], availableNamespaces: [String]) {
+    public init(
+        tools: [AgentToolDefinition],
+        requestedNamespaces: [String],
+        matchedNamespaces: [String],
+        availableNamespaces: [String]
+    ) {
         self.tools = tools
+        self.requestedNamespaces = requestedNamespaces
         self.matchedNamespaces = matchedNamespaces
         self.availableNamespaces = availableNamespaces
+    }
+
+    public var unavailableNamespaces: [String] {
+        let available = Set(availableNamespaces)
+        return requestedNamespaces.filter { !available.contains($0) }
     }
 }
 
@@ -97,14 +109,17 @@ public struct AssistantToolRouter: Sendable, Equatable {
         definitions: [AgentToolDefinition],
         maximumResults: Int = 8
     ) -> AssistantToolDiscoveryResult {
-        let candidates = route(definitions: definitions).discoverableDefinitions
+        let route = route(definitions: definitions)
+        let directDefinitions = definitions.filter { Self.directToolNames.contains($0.name) }
+        let candidates = (route.discoverableDefinitions + directDefinitions).sorted { $0.name < $1.name }
         let availableNamespaces = Array(Set(candidates.map { familyName(for: $0) })).sorted()
         let normalizedQuery = normalize(query)
         let terms = normalizedQuery
             .split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
             .map(String.init)
             .filter { $0.count >= 2 }
-        let matchedNamespaces = matchingNamespaces(in: normalizedQuery)
+        let requestedNamespaces = matchingNamespaces(in: normalizedQuery)
+        let matchedNamespaces = requestedNamespaces
             .filter { availableNamespaces.contains($0.name) }
         let matchedNamespaceNames = Set(matchedNamespaces.map(\.name))
         let ranked = candidates.compactMap { definition -> (definition: AgentToolDefinition, score: Int, namespace: String)? in
@@ -140,6 +155,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
             }
             return AssistantToolDiscoveryResult(
                 tools: tools,
+                requestedNamespaces: requestedNamespaces.map(\.name),
                 matchedNamespaces: matchedNamespaces.map(\.name),
                 availableNamespaces: availableNamespaces
             )
@@ -159,6 +175,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
         }
         return AssistantToolDiscoveryResult(
             tools: selected,
+            requestedNamespaces: requestedNamespaces.map(\.name),
             matchedNamespaces: matchedNamespaces.map(\.name),
             availableNamespaces: availableNamespaces
         )
@@ -181,7 +198,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
 
     private func familyName(for definition: AgentToolDefinition) -> String {
         let name = definition.name.lowercased()
-        if ["read", "readmany", "edit", "multiedit", "write", "glob", "grep", "ls"].contains(name) {
+        if ["read", "readmany", "edit", "multiedit", "write", "glob", "grep", "ls", "shell", "applypatch"].contains(name) {
             return "workspace"
         }
         let mappedPrefixes: [(prefix: String, family: String)] = [

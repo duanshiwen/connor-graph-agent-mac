@@ -291,6 +291,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 appendingTo: resolvedWorkspace.additionalAllowedDirectories
             )
         )
+        registry.register(LocalReadFileTool(policy: localWorkspacePolicy))
+        registry.register(LocalReadManyTool(policy: localWorkspacePolicy))
+        registry.register(LocalListDirectoryTool(policy: localWorkspacePolicy))
+        registry.register(LocalGlobTool(policy: localWorkspacePolicy))
+        registry.register(LocalGrepTool(policy: localWorkspacePolicy))
         registry.register(LocalShellTool(policy: localWorkspacePolicy))
         registry.register(LocalApplyPatchTool(policy: localWorkspacePolicy))
         if let storagePaths {
@@ -307,7 +312,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 storagePaths: storagePaths,
                 accountID: groupID,
                 api: interactiveWebAPIClient,
-                previewHandler: interactiveWebPreviewHandler
+                previewHandler: interactiveWebPreviewHandler,
+                browserControlHandler: browserControlHandler
             ))
         }
         registry.registerCurrentTimeTool()
@@ -389,6 +395,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.register(BrowserNavigateTool(handler: browserControlHandler))
             registry.register(BrowserWaitTool(handler: browserControlHandler))
             registry.register(BrowserScreenshotTool(handler: browserControlHandler))
+            registry.register(BrowserQualityAuditTool(handler: browserControlHandler))
             registry.register(BrowserInteractTool(handler: browserControlHandler))
             registry.register(BrowserSubmitTool(handler: browserControlHandler))
             registry.register(BrowserUploadTool(handler: browserControlHandler))
@@ -401,7 +408,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             allowedToolNames: allowedMCPToolNames
         )
         if let storagePaths {
-            let scanner = SkillPackageScanner()
+            let scanner = SkillPackageScanner.applicationDefault()
             let snapshot = scanner.scan(storagePaths: storagePaths)
             registry.register(SkillActivateTool(packages: snapshot.packages))
             registry.register(SkillListTool(packages: snapshot.packages))
@@ -452,7 +459,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             : ""
         let interactiveWebInstruction = registry.definition(named: "interactive_web_create_draft") == nil
             ? ""
-            : "When the user wants to share or showcase a result, invite other people to visit, or needs persistent interaction such as registration, feedback, or voting, you may naturally ask whether to make it a webpage. After completing a substantial result that is clearly suitable for sharing, you may also suggest this briefly at the end of delivery. If accepted, create a local draft and preview first. A preview is not a publication: publishing to the internet must use `interactive_web_publish`, and only a successful tool result proves that publication happened."
+            : "When the user wants to share or showcase a result, invite other people to visit, or needs persistent interaction such as registration, feedback, or voting, you may naturally ask whether to make it a webpage. After completing a substantial result that is clearly suitable for sharing, you may also suggest this briefly at the end of delivery. If accepted, classify the work as a production task and commit its content, visual, interaction, responsive, and accessibility acceptance criteria before building. Generate HTML, CSS, and JavaScript in the model response and pass them directly to `interactive_web_create_draft`; that tool stores a temporary project folder under the app-managed user-data sandbox. Do not publish while building. Do not use Shell, ApplyPatch, workspace file tools, attachments, staging files, or local documentation searches merely to create or inspect this draft, and do not require a user-selected workspace. Inspect workspace files only when the user explicitly asks to incorporate existing workspace content. After draft creation, call `interactive_web_preview`, inspect its previewTabID with browser snapshot and interaction tools, then call `interactive_web_quality_review` to run the required desktop and mobile audits and inspect both attached screenshots. If inspection reveals a defect or the review fails, read each affected source with `interactive_web_get_draft`, then call `interactive_web_update_draft` with that result's exact manifestHash and precise edits; repeat preview and quality review on the new revision. Never reconstruct an existing draft from conversation memory. Only after the current manifest passes review may you call `interactive_web_publish`; only a successful publish tool result proves that publication happened."
         effectiveConfiguration.instructionAppendix = [
             configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),
             userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines),

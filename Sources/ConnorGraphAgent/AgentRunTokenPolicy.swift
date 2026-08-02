@@ -94,15 +94,32 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
 
     private func routingContext(for request: AgentChatRequest) -> String {
         // Direct workspace schemas follow the active instruction only. Historical
-        // messages remain available for continuity without expanding the stable surface.
-        request.userMessage.lowercased()
+        // messages remain available for continuity without expanding the stable surface,
+        // except when the user explicitly resumes the immediately preceding task.
+        let current = request.userMessage.lowercased()
+        guard isExplicitContinuation(current) else { return current }
+        let recentTaskContext = request.recentMessages.suffix(6)
+            .map(\.content)
+            .joined(separator: "\n")
+            .lowercased()
+        return current + "\n" + recentTaskContext
     }
 
     private func containsAny(_ text: String, signals: [String]) -> Bool {
         signals.contains(where: text.contains)
     }
 
+    private func isExplicitContinuation(_ text: String) -> Bool {
+        Self.continuationSignals.contains { signal in
+            text == signal || text.hasPrefix(signal + "，") || text.hasPrefix(signal + ",")
+        }
+    }
+
     private static let localFileSignals = ["文件", "目录", "文件夹", "代码", "仓库", "项目", "工作区", "编译", "测试", "重构", "修改", "实现", "file", "folder", "directory", "code", "repo", "project", "workspace", "build", "test", "refactor", "implement", "edit"]
+    private static let continuationSignals = [
+        "已经选择", "已选择", "继续", "继续执行", "继续制作", "继续制作并发布", "接着做", "接着执行", "好了", "已完成",
+        "continue", "continue working", "continue and publish", "resume", "resume work", "done", "selected"
+    ]
 }
 
 public struct AgentInstructionCapabilityProjector: Sendable, Equatable {

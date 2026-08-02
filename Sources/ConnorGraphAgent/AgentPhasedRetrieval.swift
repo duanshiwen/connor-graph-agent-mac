@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphCore
 
 public enum AgentLoopPhase: String, Codable, CaseIterable, Sendable, Equatable {
     case strategyResearch
@@ -31,6 +32,7 @@ public struct AgentRuntimeContext: Codable, Sendable, Equatable {
 public enum AgentStrategyTaskMode: String, Codable, Sendable, Equatable {
     case mechanical
     case coding
+    case production
     case research
     case creative
     case recommendation
@@ -123,6 +125,9 @@ public struct AgentStrategyPlan: Codable, Sendable, Equatable {
     public var memoryDecision: AgentStrategyMemoryDecision
     public var memoryQueries: [String]
     public var memoryPageSize: Int
+    public var deliverables: [String]
+    public var acceptanceCriteria: [String]
+    public var verificationSteps: [String]
 
     public init(
         provisionalApproach: String,
@@ -134,7 +139,10 @@ public struct AgentStrategyPlan: Codable, Sendable, Equatable {
         taskMode: AgentStrategyTaskMode,
         memoryDecision: AgentStrategyMemoryDecision,
         memoryQueries: [String] = [],
-        memoryPageSize: Int = 20
+        memoryPageSize: Int = 20,
+        deliverables: [String] = [],
+        acceptanceCriteria: [String] = [],
+        verificationSteps: [String] = []
     ) {
         self.provisionalApproach = provisionalApproach
         self.recommendedApproach = recommendedApproach
@@ -146,11 +154,15 @@ public struct AgentStrategyPlan: Codable, Sendable, Equatable {
         self.memoryDecision = memoryDecision
         self.memoryQueries = memoryQueries
         self.memoryPageSize = memoryPageSize
+        self.deliverables = deliverables
+        self.acceptanceCriteria = acceptanceCriteria
+        self.verificationSteps = verificationSteps
     }
 
     private enum CodingKeys: String, CodingKey {
         case provisionalApproach, recommendedApproach, alternatives, constraints, evidenceReferences
         case unresolvedQuestions, taskMode, memoryDecision, memoryQueries, memoryPageSize
+        case deliverables, acceptanceCriteria, verificationSteps
     }
 
     public init(from decoder: Decoder) throws {
@@ -165,6 +177,9 @@ public struct AgentStrategyPlan: Codable, Sendable, Equatable {
         memoryDecision = try container.decode(AgentStrategyMemoryDecision.self, forKey: .memoryDecision)
         memoryQueries = try container.decodeIfPresent([String].self, forKey: .memoryQueries) ?? []
         memoryPageSize = try container.decodeIfPresent(Int.self, forKey: .memoryPageSize) ?? 20
+        deliverables = try container.decodeIfPresent([String].self, forKey: .deliverables) ?? []
+        acceptanceCriteria = try container.decodeIfPresent([String].self, forKey: .acceptanceCriteria) ?? []
+        verificationSteps = try container.decodeIfPresent([String].self, forKey: .verificationSteps) ?? []
     }
 }
 
@@ -177,6 +192,9 @@ public enum AgentStrategyPlanValidationError: Error, Sendable, Equatable {
     case memoryQueriesForbiddenWhenSkipped
     case memoryCapabilityUnavailable
     case invalidMemorySkipReasonForTaskMode
+    case productionDeliverablesRequired
+    case productionAcceptanceCriteriaRequired
+    case productionVerificationStepsRequired
 }
 
 public struct AgentStrategyPlanValidator: Sendable {
@@ -191,6 +209,17 @@ public struct AgentStrategyPlanValidator: Sendable {
         }
         guard (1...100).contains(plan.memoryPageSize) else {
             throw AgentStrategyPlanValidationError.invalidMemoryPageSize
+        }
+        if plan.taskMode == .production {
+            guard !normalizedItems(plan.deliverables).isEmpty else {
+                throw AgentStrategyPlanValidationError.productionDeliverablesRequired
+            }
+            guard !normalizedItems(plan.acceptanceCriteria).isEmpty else {
+                throw AgentStrategyPlanValidationError.productionAcceptanceCriteriaRequired
+            }
+            guard !normalizedItems(plan.verificationSteps).isEmpty else {
+                throw AgentStrategyPlanValidationError.productionVerificationStepsRequired
+            }
         }
         switch plan.memoryDecision {
         case .query:
@@ -215,6 +244,183 @@ public struct AgentStrategyPlanValidator: Sendable {
 
     private func normalizedQueries(_ queries: [String]) -> [String] {
         queries.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    private func normalizedItems(_ items: [String]) -> [String] {
+        items.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+}
+
+public enum AgentDeliveryReviewOutcome: String, Codable, Sendable, Equatable {
+    case passed
+    case partial
+    case blocked
+}
+
+public enum AgentDeliveryCriterionStatus: String, Codable, Sendable, Equatable {
+    case passed
+    case failed
+    case notVerified = "not_verified"
+}
+
+public struct AgentDeliveryCriterionReview: Codable, Sendable, Equatable {
+    public var criterion: String
+    public var status: AgentDeliveryCriterionStatus
+    public var evidence: String
+
+    public init(criterion: String, status: AgentDeliveryCriterionStatus, evidence: String) {
+        self.criterion = criterion
+        self.status = status
+        self.evidence = evidence
+    }
+}
+
+public struct AgentDeliveryVerificationReview: Codable, Sendable, Equatable {
+    public var method: String
+    public var evidence: String
+
+    public init(method: String, evidence: String) {
+        self.method = method
+        self.evidence = evidence
+    }
+}
+
+public struct AgentDeliveryReview: Codable, Sendable, Equatable {
+    public var outcome: AgentDeliveryReviewOutcome
+    public var deliverables: [String]
+    public var criteria: [AgentDeliveryCriterionReview]
+    public var verification: [AgentDeliveryVerificationReview]
+    public var remainingIssues: [String]
+
+    public init(
+        outcome: AgentDeliveryReviewOutcome,
+        deliverables: [String],
+        criteria: [AgentDeliveryCriterionReview],
+        verification: [AgentDeliveryVerificationReview],
+        remainingIssues: [String] = []
+    ) {
+        self.outcome = outcome
+        self.deliverables = deliverables
+        self.criteria = criteria
+        self.verification = verification
+        self.remainingIssues = remainingIssues
+    }
+}
+
+public struct AgentFinalOutputPreparation: Codable, Sendable, Equatable {
+    public var reason: String
+    public var deliveryReview: AgentDeliveryReview?
+
+    public init(reason: String, deliveryReview: AgentDeliveryReview? = nil) {
+        self.reason = reason
+        self.deliveryReview = deliveryReview
+    }
+}
+
+public enum AgentDeliveryReviewValidationError: Error, Sendable, Equatable {
+    case reviewRequired
+    case deliverableCoverageIncomplete
+    case criterionCoverageIncomplete
+    case verificationCoverageIncomplete
+    case evidenceRequired
+    case passedReviewContainsFailure
+    case passedReviewContainsRemainingIssues
+    case incompleteReviewNeedsRemainingIssue
+}
+
+public struct AgentDeliveryReviewValidator: Sendable {
+    public init() {}
+
+    public func validate(
+        _ review: AgentDeliveryReview?,
+        for plan: AgentStrategyPlan,
+        artifactWasProduced: Bool = false
+    ) throws {
+        guard plan.taskMode == .production || artifactWasProduced else { return }
+        guard let review else { throw AgentDeliveryReviewValidationError.reviewRequired }
+
+        let plannedDeliverables = normalizedSet(plan.deliverables)
+        let reviewedDeliverables = normalizedSet(review.deliverables)
+        guard !reviewedDeliverables.isEmpty,
+              plannedDeliverables.isSubset(of: reviewedDeliverables) else {
+            throw AgentDeliveryReviewValidationError.deliverableCoverageIncomplete
+        }
+
+        let criteriaByName = Dictionary(review.criteria.map {
+            (normalize($0.criterion), $0)
+        }, uniquingKeysWith: { first, _ in first })
+        guard !criteriaByName.isEmpty,
+              normalizedSet(plan.acceptanceCriteria).isSubset(of: Set(criteriaByName.keys)) else {
+            throw AgentDeliveryReviewValidationError.criterionCoverageIncomplete
+        }
+        let verificationByMethod = Dictionary(review.verification.map {
+            (normalize($0.method), $0)
+        }, uniquingKeysWith: { first, _ in first })
+        guard !verificationByMethod.isEmpty,
+              normalizedSet(plan.verificationSteps).isSubset(of: Set(verificationByMethod.keys)) else {
+            throw AgentDeliveryReviewValidationError.verificationCoverageIncomplete
+        }
+        guard review.criteria.allSatisfy({ !normalize($0.evidence).isEmpty }),
+              review.verification.allSatisfy({ !normalize($0.evidence).isEmpty }) else {
+            throw AgentDeliveryReviewValidationError.evidenceRequired
+        }
+
+        switch review.outcome {
+        case .passed:
+            guard review.criteria.allSatisfy({ $0.status == .passed }) else {
+                throw AgentDeliveryReviewValidationError.passedReviewContainsFailure
+            }
+            guard normalizedSet(review.remainingIssues).isEmpty else {
+                throw AgentDeliveryReviewValidationError.passedReviewContainsRemainingIssues
+            }
+        case .partial, .blocked:
+            guard !normalizedSet(review.remainingIssues).isEmpty else {
+                throw AgentDeliveryReviewValidationError.incompleteReviewNeedsRemainingIssue
+            }
+        }
+    }
+
+    private func normalizedSet(_ values: [String]) -> Set<String> {
+        Set(values.map(normalize).filter { !$0.isEmpty })
+    }
+
+    private func normalize(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+public enum AgentProductionToolClassifier {
+    public static func producesArtifact(
+        toolName: String,
+        permission: AgentPermissionCapability?
+    ) -> Bool {
+        switch permission {
+        case .writeWorkspaceFile, .editWorkspaceFile, .createInteractiveWebDraft, .createMailDraft:
+            return true
+        default:
+            break
+        }
+        let normalized = toolName.lowercased()
+        if normalized == "generate_image"
+            || normalized == "edit_image"
+            || normalized == "applypatch"
+            || normalized == "apply_patch"
+            || normalized == "write"
+            || normalized == "edit"
+            || normalized.hasPrefix("connor_skill_create")
+            || normalized.hasPrefix("connor_skill_update")
+            || normalized.hasPrefix("interactive_web_create_draft")
+            || normalized.hasPrefix("interactive_web_update_draft")
+        {
+            return true
+        }
+        let productionNouns = [
+            "artifact", "document", "docx", "presentation", "slides",
+            "spreadsheet", "workbook", "image", "website", "webpage"
+        ]
+        let productionVerbs = ["create", "generate", "edit", "update", "write", "export"]
+        return productionNouns.contains(where: normalized.contains)
+            && productionVerbs.contains(where: normalized.contains)
     }
 }
 
@@ -693,6 +899,10 @@ public struct AgentPhasedLoopState: Sendable, Equatable {
         guard phase == .strategyResearch else {
             throw AgentStrategyPlanValidationError.invalidCommitPhase(phase)
         }
+        try AgentStrategyPlanValidator().validate(
+            plan,
+            memoryCapabilityAvailable: memoryCapabilityAvailable
+        )
         strategy = plan
         phase = plan.memoryDecision == .query ? .memoryPreparation : .taskExecution
     }
@@ -744,17 +954,36 @@ public enum AgentPhaseToolContract {
                     "reason": .stringEnumeration(values: AgentMemorySkipReason.allRawValues, description: "Reason for skipping Memory; required when action is skip.")
                 ], required: ["action"]),
                 "memoryQueries": .array(items: .string(description: ""), description: ""),
-                "memoryPageSize": .integer(description: "1...100; defaults to 20.")
+                "memoryPageSize": .integer(description: "1...100; defaults to 20."),
+                "deliverables": .array(items: .string(description: "Exact deliverable"), description: "Required when taskMode is production."),
+                "acceptanceCriteria": .array(items: .string(description: "Observable acceptance criterion"), description: "Required when taskMode is production."),
+                "verificationSteps": .array(items: .string(description: "Concrete final verification method"), description: "Required when taskMode is production.")
             ], required: ["provisionalApproach", "recommendedApproach", "taskMode", "memoryDecision"])
         ),
         AgentToolDefinition(
             name: prepareFinalOutputName,
-            description: "Enter Final Synthesis and internally finish final-response Profile pagination only after the requested work, proportionate verification, and the required final attention batch are complete. Call once, then return the final answer unless the profile exposes a concrete issue that changes the result. This control tool does not itself read mail, calendars, RSS, or other sources.",
-            inputSchema: .object(properties: ["reason": .string(description: "")], required: ["reason"])
+            description: "Enter Final Synthesis and internally finish final-response Profile pagination only after the requested work, proportionate verification, and the required final attention batch are complete. Production tasks must include a deliveryReview that covers every committed deliverable, acceptance criterion, and verification step with concrete evidence; report partial or blocked instead of claiming success when issues remain. Call once, then return the final answer unless the profile exposes a concrete issue that changes the result. This control tool does not itself read mail, calendars, RSS, or other sources.",
+            inputSchema: .object(properties: [
+                "reason": .string(description: "Why task execution is ready to enter final synthesis."),
+                "deliveryReview": .object(properties: [
+                    "outcome": .stringEnumeration(values: ["passed", "partial", "blocked"], description: "Overall delivery outcome."),
+                    "deliverables": .array(items: .string(description: "Completed deliverable"), description: "Every deliverable committed in the production strategy."),
+                    "criteria": .array(items: .object(properties: [
+                        "criterion": .string(description: "Exact acceptance criterion from the production strategy."),
+                        "status": .stringEnumeration(values: ["passed", "failed", "not_verified"], description: "Observed criterion status."),
+                        "evidence": .string(description: "Concrete observation, tool result, check, or inspection evidence.")
+                    ], required: ["criterion", "status", "evidence"]), description: "One result for every committed acceptance criterion."),
+                    "verification": .array(items: .object(properties: [
+                        "method": .string(description: "Exact verification step from the production strategy."),
+                        "evidence": .string(description: "Concrete verification result; never merely 'checked'.")
+                    ], required: ["method", "evidence"]), description: "One result for every committed verification step."),
+                    "remainingIssues": .array(items: .string(description: "Known remaining issue"), description: "Must be empty for passed and non-empty for partial or blocked.")
+                ], required: ["outcome", "deliverables", "criteria", "verification", "remainingIssues"])
+            ], required: ["reason"])
         ),
         AgentToolDefinition(
             name: externalSearchBatchName,
-            description: "Run model-selected independent native reads concurrently and return one aggregated result. Put every read that can be anticipated from current evidence into this one batch. Each calls item uses the exact native toolName and native arguments object. Do not repeat a completed call unless an intervening state change or explicit retry instruction makes the same call necessary.",
+            description: "Run model-selected independent native reads concurrently and return one aggregated result. This wrapper does not classify call semantics; native tool permissions remain authoritative. Put every read that can be anticipated from current evidence into this one batch. Each calls item uses the exact native toolName and native arguments object. Do not repeat a completed call unless an intervening state change or explicit retry instruction makes the same call necessary.",
             inputSchema: .object(properties: [
                 "calls": .array(items: .object(properties: [
                     "toolName": .string(description: "Exact native tool name selected by the model."),
@@ -783,7 +1012,7 @@ public enum AgentPhaseToolContract {
 }
 
 private extension AgentStrategyTaskMode {
-    static var allRawValues: [String] { [mechanical, coding, research, creative, recommendation, general].map(\.rawValue) }
+    static var allRawValues: [String] { [mechanical, coding, production, research, creative, recommendation, general].map(\.rawValue) }
 }
 
 private extension AgentMemorySkipReason {
@@ -797,5 +1026,11 @@ public enum AgentStrategyPlanDecoder {
         let data = Data(argumentsJSON.utf8)
         let decoder = JSONDecoder()
         return try decoder.decode(AgentStrategyPlan.self, from: data)
+    }
+}
+
+public enum AgentFinalOutputPreparationDecoder {
+    public static func decode(argumentsJSON: String) throws -> AgentFinalOutputPreparation {
+        try JSONDecoder().decode(AgentFinalOutputPreparation.self, from: Data(argumentsJSON.utf8))
     }
 }

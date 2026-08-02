@@ -708,13 +708,23 @@ public struct AgentToolRegistry: Sendable {
         tools[tool.name] = tool
     }
 
+    private func registeredTool(named name: String) -> (any AgentTool)? {
+        if let exact = tools[name] { return exact }
+        let canonicalName = switch name.lowercased().replacingOccurrences(of: "_", with: "") {
+        case "shell": "Shell"
+        case "applypatch": "ApplyPatch"
+        default: name
+        }
+        return tools[canonicalName]
+    }
+
     public func definition(named name: String) -> AgentToolDefinition? {
-        guard let tool = tools[name] else { return nil }
+        guard let tool = registeredTool(named: name) else { return nil }
         return AgentToolDefinition(name: tool.name, description: tool.description, inputSchema: tool.inputSchema, inputExamples: tool.inputExamples)
     }
 
     public func permission(named name: String) -> AgentPermissionCapability? {
-        tools[name]?.permission
+        registeredTool(named: name)?.permission
     }
 
     public var definitions: [AgentToolDefinition] {
@@ -739,7 +749,7 @@ public struct AgentToolRegistry: Sendable {
     }
 
     public func execute(_ call: AgentToolCall, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let tool = tools[call.name] else {
+        guard let tool = registeredTool(named: call.name) else {
             throw AgentToolError.unknownTool(call.name)
         }
         let rawArguments = try AgentToolArguments(json: call.argumentsJSON)

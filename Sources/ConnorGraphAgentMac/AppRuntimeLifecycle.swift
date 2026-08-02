@@ -3169,7 +3169,7 @@ final class AppRuntimeLifecycle {
     private func resolveActiveSkillInstructions(sessionID: String) -> String? {
         guard let slug = chatFeatureModel.composer.activeSkillSlug else { return nil }
         if let storagePaths {
-            let scanner = SkillPackageScanner()
+            let scanner = SkillPackageScanner.applicationDefault()
             let snapshot = scanner.scan(storagePaths: storagePaths)
             if let resolution = snapshot.resolution(slug: slug) {
                 let runtime = SkillInvocationRuntime()

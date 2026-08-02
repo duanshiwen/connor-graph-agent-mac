@@ -28,7 +28,11 @@ struct BrowserAssistedWebToolTests {
         let recorder = Recorder()
         let handler: BrowserControlHandler = { request in
             recorder.request = request
-            return BrowserControlResponse(contentText: "snapshot", contentJSON: #"{"nodes":[]}"#)
+            return BrowserControlResponse(
+                contentText: "snapshot",
+                contentJSON: #"{"nodes":[]}"#,
+                modelContentParts: [.imageDataURL("data:image/png;base64,AA==", mimeType: "image/png")]
+            )
         }
         let tool = BrowserSnapshotTool(handler: handler)
         let result = try await tool.execute(
@@ -44,6 +48,7 @@ struct BrowserAssistedWebToolTests {
         #expect(recorder.request?.tabID == "tab-1")
         #expect(recorder.request?.maxNodes == 500)
         #expect(result.contentText == "snapshot")
+        #expect(result.modelContentParts?.first?.kind == .imageDataURL)
 
         let tabsTool = BrowserTabsTool(handler: handler)
         #expect(tabsTool.description.contains("tabID"))
@@ -57,12 +62,29 @@ struct BrowserAssistedWebToolTests {
         let nodeSchema = try #require(interactProperties["nodeRef"] as? [String: Any])
         #expect((nodeSchema["description"] as? String)?.contains("copy it without renaming") == true)
 
+        let audit = BrowserQualityAuditTool(handler: handler)
+        _ = try await audit.execute(
+            arguments: AgentToolArguments(values: [
+                "tabID": .string("tab-1"),
+                "viewportWidth": .int(100),
+                "viewportHeight": .int(9_999),
+                "fullPage": .bool(true)
+            ]),
+            context: Self.context()
+        )
+        #expect(recorder.request?.operation == .qualityAudit)
+        #expect(recorder.request?.viewportWidth == 320)
+        #expect(recorder.request?.viewportHeight == 1_600)
+        #expect(recorder.request?.fullPage == true)
+        #expect(audit.description.contains("before claiming"))
+
         var registry = AgentToolRegistry()
         registry.register(tabsTool)
         registry.register(BrowserSnapshotTool(handler: handler))
         registry.register(BrowserNavigateTool(handler: handler))
         registry.register(BrowserWaitTool(handler: handler))
         registry.register(BrowserScreenshotTool(handler: handler))
+        registry.register(BrowserQualityAuditTool(handler: handler))
         registry.register(BrowserInteractTool(handler: handler))
         registry.register(BrowserSubmitTool(handler: handler))
         registry.register(BrowserUploadTool(handler: handler))

@@ -23,9 +23,15 @@ import ConnorGraphStore
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
     let names = controller.toolRegistry.definitions.map(\.name)
 
+    #expect(Set(["Read", "ReadMany", "LS", "Glob", "Grep"]).isSubset(of: Set(names)))
     #expect(names.contains("Shell"))
     #expect(names.contains("ApplyPatch"))
-    #expect(Set(names).isDisjoint(with: ["Read", "ReadMany", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "WriteBatch", "Bash"]))
+    #expect(Set(names).isDisjoint(with: ["Write", "Edit", "MultiEdit", "WriteBatch", "Bash"]))
+    #expect(controller.toolRegistry.permission(named: "Read") == .readWorkspaceFile)
+    #expect(controller.toolRegistry.permission(named: "ReadMany") == .readWorkspaceFile)
+    #expect(controller.toolRegistry.permission(named: "LS") == .listWorkspaceFiles)
+    #expect(controller.toolRegistry.permission(named: "Glob") == .listWorkspaceFiles)
+    #expect(controller.toolRegistry.permission(named: "Grep") == .searchWorkspaceFiles)
     #expect(controller.toolRegistry.permission(named: "Shell") == .runReadOnlyShellCommand)
     #expect(controller.toolRegistry.permission(named: "ApplyPatch") == .editWorkspaceFile)
 }
@@ -131,9 +137,9 @@ import ConnorGraphStore
     #expect(controller.toolRegistry.permission(named: "present_image") == .externalNetwork)
     #expect(controller.toolRegistry.definitions.map(\.name).contains("image_search"))
     #expect(controller.toolRegistry.permission(named: "image_search") == .externalNetwork)
-    #expect(!controller.toolRegistry.definitions.map(\.name).contains("Read"))
+    #expect(controller.toolRegistry.definitions.map(\.name).contains("Read"))
     let result = try await controller.toolRegistry.execute(
-        AgentToolCall(name: "Shell", argumentsJSON: #"{"command":"cat README.md"}"#),
+        AgentToolCall(name: "Read", argumentsJSON: #"{"filePath":"README.md"}"#),
         context: AgentToolExecutionContext(
             runID: "run-local-runtime-workspace",
             sessionID: "session-local-runtime-workspace",
@@ -320,6 +326,15 @@ import ConnorGraphStore
 
     #expect(!disabled.contains("interactive_web_publish"))
     #expect(enabled.contains("share or showcase a result"))
+    #expect(enabled.contains("pass them directly to `interactive_web_create_draft`"))
+    #expect(enabled.contains("Do not use Shell, ApplyPatch, workspace file tools"))
+    #expect(enabled.contains("do not require a user-selected workspace"))
+    #expect(enabled.contains("inspect its previewTabID with browser snapshot and interaction tools"))
+    #expect(enabled.contains("interactive_web_update_draft"))
+    #expect(enabled.contains("interactive_web_get_draft"))
+    #expect(enabled.contains("interactive_web_quality_review"))
+    #expect(enabled.contains("Never reconstruct an existing draft from conversation memory"))
+    #expect(enabled.contains("Do not publish while building"))
     #expect(enabled.contains("interactive_web_publish"))
 }
 

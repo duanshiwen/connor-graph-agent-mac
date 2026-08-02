@@ -2166,6 +2166,48 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(names == ["Shell", "ApplyPatch"])
 }
 
+@Test func contextualRunTokenPolicyCarriesWorkspaceToolsIntoExplicitContinuation() {
+    let definitions = ["Shell", "ApplyPatch", "mail_search_messages"].map {
+        AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
+    }
+    let request = AgentChatRequest(
+        sessionID: "workspace-continuation",
+        userMessage: "已经选择",
+        recentMessages: [
+            AgentMessage(role: .user, content: "请读取工作目录中的功能说明并制作网页"),
+            AgentMessage(role: .assistant, content: "请先选择包含功能说明的工作目录。")
+        ]
+    )
+    let names = Set(AgentRunTokenPolicy().initiallyExposedTools(
+        from: definitions,
+        request: request,
+        mode: .contextual
+    ).map(\.name))
+
+    #expect(names == ["Shell", "ApplyPatch"])
+}
+
+@Test func contextualRunTokenPolicyDoesNotCarryStaleWorkspaceToolsIntoNewTopic() {
+    let definitions = ["Shell", "ApplyPatch", "mail_search_messages"].map {
+        AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
+    }
+    let request = AgentChatRequest(
+        sessionID: "new-topic-after-workspace",
+        userMessage: "介绍一下今天的天气",
+        recentMessages: [
+            AgentMessage(role: .user, content: "请读取工作区文件"),
+            AgentMessage(role: .assistant, content: "文件已经读取完成。")
+        ]
+    )
+    let names = Set(AgentRunTokenPolicy().initiallyExposedTools(
+        from: definitions,
+        request: request,
+        mode: .contextual
+    ).map(\.name))
+
+    #expect(names.isEmpty)
+}
+
 @Test func agentLoopDiscoversWebFromTheAuthorizedCatalogWithoutInitiallyExposingItsSchema() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
@@ -2227,6 +2269,52 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(payload["catalogToolCount"] as? Int == 1)
     #expect(payload["returnedTools"] as? [String] == ["web_search"])
     #expect((payload["initiallyExposedToolCount"] as? Int ?? 0) > 0)
+}
+
+@Test func agentLoopBlocksRepeatedDiscoveryOfUnavailableCapabilityNamespace() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [.init(
+                id: "discover-missing-workspace",
+                name: AssistantDecisionToolContract.searchName,
+                argumentsJSON: #"{"query":"读取本地工作区文件"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [.init(
+                id: "rediscover-missing-workspace",
+                name: AssistantDecisionToolContract.searchName,
+                argumentsJSON: #"{"query":"workspace filesystem tools"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "当前运行没有工作区能力。", finishReason: .stop)
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(DiscoveryNetworkTool())
+    let audit = InMemoryAgentAuditLog()
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        auditLog: audit
+    )
+
+    for try await _ in loop.run(AgentChatRequest(
+        runID: "run-missing-workspace-discovery",
+        sessionID: "session-missing-workspace-discovery",
+        userMessage: "继续"
+    )) {}
+
+    let discoveryEvents = await audit.events.filter { $0.eventType == .toolDiscovery }
+    #expect(discoveryEvents.count == 1)
+    let requests = await provider.requests
+    #expect(requests.count == 3)
+    #expect(requests[2].messages.contains {
+        $0.role == .system && $0.content.contains("Do not search for them again")
+    })
 }
 
 @Test func agentLoopAcceptsMemoryAndNotePreflightInsideOneParallelQuery() async throws {

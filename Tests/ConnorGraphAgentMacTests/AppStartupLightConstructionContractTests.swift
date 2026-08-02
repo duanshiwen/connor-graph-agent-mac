@@ -90,7 +90,7 @@ struct AppStartupLightConstructionContractTests {
 
     @Test func skillPresentationIsBuiltDuringContentBootstrapNotRouteAppearance() throws {
         let bootstrapSource = try projectSource(named: "AppContentBootstrapActor.swift")
-        #expect(bootstrapSource.contains("SkillPackageScanner().scan(storagePaths: paths)"))
+        #expect(bootstrapSource.contains("SkillPackageScanner.applicationDefault().scan(storagePaths: paths)"))
         #expect(bootstrapSource.contains("SkillCommercialUIPresentationBuilder().build"))
 
         let skillListSource = try projectSource(named: "SkillManagerListViews.swift")

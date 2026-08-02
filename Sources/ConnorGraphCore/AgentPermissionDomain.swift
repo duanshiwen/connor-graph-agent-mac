@@ -46,6 +46,7 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     case syncRSSSources
     case importRSSOPML
     case exportRSSOPML
+    case createInteractiveWebDraft
     case publishInteractiveWeb
 }
 

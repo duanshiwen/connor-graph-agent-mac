@@ -143,6 +143,7 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         case .syncRSSSources: "同步 RSS 订阅源"
         case .importRSSOPML: "导入 RSS 订阅"
         case .exportRSSOPML: "导出 RSS 订阅"
+        case .createInteractiveWebDraft: "创建互动网页草稿"
         case .publishInteractiveWeb: "发布或管理互动网页"
         }
     }

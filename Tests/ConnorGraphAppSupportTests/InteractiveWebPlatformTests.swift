@@ -43,7 +43,10 @@ struct InteractiveWebPlatformTests {
             storagePaths: fixture.paths,
             accountID: "account",
             api: nil,
-            previewHandler: { status, sessionID in await recorder.record(status, sessionID: sessionID) }
+            previewHandler: { status, sessionID in
+                await recorder.record(status, sessionID: sessionID)
+                return "preview-tab-1"
+            }
         )
         let created = try await runtime.createDraft(
             sessionID: "session-1",
@@ -55,8 +58,16 @@ struct InteractiveWebPlatformTests {
 
         let previewed = try await runtime.preview(projectID: created.projectID, sessionID: "session-1")
         let routed = await recorder.value
-        #expect(routed?.0 == previewed)
+        #expect(routed?.0.projectID == previewed.projectID)
+        #expect(routed?.0.manifestHash == previewed.manifestHash)
+        #expect(routed?.0.previewTabID == nil)
         #expect(routed?.1 == "session-1")
+        #expect(previewed.previewTabID == "preview-tab-1")
+        let managedProjectsRoot = fixture.paths.artifactsDirectory
+            .appendingPathComponent("interactive-web/projects", isDirectory: true)
+            .standardizedFileURL.path + "/"
+        #expect(created.rootURL.standardizedFileURL.path.hasPrefix(managedProjectsRoot))
+        #expect(InteractiveWebAgentTool(operation: .createDraft, runtime: runtime).permission == .createInteractiveWebDraft)
     }
 
     @Test func publishRejectsDraftChangedAfterApprovalBeforeNetworkAccess() async throws {
@@ -83,6 +94,69 @@ struct InteractiveWebPlatformTests {
                 password: nil
             )
         }
+    }
+
+    @Test func draftSourceSupportsExactEditsAndRejectsStaleUpdates() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let created = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<h1>Hello</h1>",
+            css: "h1 { color: red; }",
+            javascript: nil
+        )
+
+        let source = try await runtime.draftSource(projectID: created.projectID, fileName: "index.html")
+        #expect(source.content == "<h1>Hello</h1>")
+        #expect(source.manifestHash == created.manifestHash)
+
+        let updated = try await runtime.updateDraft(
+            projectID: created.projectID,
+            expectedManifestHash: source.manifestHash,
+            replacements: [:],
+            edits: ["index.html": [(oldText: "Hello", newText: "Finished")]]
+        )
+        #expect(updated.revision == 2)
+        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("index.html"), encoding: .utf8) == "<h1>Finished</h1>")
+        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("style.css"), encoding: .utf8) == "h1 { color: red; }")
+
+        await #expect(throws: AgentToolError.self) {
+            _ = try await runtime.updateDraft(
+                projectID: created.projectID,
+                expectedManifestHash: source.manifestHash,
+                replacements: ["style.css": "h1 { color: blue; }"],
+                edits: [:]
+            )
+        }
+    }
+
+    @Test func invalidMultiFileEditLeavesDraftUnchanged() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let created = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<h1>Hello</h1>",
+            css: "h1 { color: red; }",
+            javascript: nil
+        )
+
+        await #expect(throws: AgentToolError.self) {
+            _ = try await runtime.updateDraft(
+                projectID: created.projectID,
+                expectedManifestHash: created.manifestHash,
+                replacements: ["style.css": "h1 { color: blue; }"],
+                edits: ["index.html": [(oldText: "Missing", newText: "Finished")]]
+            )
+        }
+        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("index.html"), encoding: .utf8) == "<h1>Hello</h1>")
+        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("style.css"), encoding: .utf8) == "h1 { color: red; }")
+        let status = try await runtime.status(projectID: created.projectID)
+        #expect(status.revision == 1)
+        #expect(status.manifestHash == created.manifestHash)
     }
 
     @Test func publishingToolApprovalPayloadBindsRevisionHashAndSize() async throws {
@@ -117,6 +191,65 @@ struct InteractiveWebPlatformTests {
         #expect(object["fileCount"] as? Int == status.fileCount)
         #expect((object["totalBytes"] as? NSNumber)?.int64Value == status.totalBytes)
         #expect(object["accessMode"] as? String == "private")
+    }
+
+    @Test func publishPreflightRequiresQualityReviewForCurrentManifest() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(
+            storagePaths: fixture.paths,
+            accountID: "account",
+            api: nil,
+            browserControlHandler: { request in
+                let width = request.viewportWidth ?? 0
+                let height = request.viewportHeight ?? 0
+                let json = "{\"viewport\":{\"width\":\(width),\"height\":\(height)},\"issues\":[],\"runtimeErrors\":[]}"
+                return BrowserControlResponse(contentText: "reviewed", contentJSON: json)
+            }
+        )
+        let status = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<main><h1>Ready</h1></main>",
+            css: nil,
+            javascript: nil
+        )
+        let tool = InteractiveWebAgentTool(operation: .publish, runtime: runtime)
+        let call = AgentToolCall(
+            name: tool.name,
+            argumentsJSON: "{\"projectID\":\"\(status.projectID)\",\"manifestHash\":\"\(status.manifestHash)\",\"accessMode\":\"private\"}"
+        )
+        let context = AgentToolExecutionContext(
+            runID: "run-1",
+            sessionID: "session-1",
+            groupID: "account",
+            userPrompt: "publish",
+            toolCallID: "call-1",
+            policyEngine: AgentPolicyEngine(permissionMode: .askToWrite)
+        )
+
+        await #expect(throws: AgentToolError.self) {
+            try await tool.preflight(call: call, context: context)
+        }
+        let reviewed = try await runtime.qualityReview(
+            projectID: status.projectID,
+            expectedManifestHash: status.manifestHash,
+            sessionID: "session-1",
+            previewTabID: "preview-tab"
+        )
+        #expect(reviewed.status.qualityReview?.outcome == .passed)
+        #expect(reviewed.status.qualityReview?.viewports.map(\.width) == [1_440, 390])
+        try await tool.preflight(call: call, context: context)
+
+        _ = try await runtime.updateDraft(
+            projectID: status.projectID,
+            expectedManifestHash: status.manifestHash,
+            replacements: [:],
+            edits: ["index.html": [(oldText: "Ready", newText: "Changed")]]
+        )
+        await #expect(throws: AgentToolError.self) {
+            try await tool.preflight(call: call, context: context)
+        }
     }
 
     private func makeRuntimeFixture() throws -> (paths: AppStoragePaths, root: URL) {
