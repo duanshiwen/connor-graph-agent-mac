@@ -47,7 +47,15 @@ public struct AssistantToolDiscoveryResult: Sendable, Equatable {
 }
 
 public struct AssistantToolRouter: Sendable, Equatable {
-    public static let directToolNames: Set<String> = ["Shell", "ApplyPatch"]
+    public static let interactiveWebDirectToolNames: Set<String> = [
+        "interactive_web_create_draft",
+        "interactive_web_get_draft",
+        "interactive_web_update_draft",
+        "interactive_web_get_status",
+        "interactive_web_publish"
+    ]
+    public static let directToolNames = Set<String>(["Shell", "ApplyPatch"])
+        .union(interactiveWebDirectToolNames)
     public static let runtimeInternalToolNames = AssistantBootstrapCoordinator.internalToolNames
         .union(AssistantAttentionCoordinator.internalToolNames)
         .union([AgentCurrentTimePreflightPolicy.requiredToolName])
@@ -191,7 +199,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
         }
         return ([
             "## Tool Discovery",
-            "Only direct workspace tools and control tools have stable schemas in this request. assistant_tool_search discovers schemas only; it does not read data. For any other capability, search once using one or more compact capability domains in the user's language, then invoke returned exact names and schemas through parallel_tool_query or parallel_tool_execute. Keep dates, record IDs, and operation arguments for the native tool call.",
+            "Direct workspace tools, core interactive webpage tools, and control tools have stable schemas in this request. assistant_tool_search discovers schemas only; it does not read data. For any other capability, search once using one or more compact capability domains in the user's language, then invoke returned exact names and schemas through parallel_tool_query or parallel_tool_execute. Keep dates, record IDs, and operation arguments for the native tool call.",
             "Available families:"
         ] + lines).joined(separator: "\n")
     }

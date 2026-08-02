@@ -49,7 +49,7 @@ Create a compact internal matrix with one row for every criterion and promised i
 
 ## Repair loop
 
-When the current task authorizes edits and an interactive web draft can be updated, report the concrete defects to the active creation workflow, update the draft, obtain its new preview revision, and repeat only the affected checks plus both final viewport audits. Do not publish or claim completion until the final revision passes.
+When the user asks to improve an already published interactive webpage, inspect its published URL, report concrete defects to the active creation workflow, update the retained draft, publish the new revision, and repeat only the affected checks against the new URL.
 
 When edits are not authorized, stop at diagnosis and provide actionable findings without modifying the page.
 

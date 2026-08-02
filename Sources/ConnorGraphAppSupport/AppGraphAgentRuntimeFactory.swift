@@ -59,7 +59,6 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var rssRuntime: RSSRuntime?
     public var cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient?
     public var interactiveWebAPIClient: InteractiveWebAPIClient?
-    public var interactiveWebPreviewHandler: InteractiveWebToolRuntime.PreviewHandler?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
     public var browserControlHandler: BrowserControlHandler?
@@ -83,7 +82,6 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         rssRuntime: RSSRuntime? = nil,
         cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient? = nil,
         interactiveWebAPIClient: InteractiveWebAPIClient? = nil,
-        interactiveWebPreviewHandler: InteractiveWebToolRuntime.PreviewHandler? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
         browserControlHandler: BrowserControlHandler? = nil,
@@ -105,7 +103,6 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.rssRuntime = rssRuntime
         self.cloudKnowledgeConsumptionClient = cloudKnowledgeConsumptionClient
         self.interactiveWebAPIClient = interactiveWebAPIClient
-        self.interactiveWebPreviewHandler = interactiveWebPreviewHandler
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
         self.browserControlHandler = browserControlHandler
@@ -311,9 +308,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.registerInteractiveWebTools(runtime: InteractiveWebToolRuntime(
                 storagePaths: storagePaths,
                 accountID: groupID,
-                api: interactiveWebAPIClient,
-                previewHandler: interactiveWebPreviewHandler,
-                browserControlHandler: browserControlHandler
+                api: interactiveWebAPIClient
             ))
         }
         registry.registerCurrentTimeTool()
@@ -459,7 +454,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             : ""
         let interactiveWebInstruction = registry.definition(named: "interactive_web_create_draft") == nil
             ? ""
-            : "When the user wants to share or showcase a result, invite other people to visit, or needs persistent interaction such as registration, feedback, or voting, you may naturally ask whether to make it a webpage. After completing a substantial result that is clearly suitable for sharing, you may also suggest this briefly at the end of delivery. If accepted, classify the work as a production task and commit its content, visual, interaction, responsive, and accessibility acceptance criteria before building. Generate HTML, CSS, and JavaScript in the model response and pass them directly to `interactive_web_create_draft`; that tool stores a temporary project folder under the app-managed user-data sandbox. Do not publish while building. Do not use Shell, ApplyPatch, workspace file tools, attachments, staging files, or local documentation searches merely to create or inspect this draft, and do not require a user-selected workspace. Inspect workspace files only when the user explicitly asks to incorporate existing workspace content. After draft creation, call `interactive_web_preview`, inspect its previewTabID with browser snapshot and interaction tools, then call `interactive_web_quality_review` to run the required desktop and mobile audits and inspect both attached screenshots. If inspection reveals a defect or the review fails, read each affected source with `interactive_web_get_draft`, then call `interactive_web_update_draft` with that result's exact manifestHash and precise edits; repeat preview and quality review on the new revision. Never reconstruct an existing draft from conversation memory. Only after the current manifest passes review may you call `interactive_web_publish`; only a successful publish tool result proves that publication happened."
+            : "When the user wants to share or showcase a result, invite other people to visit, or needs persistent interaction such as registration, feedback, or voting, you may naturally ask whether to make it a webpage. After completing a substantial result that is clearly suitable for sharing, you may also suggest this briefly at the end of delivery. If accepted, classify the work as a production task and commit its content, visual, interaction, responsive, and accessibility acceptance criteria before building. Generate complete HTML, CSS, and JavaScript in the model response and pass them directly to `interactive_web_create_draft`; that tool stores a temporary project folder under the app-managed user-data sandbox. Do not use Shell, ApplyPatch, workspace file tools, attachments, staging files, local preview tools, or documentation searches merely to create or inspect this draft, and do not require a user-selected workspace. Inspect workspace files only when the user explicitly asks to incorporate existing workspace content. Before publishing, perform an internal source-level review against the committed criteria and correct the draft when needed; this review does not require a local preview. Then call `interactive_web_publish` with the exact projectID and manifestHash; normal native permission approval still applies. Return its published URL after the approved call succeeds. If the user reviews that URL and asks for changes, read each affected source with `interactive_web_get_draft`, update it with `interactive_web_update_draft` using the exact current manifestHash, internally review the revision, then publish it through the same permission flow and return the new URL. Never reconstruct an existing draft from conversation memory. Only a successful publish tool result proves that publication happened."
         effectiveConfiguration.instructionAppendix = [
             configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),
             userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines),

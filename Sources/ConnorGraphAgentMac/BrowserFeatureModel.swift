@@ -129,10 +129,6 @@ final class BrowserFeatureModel {
     var historySearchQuery = ""
     var internalBrowserEnabled = true
     private(set) var errorMessage: String?
-    private(set) var interactiveWebPreviewRuntime: InteractiveWebPreviewRuntime?
-    private(set) var interactiveWebPreviewStatus: InteractiveWebProjectStatus?
-    @ObservationIgnored private var interactiveWebPreviewTabID: UUID?
-    @ObservationIgnored private var interactiveWebPreviewSessionID: String?
 
     @ObservationIgnored private let historyStore: BrowserHistoryStore?
     @ObservationIgnored private let bookmarkStore: BrowserBookmarkStore?
@@ -491,55 +487,6 @@ final class BrowserFeatureModel {
         }
     }
 
-    @discardableResult
-    func openInteractiveWebPreview(status: InteractiveWebProjectStatus, preferredSessionID: String? = nil) -> String {
-        closeInteractiveWebPreview()
-        let sessionID = preferredSessionID ?? currentSessionID
-        let tabID = UUID()
-        let runtime = InteractiveWebPreviewRuntime(projectRoot: status.rootURL)
-        var snapshot = workspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
-        let previewURL = "\(InteractiveWebPreviewRuntime.scheme)://project/index.html"
-        let tab = AppBrowserTabSnapshot(
-            id: tabID,
-            initialURLString: previewURL,
-            title: status.name,
-            currentURLString: previewURL
-        )
-        snapshot.tabs.append(tab)
-        snapshot.selectedTabID = tabID
-        saveWorkspaceSnapshot(snapshot, for: sessionID)
-        liveWebViewStore.adoptExternalWebView(
-            key: BrowserLiveWebViewKey(sessionID: sessionID, tabID: tabID),
-            webView: runtime.webView,
-            isVisible: true
-        )
-        var previewStatus = status
-        previewStatus.previewTabID = tabID.uuidString
-        interactiveWebPreviewRuntime = runtime
-        interactiveWebPreviewStatus = previewStatus
-        interactiveWebPreviewTabID = tabID
-        interactiveWebPreviewSessionID = sessionID
-        runtime.load()
-        showWorkspace(for: sessionID)
-        return tabID.uuidString
-    }
-
-    func closeInteractiveWebPreview() {
-        interactiveWebPreviewRuntime?.webView.stopLoading()
-        if let tabID = interactiveWebPreviewTabID, let sessionID = interactiveWebPreviewSessionID {
-            liveWebViewStore.remove(BrowserLiveWebViewKey(sessionID: sessionID, tabID: tabID))
-            if var snapshot = workspaceSnapshotsBySessionID[sessionID] {
-                snapshot.tabs.removeAll { $0.id == tabID }
-                if snapshot.selectedTabID == tabID { snapshot.selectedTabID = snapshot.tabs.last?.id }
-                saveWorkspaceSnapshot(snapshot, for: sessionID)
-            }
-        }
-        interactiveWebPreviewRuntime = nil
-        interactiveWebPreviewStatus = nil
-        interactiveWebPreviewTabID = nil
-        interactiveWebPreviewSessionID = nil
-    }
-
     func showWorkspace() {
         showWorkspace(for: currentSessionID)
     }
@@ -575,7 +522,6 @@ final class BrowserFeatureModel {
     }
 
     func resetWorkspaceBinding() {
-        closeInteractiveWebPreview()
         workspaceSessionID = nil
         isVisible = false
         workspaceSessionBinding = BrowserWorkspaceSessionBinding()
@@ -1035,7 +981,6 @@ final class BrowserFeatureModel {
     func shutdown() {
         guard !isShutdown else { return }
         isShutdown = true
-        closeInteractiveWebPreview()
         automationRuntime.shutdown()
         for task in assistedFetchTimeoutTasksByID.values { task.cancel() }
         assistedFetchTimeoutTasksByID.removeAll()
