@@ -2166,6 +2166,48 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(names == ["Shell", "ApplyPatch"])
 }
 
+@Test func contextualRunTokenPolicyCarriesWorkspaceToolsIntoExplicitContinuation() {
+    let definitions = ["Shell", "ApplyPatch", "mail_search_messages"].map {
+        AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
+    }
+    let request = AgentChatRequest(
+        sessionID: "workspace-continuation",
+        userMessage: "已经选择",
+        recentMessages: [
+            AgentMessage(role: .user, content: "请读取工作目录中的功能说明并制作网页"),
+            AgentMessage(role: .assistant, content: "请先选择包含功能说明的工作目录。")
+        ]
+    )
+    let names = Set(AgentRunTokenPolicy().initiallyExposedTools(
+        from: definitions,
+        request: request,
+        mode: .contextual
+    ).map(\.name))
+
+    #expect(names == ["Shell", "ApplyPatch"])
+}
+
+@Test func contextualRunTokenPolicyDoesNotCarryStaleWorkspaceToolsIntoNewTopic() {
+    let definitions = ["Shell", "ApplyPatch", "mail_search_messages"].map {
+        AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
+    }
+    let request = AgentChatRequest(
+        sessionID: "new-topic-after-workspace",
+        userMessage: "介绍一下今天的天气",
+        recentMessages: [
+            AgentMessage(role: .user, content: "请读取工作区文件"),
+            AgentMessage(role: .assistant, content: "文件已经读取完成。")
+        ]
+    )
+    let names = Set(AgentRunTokenPolicy().initiallyExposedTools(
+        from: definitions,
+        request: request,
+        mode: .contextual
+    ).map(\.name))
+
+    #expect(names.isEmpty)
+}
+
 @Test func agentLoopDiscoversWebFromTheAuthorizedCatalogWithoutInitiallyExposingItsSchema() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
