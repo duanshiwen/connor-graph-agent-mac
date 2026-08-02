@@ -44,6 +44,56 @@ public actor InteractiveWebToolRuntime {
         return try status(project)
     }
 
+	public func remoteProjects(limit: Int) async throws -> [InteractiveWebRemoteProject] {
+		try await requireAPI().projects(limit: limit)
+	}
+
+	public func remoteProject(id: String) async throws -> InteractiveWebRemoteProjectDetail {
+		try await requireAPI().project(id: id)
+	}
+
+	public func downloadRemoteProject(sessionID: String, remoteProjectID: String) async throws -> InteractiveWebProjectStatus {
+		let api = try requireAPI()
+		let remote = try await api.project(id: remoteProjectID)
+		guard remote.currentDeploymentId != nil, !remote.files.isEmpty else {
+			throw AgentToolError.invalidArguments("remote project has no published files")
+		}
+		let localID = UUID().uuidString
+		let root = projectsRoot.appendingPathComponent(localID, isDirectory: true)
+		try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+		do {
+			for item in remote.files {
+				let target = try validatedProjectFileURL(item.path, root: root)
+				try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+				let data = try await api.projectFile(projectID: remote.id, path: item.path)
+				guard Int64(data.count) == item.sizeBytes else { throw AgentToolError.invalidArguments("downloaded file size mismatch for \(item.path)") }
+				try data.write(to: target, options: .atomic)
+			}
+			let manifest = try packager.package(rootURL: root)
+			let expected = Dictionary(uniqueKeysWithValues: remote.files.map { ($0.path, $0.sha256.lowercased()) })
+			guard manifest.files.count == remote.files.count,
+				manifest.files.allSatisfy({ expected[$0.path] == $0.sha256.lowercased() }) else {
+				throw AgentToolError.invalidArguments("downloaded project did not match the remote manifest")
+			}
+			let project = LocalInteractiveWebProject(
+				id: localID,
+				accountID: accountID,
+				name: remote.name,
+				rootURL: root,
+				conversationID: sessionID,
+				remoteProjectID: remote.id,
+				remoteSiteID: remote.siteId,
+				latestDeploymentID: remote.currentDeploymentId,
+				publishedURL: remote.status == "active" ? api.publicSiteURL(siteID: remote.siteId) : nil
+			)
+			try await store.save(project: project)
+			return try status(project)
+		} catch {
+			try? fileManager.removeItem(at: root)
+			throw error
+		}
+	}
+
     public func draftSource(projectID: String, fileName: String) async throws -> InteractiveWebDraftSource {
         let project = try await requireProject(projectID)
         let name = try validatedDraftFileName(fileName)
@@ -206,11 +256,23 @@ public actor InteractiveWebToolRuntime {
     }
 
     private func validatedDraftFileName(_ name: String) throws -> String {
-        guard ["index.html", "style.css", "app.js"].contains(name) else {
-            throw AgentToolError.invalidArguments("fileName must be index.html, style.css, or app.js")
-        }
-        return name
+		let allowed = Set(["html", "css", "js", "json", "svg"])
+		guard !name.isEmpty, !name.hasPrefix("/"), !name.split(separator: "/").contains(".."), allowed.contains(URL(fileURLWithPath: name).pathExtension.lowercased()) else {
+			throw AgentToolError.invalidArguments("fileName must be a relative HTML, CSS, JavaScript, JSON, or SVG path")
+		}
+		return name
     }
+
+	private func validatedProjectFileURL(_ name: String, root: URL) throws -> URL {
+		guard !name.isEmpty, !name.hasPrefix("/"), !name.split(separator: "/").contains("..") else {
+			throw AgentToolError.invalidArguments("remote project contains an invalid file path")
+		}
+		let target = root.appendingPathComponent(name).standardizedFileURL
+		guard target.path.hasPrefix(root.standardizedFileURL.path + "/") else {
+			throw AgentToolError.invalidArguments("remote project file escapes the user data directory")
+		}
+		return target
+	}
 
     private func validate(_ content: String, named name: String) throws {
         guard Data(content.utf8).count <= 2 * 1_024 * 1_024 else {
@@ -282,6 +344,9 @@ public actor InteractiveWebToolRuntime {
 
 public struct InteractiveWebAgentTool: AgentTool {
     public enum Operation: String, Sendable, CaseIterable {
+		case listProjects = "interactive_web_list_projects"
+		case getProject = "interactive_web_get_project"
+		case downloadProject = "interactive_web_download_project"
         case createDraft = "interactive_web_create_draft"
         case getDraft = "interactive_web_get_draft"
         case updateDraft = "interactive_web_update_draft"
@@ -299,14 +364,17 @@ public struct InteractiveWebAgentTool: AgentTool {
     public var name: String { operation.rawValue }
     public var permission: AgentPermissionCapability {
         switch operation {
-        case .createDraft, .updateDraft: .createInteractiveWebDraft
-        case .getDraft, .getStatus: .readSession
-        case .recordsSummary: .externalNetwork
+		case .createDraft, .updateDraft, .downloadProject: .createInteractiveWebDraft
+		case .getDraft, .getStatus: .readSession
+		case .listProjects, .getProject, .recordsSummary: .externalNetwork
         case .publish, .rollback, .setAccess, .offline, .exportRecords: .publishInteractiveWeb
         }
     }
     public var description: String {
         switch operation {
+		case .listProjects: "List the signed-in user's published interactive webpage projects."
+		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
+		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
         case .createDraft: "Create a local interactive webpage draft from complete HTML, CSS, and JavaScript generated in the current model response. The tool writes these files into the app-managed user-data sandbox; no selected workspace, local file tool, staging file, or documentation lookup is required. This does not publish anything."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash."
         case .updateDraft: "Atomically update an app-managed interactive webpage draft using exact text edits or full file replacements. Pass expectedManifestHash from interactive_web_get_draft to prevent overwriting a newer revision."
@@ -321,20 +389,24 @@ public struct InteractiveWebAgentTool: AgentTool {
     }
     public var inputSchema: AgentToolInputSchema {
         switch operation {
+		case .listProjects:
+			.closedObject(properties: ["limit": .integer(description: "1 through 100")], required: [])
+		case .getProject, .downloadProject:
+			.closedObject(properties: ["remoteProjectID": .string(description: "Exact online project ID")], required: ["remoteProjectID"])
         case .createDraft:
             .object(properties: ["name": .string(description: "Webpage name"), "html": .string(description: "Complete index.html"), "css": .string(description: "Optional stylesheet"), "javascript": .string(description: "Optional script")], required: ["name", "html"])
         case .getDraft:
-            .closedObject(properties: ["projectID": .string(description: "Exact local project ID"), "fileName": .stringEnumeration(values: ["index.html", "style.css", "app.js"], description: "Draft source file to read")], required: ["projectID", "fileName"])
+			.closedObject(properties: ["projectID": .string(description: "Exact local project ID"), "fileName": .string(description: "Relative text source path")], required: ["projectID", "fileName"])
         case .updateDraft:
             .object(properties: [
                 "projectID": .string(description: "Exact local project ID"),
                 "expectedManifestHash": .string(description: "Exact manifestHash from the latest interactive_web_get_draft result"),
                 "replacements": .array(items: .closedObject(properties: [
-                    "fileName": .stringEnumeration(values: ["index.html", "style.css", "app.js"], description: "Draft file to replace"),
+					"fileName": .string(description: "Relative text source path"),
                     "content": .string(description: "Complete replacement content")
                 ], required: ["fileName", "content"]), description: "Optional complete file replacements"),
                 "edits": .array(items: .closedObject(properties: [
-                    "fileName": .stringEnumeration(values: ["index.html", "style.css", "app.js"], description: "Existing draft file to edit"),
+					"fileName": .string(description: "Relative text source path"),
                     "oldText": .string(description: "Exact text that must occur once"),
                     "newText": .string(description: "Replacement text")
                 ], required: ["fileName", "oldText", "newText"]), description: "Optional ordered exact text replacements")
@@ -391,6 +463,17 @@ public struct InteractiveWebAgentTool: AgentTool {
         let text: String
         var json: String?
         switch operation {
+		case .listProjects:
+			status = nil
+			let projects = try await runtime.remoteProjects(limit: min(max(arguments.int("limit") ?? 50, 1), 100))
+			json = try encode(projects); text = "Online interactive webpage projects loaded."
+		case .getProject:
+			status = nil
+			let project = try await runtime.remoteProject(id: requiredString("remoteProjectID", arguments))
+			json = try encode(project); text = "Online interactive webpage project details loaded."
+		case .downloadProject:
+			status = try await runtime.downloadRemoteProject(sessionID: context.sessionID, remoteProjectID: requiredString("remoteProjectID", arguments))
+			text = "Online webpage downloaded to Connor's user data directory."
         case .createDraft:
             status = try await runtime.createDraft(sessionID: context.sessionID, name: requiredString("name", arguments), html: requiredString("html", arguments), css: optionalString("css", arguments), javascript: optionalString("javascript", arguments))
             text = "Local webpage draft created."

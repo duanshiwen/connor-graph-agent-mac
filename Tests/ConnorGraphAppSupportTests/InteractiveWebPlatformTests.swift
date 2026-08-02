@@ -35,6 +35,16 @@ struct InteractiveWebPlatformTests {
         ] == ["public", "password", "private"])
     }
 
+	@Test func submittedRecordPreservesUserData() throws {
+		let payload = Data(#"{"id":"record-1","data":{"name":"Lin","attending":true,"guests":2},"status":"approved","createdAt":"2026-08-03T00:00:00Z"}"#.utf8)
+		let decoder = JSONDecoder()
+		decoder.dateDecodingStrategy = .iso8601
+		let record = try decoder.decode(InteractiveWebRecordMetadata.self, from: payload)
+		#expect(record.data["name"] == .string("Lin"))
+		#expect(record.data["attending"] == .bool(true))
+		#expect(record.data["guests"] == .number(2))
+	}
+
     @Test func publishRejectsDraftChangedAfterApprovalBeforeNetworkAccess() async throws {
         let fixture = try makeRuntimeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

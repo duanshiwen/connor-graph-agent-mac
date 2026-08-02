@@ -40,6 +40,29 @@ public struct InteractiveWebAPIClient: Sendable {
         return result
     }
 
+    public func projects(limit: Int = 50) async throws -> [InteractiveWebRemoteProject] {
+		try await get("api/v1/projects?limit=\(min(max(limit, 1), 100))")
+	}
+
+	public func project(id: String) async throws -> InteractiveWebRemoteProjectDetail {
+		try await get("api/v1/projects/\(id)")
+	}
+
+	public func projectFile(projectID: String, path: String) async throws -> Data {
+		guard !path.isEmpty, !path.hasPrefix("/"), !path.split(separator: "/").contains("..") else {
+			throw InteractiveWebAPIError.invalidResponse
+		}
+		var url = baseURL.appendingPathComponent("api/v1/projects/\(projectID)/files")
+		for component in path.split(separator: "/") { url.appendPathComponent(String(component)) }
+		var request = URLRequest(url: url)
+		request.setValue("Bearer \(try await credentials.accessToken())", forHTTPHeaderField: "Authorization")
+		let (data, response) = try await transport.data(for: request)
+		guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw InteractiveWebAPIError.server }
+		return data
+	}
+
+	public func publicSiteURL(siteID: String) -> URL { baseURL.appendingPathComponent("s/\(siteID)") }
+
     public func rollback(projectID: String, deploymentID: String) async throws {
         let _: RollbackResult = try await send("api/v1/projects/\(projectID)/rollback", method: "POST", body: Rollback(deploymentId: deploymentID))
     }
@@ -111,8 +134,60 @@ public struct InteractiveWebAPIClient: Sendable {
     private struct AccessPolicyResult: Decodable { var mode: String; var expiresAt: Date? }
 }
 
+public struct InteractiveWebRemoteProject: Codable, Sendable, Equatable {
+	public var id: String
+	public var name: String
+	public var siteId: String
+	public var status: String
+	public var accessMode: String
+	public var currentDeploymentId: String?
+	public var createdAt: String
+	public var updatedAt: String
+}
+
+public struct InteractiveWebRemoteDeployment: Codable, Sendable, Equatable {
+	public var id: String
+	public var projectId: String
+	public var version: Int
+	public var status: String
+	public var failureCode: String?
+	public var createdAt: String
+	public var finalizedAt: String?
+}
+
+public struct InteractiveWebRemoteFile: Codable, Sendable, Equatable {
+	public var id: String
+	public var deploymentId: String
+	public var path: String
+	public var sha256: String
+	public var mediaType: String
+	public var sizeBytes: Int64
+	public var createdAt: String
+}
+
+public struct InteractiveWebRemoteCollection: Codable, Sendable, Equatable {
+	public var name: String
+	public var schemaVersion: Int
+	public var recordCount: Int64
+}
+
+public struct InteractiveWebRemoteProjectDetail: Codable, Sendable, Equatable {
+	public var id: String
+	public var name: String
+	public var siteId: String
+	public var status: String
+	public var accessMode: String
+	public var currentDeploymentId: String?
+	public var createdAt: String
+	public var updatedAt: String
+	public var deployments: [InteractiveWebRemoteDeployment]
+	public var files: [InteractiveWebRemoteFile]
+	public var collections: [InteractiveWebRemoteCollection]
+}
+
 public struct InteractiveWebRecordMetadata: Codable, Sendable, Equatable {
     public var id: String
+	public var data: [String: ConnorJSONValue]
     public var status: String
     public var checkedInAt: Date?
     public var createdAt: Date
