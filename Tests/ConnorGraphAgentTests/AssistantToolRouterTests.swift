@@ -16,6 +16,26 @@ import Testing
     #expect(!route.modelVisibleDefinitions.contains { $0.name == "mail_search_messages" })
 }
 
+@Test func toolRouterKeepsTheCompleteCatalogDiscoverableWithoutExpandingTheStableSurface() {
+    let exposedDefinitions = [
+        AgentToolDefinition(name: "Shell", description: "Run shell", inputSchema: .object(properties: [:], required: []))
+    ]
+    let catalogDefinitions = exposedDefinitions + [
+        AgentToolDefinition(name: "web_search", description: "Search the public web", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "get_current_time", description: "Internal time preflight", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let route = AssistantToolRouter().route(
+        initiallyExposedDefinitions: exposedDefinitions,
+        catalogDefinitions: catalogDefinitions
+    )
+
+    #expect(route.modelVisibleDefinitions.contains { $0.name == "Shell" })
+    #expect(!route.modelVisibleDefinitions.contains { $0.name == "web_search" })
+    #expect(route.discoverableDefinitions.contains { $0.name == "web_search" })
+    #expect(!route.discoverableDefinitions.contains { $0.name == "get_current_time" })
+}
+
 @Test func toolSearchReturnsRelevantFullSchemasOnly() {
     let definitions = [
         AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: ["query": .string(description: "query")], required: ["query"])),
