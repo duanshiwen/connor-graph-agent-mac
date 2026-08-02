@@ -9,7 +9,7 @@ public struct InteractiveWebAPIClient: Sendable {
 
     public init(baseURL: URL, transport: any ConnorBackendHTTPTransport = URLSession.shared, credentials: any CloudKnowledgeCredentialProvider = StoredCloudKnowledgeCredentialProvider()) {
         self.baseURL = baseURL; self.transport = transport; self.credentials = credentials
-        self.encoder = JSONEncoder()
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; self.encoder = encoder
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601; self.decoder = decoder
     }
 
@@ -49,6 +49,22 @@ public struct InteractiveWebAPIClient: Sendable {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw InteractiveWebAPIError.server }; return data
     }
 
+    public func updateAccessPolicy(siteID: String, mode: InteractiveWebAccessMode, password: String? = nil, expiresAt: Date? = nil) async throws {
+        let _: AccessPolicyResult = try await send("api/v1/sites/\(siteID)/access-policy", method: "PATCH", body: AccessPolicy(mode: mode.rawValue, password: password, expiresAt: expiresAt))
+    }
+
+    public func offline(siteID: String) async throws {
+        try await sendNoContent("api/v1/sites/\(siteID)/offline", method: "POST")
+    }
+
+    public func analytics(projectID: String) async throws -> InteractiveWebAnalytics {
+        try await get("api/v1/projects/\(projectID)/analytics")
+    }
+
+    public func auditLogs(projectID: String, limit: Int = 100) async throws -> [InteractiveWebAuditEntry] {
+        try await get("api/v1/projects/\(projectID)/audit-logs?limit=\(min(max(limit, 1), 200))")
+    }
+
     private func createProject(name: String) async throws -> String {
         let project: RemoteProject = try await send("api/v1/projects", method: "POST", body: CreateProject(name: name)); return project.id
     }
@@ -68,6 +84,12 @@ public struct InteractiveWebAPIClient: Sendable {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let value = try? decoder.decode(Envelope<T>.self, from: data).data else { throw InteractiveWebAPIError.server }; return value
     }
 
+    private func sendNoContent(_ path: String, method: String) async throws {
+        let url = baseURL.appendingPathComponent(path); var request = URLRequest(url: url); request.httpMethod = method; request.setValue("Bearer \(try await credentials.accessToken())", forHTTPHeaderField: "Authorization")
+        let (_, response) = try await transport.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw InteractiveWebAPIError.server }
+    }
+
     private struct Envelope<T: Decodable>: Decodable { var data: T }
     private struct Empty: Encodable {}
     private struct CreateProject: Encodable { var name: String }
@@ -77,12 +99,23 @@ public struct InteractiveWebAPIClient: Sendable {
     private struct Deployment: Decodable { var id: String }
     private struct UploadSession: Decodable { var uploadUrls: [String: URL] }
     private struct RollbackResult: Decodable { var currentDeploymentId: String }
+    private struct AccessPolicy: Encodable { var mode: String; var password: String?; var expiresAt: Date? }
+    private struct AccessPolicyResult: Decodable { var mode: String; var expiresAt: Date? }
 }
 
 public struct InteractiveWebRecordMetadata: Decodable, Sendable, Equatable {
     public var id: String
     public var status: String
     public var checkedInAt: Date?
+    public var createdAt: Date
+}
+
+public struct InteractiveWebAuditEntry: Decodable, Sendable, Equatable {
+    public var id: String
+    public var actorId: Int
+    public var actorRole: String
+    public var action: String
+    public var resourceId: String
     public var createdAt: Date
 }
 

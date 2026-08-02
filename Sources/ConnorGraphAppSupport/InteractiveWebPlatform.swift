@@ -2,6 +2,13 @@ import CryptoKit
 import Foundation
 
 public enum InteractiveWebChoiceMode: String, Codable, Sendable { case single, multiple }
+public enum InteractiveWebAccessMode: String, Codable, Sendable { case `public`, password, `private` }
+
+public struct InteractiveWebAnalytics: Codable, Sendable, Equatable {
+    public var views: Int
+    public var interactions: Int
+    public var errors: Int
+}
 
 public struct InteractiveWebChoiceOption: Codable, Sendable, Equatable {
     public var id: String
