@@ -2137,25 +2137,19 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(noteLookup.requiresNoteSearch)
 }
 
-@Test func contextualRunTokenPolicyRoutesNativeToolFamiliesAndPreservesExternalTools() {
-    let definitions = ["Shell", "mail_search_messages", "web_search", "memory_os_recent_context", "external_mcp_action"].map {
+@Test func contextualRunTokenPolicyOnlyInitiallyExposesDirectWorkspaceTools() {
+    let definitions = ["Shell", "ApplyPatch", "mail_search_messages", "web_search", "external_mcp_action"].map {
         AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
     }
     let request = AgentChatRequest(sessionID: "routing", userMessage: "请读取项目中的配置文件")
     let policy = AgentRunTokenPolicy()
-    let plan = policy.retrievalPlan(for: request, mode: .contextual)
-    let names = Set(policy.exposedTools(
+    let names = Set(policy.initiallyExposedTools(
         from: definitions,
         request: request,
-        retrievalPlan: plan,
         mode: .contextual
     ).map(\.name))
 
-    #expect(names.contains("Shell"))
-    #expect(names.contains("external_mcp_action"))
-    #expect(!names.contains("mail_search_messages"))
-    #expect(!names.contains("web_search"))
-    #expect(names.contains("memory_os_recent_context"))
+    #expect(names == ["Shell", "ApplyPatch"])
 }
 
 @Test func agentLoopAcceptsMemoryAndNotePreflightInsideOneParallelQuery() async throws {

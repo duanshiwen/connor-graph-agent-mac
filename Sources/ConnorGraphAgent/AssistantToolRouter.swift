@@ -1,11 +1,5 @@
 import Foundation
 
-public enum AssistantToolTier: String, Codable, Sendable, Equatable {
-    case runtimeInternal
-    case alwaysVisible
-    case discoverable
-}
-
 public struct AssistantToolRoute: Sendable, Equatable {
     public var modelVisibleDefinitions: [AgentToolDefinition]
     public var discoverableDefinitions: [AgentToolDefinition]

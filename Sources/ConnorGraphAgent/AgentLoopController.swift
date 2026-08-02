@@ -296,10 +296,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     policy: policy
                 )
                 let availableRegisteredToolDefinitions = await toolRegistry.definitions(availableUnder: policy)
-                let exposedToolDefinitions = tokenPolicy.exposedTools(
+                let exposedToolDefinitions = tokenPolicy.initiallyExposedTools(
                     from: availableRegisteredToolDefinitions,
                     request: request,
-                    retrievalPlan: retrievalPlan,
                     mode: configuration.toolExposureMode
                 ).sorted { $0.name < $1.name }
                 let assistantToolRouter = AssistantToolRouter()
