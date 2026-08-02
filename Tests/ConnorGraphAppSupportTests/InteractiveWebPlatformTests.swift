@@ -18,4 +18,11 @@ struct InteractiveWebPlatformTests {
         let manifest = try InteractiveWebPackager().package(rootURL: root)
         #expect(manifest.files.map(\.path) == ["index.html", "style.css"])
     }
+
+    @Test func manifestCarriesRegistrationSchema() {
+        let manifest = InteractiveWebManifest(files: [], collections: [
+            .init(name: "registrations", fields: [.init(name: "name", type: "string", required: true, maxLength: 80)], anonymousCreate: true)
+        ])
+        #expect(manifest.collections.first?.name == "registrations")
+    }
 }

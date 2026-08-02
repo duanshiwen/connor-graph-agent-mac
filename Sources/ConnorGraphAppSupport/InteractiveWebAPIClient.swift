@@ -4,11 +4,13 @@ public struct InteractiveWebAPIClient: Sendable {
     public var baseURL: URL
     private let transport: any ConnorBackendHTTPTransport
     private let credentials: any CloudKnowledgeCredentialProvider
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
 
     public init(baseURL: URL, transport: any ConnorBackendHTTPTransport = URLSession.shared, credentials: any CloudKnowledgeCredentialProvider = StoredCloudKnowledgeCredentialProvider()) {
         self.baseURL = baseURL; self.transport = transport; self.credentials = credentials
+        self.encoder = JSONEncoder()
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601; self.decoder = decoder
     }
 
     public func publish(project: LocalInteractiveWebProject, manifest: InteractiveWebManifest) async throws -> LocalInteractiveWebProject {
@@ -34,6 +36,19 @@ public struct InteractiveWebAPIClient: Sendable {
         let _: RollbackResult = try await send("api/v1/projects/\(projectID)/rollback", method: "POST", body: Rollback(deploymentId: deploymentID))
     }
 
+    public func records(projectID: String, collection: String, limit: Int = 100) async throws -> [InteractiveWebRecordMetadata] {
+        guard collection.range(of: #"^[a-z_][a-z0-9_]{0,63}$"#, options: .regularExpression) != nil else { throw InteractiveWebAPIError.invalidResponse }
+        return try await get("api/v1/projects/\(projectID)/collections/\(collection)/records?limit=\(min(max(limit, 1), 1000))")
+    }
+
+    public func exportCSV(projectID: String, collection: String) async throws -> Data {
+        guard collection.range(of: #"^[a-z_][a-z0-9_]{0,63}$"#, options: .regularExpression) != nil else { throw InteractiveWebAPIError.invalidResponse }
+        let url = baseURL.appendingPathComponent("api/v1/projects/\(projectID)/collections/\(collection)/export")
+        var request = URLRequest(url: url); request.setValue("Bearer \(try await credentials.accessToken())", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await transport.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw InteractiveWebAPIError.server }; return data
+    }
+
     private func createProject(name: String) async throws -> String {
         let project: RemoteProject = try await send("api/v1/projects", method: "POST", body: CreateProject(name: name)); return project.id
     }
@@ -46,6 +61,13 @@ public struct InteractiveWebAPIClient: Sendable {
         guard let value = try? decoder.decode(Envelope<T>.self, from: data).data else { throw InteractiveWebAPIError.invalidResponse }; return value
     }
 
+    private func get<T: Decodable>(_ path: String) async throws -> T {
+        guard let url = URL(string: path, relativeTo: baseURL.appendingPathComponent("/"))?.absoluteURL else { throw InteractiveWebAPIError.invalidResponse }
+        var request = URLRequest(url: url); request.setValue("Bearer \(try await credentials.accessToken())", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await transport.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let value = try? decoder.decode(Envelope<T>.self, from: data).data else { throw InteractiveWebAPIError.server }; return value
+    }
+
     private struct Envelope<T: Decodable>: Decodable { var data: T }
     private struct Empty: Encodable {}
     private struct CreateProject: Encodable { var name: String }
@@ -55,6 +77,13 @@ public struct InteractiveWebAPIClient: Sendable {
     private struct Deployment: Decodable { var id: String }
     private struct UploadSession: Decodable { var uploadUrls: [String: URL] }
     private struct RollbackResult: Decodable { var currentDeploymentId: String }
+}
+
+public struct InteractiveWebRecordMetadata: Decodable, Sendable, Equatable {
+    public var id: String
+    public var status: String
+    public var checkedInAt: Date?
+    public var createdAt: Date
 }
 
 public enum InteractiveWebAPIError: Error { case server, invalidResponse, uploadFailed }
