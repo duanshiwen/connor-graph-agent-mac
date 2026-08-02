@@ -295,6 +295,23 @@ private struct PhasedBatchExecutionTool: AgentTool {
     }
 }
 
+private struct PhasedArtifactTool: AgentTool {
+    let name = "interactive_web_create_draft"
+    let permission: AgentPermissionCapability = .createInteractiveWebDraft
+    let description = "create a test artifact"
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "artifact created"
+        )
+    }
+}
+
 @Test func promptModuleCatalogHasCompleteStableAcyclicClassification() {
     #expect(AgentPromptModuleCatalog.specifications.count == 42)
     #expect(AgentPromptModuleCatalog.duplicateIDs.isEmpty)
@@ -311,6 +328,13 @@ private struct PhasedBatchExecutionTool: AgentTool {
     let commit = try #require(definitions.first { $0.name == AgentPhaseToolContract.commitStrategyName })
     let commitSchema = String(data: try JSONSerialization.data(withJSONObject: commit.inputSchema.jsonObject, options: [.sortedKeys]), encoding: .utf8) ?? ""
     #expect(!commitSchema.contains("requestedModuleIDs"))
+    #expect(commitSchema.contains("production"))
+    #expect(commitSchema.contains("acceptanceCriteria"))
+
+    let prepare = try #require(definitions.first { $0.name == AgentPhaseToolContract.prepareFinalOutputName })
+    let prepareSchema = String(data: try JSONSerialization.data(withJSONObject: prepare.inputSchema.jsonObject, options: [.sortedKeys]), encoding: .utf8) ?? ""
+    #expect(prepareSchema.contains("deliveryReview"))
+    #expect(prepareSchema.contains("remainingIssues"))
 
     let query = try #require(definitions.first { $0.name == AgentPhaseToolContract.externalSearchBatchName })
     #expect(query.description.contains("does not classify call semantics"))
@@ -319,6 +343,73 @@ private struct PhasedBatchExecutionTool: AgentTool {
     let execute = try #require(definitions.first { $0.name == AgentPhaseToolContract.externalReadBatchName })
     #expect(execute.description.contains("listed order"))
     #expect(!execute.description.contains("read-only deep-read"))
+}
+
+@Test func productionStrategyRequiresDecomposedDeliveryPlan() throws {
+    let incomplete = AgentStrategyPlan(
+        provisionalApproach: "Create the requested artifact.",
+        recommendedApproach: "Build and inspect it.",
+        taskMode: .production,
+        memoryDecision: .skip(.userExplicitlyDisabled)
+    )
+    #expect(throws: AgentStrategyPlanValidationError.productionDeliverablesRequired) {
+        try AgentStrategyPlanValidator().validate(incomplete, memoryCapabilityAvailable: true)
+    }
+
+    let complete = AgentStrategyPlan(
+        provisionalApproach: "Create the requested artifact.",
+        recommendedApproach: "Build, inspect, repair, and verify it.",
+        taskMode: .production,
+        memoryDecision: .skip(.userExplicitlyDisabled),
+        deliverables: ["Responsive webpage"],
+        acceptanceCriteria: ["Primary interaction works"],
+        verificationSteps: ["Inspect desktop and mobile previews"]
+    )
+    try AgentStrategyPlanValidator().validate(complete, memoryCapabilityAvailable: true)
+}
+
+@Test func productionDeliveryReviewRequiresCoverageAndEvidence() throws {
+    let plan = AgentStrategyPlan(
+        provisionalApproach: "Create the requested artifact.",
+        recommendedApproach: "Build, inspect, repair, and verify it.",
+        taskMode: .production,
+        memoryDecision: .skip(.userExplicitlyDisabled),
+        deliverables: ["Responsive webpage"],
+        acceptanceCriteria: ["Primary interaction works"],
+        verificationSteps: ["Inspect desktop and mobile previews"]
+    )
+    let missingEvidence = AgentDeliveryReview(
+        outcome: .passed,
+        deliverables: ["Responsive webpage"],
+        criteria: [.init(criterion: "Primary interaction works", status: .passed, evidence: "")],
+        verification: [.init(method: "Inspect desktop and mobile previews", evidence: "desktop and mobile rendered")]
+    )
+    #expect(throws: AgentDeliveryReviewValidationError.evidenceRequired) {
+        try AgentDeliveryReviewValidator().validate(missingEvidence, for: plan)
+    }
+
+    let complete = AgentDeliveryReview(
+        outcome: .passed,
+        deliverables: ["Responsive webpage"],
+        criteria: [.init(criterion: "Primary interaction works", status: .passed, evidence: "Submitted the form and observed its success state")],
+        verification: [.init(method: "Inspect desktop and mobile previews", evidence: "Reviewed 1440x900 and 390x844 renders with no overlap")]
+    )
+    try AgentDeliveryReviewValidator().validate(complete, for: plan)
+}
+
+@Test func productionToolClassifierRecognizesDurableArtifactMutations() {
+    #expect(AgentProductionToolClassifier.producesArtifact(
+        toolName: "interactive_web_create_draft",
+        permission: .createInteractiveWebDraft
+    ))
+    #expect(AgentProductionToolClassifier.producesArtifact(
+        toolName: "ApplyPatch",
+        permission: .editWorkspaceFile
+    ))
+    #expect(!AgentProductionToolClassifier.producesArtifact(
+        toolName: "browser_snapshot",
+        permission: .readBrowserPage
+    ))
 }
 
 @Test func strategyCommitCombinesProvisionalEvidenceAndMemoryDecision() throws {
@@ -727,6 +818,52 @@ private struct PhasedBatchExecutionTool: AgentTool {
             && $0.content.contains("Alan Turing was born in 1912.")
             && $0.content.contains("mcp__wikidata__search_items")
             && $0.content.contains("cloud_kb_knowledge_context")
+    })
+}
+
+@Test func productionLoopRejectsFinalSynthesisUntilDeliveryReviewIsComplete() async throws {
+    let commitJSON = #"{"provisionalApproach":"build once","recommendedApproach":"build, inspect, repair, verify","taskMode":"production","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"},"deliverables":["Responsive webpage"],"acceptanceCriteria":["Primary interaction works"],"verificationSteps":["Inspect desktop and mobile previews"]}"#
+    let reviewedPrepareJSON = #"{"reason":"verified final artifact","deliveryReview":{"outcome":"passed","deliverables":["Responsive webpage"],"criteria":[{"criterion":"Primary interaction works","status":"passed","evidence":"Submitted the form and observed its success state"}],"verification":[{"method":"Inspect desktop and mobile previews","evidence":"Reviewed 1440x900 and 390x844 renders with no overlap"}],"remainingIssues":[]}}"#
+    let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(id: "strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: commitJSON)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "premature", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"created"}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "reviewed", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: reviewedPrepareJSON)], finishReason: .toolCalls),
+        .init(text: "done")
+    ])
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+
+    for try await _ in loop.run(.init(sessionID: "production-review", userMessage: "Build a polished interactive webpage")) {}
+
+    let requests = await provider.capturedRequests()
+    #expect(requests.map { $0.promptCacheContext?.phase } == [
+        .strategyResearch, .taskExecution, .taskExecution, .finalSynthesis
+    ])
+    #expect(requests[2].messages.contains {
+        $0.role == .system && $0.content.contains("Final synthesis was not prepared")
+    })
+}
+
+@Test func producedArtifactRequiresDeliveryReviewEvenWhenStrategyWasMisclassified() async throws {
+    let reviewedPrepareJSON = #"{"reason":"verified artifact","deliveryReview":{"outcome":"passed","deliverables":["Generated webpage"],"criteria":[{"criterion":"Requested content is present","status":"passed","evidence":"Inspected the rendered content"}],"verification":[{"method":"Render and inspect","evidence":"Preview rendered without errors"}],"remainingIssues":[]}}"#
+    let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(id: "strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"create","recommendedApproach":"create","taskMode":"general","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"}}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "create", name: "interactive_web_create_draft", argumentsJSON: "{}")], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "premature", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"created"}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "reviewed", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: reviewedPrepareJSON)], finishReason: .toolCalls),
+        .init(text: "done")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(PhasedArtifactTool())
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(.init(sessionID: "misclassified-production", userMessage: "Create a webpage")) {}
+
+    let requests = await provider.capturedRequests()
+    #expect(requests.map { $0.promptCacheContext?.phase } == [
+        .strategyResearch, .taskExecution, .taskExecution, .taskExecution, .finalSynthesis
+    ])
+    #expect(requests[3].messages.contains {
+        $0.role == .system && $0.content.contains("production delivery review is incomplete")
     })
 }
 

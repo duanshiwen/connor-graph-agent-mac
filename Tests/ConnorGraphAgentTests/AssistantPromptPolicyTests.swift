@@ -11,6 +11,9 @@ import Testing
     #expect(prompt.contains("Do not rediscover or reread those sources solely for that check"))
     #expect(prompt.contains("Policy Engine is authoritative"))
     #expect(prompt.contains("Runtime deterministically loads bounded recent memory"))
+    #expect(prompt.contains("taskMode `production`"))
+    #expect(prompt.contains("A successful create/write/generate tool call proves persistence only"))
+    #expect(prompt.contains("submit a deliveryReview"))
     #expect(!prompt.contains("prepare_final_output"))
     #expect(!prompt.contains("memory_query"))
 }

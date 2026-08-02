@@ -323,6 +323,9 @@ import ConnorGraphStore
     #expect(enabled.contains("pass them directly to `interactive_web_create_draft`"))
     #expect(enabled.contains("Do not use Shell, ApplyPatch, workspace file tools"))
     #expect(enabled.contains("do not require a user-selected workspace"))
+    #expect(enabled.contains("inspect the rendered page through available browser snapshot or screenshot tools"))
+    #expect(enabled.contains("interactive_web_update_draft"))
+    #expect(enabled.contains("Do not call the preview endpoint alone a visual verification"))
     #expect(enabled.contains("interactive_web_publish"))
 }
 

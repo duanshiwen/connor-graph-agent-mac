@@ -395,6 +395,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     var hasCheckpointForCurrentPressure = false
                     var budgetCompactionRequested = false
                     var nextBudgetCompactionTokenThreshold = max(1, configuration.budget.maxTotalTokens)
+                    var artifactWasProduced = false
 
                     func shouldApplyCorrectionContinue(_ category: String) -> Bool {
                         let count = correctionContinueCounts[category, default: 0] + 1
@@ -830,6 +831,44 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 continue
                             }
                         }
+                        if let strategyCall = calls.first(where: { $0.name == AgentPhaseToolContract.commitStrategyName }) {
+                            do {
+                                let plan = try AgentStrategyPlanDecoder.decode(argumentsJSON: strategyCall.argumentsJSON)
+                                try AgentStrategyPlanValidator().validate(
+                                    plan,
+                                    memoryCapabilityAvailable: memoryCapabilityAvailable
+                                )
+                            } catch {
+                                if shouldApplyCorrectionContinue("strategy_validation") {
+                                    messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                    messages.append(AgentModelMessage(role: .system, content: """
+                                    The strategy commit was not executed because it is incomplete: \(String(describing: error)). For taskMode production, provide non-empty deliverables, acceptanceCriteria, and verificationSteps that are concrete enough to review later. Re-issue agent_commit_strategy with a valid complete plan.
+                                    """))
+                                    continue
+                                }
+                            }
+                        }
+                        if let prepareCall = calls.first(where: { $0.name == AgentPhaseToolContract.prepareFinalOutputName }),
+                           let strategy = phasedState.strategy {
+                            do {
+                                let preparation = try AgentFinalOutputPreparationDecoder.decode(
+                                    argumentsJSON: prepareCall.argumentsJSON
+                                )
+                                try AgentDeliveryReviewValidator().validate(
+                                    preparation.deliveryReview,
+                                    for: strategy,
+                                    artifactWasProduced: artifactWasProduced
+                                )
+                            } catch {
+                                if shouldApplyCorrectionContinue("delivery_review") {
+                                    messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                    messages.append(AgentModelMessage(role: .system, content: """
+                                    Final synthesis was not prepared because the production delivery review is incomplete: \(String(describing: error)). Continue the quality loop if evidence is missing or defects remain. Then re-issue prepare_final_output with a deliveryReview that repeats every committed deliverable, acceptance criterion, and verification step exactly, attaches concrete evidence to each result, and reports remaining issues honestly.
+                                    """))
+                                    continue
+                                }
+                            }
+                        }
                         if phasedState.phase == .strategyResearch {
                             let researchCalls = calls.filter {
                                 $0.name == AgentPhaseToolContract.externalSearchBatchName
@@ -910,6 +949,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         )
 
                         for batchResult in batchResults where batchResult.result.error == nil {
+                                let successfulNativeToolNames = Self.selectedNativeToolNames(in: [batchResult.call])
+                                if successfulNativeToolNames.contains(where: {
+                                    AgentProductionToolClassifier.producesArtifact(
+                                        toolName: $0,
+                                        permission: toolRegistry.permission(named: $0)
+                                    )
+                                }) {
+                                    artifactWasProduced = true
+                                }
                                 switch batchResult.call.name {
                                 case AgentPhaseToolContract.commitStrategyName:
                                     let plan = try AgentStrategyPlanDecoder.decode(argumentsJSON: batchResult.call.argumentsJSON)
