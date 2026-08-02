@@ -308,7 +308,7 @@ struct BrowserWorkspaceView: View {
         let accessMode = interactiveWebAccessMode
         model.closeInteractiveWebPreview()
         Task {
-            let prompt = "请发布当前互动网页。projectID=\(status.projectID)，manifestHash=\(status.manifestHash)，accessMode=\(accessMode)。请调用 interactive_web_publish，并以工具结果为准。"
+            let prompt = "请先对当前互动网页完成桌面端和移动端质量验收，再发布通过验收的版本。projectID=\(status.projectID)，manifestHash=\(status.manifestHash)，previewTabID=\(status.previewTabID ?? "")，accessMode=\(accessMode)。请先调用 interactive_web_quality_review；如有问题先读取并修改本地临时项目，重新预览验收，只有通过后才调用 interactive_web_publish，并以工具结果为准。"
             _ = await chat.submit(prompt, "发布互动网页")
         }
     }

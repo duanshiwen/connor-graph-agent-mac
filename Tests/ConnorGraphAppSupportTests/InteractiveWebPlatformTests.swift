@@ -193,6 +193,65 @@ struct InteractiveWebPlatformTests {
         #expect(object["accessMode"] as? String == "private")
     }
 
+    @Test func publishPreflightRequiresQualityReviewForCurrentManifest() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(
+            storagePaths: fixture.paths,
+            accountID: "account",
+            api: nil,
+            browserControlHandler: { request in
+                let width = request.viewportWidth ?? 0
+                let height = request.viewportHeight ?? 0
+                let json = "{\"viewport\":{\"width\":\(width),\"height\":\(height)},\"issues\":[],\"runtimeErrors\":[]}"
+                return BrowserControlResponse(contentText: "reviewed", contentJSON: json)
+            }
+        )
+        let status = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<main><h1>Ready</h1></main>",
+            css: nil,
+            javascript: nil
+        )
+        let tool = InteractiveWebAgentTool(operation: .publish, runtime: runtime)
+        let call = AgentToolCall(
+            name: tool.name,
+            argumentsJSON: "{\"projectID\":\"\(status.projectID)\",\"manifestHash\":\"\(status.manifestHash)\",\"accessMode\":\"private\"}"
+        )
+        let context = AgentToolExecutionContext(
+            runID: "run-1",
+            sessionID: "session-1",
+            groupID: "account",
+            userPrompt: "publish",
+            toolCallID: "call-1",
+            policyEngine: AgentPolicyEngine(permissionMode: .askToWrite)
+        )
+
+        await #expect(throws: AgentToolError.self) {
+            try await tool.preflight(call: call, context: context)
+        }
+        let reviewed = try await runtime.qualityReview(
+            projectID: status.projectID,
+            expectedManifestHash: status.manifestHash,
+            sessionID: "session-1",
+            previewTabID: "preview-tab"
+        )
+        #expect(reviewed.status.qualityReview?.outcome == .passed)
+        #expect(reviewed.status.qualityReview?.viewports.map(\.width) == [1_440, 390])
+        try await tool.preflight(call: call, context: context)
+
+        _ = try await runtime.updateDraft(
+            projectID: status.projectID,
+            expectedManifestHash: status.manifestHash,
+            replacements: [:],
+            edits: ["index.html": [(oldText: "Ready", newText: "Changed")]]
+        )
+        await #expect(throws: AgentToolError.self) {
+            try await tool.preflight(call: call, context: context)
+        }
+    }
+
     private func makeRuntimeFixture() throws -> (paths: AppStoragePaths, root: URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ConnorInteractiveWebRuntime-", isDirectory: true)
