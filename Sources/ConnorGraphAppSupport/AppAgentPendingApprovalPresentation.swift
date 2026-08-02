@@ -45,6 +45,10 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
             self.title = personality.title
             self.detail = personality.detail
             self.allowsAlwaysAllow = false
+        } else if approval.capability == .publishInteractiveWeb {
+            self.title = approval.toolName == "interactive_web_publish" ? "发布互动网页" : "管理已发布网页"
+            self.detail = Self.compactJSON(approval.payloadJSON)
+            self.allowsAlwaysAllow = false
         } else {
             self.title = "请求执行：\(toolDisplayName)"
             self.detail = "权限：\(capabilityLabel) · \(capabilityDescription) · 请求：\(approval.requestID) · 参数：\(Self.compactJSON(approval.payloadJSON))"
@@ -139,6 +143,7 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         case .syncRSSSources: "同步 RSS 订阅源"
         case .importRSSOPML: "导入 RSS 订阅"
         case .exportRSSOPML: "导出 RSS 订阅"
+        case .publishInteractiveWeb: "发布或管理互动网页"
         }
     }
 

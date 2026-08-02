@@ -2664,6 +2664,8 @@ private extension AgentPermissionCapability {
              .mutateContacts, .mutateCalendar,
              .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML:
             return false
+        case .publishInteractiveWeb:
+            return false
         }
     }
 }

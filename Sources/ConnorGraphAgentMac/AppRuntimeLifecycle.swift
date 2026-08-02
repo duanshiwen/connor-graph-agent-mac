@@ -123,6 +123,7 @@ final class AppRuntimeLifecycle {
     let knowledgeCreatorStore: CloudKnowledgeCreatorStore
     let cloudKnowledgeAPI: CloudKnowledgeAPIClient
     let cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient
+    let interactiveWebAPIClient: InteractiveWebAPIClient
     let rssFeatureModel: RSSFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let chatWorkspaceCoordinator = ChatWorkspaceCoordinator()
@@ -672,6 +673,11 @@ final class AppRuntimeLifecycle {
             serverIsReachable: { AppBackendConnectivity.shared.isReachable }
         )
         self.cloudKnowledgeConsumptionClient = CloudKnowledgeConsumptionClient(api: cloudKnowledgeMarketplaceAPI, cache: cloudKnowledgeAuthorizationCache)
+        self.interactiveWebAPIClient = InteractiveWebAPIClient(
+            baseURL: backendBaseURL,
+            transport: backendTransport,
+            credentials: cloudCredentials
+        )
         self.knowledgeCreatorStore = CloudKnowledgeCreatorStore(
             creatorAPI: CloudKnowledgeCreatorAPIClient(
                 baseURL: backendBaseURL,
@@ -834,6 +840,7 @@ final class AppRuntimeLifecycle {
                 mailRuntime: mailFeatureModel.agentRuntime,
                 rssRuntime: rssFeatureModel.agentRuntime,
                 cloudKnowledgeConsumptionClient: cloudKnowledgeConsumptionClient,
+                interactiveWebAPIClient: interactiveWebAPIClient,
                 browserAssistedSearchHandler: { [weak self] request in
                     await MainActor.run {
                         guard let self else { return nil }

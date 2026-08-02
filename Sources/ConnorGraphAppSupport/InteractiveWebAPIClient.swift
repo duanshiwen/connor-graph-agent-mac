@@ -15,10 +15,13 @@ public struct InteractiveWebAPIClient: Sendable {
 
     public func publish(project: LocalInteractiveWebProject, manifest: InteractiveWebManifest) async throws -> LocalInteractiveWebProject {
         let remoteProjectID: String
+        var remoteSiteID = project.remoteSiteID
         if let existingProjectID = project.remoteProjectID {
             remoteProjectID = existingProjectID
         } else {
-            remoteProjectID = try await createProject(name: project.name)
+            let remoteProject = try await createProject(name: project.name)
+            remoteProjectID = remoteProject.id
+            remoteSiteID = remoteProject.siteId
         }
         let deployment: Deployment = try await send("api/v1/projects/\(remoteProjectID)/deployments", method: "POST", body: Empty())
         let session: UploadSession = try await send("api/v1/deployments/\(deployment.id)/upload-session", method: "POST", body: UploadPaths(paths: manifest.files.map(\.path)))
@@ -29,7 +32,12 @@ public struct InteractiveWebAPIClient: Sendable {
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw InteractiveWebAPIError.uploadFailed }
         }
         let _: Deployment = try await send("api/v1/deployments/\(deployment.id)/finalize", method: "POST", body: manifest)
-        var result = project; result.remoteProjectID = remoteProjectID; result.latestDeploymentID = deployment.id; return result
+        var result = project
+        result.remoteProjectID = remoteProjectID
+        result.remoteSiteID = remoteSiteID
+        result.latestDeploymentID = deployment.id
+        if let siteID = result.remoteSiteID { result.publishedURL = baseURL.appendingPathComponent("s/\(siteID)") }
+        return result
     }
 
     public func rollback(projectID: String, deploymentID: String) async throws {
@@ -65,8 +73,8 @@ public struct InteractiveWebAPIClient: Sendable {
         try await get("api/v1/projects/\(projectID)/audit-logs?limit=\(min(max(limit, 1), 200))")
     }
 
-    private func createProject(name: String) async throws -> String {
-        let project: RemoteProject = try await send("api/v1/projects", method: "POST", body: CreateProject(name: name)); return project.id
+    private func createProject(name: String) async throws -> RemoteProject {
+        try await send("api/v1/projects", method: "POST", body: CreateProject(name: name))
     }
 
     private func send<T: Decodable, B: Encodable>(_ path: String, method: String, body: B) async throws -> T {
@@ -95,7 +103,7 @@ public struct InteractiveWebAPIClient: Sendable {
     private struct CreateProject: Encodable { var name: String }
     private struct UploadPaths: Encodable { var paths: [String] }
     private struct Rollback: Encodable { var deploymentId: String }
-    private struct RemoteProject: Decodable { var id: String }
+    private struct RemoteProject: Decodable { var id: String; var siteId: String }
     private struct Deployment: Decodable { var id: String }
     private struct UploadSession: Decodable { var uploadUrls: [String: URL] }
     private struct RollbackResult: Decodable { var currentDeploymentId: String }
@@ -103,7 +111,7 @@ public struct InteractiveWebAPIClient: Sendable {
     private struct AccessPolicyResult: Decodable { var mode: String; var expiresAt: Date? }
 }
 
-public struct InteractiveWebRecordMetadata: Decodable, Sendable, Equatable {
+public struct InteractiveWebRecordMetadata: Codable, Sendable, Equatable {
     public var id: String
     public var status: String
     public var checkedInAt: Date?
