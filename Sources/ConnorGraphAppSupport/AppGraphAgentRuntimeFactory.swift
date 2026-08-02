@@ -714,7 +714,6 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         return AnyLLMProvider { prompt, context in
             let kind: AgentLLMRequestKind
             switch context.query {
-            case "Compress context": kind = .contextCompression
             case "Summarize chat session": kind = .sessionSummary
             case "Update rolling conversation summary": kind = .conversationRollingSummary
             default: kind = .unclassified

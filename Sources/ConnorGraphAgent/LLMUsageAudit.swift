@@ -5,7 +5,6 @@ public enum AgentLLMRequestKind: String, Codable, Sendable, Equatable, CaseItera
     case conversationProgressUpdate = "conversation_progress_update"
     case conversationIntentNormalization = "conversation_intent_normalization"
     case conversationRollingSummary = "conversation_rolling_summary"
-    case contextCompression = "context_compression"
     case sessionSummary = "session_summary"
     case sessionTitleGeneration = "session_title_generation"
     case memoryL1Extraction = "memory_l1_extraction"
