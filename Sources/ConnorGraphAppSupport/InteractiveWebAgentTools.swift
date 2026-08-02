@@ -71,12 +71,12 @@ public actor InteractiveWebToolRuntime {
     }
 
     public func publish(projectID: String, expectedManifestHash: String, accessMode: InteractiveWebAccessMode, password: String?) async throws -> InteractiveWebProjectStatus {
-        let api = try requireAPI()
         let project = try await requireProject(projectID)
         let manifest = try packager.package(rootURL: project.rootURL)
         guard packager.fingerprint(manifest) == expectedManifestHash else {
             throw AgentToolError.invalidArguments("approved manifestHash no longer matches the current draft")
         }
+        let api = try requireAPI()
         let published = try await api.publish(project: project, manifest: manifest)
         if let siteID = published.remoteSiteID {
             try await api.updateAccessPolicy(siteID: siteID, mode: accessMode, password: password)
