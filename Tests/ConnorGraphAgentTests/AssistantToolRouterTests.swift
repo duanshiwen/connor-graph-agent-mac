@@ -57,3 +57,17 @@ import Testing
     #expect(catalog.contains("mail accounts, recent messages"))
     #expect(catalog.contains("邮件、邮箱与收件箱"))
 }
+
+@Test func finalAttentionRSSSearchRemainsPubliclyDiscoverable() {
+    let definitions = [
+        AgentToolDefinition(name: "attention_brief", description: "Internal attention aggregation", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "rss_search_items", description: "Search RSS items", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let route = AssistantToolRouter().route(definitions: definitions)
+    let matches = AssistantToolRouter().discover(query: "近48小时RSS", definitions: definitions)
+
+    #expect(!route.discoverableDefinitions.contains { $0.name == "attention_brief" })
+    #expect(route.discoverableDefinitions.contains { $0.name == "rss_search_items" })
+    #expect(matches.map(\.name) == ["rss_search_items"])
+}

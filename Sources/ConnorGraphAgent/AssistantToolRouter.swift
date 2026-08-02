@@ -127,7 +127,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
         }
         return ([
             "## Tool Discovery",
-            "Only direct workspace tools and control tools have stable schemas in this request. For any other capability, call assistant_tool_search once with a compact capability query, then invoke returned exact names and schemas through parallel_tool_query or parallel_tool_execute.",
+            "Only direct workspace tools and control tools have stable schemas in this request. assistant_tool_search discovers schemas only; it does not read data. For any other capability, search once using one or more compact capability domains in the user's language, then invoke returned exact names and schemas through parallel_tool_query or parallel_tool_execute. Keep dates, record IDs, and operation arguments for the native tool call.",
             "Available families:"
         ] + lines).joined(separator: "\n")
     }
@@ -171,9 +171,9 @@ public enum AssistantDecisionToolContract {
     public static let definitions: [AgentToolDefinition] = [
         AgentToolDefinition(
             name: searchName,
-            description: "Search the current session's approved Tool Registry, MCP, and knowledge capabilities. Returns a small set of exact tool names with complete input schemas. Use once per missing capability and do not repeat the same query.",
+            description: "Discover callable capabilities in the current session's approved Tool Registry, MCP, and knowledge catalog. This returns exact tool names and complete input schemas but never reads source data or performs an action. The query may name one or more capability domains in the user's language. Use once for the missing domains, then call the returned native tools; do not repeat the same discovery query.",
             inputSchema: .closedObject(properties: [
-                "query": .string(description: "Compact capability or domain query."),
+                "query": .string(description: "One or more compact capability domains in the user's language. Keep dates, record IDs, and operation arguments for the returned native tool calls."),
                 "maxResults": .integer(description: "Optional result limit from 1 through 16; default 8.")
             ], required: ["query"])
         ),
