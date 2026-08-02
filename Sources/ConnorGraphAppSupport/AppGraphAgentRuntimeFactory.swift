@@ -446,13 +446,17 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let generatedImageInstruction = generatedImageToolIsAvailable
             ? "When the user asks to create or generate an image, use `generate_image`. When the user asks to modify a session image and `edit_image` is available, use `edit_image` with the exact latest source attachment ID instead of generating a replacement from scratch. Do not claim that image generation or editing is unavailable before attempting the corresponding available tool; if the tool fails, report the actual failure briefly."
             : ""
+        let interactiveWebInstruction = registry.definition(named: "interactive_web_create_draft") == nil
+            ? ""
+            : "When the user wants to share or showcase a result, invite other people to visit, or needs persistent interaction such as registration, feedback, or voting, you may naturally ask whether to make it a webpage. After completing a substantial result that is clearly suitable for sharing, you may also suggest this briefly at the end of delivery. If accepted, create a local draft and preview first. A preview is not a publication: publishing to the internet must use `interactive_web_publish`, and only a successful tool result proves that publication happened."
         effectiveConfiguration.instructionAppendix = [
             configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),
             userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines),
             connorPersonalityPromptSection().trimmingCharacters(in: .whitespacesAndNewlines),
             workspacePromptSection(resolvedWorkspace),
             environmentEvidencePromptSection(),
-            generatedImageInstruction
+            generatedImageInstruction,
+            interactiveWebInstruction
         ]
         .filter { !$0.isEmpty }
         .joined(separator: "\n\n")
