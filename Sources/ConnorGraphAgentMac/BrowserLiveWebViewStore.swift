@@ -557,6 +557,7 @@ final class BrowserLiveWebViewStore {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.userContentController.addUserScript(WKUserScript(source: EmbeddedWebView.selectionObserverScript, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
         configuration.userContentController.addUserScript(WKUserScript(source: EmbeddedWebView.editableFieldObserverScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        configuration.userContentController.addUserScript(WKUserScript(source: browserDiagnosticsScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         configuration.userContentController.add(coordinator, name: WebViewCoordinator.selectionMessageName)
         configuration.userContentController.add(coordinator, name: WebViewCoordinator.editableFieldMessageName)
 
@@ -568,6 +569,29 @@ final class BrowserLiveWebViewStore {
         webView.isInspectable = true
         return webView
     }
+
+    private static let browserDiagnosticsScript = #"""
+    (() => {
+      if (Array.isArray(globalThis.__connorBrowserDiagnostics)) return;
+      const entries = [];
+      Object.defineProperty(globalThis, '__connorBrowserDiagnostics', { value: entries, configurable: false });
+      const append = (level, values) => {
+        const message = Array.from(values || []).map(value => {
+          if (value instanceof Error) return value.stack || value.message || String(value);
+          if (typeof value === 'string') return value;
+          try { return JSON.stringify(value); } catch { return String(value); }
+        }).join(' ').slice(0, 1000);
+        entries.push({ level, message, timestamp: new Date().toISOString() });
+        if (entries.length > 200) entries.splice(0, entries.length - 200);
+      };
+      for (const level of ['warn', 'error']) {
+        const original = console[level]?.bind(console);
+        console[level] = (...values) => { append(level, values); original?.(...values); };
+      }
+      addEventListener('error', event => append('error', [event.message || event.error || 'Uncaught error']));
+      addEventListener('unhandledrejection', event => append('error', ['Unhandled promise rejection', event.reason]));
+    })();
+    """#
 
     private static func makeConfiguredWebView(configuration: WKWebViewConfiguration, coordinator: WebViewCoordinator, isPrivate: Bool) -> WKWebView {
         makeConfiguredWebView(configuration: configuration, coordinator: coordinator, isPrivate: isPrivate, privateDataStore: nil)

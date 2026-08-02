@@ -394,6 +394,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.register(BrowserNavigateTool(handler: browserControlHandler))
             registry.register(BrowserWaitTool(handler: browserControlHandler))
             registry.register(BrowserScreenshotTool(handler: browserControlHandler))
+            registry.register(BrowserQualityAuditTool(handler: browserControlHandler))
             registry.register(BrowserInteractTool(handler: browserControlHandler))
             registry.register(BrowserSubmitTool(handler: browserControlHandler))
             registry.register(BrowserUploadTool(handler: browserControlHandler))

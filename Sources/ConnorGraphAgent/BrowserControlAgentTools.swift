@@ -7,6 +7,7 @@ public enum BrowserControlOperation: String, Codable, Sendable, Equatable {
     case navigate
     case wait
     case screenshot
+    case qualityAudit
     case interact
     case submit
     case upload
@@ -26,6 +27,8 @@ public struct BrowserControlRequest: Sendable, Equatable {
     public var timeoutMilliseconds: Int
     public var maxNodes: Int
     public var fullPage: Bool
+    public var viewportWidth: Int?
+    public var viewportHeight: Int?
 
     public init(
         operation: BrowserControlOperation,
@@ -37,7 +40,9 @@ public struct BrowserControlRequest: Sendable, Equatable {
         value: String? = nil,
         timeoutMilliseconds: Int = 10_000,
         maxNodes: Int = 200,
-        fullPage: Bool = false
+        fullPage: Bool = false,
+        viewportWidth: Int? = nil,
+        viewportHeight: Int? = nil
     ) {
         self.operation = operation
         self.sessionID = sessionID
@@ -49,6 +54,8 @@ public struct BrowserControlRequest: Sendable, Equatable {
         self.timeoutMilliseconds = timeoutMilliseconds
         self.maxNodes = maxNodes
         self.fullPage = fullPage
+        self.viewportWidth = viewportWidth
+        self.viewportHeight = viewportHeight
     }
 }
 
@@ -82,8 +89,14 @@ private enum BrowserControlToolSupport {
             value: arguments.string("value"),
             timeoutMilliseconds: min(max(arguments.int("timeoutMs") ?? arguments.int("timeout_ms") ?? 10_000, 250), 120_000),
             maxNodes: min(max(arguments.int("maxNodes") ?? arguments.int("max_nodes") ?? 200, 20), 500),
-            fullPage: arguments.bool("fullPage") ?? arguments.bool("full_page") ?? false
+            fullPage: arguments.bool("fullPage") ?? arguments.bool("full_page") ?? false,
+            viewportWidth: boundedViewport(arguments.int("viewportWidth") ?? arguments.int("viewport_width"), range: 320...2_560),
+            viewportHeight: boundedViewport(arguments.int("viewportHeight") ?? arguments.int("viewport_height"), range: 480...1_600)
         )
+    }
+
+    private static func boundedViewport(_ value: Int?, range: ClosedRange<Int>) -> Int? {
+        value.map { min(max($0, range.lowerBound), range.upperBound) }
     }
 
     static func execute(
@@ -208,6 +221,25 @@ public struct BrowserScreenshotTool: AgentTool {
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         try await BrowserControlToolSupport.execute(operation: .screenshot, toolName: name, arguments: arguments, context: context, handler: handler)
+    }
+}
+
+public struct BrowserQualityAuditTool: AgentTool {
+    public let name = "browser_quality_audit"
+    public let description = "Audit the rendered built-in browser page at an explicit desktop or mobile viewport. Returns a structured report covering horizontal overflow, clipped or offscreen content, unnamed controls, unlabeled fields, missing image alternatives, heading order, duplicate IDs, small interactive targets, and captured JavaScript errors, plus a screenshot from the same viewport. Use this before claiming that a webpage is complete."
+    public let permission: AgentPermissionCapability = .readBrowserPage
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "tabID": .string(description: "Optional exact tabID returned by browser_tabs or a browser navigation result; copy it without renaming."),
+        "viewportWidth": .integer(description: "Viewport width in CSS pixels, clamped to 320-2560. Use an explicit desktop or mobile width."),
+        "viewportHeight": .integer(description: "Viewport height in CSS pixels, clamped to 480-1600. Use an explicit desktop or mobile height."),
+        "fullPage": .boolean(description: "Capture the full page when true. Defaults to the current viewport.")
+    ], required: ["viewportWidth", "viewportHeight"])
+    private let handler: BrowserControlHandler?
+
+    public init(handler: BrowserControlHandler? = nil) { self.handler = handler }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        try await BrowserControlToolSupport.execute(operation: .qualityAudit, toolName: name, arguments: arguments, context: context, handler: handler)
     }
 }
 
