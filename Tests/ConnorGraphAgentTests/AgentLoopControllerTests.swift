@@ -991,6 +991,20 @@ private struct RetrievalEvidenceTool: AgentTool {
     }
 }
 
+private struct DiscoveryNetworkTool: AgentTool {
+    let name = "web_search"
+    let description = "Search the public web for current information."
+    let permission = AgentPermissionCapability.externalNetwork
+    let inputSchema = AgentToolInputSchema.closedObject(
+        properties: ["query": .string(description: "Search query")],
+        required: ["query"]
+    )
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "search result")
+    }
+}
+
 private struct PaginatedCurrentUserProfileTool: AgentTool {
     let name = AgentContinuityPreflightPolicy.currentUserProfileToolName
     let description = "Return deterministic paginated current-user profile evidence"
@@ -2150,6 +2164,69 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     ).map(\.name))
 
     #expect(names == ["Shell", "ApplyPatch"])
+}
+
+@Test func agentLoopDiscoversWebFromTheAuthorizedCatalogWithoutInitiallyExposingItsSchema() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [.init(
+                id: "discover-web",
+                name: AssistantDecisionToolContract.searchName,
+                argumentsJSON: #"{"query":"网络搜索"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [.init(
+                id: "prepare-discovery-final",
+                name: AgentPhaseToolContract.prepareFinalOutputName,
+                argumentsJSON: #"{"reason":"discovery verified"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "已找到公开信息检索能力。", finishReason: .stop)
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(DiscoveryNetworkTool())
+    let audit = InMemoryAgentAuditLog()
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        auditLog: audit
+    )
+
+    for try await _ in loop.run(AgentChatRequest(
+        runID: "run-discover-web",
+        sessionID: "session-discover-web",
+        userMessage: "润米有哪些公开联系方式？"
+    )) {}
+
+    let requests = await provider.requests
+    let firstRequest = try #require(requests.first)
+    let secondRequest = try #require(requests.dropFirst().first)
+    #expect(firstRequest.tools.contains { $0.name == AssistantDecisionToolContract.searchName })
+    #expect(!firstRequest.tools.contains { $0.name == "web_search" })
+    #expect(firstRequest.tools == secondRequest.tools)
+    #expect(firstRequest.messages.contains { message in
+        message.role == .system && message.content.contains("- web: web search and web content retrieval")
+    })
+    #expect(requests.dropFirst().contains { request in
+        request.messages.contains { message in
+            message.role == .tool
+                && message.toolCallID == "discover-web"
+                && message.content.contains("web_search")
+        }
+    })
+
+    let discoveryEvent = try #require(await audit.events.first { $0.eventType == .toolDiscovery })
+    let payloadData = Data(discoveryEvent.payloadJSON.utf8)
+    let payload = try #require(JSONSerialization.jsonObject(with: payloadData) as? [String: Any])
+    #expect(payload["matchStatus"] as? String == "matched")
+    #expect(payload["catalogToolCount"] as? Int == 1)
+    #expect(payload["returnedTools"] as? [String] == ["web_search"])
+    #expect((payload["initiallyExposedToolCount"] as? Int ?? 0) > 0)
 }
 
 @Test func agentLoopAcceptsMemoryAndNotePreflightInsideOneParallelQuery() async throws {

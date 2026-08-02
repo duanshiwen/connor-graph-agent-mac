@@ -52,7 +52,14 @@ public struct AssistantToolRouter: Sendable, Equatable {
         .init(name: "contact", summary: "contacts and person records / 联系人与通讯录", aliases: ["contact", "contacts", "person", "people", "联系人", "通讯录"]),
         .init(name: "browser", summary: "interactive browser navigation and page inspection / 浏览器页面操作", aliases: ["browser", "page", "website", "浏览器", "网页", "网站"]),
         .init(name: "web", summary: "web search and web content retrieval / 网络搜索与网页读取", aliases: ["web", "online", "internet", "联网", "上网", "网络", "查资料"]),
-        .init(name: "memory", summary: "Memory OS records and durable knowledge / 记忆与长期知识", aliases: ["memory", "remember", "history", "记忆", "回忆", "历史"])
+        .init(name: "memory", summary: "Memory OS records and durable knowledge / 记忆与长期知识", aliases: ["memory", "remember", "history", "记忆", "回忆", "历史"]),
+        .init(name: "science", summary: "scientific calculation, statistics, linear algebra, units, and optimization / 科学计算、统计、线性代数、单位与优化", aliases: ["science", "compute", "calculation", "statistics", "math", "科学", "计算", "统计", "数学", "公式"]),
+        .init(name: "image", summary: "image search, generation, editing, and presentation / 图片搜索、生成、编辑与展示", aliases: ["image", "photo", "picture", "illustration", "图片", "图像", "照片", "配图"]),
+        .init(name: "environment", summary: "current environment, location, and weather context / 当前环境、位置与天气", aliases: ["environment", "location", "weather", "环境", "位置", "地点", "天气"]),
+        .init(name: "skill", summary: "installed skills and reusable workflows / 已安装技能与工作流", aliases: ["skill", "workflow", "技能", "工作流"]),
+        .init(name: "graph", summary: "knowledge graph search and graph-backed records / 知识图谱搜索与图谱记录", aliases: ["graph", "knowledge graph", "图谱", "知识图谱"]),
+        .init(name: "workspace", summary: "workspace files, search, and local editing / 工作区文件、搜索与编辑", aliases: ["workspace", "local files", "code", "工作区", "本地文件", "代码", "文件"]),
+        .init(name: "knowledge", summary: "cloud knowledge-base search and retrieval / 云端知识库搜索与读取", aliases: ["knowledge", "knowledge base", "cloud knowledge", "知识", "知识库", "云知识库"])
     ]
 
     public func route(definitions: [AgentToolDefinition]) -> AssistantToolRoute {
@@ -174,6 +181,26 @@ public struct AssistantToolRouter: Sendable, Equatable {
 
     private func familyName(for definition: AgentToolDefinition) -> String {
         let name = definition.name.lowercased()
+        if ["read", "readmany", "edit", "multiedit", "write", "glob", "grep", "ls"].contains(name) {
+            return "workspace"
+        }
+        let mappedPrefixes: [(prefix: String, family: String)] = [
+            ("contacts_", "contact"),
+            ("person_", "contact"),
+            ("time_", "science"),
+            ("get_current_environment", "environment"),
+            ("environment_", "environment"),
+            ("connor_skill_", "skill"),
+            ("generate_image", "image"),
+            ("edit_image", "image"),
+            ("present_image", "image"),
+            ("local_", "workspace"),
+            ("workspace_", "workspace"),
+            ("cloud_kb_", "knowledge")
+        ]
+        if let mapping = mappedPrefixes.first(where: { name.hasPrefix($0.prefix) }) {
+            return mapping.family
+        }
         if let separator = name.firstIndex(of: "_") { return String(name[..<separator]) }
         return name
     }
