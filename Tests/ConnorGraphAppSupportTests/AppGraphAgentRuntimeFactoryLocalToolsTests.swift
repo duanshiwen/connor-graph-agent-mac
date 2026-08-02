@@ -320,6 +320,9 @@ import ConnorGraphStore
 
     #expect(!disabled.contains("interactive_web_publish"))
     #expect(enabled.contains("share or showcase a result"))
+    #expect(enabled.contains("pass them directly to `interactive_web_create_draft`"))
+    #expect(enabled.contains("Do not use Shell, ApplyPatch, workspace file tools"))
+    #expect(enabled.contains("do not require a user-selected workspace"))
     #expect(enabled.contains("interactive_web_publish"))
 }
 

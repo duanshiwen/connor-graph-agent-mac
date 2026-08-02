@@ -189,7 +189,7 @@ public struct InteractiveWebAgentTool: AgentTool {
     public var name: String { operation.rawValue }
     public var permission: AgentPermissionCapability {
         switch operation {
-        case .createDraft, .updateDraft: .writeWorkspaceFile
+        case .createDraft, .updateDraft: .createInteractiveWebDraft
         case .preview, .getStatus: .readSession
         case .recordsSummary: .externalNetwork
         case .publish, .rollback, .setAccess, .offline, .exportRecords: .publishInteractiveWeb
@@ -197,8 +197,8 @@ public struct InteractiveWebAgentTool: AgentTool {
     }
     public var description: String {
         switch operation {
-        case .createDraft: "Create a local interactive webpage draft in the app sandbox. This does not publish anything."
-        case .updateDraft: "Update an existing local interactive webpage draft. This does not publish anything."
+        case .createDraft: "Create a local interactive webpage draft from complete HTML, CSS, and JavaScript generated in the current model response. The tool writes these files into the app-managed user-data sandbox; no selected workspace, local file tool, staging file, or documentation lookup is required. This does not publish anything."
+        case .updateDraft: "Update an existing app-managed interactive webpage draft from replacement HTML, CSS, or JavaScript. Do not stage content with workspace file tools. This does not publish anything."
         case .preview: "Return the current local preview target and exact artifact hash for the secure preview runtime."
         case .getStatus: "Read the current local and published status of an interactive webpage project."
         case .publish: "Publish the exact reviewed webpage revision to the internet. Always requires native human approval; copy manifestHash exactly from a prior tool result."

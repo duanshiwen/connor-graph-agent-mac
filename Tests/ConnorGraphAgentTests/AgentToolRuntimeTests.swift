@@ -48,6 +48,17 @@ private struct NetworkReadTool: AgentTool {
     }
 }
 
+private struct DirectShellStub: AgentTool {
+    let name = "Shell"
+    let description = "Direct shell compatibility stub."
+    let permission: AgentPermissionCapability = .runReadOnlyShellCommand
+    let inputSchema = AgentToolInputSchema.closedObject(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "resolved")
+    }
+}
+
 @Test func browserPermissionsSeparateReadingNavigationInteractionAndCommit() async {
     let readOnly = AgentPolicyEngine(permissionMode: .readOnly)
     #expect(await readOnly.evaluate(capability: .readBrowserPage, runID: "run", sessionID: "session").outcome == .approved)
@@ -113,6 +124,44 @@ private struct NetworkReadTool: AgentTool {
         sessionID: "session-publish"
     )
     #expect(denied.outcome == .denied)
+}
+
+@Test func interactiveWebDraftUsesAppManagedDraftPermission() async {
+    let readOnly = await AgentPolicyEngine(permissionMode: .readOnly).evaluate(
+        capability: .createInteractiveWebDraft,
+        runID: "run-draft-read-only",
+        sessionID: "session-draft"
+    )
+    let askToWrite = await AgentPolicyEngine(permissionMode: .askToWrite).evaluate(
+        capability: .createInteractiveWebDraft,
+        runID: "run-draft-ask",
+        sessionID: "session-draft"
+    )
+
+    #expect(readOnly.outcome == .denied)
+    #expect(askToWrite.outcome == .approved)
+}
+
+@Test func toolRegistryResolvesCommonDirectWorkspaceToolAliases() async throws {
+    var registry = AgentToolRegistry()
+    registry.register(DirectShellStub())
+    let context = AgentToolExecutionContext(
+        runID: "run-shell-alias",
+        sessionID: "session-shell-alias",
+        groupID: "default",
+        userPrompt: "inspect files",
+        toolCallID: "call-shell-alias",
+        policyEngine: AgentPolicyEngine(permissionMode: .readOnly)
+    )
+
+    #expect(registry.definition(named: "shell")?.name == "Shell")
+    #expect(registry.permission(named: "shell") == .runReadOnlyShellCommand)
+    let result = try await registry.execute(
+        AgentToolCall(id: "call-shell-alias", name: "shell", argumentsJSON: "{}"),
+        context: context
+    )
+    #expect(result.toolName == "Shell")
+    #expect(result.contentText == "resolved")
 }
 
 @Test func executeModePropagatesAutomaticApprovalIntoToolContext() async throws {

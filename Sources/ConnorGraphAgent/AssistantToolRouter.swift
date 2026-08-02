@@ -97,7 +97,9 @@ public struct AssistantToolRouter: Sendable, Equatable {
         definitions: [AgentToolDefinition],
         maximumResults: Int = 8
     ) -> AssistantToolDiscoveryResult {
-        let candidates = route(definitions: definitions).discoverableDefinitions
+        let route = route(definitions: definitions)
+        let directDefinitions = definitions.filter { Self.directToolNames.contains($0.name) }
+        let candidates = (route.discoverableDefinitions + directDefinitions).sorted { $0.name < $1.name }
         let availableNamespaces = Array(Set(candidates.map { familyName(for: $0) })).sorted()
         let normalizedQuery = normalize(query)
         let terms = normalizedQuery
@@ -181,7 +183,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
 
     private func familyName(for definition: AgentToolDefinition) -> String {
         let name = definition.name.lowercased()
-        if ["read", "readmany", "edit", "multiedit", "write", "glob", "grep", "ls"].contains(name) {
+        if ["read", "readmany", "edit", "multiedit", "write", "glob", "grep", "ls", "shell", "applypatch"].contains(name) {
             return "workspace"
         }
         let mappedPrefixes: [(prefix: String, family: String)] = [

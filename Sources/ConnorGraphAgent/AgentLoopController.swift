@@ -2662,7 +2662,8 @@ private extension AgentPermissionCapability {
              .runReadOnlyShellCommand, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand,
              .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .importMailAttachment,
              .mutateContacts, .mutateCalendar,
-             .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML:
+             .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML,
+             .createInteractiveWebDraft:
             return false
         case .publishInteractiveWeb:
             return false

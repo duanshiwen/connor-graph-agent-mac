@@ -57,6 +57,11 @@ struct InteractiveWebPlatformTests {
         let routed = await recorder.value
         #expect(routed?.0 == previewed)
         #expect(routed?.1 == "session-1")
+        let managedProjectsRoot = fixture.paths.artifactsDirectory
+            .appendingPathComponent("interactive-web/projects", isDirectory: true)
+            .standardizedFileURL.path + "/"
+        #expect(created.rootURL.standardizedFileURL.path.hasPrefix(managedProjectsRoot))
+        #expect(InteractiveWebAgentTool(operation: .createDraft, runtime: runtime).permission == .createInteractiveWebDraft)
     }
 
     @Test func publishRejectsDraftChangedAfterApprovalBeforeNetworkAccess() async throws {
