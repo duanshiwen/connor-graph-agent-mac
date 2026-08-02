@@ -166,6 +166,26 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     return store
 }
 
+@Test func nativeSessionManagerConvenienceInitializerUsesLoopInputBudget() throws {
+    let store = try makeNativeSessionStore()
+    let loop = AgentLoopController(
+        modelProvider: NativeSessionFinalAnswerProvider(),
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(
+            promptMaxEstimatedTokens: 64_000,
+            modelContextWindowTokens: 60_000,
+            reservedOutputTokens: 8_192
+        )
+    )
+
+    let manager = NativeSessionManager(
+        loopController: loop,
+        sessionRepository: AppChatSessionRepository(store: store)
+    )
+
+    #expect(manager.maximumInputTokens == 51_808)
+}
+
 @Test func nativeSessionManagerCompactsAtMostOncePerSubmission() async throws {
     let store = try makeNativeSessionStore()
     let repository = AppChatSessionRepository(store: store)

@@ -170,7 +170,7 @@ public struct LLMUsageAuditQueryService: Sendable {
                 let promptTokens = values.compactMap(\.promptTokens).reduce(0, +)
                 let cacheReadTokens = values.compactMap(\.cacheReadInputTokens).reduce(0, +)
                 let firstTokenLatencies = values.compactMap(\.firstTokenLatencyMilliseconds)
-                LLMUsageAuditSummaryRow(
+                return LLMUsageAuditSummaryRow(
                     key: name,
                     calls: values.count,
                     succeeded: values.filter { $0.status == .succeeded }.count,

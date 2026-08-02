@@ -129,6 +129,14 @@ public struct NativeSessionManager: Sendable {
         groupID: String = "default",
         memoryOSFacade: AppMemoryOSFacade? = nil
     ) {
+        let configuration = loopController.configuration
+        let contextWindowTokens = configuration.modelContextWindowTokens
+            ?? SessionContextBudget.inferContextWindowSize(modelID: loopController.modelProvider.modelID)
+        let maximumInputTokens = AgentModelContextGuard().maximumInputTokens(
+            contextWindowTokens: contextWindowTokens,
+            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+            reservedOutputTokens: configuration.reservedOutputTokens
+        )
         self.init(
             backend: AgentLoopBackend(loopController: loopController),
             sessionRepository: sessionRepository,
@@ -136,7 +144,8 @@ public struct NativeSessionManager: Sendable {
             groupID: groupID,
             permissionMode: loopController.configuration.permissionMode,
             memoryOSFacade: memoryOSFacade,
-            memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: AnyAgentModelProvider(loopController.modelProvider)))
+            memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: AnyAgentModelProvider(loopController.modelProvider))),
+            maximumInputTokens: maximumInputTokens
         )
     }
 
