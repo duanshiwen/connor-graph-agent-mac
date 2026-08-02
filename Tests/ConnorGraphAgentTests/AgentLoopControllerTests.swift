@@ -2208,6 +2208,21 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(names.isEmpty)
 }
 
+@Test func contextualRunTokenPolicyAlwaysExposesCoreInteractiveWebWorkflow() {
+    let definitions = AssistantToolRouter.interactiveWebDirectToolNames.map {
+        AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
+    }
+    let request = AgentChatRequest(sessionID: "interactive-web", userMessage: "继续")
+
+    let names = Set(AgentRunTokenPolicy().initiallyExposedTools(
+        from: definitions,
+        request: request,
+        mode: .contextual
+    ).map(\.name))
+
+    #expect(names == AssistantToolRouter.interactiveWebDirectToolNames)
+}
+
 @Test func agentLoopDiscoversWebFromTheAuthorizedCatalogWithoutInitiallyExposingItsSchema() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(

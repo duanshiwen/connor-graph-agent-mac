@@ -35,40 +35,15 @@ struct InteractiveWebPlatformTests {
         ] == ["public", "password", "private"])
     }
 
-    @Test func previewRoutesExactStatusToNativeHandler() async throws {
-        let fixture = try makeRuntimeFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.root) }
-        let recorder = InteractiveWebPreviewRecorder()
-        let runtime = InteractiveWebToolRuntime(
-            storagePaths: fixture.paths,
-            accountID: "account",
-            api: nil,
-            previewHandler: { status, sessionID in
-                await recorder.record(status, sessionID: sessionID)
-                return "preview-tab-1"
-            }
-        )
-        let created = try await runtime.createDraft(
-            sessionID: "session-1",
-            name: "Result",
-            html: "<h1>Hello</h1>",
-            css: nil,
-            javascript: nil
-        )
-
-        let previewed = try await runtime.preview(projectID: created.projectID, sessionID: "session-1")
-        let routed = await recorder.value
-        #expect(routed?.0.projectID == previewed.projectID)
-        #expect(routed?.0.manifestHash == previewed.manifestHash)
-        #expect(routed?.0.previewTabID == nil)
-        #expect(routed?.1 == "session-1")
-        #expect(previewed.previewTabID == "preview-tab-1")
-        let managedProjectsRoot = fixture.paths.artifactsDirectory
-            .appendingPathComponent("interactive-web/projects", isDirectory: true)
-            .standardizedFileURL.path + "/"
-        #expect(created.rootURL.standardizedFileURL.path.hasPrefix(managedProjectsRoot))
-        #expect(InteractiveWebAgentTool(operation: .createDraft, runtime: runtime).permission == .createInteractiveWebDraft)
-    }
+	@Test func submittedRecordPreservesUserData() throws {
+		let payload = Data(#"{"id":"record-1","data":{"name":"Lin","attending":true,"guests":2},"status":"approved","createdAt":"2026-08-03T00:00:00Z"}"#.utf8)
+		let decoder = JSONDecoder()
+		decoder.dateDecodingStrategy = .iso8601
+		let record = try decoder.decode(InteractiveWebRecordMetadata.self, from: payload)
+		#expect(record.data["name"] == .string("Lin"))
+		#expect(record.data["attending"] == .bool(true))
+		#expect(record.data["guests"] == .number(2))
+	}
 
     @Test func publishRejectsDraftChangedAfterApprovalBeforeNetworkAccess() async throws {
         let fixture = try makeRuntimeFixture()
@@ -193,20 +168,10 @@ struct InteractiveWebPlatformTests {
         #expect(object["accessMode"] as? String == "private")
     }
 
-    @Test func publishPreflightRequiresQualityReviewForCurrentManifest() async throws {
+    @Test func publishPreflightAcceptsCurrentManifestAndRejectsStaleManifest() async throws {
         let fixture = try makeRuntimeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
-        let runtime = InteractiveWebToolRuntime(
-            storagePaths: fixture.paths,
-            accountID: "account",
-            api: nil,
-            browserControlHandler: { request in
-                let width = request.viewportWidth ?? 0
-                let height = request.viewportHeight ?? 0
-                let json = "{\"viewport\":{\"width\":\(width),\"height\":\(height)},\"issues\":[],\"runtimeErrors\":[]}"
-                return BrowserControlResponse(contentText: "reviewed", contentJSON: json)
-            }
-        )
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
         let status = try await runtime.createDraft(
             sessionID: "session-1",
             name: "Result",
@@ -228,17 +193,6 @@ struct InteractiveWebPlatformTests {
             policyEngine: AgentPolicyEngine(permissionMode: .askToWrite)
         )
 
-        await #expect(throws: AgentToolError.self) {
-            try await tool.preflight(call: call, context: context)
-        }
-        let reviewed = try await runtime.qualityReview(
-            projectID: status.projectID,
-            expectedManifestHash: status.manifestHash,
-            sessionID: "session-1",
-            previewTabID: "preview-tab"
-        )
-        #expect(reviewed.status.qualityReview?.outcome == .passed)
-        #expect(reviewed.status.qualityReview?.viewports.map(\.width) == [1_440, 390])
         try await tool.preflight(call: call, context: context)
 
         _ = try await runtime.updateDraft(
@@ -260,9 +214,4 @@ struct InteractiveWebPlatformTests {
         try paths.ensureDirectoryHierarchy()
         return (paths, root)
     }
-}
-
-private actor InteractiveWebPreviewRecorder {
-    private(set) var value: (InteractiveWebProjectStatus, String)?
-    func record(_ status: InteractiveWebProjectStatus, sessionID: String) { value = (status, sessionID) }
 }

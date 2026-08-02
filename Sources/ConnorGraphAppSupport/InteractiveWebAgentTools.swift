@@ -3,8 +3,6 @@ import ConnorGraphAgent
 import ConnorGraphCore
 
 public actor InteractiveWebToolRuntime {
-    public typealias PreviewHandler = @Sendable (InteractiveWebProjectStatus, String) async -> String?
-
     private let projectsRoot: URL
     private let exportsRoot: URL
     private let accountID: String
@@ -12,15 +10,11 @@ public actor InteractiveWebToolRuntime {
     private let api: InteractiveWebAPIClient?
     private let packager: InteractiveWebPackager
     private let fileManager: FileManager
-    private let previewHandler: PreviewHandler?
-    private let browserControlHandler: BrowserControlHandler?
 
     public init(
         storagePaths: AppStoragePaths,
         accountID: String,
         api: InteractiveWebAPIClient?,
-        previewHandler: PreviewHandler? = nil,
-        browserControlHandler: BrowserControlHandler? = nil,
         packager: InteractiveWebPackager = InteractiveWebPackager(),
         fileManager: FileManager = .default
     ) {
@@ -30,8 +24,6 @@ public actor InteractiveWebToolRuntime {
         self.accountID = accountID
         self.store = InteractiveWebLocalStore(storagePaths: storagePaths)
         self.api = api
-        self.previewHandler = previewHandler
-        self.browserControlHandler = browserControlHandler
         self.packager = packager
         self.fileManager = fileManager
     }
@@ -51,6 +43,56 @@ public actor InteractiveWebToolRuntime {
         try await store.save(project: project)
         return try status(project)
     }
+
+	public func remoteProjects(limit: Int) async throws -> [InteractiveWebRemoteProject] {
+		try await requireAPI().projects(limit: limit)
+	}
+
+	public func remoteProject(id: String) async throws -> InteractiveWebRemoteProjectDetail {
+		try await requireAPI().project(id: id)
+	}
+
+	public func downloadRemoteProject(sessionID: String, remoteProjectID: String) async throws -> InteractiveWebProjectStatus {
+		let api = try requireAPI()
+		let remote = try await api.project(id: remoteProjectID)
+		guard remote.currentDeploymentId != nil, !remote.files.isEmpty else {
+			throw AgentToolError.invalidArguments("remote project has no published files")
+		}
+		let localID = UUID().uuidString
+		let root = projectsRoot.appendingPathComponent(localID, isDirectory: true)
+		try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+		do {
+			for item in remote.files {
+				let target = try validatedProjectFileURL(item.path, root: root)
+				try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+				let data = try await api.projectFile(projectID: remote.id, path: item.path)
+				guard Int64(data.count) == item.sizeBytes else { throw AgentToolError.invalidArguments("downloaded file size mismatch for \(item.path)") }
+				try data.write(to: target, options: .atomic)
+			}
+			let manifest = try packager.package(rootURL: root)
+			let expected = Dictionary(uniqueKeysWithValues: remote.files.map { ($0.path, $0.sha256.lowercased()) })
+			guard manifest.files.count == remote.files.count,
+				manifest.files.allSatisfy({ expected[$0.path] == $0.sha256.lowercased() }) else {
+				throw AgentToolError.invalidArguments("downloaded project did not match the remote manifest")
+			}
+			let project = LocalInteractiveWebProject(
+				id: localID,
+				accountID: accountID,
+				name: remote.name,
+				rootURL: root,
+				conversationID: sessionID,
+				remoteProjectID: remote.id,
+				remoteSiteID: remote.siteId,
+				latestDeploymentID: remote.currentDeploymentId,
+				publishedURL: remote.status == "active" ? api.publicSiteURL(siteID: remote.siteId) : nil
+			)
+			try await store.save(project: project)
+			return try status(project)
+		} catch {
+			try? fileManager.removeItem(at: root)
+			throw error
+		}
+	}
 
     public func draftSource(projectID: String, fileName: String) async throws -> InteractiveWebDraftSource {
         let project = try await requireProject(projectID)
@@ -110,7 +152,6 @@ public actor InteractiveWebToolRuntime {
         try validateProjectedDraft(project: project, projected: projected)
         try commit(projected: projected, root: project.rootURL)
         project.revision = (project.revision ?? 1) + 1
-        project.qualityReview = nil
         try await store.save(project: project)
         return try status(project)
     }
@@ -120,66 +161,12 @@ public actor InteractiveWebToolRuntime {
         return try status(project)
     }
 
-    public func preview(projectID: String, sessionID: String) async throws -> InteractiveWebProjectStatus {
-        var current = try await status(projectID: projectID)
-        current.previewTabID = await previewHandler?(current, sessionID)
-        return current
-    }
-
-    public func qualityReview(
-        projectID: String,
-        expectedManifestHash: String,
-        sessionID: String,
-        previewTabID: String
-    ) async throws -> (status: InteractiveWebProjectStatus, modelContentParts: [AgentModelMessageContentPart]) {
-        var project = try await requireProject(projectID)
-        let currentStatus = try status(project)
-        guard currentStatus.manifestHash == expectedManifestHash else {
-            throw AgentToolError.invalidArguments("manifestHash does not match the current draft; preview the latest revision before review")
-        }
-        guard let browserControlHandler else {
-            throw AgentToolError.invalidArguments("browser quality audit is unavailable in this runtime")
-        }
-        let requestedViewports = [(width: 1_440, height: 900), (width: 390, height: 844)]
-        var viewportReviews: [InteractiveWebViewportReview] = []
-        var modelContentParts: [AgentModelMessageContentPart] = []
-        for viewport in requestedViewports {
-            let response = try await browserControlHandler(BrowserControlRequest(
-                operation: .qualityAudit,
-                sessionID: sessionID,
-                tabID: previewTabID,
-                fullPage: true,
-                viewportWidth: viewport.width,
-                viewportHeight: viewport.height
-            ))
-            let review = try parseViewportReview(response, expectedWidth: viewport.width, expectedHeight: viewport.height)
-            viewportReviews.append(review)
-            modelContentParts.append(contentsOf: response.modelContentParts ?? [])
-        }
-        let outcome: InteractiveWebQualityReviewOutcome = viewportReviews.allSatisfy {
-            $0.issueCount == 0 && $0.runtimeErrorCount == 0
-        } ? .passed : .failed
-        project.qualityReview = InteractiveWebQualityReview(
-            manifestHash: currentStatus.manifestHash,
-            outcome: outcome,
-            viewports: viewportReviews
-        )
-        try await store.save(project: project)
-        return (try status(project), modelContentParts)
-    }
-
     public func publish(projectID: String, expectedManifestHash: String, accessMode: InteractiveWebAccessMode, password: String?) async throws -> InteractiveWebProjectStatus {
         let project = try await requireProject(projectID)
-        var manifest = try packager.package(rootURL: project.rootURL)
+        let manifest = try packager.package(rootURL: project.rootURL)
         guard packager.fingerprint(manifest) == expectedManifestHash else {
             throw AgentToolError.invalidArguments("approved manifestHash no longer matches the current draft")
         }
-        guard let review = project.qualityReview,
-              review.outcome == .passed,
-              review.manifestHash == expectedManifestHash else {
-            throw AgentToolError.invalidArguments("current draft has not passed desktop and mobile quality review")
-        }
-        manifest.qualityReview = review
         let api = try requireAPI()
         let published = try await api.publish(project: project, manifest: manifest)
         if let siteID = published.remoteSiteID {
@@ -256,9 +243,7 @@ public actor InteractiveWebToolRuntime {
             remoteProjectID: project.remoteProjectID,
             remoteSiteID: project.remoteSiteID,
             latestDeploymentID: project.latestDeploymentID,
-            publishedURL: project.publishedURL,
-            previewTabID: nil,
-            qualityReview: project.qualityReview
+            publishedURL: project.publishedURL
         )
     }
 
@@ -271,11 +256,23 @@ public actor InteractiveWebToolRuntime {
     }
 
     private func validatedDraftFileName(_ name: String) throws -> String {
-        guard ["index.html", "style.css", "app.js"].contains(name) else {
-            throw AgentToolError.invalidArguments("fileName must be index.html, style.css, or app.js")
-        }
-        return name
+		let allowed = Set(["html", "css", "js", "json", "svg"])
+		guard !name.isEmpty, !name.hasPrefix("/"), !name.split(separator: "/").contains(".."), allowed.contains(URL(fileURLWithPath: name).pathExtension.lowercased()) else {
+			throw AgentToolError.invalidArguments("fileName must be a relative HTML, CSS, JavaScript, JSON, or SVG path")
+		}
+		return name
     }
+
+	private func validatedProjectFileURL(_ name: String, root: URL) throws -> URL {
+		guard !name.isEmpty, !name.hasPrefix("/"), !name.split(separator: "/").contains("..") else {
+			throw AgentToolError.invalidArguments("remote project contains an invalid file path")
+		}
+		let target = root.appendingPathComponent(name).standardizedFileURL
+		guard target.path.hasPrefix(root.standardizedFileURL.path + "/") else {
+			throw AgentToolError.invalidArguments("remote project file escapes the user data directory")
+		}
+		return target
+	}
 
     private func validate(_ content: String, named name: String) throws {
         guard Data(content.utf8).count <= 2 * 1_024 * 1_024 else {
@@ -343,33 +340,16 @@ public actor InteractiveWebToolRuntime {
         return api
     }
 
-    private func parseViewportReview(
-        _ response: BrowserControlResponse,
-        expectedWidth: Int,
-        expectedHeight: Int
-    ) throws -> InteractiveWebViewportReview {
-        guard let json = response.contentJSON,
-              let object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
-              let viewport = object["viewport"] as? [String: Any],
-              let width = (viewport["width"] as? NSNumber)?.intValue,
-              let height = (viewport["height"] as? NSNumber)?.intValue,
-              width == expectedWidth,
-              height == expectedHeight else {
-            throw AgentToolError.invalidArguments("browser quality audit returned an unexpected viewport")
-        }
-        let issueCount = (object["issues"] as? [Any])?.count ?? (object["issueCount"] as? NSNumber)?.intValue ?? 0
-        let runtimeErrorCount = (object["runtimeErrors"] as? [Any])?.count ?? 0
-        return InteractiveWebViewportReview(width: width, height: height, issueCount: issueCount, runtimeErrorCount: runtimeErrorCount)
-    }
 }
 
 public struct InteractiveWebAgentTool: AgentTool {
     public enum Operation: String, Sendable, CaseIterable {
+		case listProjects = "interactive_web_list_projects"
+		case getProject = "interactive_web_get_project"
+		case downloadProject = "interactive_web_download_project"
         case createDraft = "interactive_web_create_draft"
         case getDraft = "interactive_web_get_draft"
         case updateDraft = "interactive_web_update_draft"
-        case preview = "interactive_web_preview"
-        case qualityReview = "interactive_web_quality_review"
         case getStatus = "interactive_web_get_status"
         case publish = "interactive_web_publish"
         case rollback = "interactive_web_rollback"
@@ -384,22 +364,22 @@ public struct InteractiveWebAgentTool: AgentTool {
     public var name: String { operation.rawValue }
     public var permission: AgentPermissionCapability {
         switch operation {
-        case .createDraft, .updateDraft: .createInteractiveWebDraft
-        case .getDraft, .preview, .getStatus: .readSession
-        case .qualityReview: .readBrowserPage
-        case .recordsSummary: .externalNetwork
+		case .createDraft, .updateDraft, .downloadProject: .createInteractiveWebDraft
+		case .getDraft, .getStatus: .readSession
+		case .listProjects, .getProject, .recordsSummary: .externalNetwork
         case .publish, .rollback, .setAccess, .offline, .exportRecords: .publishInteractiveWeb
         }
     }
     public var description: String {
         switch operation {
+		case .listProjects: "List the signed-in user's published interactive webpage projects."
+		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
+		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
         case .createDraft: "Create a local interactive webpage draft from complete HTML, CSS, and JavaScript generated in the current model response. The tool writes these files into the app-managed user-data sandbox; no selected workspace, local file tool, staging file, or documentation lookup is required. This does not publish anything."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash."
         case .updateDraft: "Atomically update an app-managed interactive webpage draft using exact text edits or full file replacements. Pass expectedManifestHash from interactive_web_get_draft to prevent overwriting a newer revision."
-        case .preview: "Open the current draft in the secure preview runtime and return its exact artifact hash plus previewTabID. Use that previewTabID with browser_snapshot, browser_interact, and browser_quality_audit."
-        case .qualityReview: "Run the required desktop and mobile quality audits against the exact secure preview tab, attach both screenshots, and bind the review outcome to the current manifestHash. A failed review must be fixed and repeated before publishing."
         case .getStatus: "Read the current local and published status of an interactive webpage project."
-        case .publish: "Publish the exact reviewed webpage revision to the internet. Always requires native human approval; copy manifestHash exactly from a prior tool result."
+        case .publish: "Publish the exact current webpage revision to the internet and return its URL. Always requires native human approval; copy manifestHash exactly from create, update, or status output."
         case .rollback: "Rollback a published webpage to a specific deployment. Always requires native human approval."
         case .setAccess: "Change who can access a published webpage. Always requires native human approval."
         case .offline: "Take a published webpage offline. Always requires native human approval."
@@ -409,32 +389,30 @@ public struct InteractiveWebAgentTool: AgentTool {
     }
     public var inputSchema: AgentToolInputSchema {
         switch operation {
+		case .listProjects:
+			.closedObject(properties: ["limit": .integer(description: "1 through 100")], required: [])
+		case .getProject, .downloadProject:
+			.closedObject(properties: ["remoteProjectID": .string(description: "Exact online project ID")], required: ["remoteProjectID"])
         case .createDraft:
             .object(properties: ["name": .string(description: "Webpage name"), "html": .string(description: "Complete index.html"), "css": .string(description: "Optional stylesheet"), "javascript": .string(description: "Optional script")], required: ["name", "html"])
         case .getDraft:
-            .closedObject(properties: ["projectID": .string(description: "Exact local project ID"), "fileName": .stringEnumeration(values: ["index.html", "style.css", "app.js"], description: "Draft source file to read")], required: ["projectID", "fileName"])
+			.closedObject(properties: ["projectID": .string(description: "Exact local project ID"), "fileName": .string(description: "Relative text source path")], required: ["projectID", "fileName"])
         case .updateDraft:
             .object(properties: [
                 "projectID": .string(description: "Exact local project ID"),
                 "expectedManifestHash": .string(description: "Exact manifestHash from the latest interactive_web_get_draft result"),
                 "replacements": .array(items: .closedObject(properties: [
-                    "fileName": .stringEnumeration(values: ["index.html", "style.css", "app.js"], description: "Draft file to replace"),
+					"fileName": .string(description: "Relative text source path"),
                     "content": .string(description: "Complete replacement content")
                 ], required: ["fileName", "content"]), description: "Optional complete file replacements"),
                 "edits": .array(items: .closedObject(properties: [
-                    "fileName": .stringEnumeration(values: ["index.html", "style.css", "app.js"], description: "Existing draft file to edit"),
+					"fileName": .string(description: "Relative text source path"),
                     "oldText": .string(description: "Exact text that must occur once"),
                     "newText": .string(description: "Replacement text")
                 ], required: ["fileName", "oldText", "newText"]), description: "Optional ordered exact text replacements")
             ], required: ["projectID", "expectedManifestHash"])
-        case .preview, .getStatus, .offline:
+        case .getStatus, .offline:
             .closedObject(properties: ["projectID": .string(description: "Exact local project ID")], required: ["projectID"])
-        case .qualityReview:
-            .closedObject(properties: [
-                "projectID": .string(description: "Exact local project ID"),
-                "manifestHash": .string(description: "Exact manifestHash returned by interactive_web_preview"),
-                "previewTabID": .string(description: "Exact previewTabID returned by interactive_web_preview")
-            ], required: ["projectID", "manifestHash", "previewTabID"])
         case .publish:
             .object(properties: ["projectID": .string(description: "Exact local project ID"), "manifestHash": .string(description: "Exact 64-character hash from the latest local status"), "accessMode": .stringEnumeration(values: ["public", "password", "private"], description: "Who can access the site"), "password": .string(description: "Required only for password access")], required: ["projectID", "manifestHash", "accessMode"])
         case .rollback:
@@ -457,10 +435,6 @@ public struct InteractiveWebAgentTool: AgentTool {
         let expectedHash = try requiredString("manifestHash", arguments)
         let status = try await runtime.status(projectID: projectID)
         guard status.manifestHash == expectedHash else { throw AgentToolError.invalidArguments("manifestHash does not match the current draft") }
-        guard status.qualityReview?.outcome == .passed,
-              status.qualityReview?.manifestHash == expectedHash else {
-            throw AgentToolError.invalidArguments("current draft has not passed desktop and mobile quality review")
-        }
     }
 
     public func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
@@ -488,8 +462,18 @@ public struct InteractiveWebAgentTool: AgentTool {
         let status: InteractiveWebProjectStatus?
         let text: String
         var json: String?
-        var modelContentParts: [AgentModelMessageContentPart]?
         switch operation {
+		case .listProjects:
+			status = nil
+			let projects = try await runtime.remoteProjects(limit: min(max(arguments.int("limit") ?? 50, 1), 100))
+			json = try encode(projects); text = "Online interactive webpage projects loaded."
+		case .getProject:
+			status = nil
+			let project = try await runtime.remoteProject(id: requiredString("remoteProjectID", arguments))
+			json = try encode(project); text = "Online interactive webpage project details loaded."
+		case .downloadProject:
+			status = try await runtime.downloadRemoteProject(sessionID: context.sessionID, remoteProjectID: requiredString("remoteProjectID", arguments))
+			text = "Online webpage downloaded to Connor's user data directory."
         case .createDraft:
             status = try await runtime.createDraft(sessionID: context.sessionID, name: requiredString("name", arguments), html: requiredString("html", arguments), css: optionalString("css", arguments), javascript: optionalString("javascript", arguments))
             text = "Local webpage draft created."
@@ -508,20 +492,6 @@ public struct InteractiveWebAgentTool: AgentTool {
                 edits: edits
             )
             text = "Local webpage draft updated."
-        case .preview:
-            status = try await runtime.preview(projectID: requiredString("projectID", arguments), sessionID: context.sessionID); text = "Secure local preview is ready."
-        case .qualityReview:
-            let reviewed = try await runtime.qualityReview(
-                projectID: requiredString("projectID", arguments),
-                expectedManifestHash: requiredString("manifestHash", arguments),
-                sessionID: context.sessionID,
-                previewTabID: requiredString("previewTabID", arguments)
-            )
-            status = reviewed.status
-            modelContentParts = reviewed.modelContentParts
-            text = reviewed.status.qualityReview?.outcome == .passed
-                ? "Desktop and mobile webpage quality review passed."
-                : "Webpage quality review failed; fix every reported issue and review the new revision."
         case .getStatus:
             status = try await runtime.status(projectID: requiredString("projectID", arguments)); text = "Interactive webpage status loaded."
         case .publish:
@@ -553,8 +523,8 @@ public struct InteractiveWebAgentTool: AgentTool {
             json = try encode(result); text = "Interactive webpage records exported to \(result.fileURL.path)."
         }
         if let status { json = try encode(status) }
-        let suffix = status.map { " projectID=\($0.projectID), revision=\($0.revision), manifestHash=\($0.manifestHash)" + ($0.previewTabID.map { ", previewTabID=\($0)" } ?? "") + ($0.publishedURL.map { ", url=\($0.absoluteString)" } ?? "") } ?? ""
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: text + suffix, contentJSON: json, modelContentParts: modelContentParts)
+        let suffix = status.map { " projectID=\($0.projectID), revision=\($0.revision), manifestHash=\($0.manifestHash)" + ($0.publishedURL.map { ", url=\($0.absoluteString)" } ?? "") } ?? ""
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: text + suffix, contentJSON: json)
     }
 
     private func requiredString(_ key: String, _ arguments: AgentToolArguments) throws -> String {

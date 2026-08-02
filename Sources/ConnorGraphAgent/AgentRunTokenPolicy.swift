@@ -87,8 +87,9 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
         guard mode == .contextual else { return definitions }
         let context = routingContext(for: request)
         return definitions.filter { definition in
-            AssistantToolRouter.directToolNames.contains(definition.name)
-                && containsAny(context, signals: Self.localFileSignals)
+            AssistantToolRouter.interactiveWebDirectToolNames.contains(definition.name)
+                || AssistantToolRouter.directToolNames.contains(definition.name)
+                    && containsAny(context, signals: Self.localFileSignals)
         }
     }
 

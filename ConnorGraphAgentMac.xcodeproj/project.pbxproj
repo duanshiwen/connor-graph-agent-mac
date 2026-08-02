@@ -89,7 +89,6 @@
 		A00000000000000000000056 /* Sources/ConnorGraphAgentMac/ContactsFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000057 /* Sources/ConnorGraphAgentMac/ContactsFeatureModel.swift */; };
 		A00000000000000000000058 /* Sources/ConnorGraphAgentMac/MailFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000059 /* Sources/ConnorGraphAgentMac/MailFeatureModel.swift */; };
 		A0000000000000000000005A /* Sources/ConnorGraphAgentMac/BrowserFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005B /* Sources/ConnorGraphAgentMac/BrowserFeatureModel.swift */; };
-		E2E960180000000000000002 /* Sources/ConnorGraphAgentMac/InteractiveWebPreviewRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2E960180000000000000001 /* Sources/ConnorGraphAgentMac/InteractiveWebPreviewRuntime.swift */; };
 		BA7000010000000000000001 /* Sources/ConnorGraphAgentMac/BrowserAutomationRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA7000000000000000000001 /* Sources/ConnorGraphAgentMac/BrowserAutomationRuntime.swift */; };
 		A0000000000000000000005C /* Sources/ConnorGraphAgentMac/GlobalSearchFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005D /* Sources/ConnorGraphAgentMac/GlobalSearchFeatureModel.swift */; };
 		A0000000000000000000005E /* Sources/ConnorGraphAgentMac/SettingsFeatureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005F /* Sources/ConnorGraphAgentMac/SettingsFeatureModels.swift */; };
@@ -273,7 +272,6 @@
 		A00000000000000000000057 /* Sources/ConnorGraphAgentMac/ContactsFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ContactsFeatureModel.swift; sourceTree = "<group>"; };
 		A00000000000000000000059 /* Sources/ConnorGraphAgentMac/MailFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailFeatureModel.swift; sourceTree = "<group>"; };
 		A0000000000000000000005B /* Sources/ConnorGraphAgentMac/BrowserFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserFeatureModel.swift; sourceTree = "<group>"; };
-		E2E960180000000000000001 /* Sources/ConnorGraphAgentMac/InteractiveWebPreviewRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/InteractiveWebPreviewRuntime.swift; sourceTree = "<group>"; };
 		BA7000000000000000000001 /* Sources/ConnorGraphAgentMac/BrowserAutomationRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserAutomationRuntime.swift; sourceTree = "<group>"; };
 		A0000000000000000000005D /* Sources/ConnorGraphAgentMac/GlobalSearchFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/GlobalSearchFeatureModel.swift; sourceTree = "<group>"; };
 		A0000000000000000000005F /* Sources/ConnorGraphAgentMac/SettingsFeatureModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SettingsFeatureModels.swift; sourceTree = "<group>"; };
@@ -405,7 +403,6 @@
 				A00000000000000000000057 /* Sources/ConnorGraphAgentMac/ContactsFeatureModel.swift */,
 				A00000000000000000000059 /* Sources/ConnorGraphAgentMac/MailFeatureModel.swift */,
 				A0000000000000000000005B /* Sources/ConnorGraphAgentMac/BrowserFeatureModel.swift */,
-				E2E960180000000000000001 /* Sources/ConnorGraphAgentMac/InteractiveWebPreviewRuntime.swift */,
 				BA7000000000000000000001 /* Sources/ConnorGraphAgentMac/BrowserAutomationRuntime.swift */,
 				A0000000000000000000005D /* Sources/ConnorGraphAgentMac/GlobalSearchFeatureModel.swift */,
 				A0000000000000000000005F /* Sources/ConnorGraphAgentMac/SettingsFeatureModels.swift */,
@@ -721,7 +718,6 @@
 				A00000000000000000000056 /* Sources/ConnorGraphAgentMac/ContactsFeatureModel.swift in Sources */,
 				A00000000000000000000058 /* Sources/ConnorGraphAgentMac/MailFeatureModel.swift in Sources */,
 				A0000000000000000000005A /* Sources/ConnorGraphAgentMac/BrowserFeatureModel.swift in Sources */,
-				E2E960180000000000000002 /* Sources/ConnorGraphAgentMac/InteractiveWebPreviewRuntime.swift in Sources */,
 				BA7000010000000000000001 /* Sources/ConnorGraphAgentMac/BrowserAutomationRuntime.swift in Sources */,
 				A0000000000000000000005C /* Sources/ConnorGraphAgentMac/GlobalSearchFeatureModel.swift in Sources */,
 				A0000000000000000000005E /* Sources/ConnorGraphAgentMac/SettingsFeatureModels.swift in Sources */,

@@ -16,6 +16,26 @@ import Testing
     #expect(!route.modelVisibleDefinitions.contains { $0.name == "mail_search_messages" })
 }
 
+@Test func toolRouterExposesCoreInteractiveWebWorkflowWithoutDiscovery() {
+    let definitions = [
+        "interactive_web_create_draft",
+        "interactive_web_get_draft",
+        "interactive_web_update_draft",
+        "interactive_web_get_status",
+        "interactive_web_publish",
+        "interactive_web_offline"
+    ].map {
+        AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
+    }
+
+    let route = AssistantToolRouter().route(definitions: definitions)
+    let visibleNames = Set(route.modelVisibleDefinitions.map(\.name))
+
+    #expect(AssistantToolRouter.interactiveWebDirectToolNames.isSubset(of: visibleNames))
+    #expect(!visibleNames.contains("interactive_web_offline"))
+    #expect(route.discoverableDefinitions.contains { $0.name == "interactive_web_offline" })
+}
+
 @Test func toolRouterKeepsTheCompleteCatalogDiscoverableWithoutExpandingTheStableSurface() {
     let exposedDefinitions = [
         AgentToolDefinition(name: "Shell", description: "Run shell", inputSchema: .object(properties: [:], required: []))
