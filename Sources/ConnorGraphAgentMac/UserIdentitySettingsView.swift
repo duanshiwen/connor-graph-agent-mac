@@ -214,7 +214,7 @@ struct UserIdentitySettingsView: View {
                 VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                     Text("在不同客户端同步我的数据")
                         .font(SettingsListTypography.rowTitleSelected)
-                    Text("同步账号资料、设置和会话；本机数据仍可离线使用。")
+                    Text("同步内容经端到端加密，服务器只保存密文；本机数据仍可离线使用。")
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                 }

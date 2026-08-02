@@ -89,7 +89,7 @@ public struct AppAccountDataSyncResult: Sendable, Equatable {
 
 public actor AppAccountDataSyncCoordinator {
     private enum AppliedChangeKind { case session(String), settings }
-    private struct RecordState: Codable { var version: Int64; var hash: String; var deleted: Bool }
+    private struct RecordState: Codable { var version: Int64; var hash: String; var deleted: Bool; var encrypted: Bool = false }
     private struct PersistedState: Codable { var cursor: Int64 = 0; var records: [String: RecordState] = [:] }
 
     private let sessions: AppChatSessionRepository
@@ -107,6 +107,7 @@ public actor AppAccountDataSyncCoordinator {
 
     public func reconcile() async throws -> AppAccountDataSyncResult {
         guard let userID = await identity.currentUser?.id else { return AppAccountDataSyncResult() }
+        let cipher = try await AccountSyncPayloadCipher(keyData: identity.accountSyncKey(userID: String(userID)))
         let deviceID = await identity.syncDeviceID
         var syncResult = AppAccountDataSyncResult()
         let stateKey = "ConnorAccountSyncState.\(userID)"
@@ -115,10 +116,11 @@ public actor AppAccountDataSyncCoordinator {
         repeat {
             let page = try await identity.pullSyncChanges(cursor: state.cursor)
             for change in page.changes {
-                if change.sourceDeviceId != deviceID, let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(change) }) {
+                let clear = try decrypted(change, using: cipher)
+                if change.sourceDeviceId != deviceID, let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(clear.change) }) {
                     record(kind, in: &syncResult)
                 }
-                state.records[recordKey(change.collection, change.recordId)] = RecordState(version: change.version ?? 0, hash: try payloadHash(change.payload), deleted: change.deleted)
+                state.records[recordKey(change.collection, change.recordId)] = RecordState(version: change.version ?? 0, hash: try payloadHash(clear.change.payload), deleted: change.deleted, encrypted: clear.encrypted)
             }
             state.cursor = page.nextCursor; hasMore = page.hasMore
             saveState(state, key: stateKey)
@@ -127,9 +129,9 @@ public actor AppAccountDataSyncCoordinator {
         let projected = try projections()
         let syncableKeys = Set(state.records.keys.filter { $0.hasPrefix("sessions|") || $0 == "settings|macos_runtime" || $0 == "settings|profile" })
         var mutations: [ConnorSyncChange] = []
-        for (key, payload) in projected where state.records[key]?.hash != (try payloadHash(payload)) || state.records[key]?.deleted == true {
+        for (key, payload) in projected where state.records[key]?.hash != (try payloadHash(payload)) || state.records[key]?.deleted == true || state.records[key]?.encrypted != true {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
-            mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: payload))
+            mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: cipher.encrypt(payload, collection: parts[0], recordID: parts[1])))
         }
         for key in syncableKeys.subtracting(projected.keys) where state.records[key]?.deleted != true {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
@@ -140,10 +142,12 @@ public actor AppAccountDataSyncCoordinator {
             let results = try await identity.pushSyncChanges(batch)
             for (pushResult, mutation) in zip(results, batch) {
                 if let conflict = pushResult.conflict {
-                    if let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(conflict) }) { record(kind, in: &syncResult) }
-                    state.records[recordKey(conflict.collection, conflict.recordId)] = RecordState(version: conflict.version ?? 0, hash: try payloadHash(conflict.payload), deleted: conflict.deleted)
+                    let clear = try decrypted(conflict, using: cipher)
+                    if let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(clear.change) }) { record(kind, in: &syncResult) }
+                    state.records[recordKey(conflict.collection, conflict.recordId)] = RecordState(version: conflict.version ?? 0, hash: try payloadHash(clear.change.payload), deleted: conflict.deleted, encrypted: clear.encrypted)
                 } else if pushResult.applied {
-                    state.records[recordKey(mutation.collection, mutation.recordId)] = RecordState(version: (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(mutation.payload), deleted: mutation.deleted)
+                    let clear = try cipher.decrypt(mutation.payload, collection: mutation.collection, recordID: mutation.recordId)
+                    state.records[recordKey(mutation.collection, mutation.recordId)] = RecordState(version: (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(clear.payload), deleted: mutation.deleted, encrypted: !mutation.deleted)
                     syncResult.pushedChangeCount += 1
                 }
             }
@@ -201,6 +205,13 @@ public actor AppAccountDataSyncCoordinator {
     private func jsonValue<T: Encodable>(_ value: T) throws -> ConnorJSONValue { try decoder.decode(ConnorJSONValue.self, from: encoder.encode(value)) }
     private func decode<T: Decodable>(_ payload: ConnorJSONValue) throws -> T { try decoder.decode(T.self, from: encoder.encode(payload)) }
     private func payloadHash(_ payload: ConnorJSONValue) throws -> String { SHA256.hash(data: try encoder.encode(payload)).map { String(format: "%02x", $0) }.joined() }
+    private func decrypted(_ change: ConnorSyncChange, using cipher: AccountSyncPayloadCipher) throws -> (change: ConnorSyncChange, encrypted: Bool) {
+        guard !change.deleted else { return (change, true) }
+        let clear = try cipher.decrypt(change.payload, collection: change.collection, recordID: change.recordId)
+        var result = change
+        result.payload = clear.payload
+        return (result, clear.encrypted)
+    }
     private func recordKey(_ collection: String, _ id: String) -> String { "\(collection)|\(id)" }
     private func loadState(key: String) -> PersistedState { defaults.data(forKey: key).flatMap { try? decoder.decode(PersistedState.self, from: $0) } ?? PersistedState() }
     private func saveState(_ state: PersistedState, key: String) { defaults.set(try? encoder.encode(state), forKey: key) }

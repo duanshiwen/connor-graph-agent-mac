@@ -358,6 +358,7 @@ public struct AppConnorAccountCredentialStore: Sendable {
     private static let service = "ConnorGraphAgent.RemoteIdentity"
     private static let tokenPairAccount = "token-pair"
     private static let legacyAccessTokenAccount = "access-token"
+    private static let syncKeyPrefix = "account-sync-key."
     private let store: any CredentialStore
 
     public init(store: any CredentialStore = LocalEncryptedCredentialStore()) { self.store = store }
@@ -386,6 +387,17 @@ public struct AppConnorAccountCredentialStore: Sendable {
         try? store.deleteSecret(service: Self.service, account: Self.tokenPairAccount)
     }
     public func token() throws -> String? { try tokens()?.accessToken }
+
+    public func saveSyncKey(_ key: Data, userID: String) throws {
+        guard key.count == 32 else { throw AccountSyncCryptoError.invalidKey }
+        try store.saveSecret(key.base64EncodedString(), service: Self.service, account: Self.syncKeyPrefix + userID)
+    }
+
+    public func syncKey(userID: String) throws -> Data? {
+        guard let encoded = try store.readSecret(service: Self.service, account: Self.syncKeyPrefix + userID) else { return nil }
+        guard let key = Data(base64Encoded: encoded), key.count == 32 else { throw AccountSyncCryptoError.invalidKey }
+        return key
+    }
 
     public func clearTokens() throws {
         try store.deleteSecret(service: Self.service, account: Self.tokenPairAccount)
@@ -697,6 +709,11 @@ public final class AppUserIdentityStore: ObservableObject {
         requestDeviceSyncPass()
     }
 
+    public func accountSyncKey(userID: String) throws -> Data {
+        guard let key = try credentials.syncKey(userID: userID) else { throw AccountSyncCryptoError.invalidKey }
+        return key
+    }
+
     public func pullSyncChanges(cursor: Int64, limit: Int = 200) async throws -> ConnorSyncPullPage {
         try await authenticatedSession.pullSyncChanges(cursor: cursor, limit: limit)
     }
@@ -728,20 +745,25 @@ public final class AppUserIdentityStore: ObservableObject {
 
     public func login(username: String, password: String) async {
         guard requireNetwork() else { return }
-        await authenticate { try await self.api.login(username: username, password: password) }
+        await authenticate(password: password) { try await self.api.login(username: username, password: password) }
     }
 
     public func register(username: String, email: String, password: String) async {
         guard requireNetwork() else { return }
-        await authenticate { try await self.api.register(username: username, email: email, password: password) }
+        await authenticate(password: password) { try await self.api.register(username: username, email: email, password: password) }
     }
 
-    private func authenticate(_ action: () async throws -> ConnorAuthenticatedIdentity) async {
+    private func authenticate(password: String, _ action: () async throws -> ConnorAuthenticatedIdentity) async {
         errorMessage = nil
         do {
             let identity = try await action()
             guard !identity.tokens.refreshToken.isEmpty else { throw ConnorBackendAPIError.invalidResponse }
+            let userID = String(identity.user.id)
+            let syncKey = await Task.detached(priority: .userInitiated) {
+                AccountSyncPayloadCipher.deriveKey(password: password, userID: userID)
+            }.value
             try credentials.saveTokens(identity.tokens)
+            try credentials.saveSyncKey(syncKey, userID: userID)
             authenticationState = .signedIn(identity.user)
             startEventSocketIfNeeded()
             if isDeviceSyncEnabled { startDeviceSync() }
