@@ -157,6 +157,7 @@ public struct AgentInstructionSection: Sendable, Equatable {
     ## Workspace Execution Rules
     - Read or inspect existing files before editing them.
     - Prefer targeted search over reading large files when locating code or text.
+    - Prefer the structured Read, ReadMany, LS, Glob, and Grep workspace tools for ordinary file discovery and text inspection when they are available. Use Shell for Git, builds, tests, scripts, or file operations the structured tools cannot express; use ApplyPatch for mutations.
 
     ## Tool Failure and Safety Rules
     - Treat tool errors as feedback: read and preserve the concrete failure reason and any structured `retryAdvice` before deciding what to do. Retry immediately only for corrected arguments or an explicitly retryable changed approach; `retry_later` means do not call the tool again in the current run, while `do_not_retry` means another call cannot help until permission, authentication, configuration, provider compatibility, or another stated prerequisite changes. An unavailable or unregistered tool cannot be retried in the current run. Continue without a nonessential tool, and mention the limitation only when it materially affects the requested result.
