@@ -60,6 +60,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient?
     public var interactiveWebAPIClient: InteractiveWebAPIClient?
     public var interactiveWebPreviewHandler: InteractiveWebToolRuntime.PreviewHandler?
+    public var interactiveWebSuggestionsEnabled: Bool
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
     public var browserControlHandler: BrowserControlHandler?
@@ -84,6 +85,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient? = nil,
         interactiveWebAPIClient: InteractiveWebAPIClient? = nil,
         interactiveWebPreviewHandler: InteractiveWebToolRuntime.PreviewHandler? = nil,
+        interactiveWebSuggestionsEnabled: Bool = true,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
         browserControlHandler: BrowserControlHandler? = nil,
@@ -106,6 +108,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.cloudKnowledgeConsumptionClient = cloudKnowledgeConsumptionClient
         self.interactiveWebAPIClient = interactiveWebAPIClient
         self.interactiveWebPreviewHandler = interactiveWebPreviewHandler
+        self.interactiveWebSuggestionsEnabled = interactiveWebSuggestionsEnabled
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
         self.browserControlHandler = browserControlHandler
@@ -452,7 +455,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             : ""
         let interactiveWebInstruction = registry.definition(named: "interactive_web_create_draft") == nil
             ? ""
-            : "When the user wants to share or showcase a result, invite other people to visit, or needs persistent interaction such as registration, feedback, or voting, you may naturally ask whether to make it a webpage. After completing a substantial result that is clearly suitable for sharing, you may also suggest this briefly at the end of delivery. If accepted, create a local draft and preview first. A preview is not a publication: publishing to the internet must use `interactive_web_publish`, and only a successful tool result proves that publication happened."
+            : interactiveWebSuggestionsEnabled
+                ? "When the user wants to share or showcase a result, invite other people to visit, or needs persistent interaction such as registration, feedback, or voting, you may naturally ask whether to make it a webpage. After completing a substantial result that is clearly suitable for sharing, you may also suggest this briefly at the end of delivery. If accepted, create a local draft and preview first. A preview is not a publication: publishing to the internet must use `interactive_web_publish`, and only a successful tool result proves that publication happened."
+                : "When the user explicitly asks to create a webpage, use the interactive webpage tools to create and preview a local draft. A preview is not a publication: publishing to the internet must use `interactive_web_publish`, and only a successful tool result proves that publication happened."
         effectiveConfiguration.instructionAppendix = [
             configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),
             userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines),

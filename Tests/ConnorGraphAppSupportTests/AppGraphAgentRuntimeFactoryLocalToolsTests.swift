@@ -323,6 +323,30 @@ import ConnorGraphStore
     #expect(enabled.contains("interactive_web_publish"))
 }
 
+@Test func interactiveWebSuggestionFlagKeepsExplicitToolGuidance() throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryInteractiveWebFlag-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let store = try SQLiteGraphKernelStore(path: appDirectory.appendingPathComponent("store.sqlite").path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(settingsStore: LocalToolsSettingsStore(), credentialStore: LocalToolsCredentialStore())
+    let paths = AppStoragePaths(applicationSupportDirectory: appDirectory.appendingPathComponent("data", isDirectory: true))
+    try paths.ensureDirectoryHierarchy()
+
+    let instruction = AppGraphAgentRuntimeFactory(
+        store: store,
+        settingsRepository: settings,
+        storagePaths: paths,
+        interactiveWebSuggestionsEnabled: false
+    ).makeAgentLoopController().configuration.instructionAppendix
+
+    #expect(instruction.contains("explicitly asks to create a webpage"))
+    #expect(instruction.contains("interactive_web_publish"))
+    #expect(!instruction.contains("suggest this briefly at the end"))
+}
+
 @Test func agentLoopRuntimeFactoryRejectsPreviousWorkspaceAfterReplacement() async throws {
     let tempBase = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorFactoryWorkspaceReplacement-", isDirectory: true)
