@@ -28,6 +28,18 @@ public struct AssistantToolNamespaceDescriptor: Sendable, Equatable {
     }
 }
 
+public struct AssistantToolDiscoveryResult: Sendable, Equatable {
+    public var tools: [AgentToolDefinition]
+    public var matchedNamespaces: [String]
+    public var availableNamespaces: [String]
+
+    public init(tools: [AgentToolDefinition], matchedNamespaces: [String], availableNamespaces: [String]) {
+        self.tools = tools
+        self.matchedNamespaces = matchedNamespaces
+        self.availableNamespaces = availableNamespaces
+    }
+}
+
 public struct AssistantToolRouter: Sendable, Equatable {
     public static let directToolNames: Set<String> = ["Shell", "ApplyPatch"]
     public static let runtimeInternalToolNames = AssistantBootstrapCoordinator.internalToolNames
@@ -65,13 +77,23 @@ public struct AssistantToolRouter: Sendable, Equatable {
         definitions: [AgentToolDefinition],
         maximumResults: Int = 8
     ) -> [AgentToolDefinition] {
+        discovery(query: query, definitions: definitions, maximumResults: maximumResults).tools
+    }
+
+    public func discovery(
+        query: String,
+        definitions: [AgentToolDefinition],
+        maximumResults: Int = 8
+    ) -> AssistantToolDiscoveryResult {
         let candidates = route(definitions: definitions).discoverableDefinitions
+        let availableNamespaces = Array(Set(candidates.map { familyName(for: $0) })).sorted()
         let normalizedQuery = normalize(query)
         let terms = normalizedQuery
             .split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
             .map(String.init)
             .filter { $0.count >= 2 }
         let matchedNamespaces = matchingNamespaces(in: normalizedQuery)
+            .filter { availableNamespaces.contains($0.name) }
         let matchedNamespaceNames = Set(matchedNamespaces.map(\.name))
         let ranked = candidates.compactMap { definition -> (definition: AgentToolDefinition, score: Int, namespace: String)? in
             let namespace = familyName(for: definition)
@@ -94,12 +116,21 @@ public struct AssistantToolRouter: Sendable, Equatable {
             return $0.definition.name < $1.definition.name
         }
         let limit = max(1, min(maximumResults, 16))
+        let tools: [AgentToolDefinition]
         guard matchedNamespaces.count > 1 else {
-            guard let topScore = sorted.first?.score else { return [] }
-            return sorted
-                .filter { $0.score >= max(1, topScore - 1) }
-                .prefix(limit)
-                .map(\.definition)
+            if let topScore = sorted.first?.score {
+                tools = Array(sorted
+                    .filter { $0.score >= max(1, topScore - 1) }
+                    .prefix(limit)
+                    .map(\.definition))
+            } else {
+                tools = []
+            }
+            return AssistantToolDiscoveryResult(
+                tools: tools,
+                matchedNamespaces: matchedNamespaces.map(\.name),
+                availableNamespaces: availableNamespaces
+            )
         }
 
         var selected: [AgentToolDefinition] = []
@@ -114,7 +145,11 @@ public struct AssistantToolRouter: Sendable, Equatable {
             selected.append(item.definition)
             selectedNames.insert(item.definition.name)
         }
-        return selected
+        return AssistantToolDiscoveryResult(
+            tools: selected,
+            matchedNamespaces: matchedNamespaces.map(\.name),
+            availableNamespaces: availableNamespaces
+        )
     }
 
     public func compactCatalogSummary(definitions: [AgentToolDefinition]) -> String {
