@@ -905,6 +905,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             run: &run,
                             policy: policy,
                             discoverableToolDefinitions: assistantToolRoute.discoverableDefinitions,
+                            initiallyExposedToolCount: modelFacingToolDefinitions.count,
                             continuation: continuation
                         )
 
@@ -1463,6 +1464,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         run: inout AgentRun,
         policy: AgentPolicyEngine,
         discoverableToolDefinitions: [AgentToolDefinition],
+        initiallyExposedToolCount: Int,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> [AgentToolBatchResult] {
         if canExecuteInParallel(calls) {
@@ -1483,6 +1485,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 run: &run,
                 policy: policy,
                 discoverableToolDefinitions: discoverableToolDefinitions,
+                initiallyExposedToolCount: initiallyExposedToolCount,
                 continuation: continuation
             )
             results.append(AgentToolBatchResult(call: call, result: result))
@@ -1590,6 +1593,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         run: inout AgentRun,
         policy: AgentPolicyEngine,
         discoverableToolDefinitions: [AgentToolDefinition],
+        initiallyExposedToolCount: Int,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentToolResult {
         yield(.toolRequested(call), to: continuation, recorder: eventRecorder)
@@ -1630,6 +1634,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     context: context,
                     run: &run,
                     discoverableToolDefinitions: discoverableToolDefinitions,
+                    initiallyExposedToolCount: initiallyExposedToolCount,
                     continuation: continuation
                 )
             } else {
@@ -1689,9 +1694,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         context: AgentToolExecutionContext,
         run: inout AgentRun,
         discoverableToolDefinitions: [AgentToolDefinition],
+        initiallyExposedToolCount: Int,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentToolResult {
         if call.name == AssistantDecisionToolContract.searchName {
+            let discoveryStartedAt = Date()
             let arguments = try AgentToolArguments(json: call.argumentsJSON)
             let query = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !query.isEmpty else { throw AgentToolError.invalidArguments("query is required") }
@@ -1709,6 +1716,25 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             }
             let matchStatus = tools.isEmpty ? "no_match" : "matched"
             let suggestedQueries = discovery.availableNamespaces.prefix(8).map { "\($0) tools" }
+            let discoveryLatencyMilliseconds = max(0, Int(Date().timeIntervalSince(discoveryStartedAt) * 1_000))
+            let auditData = try JSONSerialization.data(withJSONObject: [
+                "query": query,
+                "matchStatus": matchStatus,
+                "catalogToolCount": discoverableToolDefinitions.count,
+                "initiallyExposedToolCount": initiallyExposedToolCount,
+                "returnedItems": tools.count,
+                "matchedNamespaces": discovery.matchedNamespaces,
+                "availableNamespaces": discovery.availableNamespaces,
+                "returnedTools": discovery.tools.map(\.name),
+                "discoveryLatencyMilliseconds": discoveryLatencyMilliseconds
+            ], options: [.sortedKeys])
+            await auditLog.record(AgentAuditEvent(
+                runID: run.id,
+                sessionID: run.sessionID,
+                eventType: .toolDiscovery,
+                toolName: AssistantDecisionToolContract.searchName,
+                payloadJSON: String(data: auditData, encoding: .utf8) ?? "{}"
+            ))
             let data = try JSONSerialization.data(withJSONObject: [
                 "success": true,
                 "matchStatus": matchStatus,

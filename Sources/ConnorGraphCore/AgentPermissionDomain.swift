@@ -169,6 +169,7 @@ public struct AgentPendingApproval: Codable, Sendable, Equatable, Identifiable {
 
 public enum AgentAuditEventType: String, Codable, Sendable, Equatable {
     case permissionDecision
+    case toolDiscovery
     case toolStarted
     case toolFinished
     case toolFailed
