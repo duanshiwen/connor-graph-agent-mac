@@ -27,3 +27,33 @@ import Testing
     #expect(matches.map(\.name) == ["mail_search_messages"])
     #expect(matches.first?.inputSchema.jsonObject["properties"] != nil)
 }
+
+@Test func toolSearchMatchesChineseAndMixedLanguageQueries() {
+    let definitions = [
+        AgentToolDefinition(name: "mail_list_recent_messages", description: "List recent mail messages", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "calendar_upcoming_events", description: "List upcoming calendar events", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "rss_list_items", description: "List RSS item summaries", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let matches = AssistantToolRouter().discover(
+        query: "读取今日日历、近两日邮件和近48小时RSS",
+        definitions: definitions
+    )
+
+    #expect(Set(matches.map(\.name)) == [
+        "calendar_upcoming_events",
+        "mail_list_recent_messages",
+        "rss_list_items"
+    ])
+}
+
+@Test func toolCatalogIncludesNamespacePurposeInsteadOfCountsAlone() {
+    let definitions = [
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let catalog = AssistantToolRouter().compactCatalogSummary(definitions: definitions)
+
+    #expect(catalog.contains("mail accounts, recent messages"))
+    #expect(catalog.contains("邮件、邮箱与收件箱"))
+}
