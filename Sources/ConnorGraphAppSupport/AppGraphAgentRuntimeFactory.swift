@@ -59,6 +59,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var rssRuntime: RSSRuntime?
     public var cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient?
     public var interactiveWebAPIClient: InteractiveWebAPIClient?
+    public var interactiveWebPreviewHandler: InteractiveWebToolRuntime.PreviewHandler?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
     public var browserControlHandler: BrowserControlHandler?
@@ -82,6 +83,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         rssRuntime: RSSRuntime? = nil,
         cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient? = nil,
         interactiveWebAPIClient: InteractiveWebAPIClient? = nil,
+        interactiveWebPreviewHandler: InteractiveWebToolRuntime.PreviewHandler? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
         browserControlHandler: BrowserControlHandler? = nil,
@@ -103,6 +105,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.rssRuntime = rssRuntime
         self.cloudKnowledgeConsumptionClient = cloudKnowledgeConsumptionClient
         self.interactiveWebAPIClient = interactiveWebAPIClient
+        self.interactiveWebPreviewHandler = interactiveWebPreviewHandler
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
         self.browserControlHandler = browserControlHandler
@@ -303,7 +306,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.registerInteractiveWebTools(runtime: InteractiveWebToolRuntime(
                 storagePaths: storagePaths,
                 accountID: groupID,
-                api: interactiveWebAPIClient
+                api: interactiveWebAPIClient,
+                previewHandler: interactiveWebPreviewHandler
             ))
         }
         registry.registerCurrentTimeTool()
