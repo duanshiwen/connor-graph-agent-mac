@@ -295,20 +295,20 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     registry: toolRegistry,
                     policy: policy
                 )
+                let availableRegisteredToolDefinitions = await toolRegistry.definitions(availableUnder: policy)
                 let exposedToolDefinitions = tokenPolicy.exposedTools(
-                    from: toolRegistry.definitions,
+                    from: availableRegisteredToolDefinitions,
                     request: request,
                     retrievalPlan: retrievalPlan,
                     mode: configuration.toolExposureMode
                 ).sorted { $0.name < $1.name }
-                let registeredToolDefinitions = toolRegistry.definitions
                 let assistantToolRouter = AssistantToolRouter()
                 let assistantToolRoute = assistantToolRouter.route(
                     initiallyExposedDefinitions: exposedToolDefinitions,
-                    catalogDefinitions: registeredToolDefinitions
+                    catalogDefinitions: availableRegisteredToolDefinitions
                 )
                 let availableToolDefinitions: [AgentToolDefinition] = {
-                    let merged = registeredToolDefinitions + AssistantDecisionToolContract.definitions
+                    let merged = availableRegisteredToolDefinitions + AssistantDecisionToolContract.definitions
                     return Dictionary(grouping: merged, by: \.name)
                         .compactMap { $0.value.first }
                         .sorted { $0.name < $1.name }
@@ -332,7 +332,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     runtimeContext.trustedPrompt,
                     environmentText,
                     AssistantEvidenceReducer().render(assistantBootstrap.contextPack),
-                    assistantToolRouter.compactCatalogSummary(definitions: registeredToolDefinitions),
+                    assistantToolRouter.compactCatalogSummary(definitions: availableRegisteredToolDefinitions),
                     "Memory, user-profile context, and Note candidates were already loaded once by the deterministic assistant bootstrap. Do not repeat those generic startup reads. Shell and ApplyPatch are direct workspace tools. Other applicable native tools are supplied through the routed catalog above."
                 ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")
                 let auditEstimator = AgentModelContextGuard().estimator

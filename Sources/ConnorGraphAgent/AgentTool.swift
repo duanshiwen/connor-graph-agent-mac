@@ -721,6 +721,17 @@ public struct AgentToolRegistry: Sendable {
         tools.keys.sorted().compactMap { definition(named: $0) }
     }
 
+    public func definitions(availableUnder policy: AgentPolicyEngine) async -> [AgentToolDefinition] {
+        var available: [AgentToolDefinition] = []
+        for definition in definitions {
+            guard let capability = permission(named: definition.name) else { continue }
+            if await policy.discoveryOutcome(for: capability) != .denied {
+                available.append(definition)
+            }
+        }
+        return available
+    }
+
     public var schemaValidationIssues: [AgentToolSchemaValidationIssue] {
         definitions.flatMap { definition in
             definition.inputSchema.validationIssues(toolName: definition.name)
