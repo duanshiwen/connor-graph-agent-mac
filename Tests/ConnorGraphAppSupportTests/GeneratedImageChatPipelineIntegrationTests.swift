@@ -40,13 +40,13 @@ private actor GeneratedImageChatScriptedProvider: AgentModelProvider {
                 )],
                 finishReason: .toolCalls
             )
-        case .taskExecution where !request.messages.contains(where: { $0.role == .tool && $0.name == "generate_image" }):
+        case .taskExecution where !request.messages.contains(where: { $0.role == .tool && $0.name == AgentPhaseToolContract.externalReadBatchName }):
             return AgentModelResponse(
                 text: nil,
                 toolCalls: [AgentToolCall(
                     id: "generate-image-call",
-                    name: "generate_image",
-                    argumentsJSON: #"{"prompt":"A lantern beside a quiet lake at dusk"}"#
+                    name: AgentPhaseToolContract.externalReadBatchName,
+                    argumentsJSON: #"{"calls":[{"toolName":"generate_image","arguments":{"prompt":"A lantern beside a quiet lake at dusk"}}]}"#
                 )],
                 usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
                 finishReason: .toolCalls
@@ -152,9 +152,9 @@ private actor GeneratedImageChatMediaRecorder {
     #expect(mediaRequest.auditContext.sessionID == session.id)
     #expect(mediaRequest.auditContext.operation == "GeneratedImageAgentTool.execute")
     let modelRequests = await scriptedProvider.recordedRequests()
-    #expect(modelRequests.count == 5)
+    #expect(modelRequests.count == 4)
     #expect(modelRequests.contains { request in
-        request.messages.contains { $0.role == .tool && $0.name == "generate_image" }
+        request.messages.contains { $0.role == .tool && $0.name == AgentPhaseToolContract.externalReadBatchName }
     })
     #expect(response.events.contains { if case .toolFinished(let result) = $0 { return result.toolName == "generate_image" }; return false })
 
