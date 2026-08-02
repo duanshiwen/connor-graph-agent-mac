@@ -71,6 +71,7 @@ private func anthropicNativeTemporaryDatabaseURL(_ name: String = UUID().uuidStr
     #expect(config.baseURL.absoluteString == "https://api.anthropic.com/v1")
     #expect(config.apiKey == "anthropic-key")
     #expect(config.model == "claude-sonnet-4-5")
+    #expect(config.featureOptions.promptCache.enabled)
 }
 
 @Test func runtimeFactoryRoutesOpenAIResponsesThroughNativeResponsesProvider() throws {

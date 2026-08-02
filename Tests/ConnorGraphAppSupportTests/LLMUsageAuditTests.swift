@@ -16,7 +16,11 @@ private func auditTestStore() -> (FileLLMUsageAuditStore, URL) {
     let base = AnyAgentModelProvider(modelID: "audit-model") { _ in
         AgentModelResponse(text: "PRIVATE_RESPONSE_BODY", usage: AgentModelUsage(promptTokens: 12, completionTokens: 3, cacheCreationInputTokens: 2, cacheReadInputTokens: 5), finishReason: .stop)
     }
-    let provider = AuditedAgentModelProvider(provider: base, recorder: store)
+    let provider = AuditedAgentModelProvider(
+        provider: base,
+        recorder: store,
+        attribution: LLMUsageAuditAttribution(providerMode: "anthropic_messages")
+    )
     let request = AgentModelRequest(
         messages: [AgentModelMessage(role: .user, content: "PRIVATE_PROMPT_BODY")],
         auditContext: AgentLLMRequestAuditContext(
@@ -35,9 +39,15 @@ private func auditTestStore() -> (FileLLMUsageAuditStore, URL) {
     #expect(record.totalTokens == 15)
     #expect(record.cacheCreationInputTokens == 2)
     #expect(record.cacheReadInputTokens == 5)
+    #expect(record.cacheReadRatio == 5.0 / 12.0)
     #expect(record.uncachedInputTokens == 7)
     #expect(record.inputCharacterCount == 19)
     #expect(record.outputCharacterCount == 21)
+    let providerSummary = try #require(LLMUsageAuditQueryService(store: store).summary().byProvider.only)
+    #expect(providerSummary.key == "anthropic_messages")
+    #expect(providerSummary.cacheCreationInputTokens == 2)
+    #expect(providerSummary.cacheReadInputTokens == 5)
+    #expect(providerSummary.cacheReadRatio == 5.0 / 12.0)
     let persisted = try String(contentsOf: store.fileURL, encoding: .utf8)
     #expect(!persisted.contains("PRIVATE_PROMPT_BODY"))
     #expect(!persisted.contains("PRIVATE_RESPONSE_BODY"))
@@ -107,6 +117,7 @@ private func auditTestStore() -> (FileLLMUsageAuditStore, URL) {
     #expect(records.first?.sessionID == "session-1")
     #expect(records.first?.runID == "run-1")
     #expect(records.first?.iteration == 2)
+    #expect(records.first?.firstTokenLatencyMilliseconds != nil)
     #expect(store.persistenceHealth().successfulWrites == 1)
     #expect(store.persistenceHealth().isHealthy)
 }

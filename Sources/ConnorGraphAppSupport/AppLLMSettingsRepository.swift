@@ -742,7 +742,10 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             extraHeaders: extraHeaders,
             featureOptions: AnthropicCompatibleFeatureOptions(
                 thinking: thinkingLevel.anthropicThinking(modelID: model),
-                effort: thinkingLevel.anthropicEffort(modelID: model)
+                effort: thinkingLevel.anthropicEffort(modelID: model),
+                promptCache: AnthropicPromptCacheConfig(
+                    enabled: connection.providerMode == .anthropicMessages
+                )
             ),
             explicitVisionSupport: connection.explicitVisionSupport
         )
