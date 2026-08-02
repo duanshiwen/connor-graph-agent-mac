@@ -87,10 +87,34 @@ public struct LocalInteractiveWebProject: Codable, Sendable, Equatable, Identifi
     public var rootURL: URL
     public var conversationID: String
     public var remoteProjectID: String?
+    public var remoteSiteID: String?
     public var latestDeploymentID: String?
-    public init(id: String = UUID().uuidString, accountID: String, name: String, rootURL: URL, conversationID: String, remoteProjectID: String? = nil, latestDeploymentID: String? = nil) {
-        self.id = id; self.accountID = accountID; self.name = name; self.rootURL = rootURL; self.conversationID = conversationID; self.remoteProjectID = remoteProjectID; self.latestDeploymentID = latestDeploymentID
+    public var publishedURL: URL?
+    public var revision: Int?
+    public init(id: String = UUID().uuidString, accountID: String, name: String, rootURL: URL, conversationID: String, remoteProjectID: String? = nil, remoteSiteID: String? = nil, latestDeploymentID: String? = nil, publishedURL: URL? = nil, revision: Int? = 1) {
+        self.id = id; self.accountID = accountID; self.name = name; self.rootURL = rootURL; self.conversationID = conversationID; self.remoteProjectID = remoteProjectID; self.remoteSiteID = remoteSiteID; self.latestDeploymentID = latestDeploymentID; self.publishedURL = publishedURL; self.revision = revision
     }
+}
+
+public struct InteractiveWebProjectStatus: Codable, Sendable, Equatable {
+    public var projectID: String
+    public var name: String
+    public var rootURL: URL
+    public var revision: Int
+    public var manifestHash: String
+    public var fileCount: Int
+    public var totalBytes: Int64
+    public var remoteProjectID: String?
+    public var remoteSiteID: String?
+    public var latestDeploymentID: String?
+    public var publishedURL: URL?
+}
+
+public struct InteractiveWebExportResult: Codable, Sendable, Equatable {
+    public var projectID: String
+    public var collection: String
+    public var fileURL: URL
+    public var sizeBytes: Int64
 }
 
 public struct InteractiveWebManifestFile: Codable, Sendable, Equatable {
@@ -150,6 +174,20 @@ public struct InteractiveWebPackager: Sendable {
         return InteractiveWebManifest(files: files)
     }
 
+    public func fingerprint(_ manifest: InteractiveWebManifest) -> String {
+        var canonical = "\(manifest.entryPoint)\n\(manifest.componentVersion)\n"
+        for file in manifest.files.sorted(by: { $0.path < $1.path }) {
+            canonical += "\(file.path)\t\(file.sha256)\t\(file.mediaType)\t\(file.sizeBytes)\n"
+        }
+        for collection in manifest.collections.sorted(by: { $0.name < $1.name }) {
+            canonical += "collection\t\(collection.name)\t\(collection.anonymousCreate)\t\(collection.anonymousRead)\n"
+            for field in collection.fields.sorted(by: { $0.name < $1.name }) {
+                canonical += "\(field.name)\t\(field.type)\t\(field.required)\t\(field.maxLength)\t\(field.enum.joined(separator: ","))\n"
+            }
+        }
+        return SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
     private static func mediaType(_ ext: String) -> String {
         ["html":"text/html", "css":"text/css", "js":"text/javascript", "json":"application/json", "png":"image/png", "jpg":"image/jpeg", "jpeg":"image/jpeg", "gif":"image/gif", "webp":"image/webp", "svg":"image/svg+xml", "woff":"font/woff", "woff2":"font/woff2"][ext] ?? "application/octet-stream"
     }
@@ -165,6 +203,7 @@ public actor InteractiveWebLocalStore {
 
     public func save(project: LocalInteractiveWebProject) throws { var state = try read(); state.projects.removeAll { $0.id == project.id }; state.projects.append(project); try write(state) }
     public func projects(accountID: String) throws -> [LocalInteractiveWebProject] { try read().projects.filter { $0.accountID == accountID } }
+    public func project(id: String) throws -> LocalInteractiveWebProject? { try read().projects.first { $0.id == id } }
     public func save(choice: InteractiveWebChoiceRequest) throws { var state = try read(); state.choices.removeAll { $0.choiceRequestID == choice.choiceRequestID }; state.choices.append(choice); try write(state) }
     public func pendingChoices(accountID: String, conversationID: String) throws -> [InteractiveWebChoiceRequest] { try read().choices.filter { $0.accountID == accountID && $0.conversationID == conversationID && $0.state == "awaiting_user_choice" } }
     public func complete(_ response: InteractiveWebChoiceResponse, contextRevision: Int) throws -> Bool {

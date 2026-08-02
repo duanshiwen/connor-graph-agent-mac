@@ -58,6 +58,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var mailRuntime: MailRuntime?
     public var rssRuntime: RSSRuntime?
     public var cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient?
+    public var interactiveWebAPIClient: InteractiveWebAPIClient?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
     public var browserControlHandler: BrowserControlHandler?
@@ -80,6 +81,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         mailRuntime: MailRuntime? = nil,
         rssRuntime: RSSRuntime? = nil,
         cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient? = nil,
+        interactiveWebAPIClient: InteractiveWebAPIClient? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
         browserControlHandler: BrowserControlHandler? = nil,
@@ -100,6 +102,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.mailRuntime = mailRuntime
         self.rssRuntime = rssRuntime
         self.cloudKnowledgeConsumptionClient = cloudKnowledgeConsumptionClient
+        self.interactiveWebAPIClient = interactiveWebAPIClient
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
         self.browserControlHandler = browserControlHandler
@@ -297,6 +300,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.register(ConnorSkillUpdateTool(service: skillMutationService))
             registry.register(ConnorSkillDeleteTool(service: skillMutationService))
             registry.registerTaskManagementTools(repository: AppTaskManagementRepository(storagePaths: storagePaths))
+            registry.registerInteractiveWebTools(runtime: InteractiveWebToolRuntime(
+                storagePaths: storagePaths,
+                accountID: groupID,
+                api: interactiveWebAPIClient
+            ))
         }
         registry.registerCurrentTimeTool()
         if let environmentProvider, let environmentStore {

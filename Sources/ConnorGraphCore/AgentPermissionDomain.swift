@@ -46,6 +46,7 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     case syncRSSSources
     case importRSSOPML
     case exportRSSOPML
+    case publishInteractiveWeb
 }
 
 public enum AgentPermissionMode: String, Codable, Sendable, Equatable, CaseIterable, Hashable {
