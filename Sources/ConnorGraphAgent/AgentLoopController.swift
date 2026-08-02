@@ -1925,6 +1925,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         continue
                     }
                     let nestedCall = AgentToolCall(id: "\(call.id)-\(index)", runID: run.id, sessionID: run.sessionID, name: toolName, argumentsJSON: item.argumentsJSON)
+                    yield(.toolRequested(nestedCall), to: continuation, recorder: eventRecorder)
+                    yield(.toolStarted(nestedCall), to: continuation, recorder: eventRecorder)
                     do {
                         let result = try await executeToolWithApprovalIfNeeded(
                             call: nestedCall,
@@ -1940,6 +1942,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             run: &run,
                             continuation: continuation
                         )
+                        yield(.toolFinished(result), to: continuation, recorder: eventRecorder)
                         if toolName == "connor_skill_activate", let promotion = result.instructionPromotion {
                             await promotionCollector.record(promotion)
                         }
@@ -1956,6 +1959,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
+                        yield(.toolFailed(AgentToolFailure(
+                            runID: run.id,
+                            sessionID: run.sessionID,
+                            toolCallID: nestedCall.id,
+                            toolName: nestedCall.name,
+                            message: String(describing: error)
+                        )), to: continuation, recorder: eventRecorder)
                         executed.append([.init(id: nestedCall.id, sourceID: toolName, uri: resourceURI, title: "Execution failed", summary: "", error: String(describing: error))])
                     }
                 }
