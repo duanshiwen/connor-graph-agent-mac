@@ -96,6 +96,25 @@ private struct NetworkReadTool: AgentTool {
     #expect(readOnlyDecision.outcome == .denied)
 }
 
+@Test func interactiveWebPublishingAlwaysRequiresHumanApproval() async {
+    for mode in [AgentPermissionMode.askToWrite, .trustedWrite, .allowAll] {
+        let decision = await AgentPolicyEngine(permissionMode: mode).evaluate(
+            capability: .publishInteractiveWeb,
+            runID: "run-publish",
+            sessionID: "session-publish",
+            toolName: "interactive_web_publish"
+        )
+        #expect(decision.outcome == .needsApproval)
+    }
+
+    let denied = await AgentPolicyEngine(permissionMode: .readOnly).evaluate(
+        capability: .publishInteractiveWeb,
+        runID: "run-publish",
+        sessionID: "session-publish"
+    )
+    #expect(denied.outcome == .denied)
+}
+
 @Test func executeModePropagatesAutomaticApprovalIntoToolContext() async throws {
     var registry = AgentToolRegistry()
     registry.register(ApprovalAwareTool())
