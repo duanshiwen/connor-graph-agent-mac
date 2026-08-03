@@ -2261,6 +2261,28 @@ final class AppRuntimeLifecycle {
     }
 
     @discardableResult
+    func storeForwardedChatMessage(_ content: String, sessionID: String?) async -> String? {
+        guard let chatSessionRepository else { return nil }
+        do {
+            let targetID: String
+            if let sessionID {
+                targetID = sessionID
+            } else {
+                targetID = try chatSessionRepository.createSession(title: "转发的聊天记录").id
+            }
+            _ = try chatSessionRepository.appendForwardedChatMessage(sessionID: targetID, content: content)
+            reloadChatSessions(restoreWorkspaceMode: false)
+            if chatFeatureModel.sessions.selectedSessionID == targetID {
+                selectChatSession(targetID)
+            }
+            return targetID
+        } catch {
+            errorMessage = "转发失败：\(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    @discardableResult
     private func createSessionOptimistically(title: String, kind: AgentSessionKind) -> String? {
         guard let chatSessionRepository else { return nil }
         let interaction = AppInteractionPerformance.begin("NewSession.UserActionToFirstFrame")

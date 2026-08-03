@@ -120,7 +120,7 @@ struct CraftDetailPaneView: View {
                 if let im = graph.im, im.selectedConversationId != nil {
                     ImChatDetailView(model: im, chatModel: graph.chat)
                 } else {
-                    ChatDetailRouteView(model: graph.chat, chatActions: graph.chatActions)
+                    ChatDetailRouteView(model: graph.chat, chatActions: graph.chatActions, imModel: graph.im)
                 }
             case .promotionQueue:
                 PromotionQueueView(model: graph.graphDiagnostics)

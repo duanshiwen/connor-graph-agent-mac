@@ -169,6 +169,18 @@ public struct AppChatSessionRepository: Sendable {
         try makeNewSession(title: title, now: now)
     }
 
+    /** 像普通聊天消息一样保存合并转发卡片，但不启动 Agent run。 */
+    @discardableResult
+    public func appendForwardedChatMessage(sessionID: String, content: String, now: Date = Date()) throws -> AgentSession {
+        guard var session = try loadSession(id: sessionID) else {
+            throw AppChatSessionRepositoryError.sessionNotFound(sessionID)
+        }
+        let previousMessageCount = session.messages.count
+        session.messages.append(AgentMessage(role: .user, content: content, createdAt: now))
+        session.updatedAt = now
+        return try saveSession(session, previousMessageCount: previousMessageCount)
+    }
+
     /// Persists a session whose stable identity was allocated by the interactive
     /// UI before storage work began. This lets navigation/list selection commit
     /// first without replacing the row identity after persistence completes.

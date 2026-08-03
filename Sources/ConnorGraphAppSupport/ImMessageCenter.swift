@@ -1185,6 +1185,7 @@ public actor ImMessageCenter {
     }
 
     private static func preview(type rawType: String, content: String) -> String {
+        if let bundle = ForwardedChatBundleCodec.decode(content) { return "[聊天记录] \(bundle.title)" }
         let normalizedType = rawType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let type = normalizedType.isEmpty ? ImMessageType.text : ImMessageType(rawValue: normalizedType)
         guard let type else { return "[不支持的消息]" }

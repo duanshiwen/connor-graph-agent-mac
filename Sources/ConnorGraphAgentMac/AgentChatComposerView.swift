@@ -47,7 +47,6 @@ struct AgentChatComposerView: View {
     @Bindable var model: ChatFeatureModel
     var chatActions: ChatFeatureActions
     @Bindable var contactsFeatureModel: ContactsFeatureModel
-    @Binding var isSessionInfoPresented: Bool
     var onExpandApprovalReview: ((AgentPendingApproval) -> Void)? = nil
     @State private var localChatInput: String = ""
     @State private var isWorkspacePopoverPresented: Bool = false
@@ -820,7 +819,6 @@ struct AgentChatComposerView: View {
             sourceRuntime: chatActions.dependencies.sources,
             hasRunningBackgroundTask: chatActions.run.hasRunningActiveSessionBackgroundTask,
             currentTextSelectionRange: { composerSelectionTracker.selectedRange },
-            isSessionInfoPresented: $isSessionInfoPresented,
             onAction: sendComposerAction
         )
     }

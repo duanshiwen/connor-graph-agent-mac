@@ -9,6 +9,7 @@ import ConnorGraphAppSupport
 struct AgentChatView: View {
     @Bindable var model: ChatFeatureModel
     var chatActions: ChatFeatureActions
+    var imModel: ImFeatureModel? = nil
     @State private var isSessionInfoPresented = false
 
 
@@ -55,7 +56,7 @@ struct AgentChatView: View {
                         )
                     )
                 } else {
-                    AgentChatConversationView(model: model, chatActions: chatActions, isSessionInfoPresented: $isSessionInfoPresented)
+                    AgentChatConversationView(model: model, chatActions: chatActions, imModel: imModel, isSessionInfoPresented: $isSessionInfoPresented)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -553,6 +554,7 @@ private struct AgentChatSessionRow: View {
 private struct AgentChatConversationView: View {
     @Bindable var model: ChatFeatureModel
     var chatActions: ChatFeatureActions
+    var imModel: ImFeatureModel?
     @Binding var isSessionInfoPresented: Bool
     @State private var expandedApprovalID: String?
     @State private var lastObservedSessionID: String?
@@ -560,6 +562,10 @@ private struct AgentChatConversationView: View {
     @State private var visibleMessageLimit: Int = Self.initialVisibleMessageLimit
     @State private var pendingPrependCorrection: PendingPrependCorrection?
     @State private var isLoadingOlderMessages = false
+    @State private var selectedForwardMessageIDs: Set<String> = []
+    @State private var isForwardSelectionMode = false
+    @State private var isForwardSheetPresented = false
+    @State private var isForwarding = false
     @StateObject private var chatViewportController = ChatViewportController(
         configuration: ChatViewportConfiguration(
             spacing: AgentChatLayout.chatViewportSpacing,
@@ -862,7 +868,20 @@ private struct AgentChatConversationView: View {
                     onExportAssistantMessage: { message in
                         chatActions.run.exportAssistantMessageToFile(message)
                     },
-                    onEditNoteBody: noteBodyEditAction(for: message)
+                    onEditNoteBody: noteBodyEditAction(for: message),
+                    isForwardSelectionMode: isForwardSelectionMode,
+                    isForwardSelected: selectedForwardMessageIDs.contains(message.id),
+                    onEnterForwardSelection: {
+                        let selectedKind = model.sessions.allSessions.first(where: { $0.id == model.sessions.selectedSessionID })?.governance.kind
+                        guard selectedKind != .note, !model.run.isSubmitting else { return }
+                        isForwardSelectionMode = true
+                        selectedForwardMessageIDs = [message.id]
+                    },
+                    onToggleForwardSelection: {
+                        if selectedForwardMessageIDs.contains(message.id) { selectedForwardMessageIDs.remove(message.id) }
+                        else { selectedForwardMessageIDs.insert(message.id) }
+                        if selectedForwardMessageIDs.isEmpty { isForwardSelectionMode = false }
+                    }
                 )
             }
         } else if let process = item.process {
@@ -946,7 +965,17 @@ private struct AgentChatConversationView: View {
 
         VStack(spacing: 0) {
             if !noteFullscreen {
-                AgentChatConversationHeader(model: model, chatActions: chatActions)
+                AgentChatConversationHeader(
+                    model: model,
+                    chatActions: chatActions,
+                    isForwardSelectionMode: isForwardSelectionMode,
+                    canBeginForwardSelection: canBeginForwardSelection,
+                    isSessionInfoPresented: $isSessionInfoPresented,
+                    onBeginForwardSelection: {
+                        selectedForwardMessageIDs = []
+                        isForwardSelectionMode = true
+                    }
+                )
                     .padding(.horizontal, AgentChatLayout.spaceL)
                     .padding(.top, AgentChatLayout.spaceS)
                     .padding(.bottom, AgentChatLayout.spaceL)
@@ -1038,15 +1067,7 @@ private struct AgentChatConversationView: View {
             }
 
 
-            AgentChatComposerView(
-                model: model,
-                chatActions: chatActions,
-                contactsFeatureModel: chatActions.dependencies.contacts,
-                isSessionInfoPresented: $isSessionInfoPresented,
-                onExpandApprovalReview: { approval in
-                    expandedApprovalID = approval.id
-                }
-            )
+            conversationFooter
             .padding(.horizontal, 0)
             .padding(.top, noteFullscreen ? 0 : AgentChatLayout.spaceM)
             .padding(.bottom, noteFullscreen ? 0 : AgentChatLayout.spaceS)
@@ -1071,6 +1092,29 @@ private struct AgentChatConversationView: View {
                 self.expandedApprovalID = nil
             }
         }
+        .sheet(isPresented: $isForwardSheetPresented) {
+            if let bundle = selectedAgentForwardBundle, let imModel {
+                ForwardDestinationSheet(
+                    bundle: bundle,
+                    destinations: forwardDestinations(sessions: model.sessions.allSessions, conversations: imModel.conversations),
+                    isSending: isForwarding,
+                    onCancel: { isForwardSheetPresented = false },
+                    onSend: { caption, destinationKeys in
+                        isForwarding = true
+                        var outgoing = bundle
+                        outgoing.caption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+                        do {
+                            try await imModel.forward(bundle: outgoing, destinationKeys: destinationKeys)
+                            isForwardSheetPresented = false
+                            clearForwardSelection()
+                        } catch {
+                            chatActions.errors.errorMessage = "转发失败：\(error.localizedDescription)"
+                        }
+                        isForwarding = false
+                    }
+                )
+            }
+        }
         .padding(.horizontal, AgentChatLayout.spaceL)
         .padding(.vertical, AgentChatLayout.spaceM)
     }
@@ -1084,6 +1128,72 @@ private struct AgentChatConversationView: View {
         case .conversationBoundary:
             return AgentChatLayout.conversationTurnSpacing - AgentChatLayout.chatViewportSpacing
         }
+    }
+
+    private var selectedAgentForwardBundle: ForwardedChatBundle? {
+        guard let sessionID = model.sessions.selectedSessionID,
+              let session = model.sessions.allSessions.first(where: { $0.id == sessionID })
+        else { return nil }
+        let selected = model.run.transcript.filter { selectedForwardMessageIDs.contains($0.id) }
+        guard !selected.isEmpty else { return nil }
+        return ForwardedChatBundle(
+            title: "\(session.title)的聊天记录",
+            sourceTitle: session.title,
+            items: selected.map { message in
+                let nested = ForwardedChatBundleCodec.decode(message.content)
+                return ForwardedChatItem(
+                    id: message.id,
+                    senderName: message.role == .user ? "我" : "康纳",
+                    createdAt: Int64(message.createdAt.timeIntervalSince1970 * 1000),
+                    kind: nested == nil ? "text" : "forward",
+                    text: nested?.title ?? message.content
+                )
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var conversationFooter: some View {
+        if isForwardSelectionMode {
+            HStack(spacing: AgentChatLayout.spaceM) {
+                Text("已选 \(selectedForwardMessageIDs.count) 条")
+                    .font(.callout.weight(.medium))
+                Spacer()
+                Button("取消") { clearForwardSelection() }
+                Button("合并转发", systemImage: "arrowshape.turn.up.right") {
+                    isForwardSheetPresented = true
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedForwardMessageIDs.isEmpty || imModel == nil)
+            }
+            .padding(.horizontal, AgentChatLayout.spaceL)
+            .padding(.vertical, AgentChatLayout.spaceM)
+            .background(.bar)
+        } else {
+            AgentChatComposerView(
+                model: model,
+                chatActions: chatActions,
+                contactsFeatureModel: chatActions.dependencies.contacts,
+                onExpandApprovalReview: { approval in
+                    expandedApprovalID = approval.id
+                }
+            )
+        }
+    }
+
+    private var canBeginForwardSelection: Bool {
+        let selectedKind = model.sessions.allSessions
+            .first(where: { $0.id == model.sessions.selectedSessionID })?
+            .governance.kind
+        return selectedKind != .note
+            && !model.run.transcript.isEmpty
+            && !model.run.isSubmitting
+            && imModel != nil
+    }
+
+    private func clearForwardSelection() {
+        selectedForwardMessageIDs = []
+        isForwardSelectionMode = false
     }
 }
 
@@ -1106,6 +1216,10 @@ private struct AgentChatTranscriptViewportHeightKey: PreferenceKey {
 private struct AgentChatConversationHeader: View {
     @Bindable var model: ChatFeatureModel
     var chatActions: ChatFeatureActions
+    var isForwardSelectionMode: Bool
+    var canBeginForwardSelection: Bool
+    @Binding var isSessionInfoPresented: Bool
+    var onBeginForwardSelection: () -> Void
     @State private var isEditingTitle = false
     @State private var titleDraft = ""
     @FocusState private var isTitleFocused: Bool
@@ -1122,7 +1236,35 @@ private struct AgentChatConversationHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
-            titleView
+            ZStack {
+                titleView
+                    .padding(.horizontal, 220)
+
+                HStack(spacing: AgentChatLayout.spaceS) {
+                    Spacer()
+                    if !isForwardSelectionMode {
+                        Button("选择消息", systemImage: "checkmark.circle") {
+                            onBeginForwardSelection()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(!canBeginForwardSelection)
+                        .help("选择多条消息并合并转发")
+                    }
+                    Button {
+                        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                            isSessionInfoPresented.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(isSessionInfoPresented ? Color.accentColor : Color.secondary)
+                    .help("会话信息")
+                    .accessibilityLabel("打开会话信息")
+                }
+            }
 
             if let summary = model.run.latestSummary {
                 DisclosureGroup {

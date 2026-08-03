@@ -292,7 +292,7 @@ struct ImChatDetailView: View {
     @State private var composerText = ""
     @State private var voiceRecorder = ImVoiceRecorder()
     @State private var mediaPlayback = ImMediaPlaybackController()
-    @State private var isGroupDetailsPresented = false
+    @State private var isConversationInfoPresented = false
 
     private var conversationTitle: String {
         model.selectedConversation?.title ?? "会话"
@@ -309,10 +309,21 @@ struct ImChatDetailView: View {
             }
         }
         .sheet(isPresented: $model.isForwardSheetPresented) {
-            ImForwardSheet(model: model, sessions: chatModel.sessions.allSessions)
+            if let bundle = model.selectedForwardBundle() {
+                ForwardDestinationSheet(
+                    bundle: bundle,
+                    destinations: forwardDestinations(sessions: chatModel.sessions.allSessions, conversations: model.conversations),
+                    isSending: model.isForwarding,
+                    onCancel: { model.isForwardSheetPresented = false },
+                    onSend: { caption, destinationKeys in
+                        model.forwardCaption = caption
+                        _ = await model.forwardSelectedMessages(destinationKeys: destinationKeys)
+                    }
+                )
+            }
         }
-        .sheet(isPresented: $isGroupDetailsPresented) {
-            ImGroupDetailSheet(model: model, isPresented: $isGroupDetailsPresented)
+        .sheet(isPresented: $isConversationInfoPresented) {
+            ImConversationInfoSheet(model: model, isPresented: $isConversationInfoPresented)
         }
         .alert(
             "出错了",
@@ -328,33 +339,43 @@ struct ImChatDetailView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        ZStack {
             Text(conversationTitle)
-                .font(.headline)
+                .font(AgentChatTypography.title)
                 .lineLimit(1)
-            if !model.socketConnected {
-                Label("连接已断开", systemImage: "wifi.slash")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-            Spacer()
-            if model.selectedConversation?.kind == .group {
-                Button {
-                    isGroupDetailsPresented = true
-                } label: {
-                    Image(systemName: "person.3")
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 220)
+
+            HStack(spacing: AgentChatLayout.spaceS) {
+                if !model.socketConnected {
+                    Label("连接已断开", systemImage: "wifi.slash")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.orange)
                 }
-                .help("群聊详情")
-                .accessibilityLabel("打开群聊详情")
+                Spacer()
+                if !model.isSelectionMode {
+                    Button("选择消息", systemImage: "checkmark.circle") {
+                        model.enterSelectionMode()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(model.messages.isEmpty)
+                    .help("选择多条消息并合并转发")
+                }
+                Button {
+                    isConversationInfoPresented = true
+                } label: {
+                    Image(systemName: "info.circle")
+                        .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                }
+                .buttonStyle(.borderless)
+                .help("会话信息")
+                .accessibilityLabel("打开会话信息")
             }
-            Button("关闭", systemImage: "xmark.circle") {
-                Task { await model.selectConversation(nil) }
-            }
-            .help("返回 AI 会话")
         }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, AgentChatLayout.spaceL)
+        .padding(.top, AgentChatLayout.spaceS)
+        .padding(.bottom, AgentChatLayout.spaceL)
     }
 
     private var messageList: some View {
@@ -411,7 +432,7 @@ struct ImChatDetailView: View {
                 .font(.callout)
             Spacer()
             Button("取消") { model.clearSelection() }
-            Button("转发给 AI") { model.isForwardSheetPresented = true }
+            Button("合并转发") { model.isForwardSheetPresented = true }
                 .buttonStyle(.borderedProminent)
                 .disabled(model.selectedMessageIds.isEmpty)
         }
@@ -441,19 +462,6 @@ struct ImChatDetailView: View {
             )
 
             HStack(spacing: AgentChatLayout.spaceS) {
-                Button {
-                    if let last = model.messages.last {
-                        model.enterSelectionMode(initialMessageId: last.id)
-                    }
-                } label: {
-                    Image(systemName: "checkmark.circle")
-                        .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .disabled(model.messages.isEmpty)
-                .help("多选转发")
-
                 Menu {
                     Button("图片", systemImage: "photo") { chooseMedia(type: .image) }
                     Button("视频", systemImage: "video") { chooseMedia(type: .video) }
@@ -716,6 +724,66 @@ struct ImGroupDetailSheet: View {
     }
 }
 
+private struct ImConversationInfoSheet: View {
+    @Bindable var model: ImFeatureModel
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        if model.selectedConversation?.kind == .group {
+            ImGroupDetailSheet(model: model, isPresented: $isPresented)
+        } else {
+            peerDetails
+        }
+    }
+
+    private var peerDetails: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("会话信息").font(.headline)
+                Spacer()
+                Button("完成") { isPresented = false }
+            }
+            .padding(16)
+            Divider()
+
+            if let conversation = model.selectedConversation {
+                Form {
+                    Section {
+                        HStack(spacing: 12) {
+                            ImUserAvatar(
+                                urlString: conversation.avatar,
+                                name: conversation.participantName,
+                                size: 42
+                            )
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(conversation.title).font(.headline)
+                                Text("跟 \(conversation.participantName)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Section("会话") {
+                        LabeledContent("类型", value: "单聊")
+                        LabeledContent("状态", value: conversation.status.displayName)
+                        LabeledContent("消息", value: "\(model.messages.count) 条")
+                        LabeledContent("通知", value: conversation.muted ? "已静音" : "正常")
+                    }
+                    if !conversation.labelIds.isEmpty {
+                        Section("标签") {
+                            Text(conversation.labelIds.joined(separator: " · "))
+                        }
+                    }
+                }
+                .formStyle(.grouped)
+            } else {
+                ContentUnavailableView("无法加载会话", systemImage: "info.circle")
+            }
+        }
+        .frame(width: 420, height: 430)
+    }
+}
+
 private struct ImMessageBubble: View {
     let message: ImMessage
     let conversation: ImConversation?
@@ -729,6 +797,8 @@ private struct ImMessageBubble: View {
     let onEnterSelection: () -> Void
     let onRetry: () -> Void
     var playback: ImMediaPlaybackController
+
+    @State private var forwardedDetail: ForwardedChatBundle?
 
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
@@ -788,6 +858,13 @@ private struct ImMessageBubble: View {
 
     @ViewBuilder
     private var messageContent: some View {
+        if let bundle = ForwardedChatBundleCodec.decode(message.content) {
+            ForwardedChatCard(bundle: bundle, onOpen: { forwardedDetail = bundle })
+                .frame(maxWidth: ImChatLayout.messageBubbleMaxWidth)
+                .sheet(item: $forwardedDetail) { selected in
+                    ForwardedChatDetailView(bundle: selected, onClose: { forwardedDetail = nil })
+                }
+        } else {
         switch message.type {
         case .text, .system:
             Text(message.content)
@@ -819,6 +896,7 @@ private struct ImMessageBubble: View {
             .padding(.horizontal, AgentChatLayout.spaceM)
             .padding(.vertical, AgentChatLayout.spaceS)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM))
+        }
         }
     }
 
@@ -1024,7 +1102,7 @@ private struct ImExpiredMediaContent: View {
     }
 }
 
-// MARK: - Forward sheet (caption + target AI session)
+// MARK: - Forward sheet compatibility wrapper
 
 /// Android `ForwardToAgentSheet`: optional caption, target session picker
 /// (new session by default), then the anonymized forward flow.
@@ -1032,40 +1110,18 @@ struct ImForwardSheet: View {
     @Bindable var model: ImFeatureModel
     var sessions: [AgentSession]
 
-    @State private var targetSessionID: String?
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("转发给 AI")
-                .font(.headline)
-            Text("已选 \(model.selectedMessageIds.count) 条消息。转发前将自动脱敏：好友身份替换为不透明代号，手机号、邮箱等敏感信息将被隐藏。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            TextField("留言（可选）", text: $model.forwardCaption)
-                .textFieldStyle(.roundedBorder)
-
-            Picker("目标会话", selection: $targetSessionID) {
-                Text("新建会话").tag(String?.none)
-                ForEach(sessions) { session in
-                    Text(session.title).tag(Optional(session.id))
+        if let bundle = model.selectedForwardBundle() {
+            ForwardDestinationSheet(
+                bundle: bundle,
+                destinations: forwardDestinations(sessions: sessions, conversations: model.conversations),
+                isSending: model.isForwarding,
+                onCancel: { model.isForwardSheetPresented = false },
+                onSend: { caption, keys in
+                    model.forwardCaption = caption
+                    _ = await model.forwardSelectedMessages(destinationKeys: keys)
                 }
-            }
-
-            HStack {
-                Spacer()
-                Button("取消") {
-                    model.isForwardSheetPresented = false
-                }
-                Button(model.isForwarding ? "转发中…" : "转发") {
-                    Task { await model.forwardSelectedMessages(targetSessionId: targetSessionID) }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isForwarding || model.selectedMessageIds.isEmpty)
-            }
+            )
         }
-        .padding(20)
-        .frame(width: 420)
     }
 }

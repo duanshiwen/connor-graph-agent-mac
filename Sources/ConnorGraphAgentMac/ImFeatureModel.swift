@@ -557,9 +557,9 @@ final class ImFeatureModel {
 
     // MARK: - Multi-select (Android `imSelectionMode` semantics)
 
-    func enterSelectionMode(initialMessageId: String) {
+    func enterSelectionMode(initialMessageId: String? = nil) {
         isSelectionMode = true
-        selectedMessageIds = [initialMessageId]
+        selectedMessageIds = initialMessageId.map { Set([$0]) } ?? []
     }
 
     func toggleMessageSelection(_ messageId: String) {
@@ -578,71 +578,78 @@ final class ImFeatureModel {
         isSelectionMode = false
     }
 
-    // MARK: - Forward to AI (anonymize → ingest → compose → submit)
+    // MARK: - Combined forwarding across Agent / peer / group conversations
 
-    /// Android `forwardSelectedImMessages` tail: anonymize the selection, ingest the
-    /// transcript into Memory OS (idempotent per batch), compose caption + disclaimer
-    /// + transcript, then submit into the target AI session (or a new one).
-    /// Returns the target session id on success.
+    func selectedForwardBundle(caption: String = "") -> ForwardedChatBundle? {
+        guard let conversation = selectedConversation else { return nil }
+        let selected = messages.filter { selectedMessageIds.contains($0.id) }.sorted { $0.seq < $1.seq }
+        guard !selected.isEmpty else { return nil }
+        return ForwardedChatBundle(
+            title: "\(conversation.title)的聊天记录",
+            sourceTitle: conversation.title,
+            caption: caption.trimmingCharacters(in: .whitespacesAndNewlines),
+            items: selected.map { message in
+                let metadata = message.mediaMetadata
+                let kind = message.messageType.lowercased()
+                return ForwardedChatItem(
+                    id: message.id,
+                    senderName: message.senderName.isEmpty ? (message.senderId == selfUserId ? "我" : conversation.participantName) : message.senderName,
+                    senderAvatar: message.senderAvatar,
+                    createdAt: message.createdAt,
+                    kind: kind,
+                    text: kind == "text" ? message.content : (metadata?.fileName ?? ""),
+                    mediaUrl: kind == "text" ? nil : message.content,
+                    thumbnailUrl: metadata?.thumbnail
+                )
+            }
+        )
+    }
+
     @discardableResult
-    func forwardSelectedMessages(targetSessionId: String?) async -> String? {
+    func forwardSelectedMessages(destinationKeys: Set<String>) async -> Bool {
         guard !isForwarding,
-              let conversation = selectedConversation,
-              !selectedMessageIds.isEmpty
-        else { return nil }
-        guard let selfId = await center.selfUserId() else {
-            errorMessage = "请先登录后再转发"
-            return nil
-        }
+              selectedConversation != nil,
+              !selectedMessageIds.isEmpty,
+              !destinationKeys.isEmpty
+        else { return false }
         isForwarding = true
         defer { isForwarding = false }
 
-        let selected = messages.filter { selectedMessageIds.contains($0.id) }
-        guard !selected.isEmpty else { return nil }
+        guard let bundle = selectedForwardBundle(caption: forwardCaption) else { return false }
 
         do {
-            let store = self.store
-            let anonymizer = ImTranscriptAnonymizer(store: store)
-            let forward = try await anonymizer.anonymize(
-                messages: selected,
-                conversation: conversation,
-                selfUserId: selfId,
-                friendLookup: { senderId in
-                    // Bound friends only: unbound senders degrade to ephemeral tokens.
-                    guard let friend = try? await store.friend(userId: senderId),
-                          let personProfileID = friend.personProfileID
-                    else { return nil }
-                    return ImParticipantInfo(personProfileID: personProfileID, displayName: friend.displayName)
-                }
-            )
-
-            let batchID = ImForwardComposer.batchID(conversationId: conversation.id, messageIds: selected.map(\.id))
-            if let facade = forwardFacade() {
-                let ingestor = ImForwardTranscriptIngestor(facade: facade)
-                try ingestor.ingest(batchID: batchID, transcriptText: forward.transcriptText)
-            }
-
-            let composed = ImForwardComposer.composeMessage(caption: forwardCaption, transcriptText: forward.transcriptText)
-            let sessionId: String?
-            if let targetSessionId {
-                sessionId = await forwardToExistingSession(targetSessionId, composed)
-            } else {
-                sessionId = await forwardToNewSession(composed)
-            }
-            guard let sessionId else {
-                errorMessage = "转发失败"
-                return nil
-            }
-
-            // Android parity: leave the IM chat and land on the AI session.
+            try await forward(bundle: bundle, destinationKeys: destinationKeys)
             forwardCaption = ""
             isForwardSheetPresented = false
             clearSelection()
-            await selectConversation(nil)
-            return sessionId
+            return true
         } catch {
             errorMessage = "转发失败：\(error.localizedDescription)"
-            return nil
+            return false
+        }
+    }
+
+    func forward(bundle: ForwardedChatBundle, destinationKeys: Set<String>) async throws {
+        let cardContent = try ForwardedChatBundleCodec.encode(bundle)
+        let modelContent = try ForwardedChatBundleCodec.encodeForModel(bundle)
+        for key in destinationKeys {
+            if key == "agent:new" {
+                guard await forwardToNewSession(modelContent) != nil else { throw CocoaError(.fileWriteUnknown) }
+            } else if key.hasPrefix("agent:") {
+                let id = String(key.dropFirst("agent:".count))
+                guard await forwardToExistingSession(id, modelContent) != nil else { throw CocoaError(.fileWriteUnknown) }
+            } else if key.hasPrefix("im:") {
+                let id = String(key.dropFirst("im:".count))
+                guard let target = conversations.first(where: { $0.id == id }) else { throw CocoaError(.fileNoSuchFile) }
+                switch target.kind {
+                case .peer:
+                    guard let peerID = target.peerUserId else { throw CocoaError(.fileNoSuchFile) }
+                    try await center.sendChatMessage(peerId: peerID, content: cardContent)
+                case .group:
+                    guard let groupID = target.groupId else { throw CocoaError(.fileNoSuchFile) }
+                    try await center.sendGroupMessage(groupId: groupID, content: cardContent)
+                }
+            }
         }
     }
 }

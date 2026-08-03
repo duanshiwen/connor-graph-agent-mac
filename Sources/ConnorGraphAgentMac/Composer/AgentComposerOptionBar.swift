@@ -11,7 +11,6 @@ struct AgentComposerOptionBar: View {
     @Bindable var sourceRuntime: SourceRuntimeFeatureModel
     var hasRunningBackgroundTask: Bool
     var currentTextSelectionRange: () -> NSRange?
-    @Binding var isSessionInfoPresented: Bool
     var onAction: (AgentComposerAction) -> Void
 
     var body: some View {
@@ -42,22 +41,6 @@ struct AgentComposerOptionBar: View {
 
             backgroundTasksButton
 
-            Button {
-                withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
-                    isSessionInfoPresented.toggle()
-                }
-            } label: {
-                AgentComposerOptionBadge(
-                    title: "信息",
-                    systemImage: "info.circle",
-                    tint: isSessionInfoPresented ? activeForeground : controlForeground,
-                    showsChevron: false,
-                    isActive: isSessionInfoPresented,
-                    style: .compact
-                )
-            }
-            .buttonStyle(.plain)
-            .help("会话信息")
         }
         .padding(.horizontal, 1)
         .padding(.bottom, 2)

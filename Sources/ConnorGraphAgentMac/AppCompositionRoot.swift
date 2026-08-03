@@ -222,11 +222,11 @@ final class AppCompositionRoot: ObservableObject {
             if connected { await center.handleSocketConnected() }
         }
 
-        let chatActions = runtime.graph.chatActions
         let friendProvisioner = ImFriendPersonProvisioner(
             profileStore: runtime.graph.contacts.agentProfileStore,
             imStore: imStore
         )
+        let chatActions = runtime.graph.chatActions
         let imFeature = ImFeatureModel(
             store: imStore,
             center: center,

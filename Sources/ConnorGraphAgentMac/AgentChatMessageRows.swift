@@ -177,10 +177,15 @@ struct AgentChatMessageRow: View {
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onEditNoteBody: ((String) async -> Bool)? = nil
+    var isForwardSelectionMode = false
+    var isForwardSelected = false
+    var onEnterForwardSelection: () -> Void = {}
+    var onToggleForwardSelection: () -> Void = {}
     @State private var isMessageExpanded = false
     @State private var isNoteEditorPresented = false
     @State private var noteEditorDraft = ""
     @State private var isHoveringMessageBubble = false
+    @State private var forwardedDetail: ForwardedChatBundle?
 
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
@@ -230,6 +235,12 @@ struct AgentChatMessageRow: View {
 
     var body: some View {
         HStack(alignment: .top) {
+            if isForwardSelectionMode {
+                Image(systemName: isForwardSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isForwardSelected ? Color.accentColor : .secondary)
+                    .frame(width: 22, height: 22)
+                    .padding(.top, 8)
+            }
             if usesTrailingUserLayout { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
             VStack(alignment: usesTrailingUserLayout ? .trailing : .leading, spacing: AgentChatLayout.spaceXS) {
@@ -237,6 +248,13 @@ struct AgentChatMessageRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: usesTrailingUserLayout ? .trailing : .leading)
+        .contentShape(Rectangle())
+        .onTapGesture { if isForwardSelectionMode { onToggleForwardSelection() } }
+        .contextMenu {
+            if !isForwardSelectionMode {
+                Button("选择转发", systemImage: "arrowshape.turn.up.right", action: onEnterForwardSelection)
+            }
+        }
         .sheet(isPresented: $isNoteEditorPresented) {
             AgentNoteBodyEditorSheet(
                 originalContent: row.message.content,
@@ -248,6 +266,9 @@ struct AgentChatMessageRow: View {
                 },
                 onSaved: { isNoteEditorPresented = false }
             )
+        }
+        .sheet(item: $forwardedDetail) { bundle in
+            ForwardedChatDetailView(bundle: bundle, onClose: { forwardedDetail = nil })
         }
     }
 
@@ -382,7 +403,10 @@ struct AgentChatMessageRow: View {
 
     @ViewBuilder
     private var messageContent: some View {
-        if isUser {
+        if let bundle = ForwardedChatBundleCodec.decode(row.message.content) {
+            ForwardedChatCard(bundle: bundle, onOpen: { if !isForwardSelectionMode { forwardedDetail = bundle } })
+                .frame(maxWidth: AgentChatLayout.userMessageMaxWidth)
+        } else if isUser {
             AgentMarkdownPreviewText(
                 markdown: row.message.content,
                 font: messageBodyFont,

@@ -27,12 +27,13 @@ struct ChatListRouteView: View {
 struct ChatDetailRouteView: View {
     @Bindable var model: ChatFeatureModel
     var chatActions: ChatFeatureActions
+    var imModel: ImFeatureModel?
 
     var body: some View {
         if model.sessions.selectedSessionID == nil {
             AgentChatNoSelectionDetailView()
         } else {
-            AgentChatView(model: model, chatActions: chatActions)
+            AgentChatView(model: model, chatActions: chatActions, imModel: imModel)
         }
     }
 }
