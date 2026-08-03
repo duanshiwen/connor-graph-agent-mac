@@ -177,7 +177,7 @@ final class AppRuntimeLifecycle {
                 ),
                 store: store
             )
-            let runs = try facade.runBackgroundAIQueueOnce(executor: executor, limit: 3)
+            let runs = try await facade.runBackgroundAIQueueOnce(executor: executor, limit: 3)
             return runs.count
         }
     }
@@ -2464,6 +2464,11 @@ final class AppRuntimeLifecycle {
             )
         ))
         return sanitizedSessionTitle(response.text ?? "")
+    }
+
+    func generateImConversationTitle(messages: [ImMessage], conversationID: String) async throws -> String {
+        let prompts = ChatSessionTitleGenerationPrompt.imMessagePrompts(messages)
+        return try await generateTitleFromUserPrompts(prompts, sessionID: conversationID)
     }
 
     private func sanitizedSessionTitle(_ raw: String) -> String {

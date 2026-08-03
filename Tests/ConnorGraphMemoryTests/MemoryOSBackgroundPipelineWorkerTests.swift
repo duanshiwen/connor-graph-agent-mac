@@ -3,7 +3,7 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphMemory
 
-@Test func l1UnifiedProjectionWorkerBuildsModelRequestFromJobDraft() throws {
+@Test func l1UnifiedProjectionWorkerBuildsModelRequestFromJobDraft() async throws {
     let draft = MemoryOSL1UnifiedProjectionJobDraft(
         id: "job-l1",
         captureEventIDs: ["capture-1", "capture-2"],
@@ -17,7 +17,7 @@ import ConnorGraphMemory
         metadata: ["model": "mock"]
     ))
 
-    let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
+    let result = try await MemoryOSBackgroundJobWorker(executor: executor).run(draft)
 
     #expect(executor.requests.count == 1)
     let request = try #require(executor.requests.first)
@@ -42,7 +42,7 @@ private final class RecordingMemoryOSBackgroundExecutor: MemoryOSBackgroundModel
         self.response = response
     }
 
-    func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse {
+    func execute(_ request: MemoryOSBackgroundModelRequest) async throws -> MemoryOSBackgroundModelResponse {
         requests.append(request)
         return response
     }

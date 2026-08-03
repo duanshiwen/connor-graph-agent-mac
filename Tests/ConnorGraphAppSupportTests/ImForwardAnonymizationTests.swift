@@ -98,6 +98,32 @@ private final class ScriptedTokens: @unchecked Sendable {
     #expect(second == "@CXBBBBBB")
 }
 
+@Test func anonymizerRefreshesPersonBindingWithoutChangingToken() async throws {
+    let store = try makeImStore()
+    let script = ScriptedTokens(["@CXAAAAAA"])
+    let anonymizer = ImTranscriptAnonymizer(store: store, now: { 42 }, generateToken: { script.next() })
+    let first = try await anonymizer.allocateAlias(
+        senderId: 9,
+        conversationId: "group:old",
+        personProfileID: "contact-old",
+        displayName: "旧名称"
+    )
+    let second = try await anonymizer.allocateAlias(
+        senderId: 9,
+        conversationId: "peer:9",
+        personProfileID: "contact-new",
+        displayName: "新名称"
+    )
+
+    #expect(second == first)
+    let persisted = try await store.aliasBySender(senderId: 9)
+    #expect(persisted?.aliasToken == "@CXAAAAAA")
+    #expect(persisted?.imConversationId == "peer:9")
+    #expect(persisted?.personProfileID == "contact-new")
+    #expect(persisted?.displayName == "新名称")
+    #expect(persisted?.createdAt == 42)
+}
+
 @Test func anonymizeMasksPiiAndReplacesNamesLongestFirst() async throws {
     let store = try makeImStore()
     let script = ScriptedTokens(["@CX111111"])
@@ -249,6 +275,38 @@ private func forwardedExtractionJSON(tokenName: String) throws -> String {
     let names = try memoryStore.query(sql: "SELECT name FROM memory_l4_entities;").compactMap(\.first)
     #expect(names.contains("@CXFFFFFF"))
     #expect(names.contains("Connor Memory OS"))
+}
+
+@Test func projectionCreatesMissingBoundPersonBeforeRedirectingToken() async throws {
+    let imStore = try makeImStore()
+    let memoryStore = try makeMemoryStore()
+    try await imStore.insertAlias(ImForwardAlias(
+        aliasToken: "@CXABCDEF", senderId: 9, imConversationId: "peer:9",
+        personProfileID: "contact-1", displayName: "张三", createdAt: 1
+    ))
+    let stableKey = AppPersonMemoryBindingService.stableKey(for: ContactID(rawValue: "contact-1"))
+    let personEntityID = AppPersonMemoryBindingService.entityID(forStableKey: stableKey)
+    #expect(try memoryStore.entity(id: personEntityID) == nil)
+
+    var facade = AppMemoryOSFacade(store: memoryStore)
+    let rewriter = ImForwardAliasProjectionRewriter(imStore: imStore, memoryStore: memoryStore)
+    facade.projectionBatchRewriter = { rewriter.rewrite($0) }
+    let summary = try facade.projectAndRecordLLMArtifact(
+        rawContent: try forwardedExtractionJSON(tokenName: "@CXABCDEF"),
+        modelID: "test-model",
+        schemaName: "GraphStructuredExtractionOutput"
+    )
+
+    #expect(summary.accepted)
+    let person = try memoryStore.entity(id: personEntityID)
+    #expect(person?.stableKey == stableKey)
+    #expect(person?.name == "张三")
+    #expect(person?.metadata["person_profile_id"] == "contact-1")
+    #expect(person?.metadata["source"] == "im_forward_alias")
+    let names = try memoryStore.query(sql: "SELECT name FROM memory_l4_entities;").compactMap(\.first)
+    #expect(!names.contains("@CXABCDEF"))
+    let subjects = try memoryStore.query(sql: "SELECT entity_id FROM memory_l4_entity_statements;").compactMap(\.first)
+    #expect(subjects == [personEntityID])
 }
 
 @Test func projectionRewriterResolvesLowercasedTokenName() throws {

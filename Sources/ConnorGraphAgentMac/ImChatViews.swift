@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
@@ -26,111 +28,200 @@ private enum ImTimeFormat {
         return day.string(from: date)
     }
 }
-// MARK: - Conversation list section (embedded above the AI session list)
+// MARK: - Conversation list row
 
-/// IM conversations shown above the AI session list; Android renders one mixed
-/// list, the Mac list pane keeps a dedicated section (pinned first, newest first).
-struct ImConversationListSection: View {
-    var model: ImFeatureModel
+struct ImConversationRow: View {
+    let conversation: ImConversation
+    let participantMessages: [ImMessage]
+    let isSelected: Bool
+    let isRegeneratingTitle: Bool
+    let labelDefinitions: [AgentSessionLabelDefinition]
+    let onSelect: () -> Void
+    let onRename: (String) -> Void
+    let onSetStatus: (AgentSessionStatus) -> Void
+    let onToggleLabel: (String) -> Void
+    let onRegenerateTitle: () -> Void
+    let onTogglePinned: () -> Void
+    let onToggleMuted: () -> Void
+    let onDelete: () -> Void
+
+    @State private var isEditingTitle = false
+    @State private var titleDraft = ""
+    @FocusState private var isTitleFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Text("好友消息")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if !model.socketConnected {
-                    Label("离线", systemImage: "wifi.slash")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .labelStyle(.titleAndIcon)
-                }
-                Spacer()
+        HStack(alignment: .top, spacing: AppListCardLayout.contentPadding) {
+            Image(systemName: conversation.pinned ? "pin.fill" : statusIcon)
+                .foregroundStyle(conversation.pinned ? .orange : .secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
+                titleRow
+                participantRow
+                labelRow
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
+        }
+        .appListRowSurface(isSelected: isSelected)
+        .contentShape(Rectangle())
+        .onTapGesture { if !isEditingTitle { onSelect() } }
+        .onAppear { titleDraft = conversation.title }
+        .onChange(of: conversation.title) { _, title in if !isEditingTitle { titleDraft = title } }
+        .onChange(of: isTitleFocused) { _, focused in if !focused && isEditingTitle { commitTitleEdit() } }
+        .contextMenu { contextMenu }
+    }
 
-            ForEach(model.sortedConversations) { conversation in
-                ImConversationRow(
-                    conversation: conversation,
-                    isSelected: model.selectedConversationId == conversation.id
-                )
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    Task { await model.selectConversation(conversation.id) }
-                }
-                .contextMenu {
-                    Button(conversation.pinned ? "取消置顶" : "置顶") {
-                        Task { await model.setPinned(conversationId: conversation.id, pinned: !conversation.pinned) }
-                    }
-                    Button(conversation.muted ? "取消免打扰" : "免打扰") {
-                        Task { await model.setMuted(conversationId: conversation.id, muted: !conversation.muted) }
-                    }
-                    Divider()
-                    Button("删除会话", role: .destructive) {
-                        Task { await model.deleteConversation(conversation.id) }
-                    }
+    private var titleRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            if isEditingTitle {
+                TextField("会话标题", text: $titleDraft)
+                    .textFieldStyle(.plain)
+                    .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                    .focused($isTitleFocused)
+                    .onSubmit(commitTitleEdit)
+            } else {
+                Text(conversation.title.isEmpty ? "会话" : conversation.title)
+                    .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                    .lineLimit(AppListCardLayout.titleLineLimit)
+                    .onTapGesture(count: 2, perform: beginTitleEdit)
+            }
+            if conversation.muted {
+                Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            if isRegeneratingTitle {
+                ProgressView().controlSize(.small)
+            } else {
+                Text(ImTimeFormat.label(forUnixMilliseconds: conversation.lastMessageAt))
+                    .font(AppListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var participantRow: some View {
+        HStack(spacing: 6) {
+            ImParticipantAvatarStack(conversation: conversation, messages: participantMessages)
+            Image(systemName: "plus")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+            Text(conversation.participantName)
+                .font(AppListTypography.rowSubtitle)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(conversation.status.displayName)
+                .font(AppListTypography.rowCaptionEmphasized)
+                .foregroundStyle(Color.accentColor)
+            if conversation.unreadCount > 0 {
+                Text("\(min(conversation.unreadCount, 99))")
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(conversation.muted ? Color.gray : Color.red, in: Capsule())
+            }
+        }
+    }
+
+    @ViewBuilder private var labelRow: some View {
+        if !conversation.labelIds.isEmpty {
+            HStack(spacing: 4) {
+                ForEach(conversation.labelIds.prefix(3), id: \.self) { labelID in
+                    Text(labelDefinitions.first(where: { $0.id == labelID })?.name ?? labelID)
+                        .font(AppListTypography.rowCaption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.10), in: Capsule())
                 }
             }
         }
-        .padding(.bottom, 6)
+    }
+
+    @ViewBuilder private var contextMenu: some View {
+        Menu("更改状态", systemImage: "circle.dashed") {
+            ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
+                Button(status.displayName) { onSetStatus(status) }
+            }
+        }
+        Menu("标签", systemImage: "tag") {
+            ForEach(labelDefinitions) { definition in
+                Button {
+                    onToggleLabel(definition.id)
+                } label: {
+                    Label(definition.name, systemImage: conversation.labelIds.contains(definition.id) ? "checkmark.circle.fill" : "tag")
+                }
+            }
+        }
+        Divider()
+        Button("重命名", systemImage: "pencil", action: beginTitleEdit)
+        Button("AI 重设标题", systemImage: "sparkles", action: onRegenerateTitle).disabled(isRegeneratingTitle)
+        Button(conversation.pinned ? "取消置顶" : "置顶", systemImage: "pin", action: onTogglePinned)
+        Button(conversation.muted ? "取消免打扰" : "免打扰", systemImage: "bell.slash", action: onToggleMuted)
+        Divider()
+        Button("删除会话", systemImage: "trash", role: .destructive, action: onDelete)
+    }
+
+    private var statusIcon: String {
+        AgentSessionStatusDefinition.defaults.first(where: { $0.id == conversation.status.rawValue })?.systemImage ?? "circle"
+    }
+
+    private func beginTitleEdit() {
+        titleDraft = conversation.title
+        isEditingTitle = true
+        isTitleFocused = true
+    }
+
+    private func commitTitleEdit() {
+        let title = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditingTitle = false
+        isTitleFocused = false
+        guard !title.isEmpty, title != conversation.title else { return }
+        onRename(title)
     }
 }
 
-private struct ImConversationRow: View {
+private struct ImParticipantAvatarStack: View {
     let conversation: ImConversation
-    let isSelected: Bool
+    let messages: [ImMessage]
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: conversation.kind == .group ? "person.3.fill" : "person.crop.circle.fill")
-                .font(.title3)
-                .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(conversation.title.isEmpty ? "会话" : conversation.title)
-                        .font(.body)
-                        .lineLimit(1)
-                    if conversation.pinned {
-                        Image(systemName: "pin.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if conversation.muted {
-                        Image(systemName: "bell.slash.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                if !conversation.lastMessagePreview.isEmpty {
-                    Text(conversation.lastMessagePreview)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 4)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(ImTimeFormat.label(forUnixMilliseconds: conversation.lastMessageAt))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                if conversation.unreadCount > 0 {
-                    Text("\(min(conversation.unreadCount, 99))")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(conversation.muted ? Color.gray : Color.red, in: Capsule())
-                }
+        HStack(spacing: -6) {
+            ForEach(Array(avatars.prefix(5).enumerated()), id: \.offset) { _, avatar in
+                ImUserAvatar(urlString: avatar.url, name: avatar.name, size: 20)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
-                .padding(.horizontal, 6)
-        )
+        .frame(minWidth: 20, alignment: .leading)
+    }
+
+    private var avatars: [(url: String, name: String)] {
+        if conversation.kind == .peer { return [(conversation.avatar, conversation.participantName)] }
+        let messageAvatars = messages.map { ($0.senderAvatar, $0.senderName) }
+        return messageAvatars.isEmpty ? [(conversation.avatar, conversation.participantName)] : messageAvatars
+    }
+}
+
+private struct ImUserAvatar: View {
+    let urlString: String
+    let name: String
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Color.accentColor.opacity(0.14))
+            if let url = URL(string: urlString), !urlString.isEmpty {
+                AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { initials }
+            } else {
+                initials
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+    }
+
+    private var initials: some View {
+        Text(name.trimmingCharacters(in: .whitespacesAndNewlines).first.map(String.init) ?? "?")
+            .font(.system(size: max(9, size * 0.48), weight: .semibold))
+            .foregroundStyle(Color.accentColor)
     }
 }
 
@@ -141,6 +232,9 @@ struct ImChatDetailView: View {
     var chatModel: ChatFeatureModel
 
     @State private var composerText = ""
+    @State private var voiceRecorder = ImVoiceRecorder()
+    @State private var mediaPlayback = ImMediaPlaybackController()
+    @State private var isGroupDetailsPresented = false
 
     private var conversationTitle: String {
         model.selectedConversation?.title ?? "会话"
@@ -160,6 +254,9 @@ struct ImChatDetailView: View {
         }
         .sheet(isPresented: $model.isForwardSheetPresented) {
             ImForwardSheet(model: model, sessions: chatModel.sessions.allSessions)
+        }
+        .sheet(isPresented: $isGroupDetailsPresented) {
+            ImGroupDetailSheet(model: model, isPresented: $isGroupDetailsPresented)
         }
         .alert(
             "出错了",
@@ -185,13 +282,14 @@ struct ImChatDetailView: View {
                     .foregroundStyle(.orange)
             }
             Spacer()
-            if !model.isSelectionMode {
-                Button("多选转发", systemImage: "checkmark.circle") {
-                    if let last = model.messages.last {
-                        model.enterSelectionMode(initialMessageId: last.id)
-                    }
+            if model.selectedConversation?.kind == .group {
+                Button {
+                    isGroupDetailsPresented = true
+                } label: {
+                    Image(systemName: "person.3")
                 }
-                .disabled(model.messages.isEmpty)
+                .help("群聊详情")
+                .accessibilityLabel("打开群聊详情")
             }
             Button("关闭", systemImage: "xmark.circle") {
                 Task { await model.selectConversation(nil) }
@@ -206,7 +304,7 @@ struct ImChatDetailView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: AgentChatLayout.conversationTurnSpacing) {
                     if model.hasOlderMessages && !model.messages.isEmpty {
                         Button("加载更早的消息") {
                             Task { await model.loadOlderMessages() }
@@ -218,19 +316,23 @@ struct ImChatDetailView: View {
                     ForEach(model.messages) { message in
                         ImMessageBubble(
                             message: message,
+                            conversation: model.selectedConversation,
                             isMine: message.senderId == (model.selfUserId ?? -1),
                             isGroup: model.selectedConversation?.kind == .group,
                             isSelectionMode: model.isSelectionMode,
                             isSelected: model.selectedMessageIds.contains(message.id),
                             onToggleSelection: { model.toggleMessageSelection(message.id) },
                             onEnterSelection: { model.enterSelectionMode(initialMessageId: message.id) },
-                            onRetry: { Task { await model.retryMessage(message.id) } }
+                            onRetry: { Task { await model.retryMessage(message.id) } },
+                            playback: mediaPlayback
                         )
                         .id(message.id)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .frame(maxWidth: AgentChatLayout.chatContentMaxWidth)
+                .padding(.horizontal, AgentChatLayout.chatViewportSpacing)
+                .padding(.vertical, AgentChatLayout.chatViewportVerticalInset)
+                .frame(maxWidth: .infinity)
             }
             .onChange(of: model.messages.last?.id) { _, newValue in
                 if let newValue {
@@ -261,20 +363,97 @@ struct ImChatDetailView: View {
     }
 
     private var composer: some View {
-        HStack(spacing: 8) {
+        VStack(spacing: 0) {
             TextField(
                 model.socketConnected ? "发送消息…" : "连接已断开，无法发送",
-                text: $composerText
+                text: $composerText,
+                axis: .vertical
             )
-            .textFieldStyle(.roundedBorder)
+            .textFieldStyle(.plain)
+            .lineLimit(3...6)
+            .font(AgentChatTypography.body)
             .onSubmit(sendCurrentMessage)
             .disabled(!model.socketConnected)
-            Button("发送", systemImage: "paperplane.fill", action: sendCurrentMessage)
-                .buttonStyle(.borderedProminent)
-                .disabled(!model.socketConnected || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .padding(.horizontal, AgentChatLayout.spaceL)
+            .padding(.vertical, AgentChatLayout.spaceM)
+            .frame(
+                minHeight: AgentChatLayout.composerTextMinHeight,
+                maxHeight: AgentChatLayout.composerTextMaxHeight,
+                alignment: .topLeading
+            )
+
+            HStack(spacing: AgentChatLayout.spaceS) {
+                Button {
+                    if let last = model.messages.last {
+                        model.enterSelectionMode(initialMessageId: last.id)
+                    }
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                        .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(model.messages.isEmpty)
+                .help("多选转发")
+
+                Menu {
+                    Button("图片", systemImage: "photo") { chooseMedia(type: .image) }
+                    Button("视频", systemImage: "video") { chooseMedia(type: .video) }
+                    Button("音频文件", systemImage: "waveform") { chooseMedia(type: .audio) }
+                } label: {
+                    Image(systemName: "plus")
+                        .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .disabled(!model.socketConnected || model.isSendingMedia || voiceRecorder.isRecording)
+                .help("发送图片、视频或音频")
+
+                Button {
+                    toggleVoiceRecording()
+                } label: {
+                    Image(systemName: voiceRecorder.isRecording ? "stop.fill" : "mic.fill")
+                        .foregroundStyle(voiceRecorder.isRecording ? .red : .secondary)
+                        .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                }
+                .buttonStyle(.plain)
+                .disabled(!model.socketConnected || model.isSendingMedia)
+                .help(voiceRecorder.isRecording ? "停止并发送语音" : "录制语音")
+
+                if voiceRecorder.isRecording {
+                    Text("\(voiceRecorder.elapsedSeconds)s / 60s")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                } else if model.isSendingMedia {
+                    ProgressView().controlSize(.small).help("正在上传媒体")
+                }
+
+                Spacer(minLength: AgentChatLayout.spaceXS)
+
+                AgentSendControlButton(
+                    isSubmitting: false,
+                    isDisabled: !model.socketConnected || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    action: sendCurrentMessage
+                )
+                .fixedSize()
+            }
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, AgentChatLayout.spaceS)
+            .frame(minHeight: AgentChatLayout.hitTargetSize)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.58), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        )
+        .frame(maxWidth: AgentChatLayout.chatContentMaxWidth)
+        .padding(.horizontal, AgentChatLayout.chatViewportSpacing)
+        .padding(.bottom, AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity)
+        .onChange(of: voiceRecorder.isRecording) { wasRecording, isRecording in
+            guard wasRecording, !isRecording, let recording = voiceRecorder.takeFinishedRecording() else { return }
+            sendRecording(recording)
+        }
     }
 
     private func sendCurrentMessage() {
@@ -283,10 +462,205 @@ struct ImChatDetailView: View {
         composerText = ""
         Task { await model.sendMessage(text) }
     }
+
+    private func chooseMedia(type: ImMessageType) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = switch type {
+        case .image: [.image]
+        case .video: [.movie]
+        case .audio: [.audio]
+        case .text, .system: []
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            let metadata = await ImMediaInspector.metadata(for: url, type: type)
+            await model.sendMedia(fileURL: url, messageType: type, metadata: metadata)
+        }
+    }
+
+    private func toggleVoiceRecording() {
+        if voiceRecorder.isRecording {
+            if let recording = voiceRecorder.stop() { sendRecording(recording) }
+        } else {
+            Task {
+                do { try await voiceRecorder.start() }
+                catch { model.errorMessage = "录音失败：\(error.localizedDescription)" }
+            }
+        }
+    }
+
+    private func sendRecording(_ recording: (url: URL, duration: Int)) {
+        Task {
+            let metadata = await ImMediaInspector.metadata(
+                for: recording.url,
+                type: .audio,
+                duration: recording.duration
+            )
+            await model.sendMedia(fileURL: recording.url, messageType: .audio, metadata: metadata)
+            try? FileManager.default.removeItem(at: recording.url)
+        }
+    }
+}
+
+// MARK: - Normal group management
+
+struct ImCreateGroupSheet: View {
+    @Bindable var model: ImFeatureModel
+    @Binding var isPresented: Bool
+    @State private var name = ""
+    @State private var description = ""
+    @State private var selectedMemberIDs: Set<Int64> = []
+    @State private var isCreating = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("新建群聊").font(.headline)
+                Spacer()
+                Button("取消") { isPresented = false }
+                Button("创建") { create() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCreating)
+            }
+            .padding(16)
+            Divider()
+
+            Form {
+                TextField("群名称", text: $name)
+                TextField("群描述（可选）", text: $description, axis: .vertical)
+                    .lineLimit(2...4)
+                Section("选择成员") {
+                    if model.friends.isEmpty {
+                        Text("暂无好友").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(model.friends) { friend in
+                            Toggle(isOn: memberBinding(friend.userId)) {
+                                HStack(spacing: 10) {
+                                    ImUserAvatar(urlString: friend.avatar, name: friend.displayName, size: 28)
+                                    Text(friend.displayName)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+        .frame(width: 440, height: 520)
+    }
+
+    private func memberBinding(_ userId: Int64) -> Binding<Bool> {
+        Binding(
+            get: { selectedMemberIDs.contains(userId) },
+            set: { selected in
+                if selected { selectedMemberIDs.insert(userId) }
+                else { selectedMemberIDs.remove(userId) }
+            }
+        )
+    }
+
+    private func create() {
+        isCreating = true
+        Task {
+            let created = await model.createGroup(
+                name: name,
+                description: description,
+                memberIds: selectedMemberIDs.sorted()
+            )
+            isCreating = false
+            if created { isPresented = false }
+        }
+    }
+}
+
+struct ImGroupDetailSheet: View {
+    @Bindable var model: ImFeatureModel
+    @Binding var isPresented: Bool
+
+    private var memberIDs: Set<Int64> { Set(model.selectedGroupMembers.map(\.userId)) }
+    private var inviteCandidates: [ImFriend] { model.friends.filter { !memberIDs.contains($0.userId) } }
+    private var isOwner: Bool { model.selectedGroupDetail?.creatorId == model.selfUserId }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("群聊详情").font(.headline)
+                Spacer()
+                Button("完成") { isPresented = false }
+            }
+            .padding(16)
+            Divider()
+
+            if model.isLoadingGroupDetails && model.selectedGroupDetail == nil {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let group = model.selectedGroupDetail {
+                Form {
+                    LabeledContent("群名称", value: group.name)
+                    if !group.description.isEmpty {
+                        LabeledContent("群描述", value: group.description)
+                    }
+                    LabeledContent("成员", value: "\(model.selectedGroupMembers.count) 人")
+
+                    Section("成员列表") {
+                        ForEach(model.selectedGroupMembers) { member in
+                            HStack(spacing: 10) {
+                                ImUserAvatar(urlString: member.avatar, name: member.displayName, size: 28)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(member.displayName)
+                                    if member.userId == group.creatorId {
+                                        Text("群主").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if isOwner && member.userId != group.creatorId {
+                                    Button("移除", role: .destructive) {
+                                        Task { await model.removeGroupMember(userId: member.userId) }
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                    }
+
+                    if !inviteCandidates.isEmpty {
+                        Section("邀请好友") {
+                            ForEach(inviteCandidates) { friend in
+                                HStack(spacing: 10) {
+                                    ImUserAvatar(urlString: friend.avatar, name: friend.displayName, size: 28)
+                                    Text(friend.displayName)
+                                    Spacer()
+                                    Button("邀请") {
+                                        Task { await model.inviteGroupMember(userId: friend.userId) }
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                    }
+
+                    Section {
+                        Button("退出群聊", role: .destructive) {
+                            Task {
+                                if await model.leaveSelectedGroup() { isPresented = false }
+                            }
+                        }
+                    }
+                }
+                .formStyle(.grouped)
+            } else {
+                ContentUnavailableView("无法加载群聊", systemImage: "person.3")
+            }
+        }
+        .frame(width: 480, height: 600)
+        .task { await model.loadSelectedGroupDetails() }
+    }
 }
 
 private struct ImMessageBubble: View {
     let message: ImMessage
+    let conversation: ImConversation?
     let isMine: Bool
     let isGroup: Bool
     let isSelectionMode: Bool
@@ -294,29 +668,22 @@ private struct ImMessageBubble: View {
     let onToggleSelection: () -> Void
     let onEnterSelection: () -> Void
     let onRetry: () -> Void
+    var playback: ImMediaPlaybackController
+
+    @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
+    private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
             if isSelectionMode {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
             }
-            if isMine { Spacer(minLength: 40) }
-            VStack(alignment: isMine ? .trailing : .leading, spacing: 2) {
-                if !isMine && isGroup && !message.senderName.isEmpty {
-                    Text(message.senderName)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Text(message.content)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        isMine ? Color.accentColor.opacity(0.85) : Color(nsColor: .controlBackgroundColor),
-                        in: RoundedRectangle(cornerRadius: 10)
-                    )
-                    .foregroundStyle(isMine ? Color.white : Color.primary)
+            if isMine { Spacer(minLength: AgentChatLayout.messageSideInset) }
+            VStack(alignment: isMine ? .trailing : .leading, spacing: AgentChatLayout.spaceXS) {
+                identityRow
+
+                messageContent
                 HStack(spacing: 4) {
                     Text(ImTimeFormat.label(forUnixMilliseconds: message.createdAt))
                         .font(.caption2)
@@ -326,7 +693,7 @@ private struct ImMessageBubble: View {
                     }
                 }
             }
-            if !isMine { Spacer(minLength: 40) }
+            if !isMine { Spacer(minLength: AgentChatLayout.messageSideInset) }
         }
         .contentShape(Rectangle())
         .onTapGesture {
@@ -339,6 +706,72 @@ private struct ImMessageBubble: View {
             if message.status == .failed {
                 Button("重新发送", systemImage: "arrow.clockwise") { onRetry() }
             }
+        }
+    }
+
+    private var messageBodyPointSize: CGFloat {
+        AgentChatFontPreferences.validatedMessageBodyPointSize(preferredMessageBodyPointSize)
+    }
+
+    private var displayName: String {
+        let sender = message.senderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sender.isEmpty { return sender }
+        if isMine { return "我" }
+        return conversation?.participantName ?? (isGroup ? "群成员" : "好友")
+    }
+
+    private var avatarURL: String {
+        if !message.senderAvatar.isEmpty { return message.senderAvatar }
+        return isMine ? "" : (conversation?.avatar ?? "")
+    }
+
+    @ViewBuilder
+    private var messageContent: some View {
+        switch message.type {
+        case .text, .system:
+            AgentMarkdownPreviewText(
+                markdown: message.content,
+                font: AgentChatTypography.messageBody(pointSize: messageBodyPointSize),
+                bodyPointSize: messageBodyPointSize
+            )
+            .textSelection(.enabled)
+            .padding(.horizontal, isMine ? AgentChatLayout.messageBubbleHorizontalPadding : 0)
+            .padding(.vertical, isMine ? AgentChatLayout.messageBubbleVerticalPadding : 0)
+            .frame(
+                maxWidth: isMine ? AgentChatLayout.userMessageMaxWidth : AgentChatLayout.messageMaxWidth,
+                alignment: .leading
+            )
+            .background(
+                isMine ? ConnorCraftPalette.userBubble : Color.clear,
+                in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+            )
+        case .image:
+            ImImageMessageContent(message: message, isMine: isMine)
+        case .video:
+            ImVideoMessageContent(message: message, isMine: isMine)
+        case .audio:
+            ImAudioMessageContent(message: message, isMine: isMine, playback: playback)
+        case nil:
+            Label(
+                message.messageType.lowercased() == "location" ? "不支持的位置消息" : "不支持的消息",
+                systemImage: "nosign"
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, AgentChatLayout.spaceS)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM))
+        }
+    }
+
+    private var identityRow: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            if isMine { Spacer(minLength: 0) }
+            ImUserAvatar(urlString: avatarURL, name: displayName, size: AgentChatLayout.avatarSize)
+            Text(displayName)
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.primary.opacity(0.88))
+            if !isMine { Spacer(minLength: 0) }
         }
     }
 
@@ -371,6 +804,160 @@ private struct ImMessageBubble: View {
             }
             .buttonStyle(.borderless)
         }
+    }
+}
+
+private struct ImImageMessageContent: View {
+    let message: ImMessage
+    let isMine: Bool
+
+    var body: some View {
+        if isExpired {
+            ImExpiredMediaContent(icon: "photo", label: "图片", isMine: isMine)
+        } else if let url = displayURL {
+            Group {
+                if url.isFileURL, let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image).resizable().scaledToFill()
+                } else {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image): image.resizable().scaledToFill()
+                        case .failure: ImExpiredMediaContent(icon: "photo", label: "图片", isMine: isMine)
+                        default: ProgressView()
+                        }
+                    }
+                }
+            }
+            .frame(width: 240, height: imageHeight)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusM))
+        }
+    }
+
+    private var metadata: ImMediaMetadata { message.mediaMetadata ?? ImMediaMetadata() }
+    private var isExpired: Bool { metadata.expired && localURL == nil }
+    private var localURL: URL? {
+        guard let path = metadata.localPath, FileManager.default.fileExists(atPath: path) else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+    private var displayURL: URL? { localURL ?? URL(string: message.content) }
+    private var imageHeight: CGFloat {
+        guard let width = metadata.width, let height = metadata.height, width > 0, height > 0 else { return 180 }
+        return min(300, max(120, 240 * CGFloat(height) / CGFloat(width)))
+    }
+}
+
+private struct ImVideoMessageContent: View {
+    let message: ImMessage
+    let isMine: Bool
+
+    var body: some View {
+        if isExpired {
+            ImExpiredMediaContent(icon: "video", label: "视频", isMine: isMine)
+        } else {
+            Button(action: openVideo) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusM)
+                        .fill(Color.black.opacity(0.78))
+                        .frame(width: 240, height: 150)
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 44))
+                        .foregroundStyle(.white)
+                    if let duration = metadata.duration {
+                        Text(Self.durationLabel(duration))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.white)
+                            .padding(6)
+                            .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
+                            .frame(width: 230, height: 140, alignment: .bottomTrailing)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .help("播放视频")
+        }
+    }
+
+    private var metadata: ImMediaMetadata { message.mediaMetadata ?? ImMediaMetadata() }
+    private var displayURL: URL? {
+        if let path = metadata.localPath, FileManager.default.fileExists(atPath: path) {
+            return URL(fileURLWithPath: path)
+        }
+        return URL(string: message.content)
+    }
+    private var isExpired: Bool { metadata.expired && displayURL == nil }
+    private func openVideo() {
+        guard let displayURL else { return }
+        NSWorkspace.shared.open(displayURL)
+    }
+    private static func durationLabel(_ seconds: Int) -> String {
+        String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+private struct ImAudioMessageContent: View {
+    let message: ImMessage
+    let isMine: Bool
+    var playback: ImMediaPlaybackController
+
+    var body: some View {
+        if isExpired {
+            ImExpiredMediaContent(icon: "waveform", label: "语音", isMine: isMine)
+        } else {
+            Button {
+                guard let displayURL else { return }
+                playback.toggle(messageID: message.id, url: displayURL)
+            } label: {
+                HStack(spacing: AgentChatLayout.spaceS) {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    Image(systemName: "waveform")
+                        .symbolEffect(.variableColor.iterative, isActive: isPlaying)
+                    Text("\(metadata.duration ?? 0)\"")
+                        .monospacedDigit()
+                }
+                .font(.callout)
+                .padding(.horizontal, AgentChatLayout.spaceM)
+                .padding(.vertical, AgentChatLayout.spaceS)
+                .frame(minWidth: 132)
+                .background(
+                    isMine ? ConnorCraftPalette.userBubble : Color(nsColor: .controlBackgroundColor),
+                    in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL)
+                )
+            }
+            .buttonStyle(.plain)
+            .help(isPlaying ? "暂停语音" : "播放语音")
+        }
+    }
+
+    private var metadata: ImMediaMetadata { message.mediaMetadata ?? ImMediaMetadata() }
+    private var displayURL: URL? {
+        if let path = metadata.localPath, FileManager.default.fileExists(atPath: path) {
+            return URL(fileURLWithPath: path)
+        }
+        return URL(string: message.content)
+    }
+    private var isExpired: Bool { metadata.expired && displayURL == nil }
+    private var isPlaying: Bool { playback.playingMessageID == message.id }
+}
+
+private struct ImExpiredMediaContent: View {
+    let icon: String
+    let label: String
+    let isMine: Bool
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            Image(systemName: icon)
+            Text("\(label)消息")
+            Text("消息已过期").foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .padding(.horizontal, AgentChatLayout.spaceM)
+        .padding(.vertical, AgentChatLayout.spaceS)
+        .background(
+            isMine ? ConnorCraftPalette.userBubble : Color(nsColor: .controlBackgroundColor),
+            in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL)
+        )
     }
 }
 

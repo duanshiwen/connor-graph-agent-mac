@@ -28,6 +28,13 @@ public enum ChatSessionTitleGenerationPrompt {
         \(json)
         """
     }
+
+    public static func imMessagePrompts(_ messages: [ImMessage], limit: Int = 10) -> [String] {
+        messages.suffix(max(0, limit)).map { message in
+            let sender = message.senderName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return sender.isEmpty ? message.content : "\(sender)：\(message.content)"
+        }
+    }
 }
 
 public actor ChatSessionTitleGenerationWorker {

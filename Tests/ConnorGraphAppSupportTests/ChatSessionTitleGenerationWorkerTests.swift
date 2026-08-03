@@ -6,6 +6,26 @@ import ConnorGraphStore
 
 @Suite("Chat Session Title Generation Worker Tests")
 struct ChatSessionTitleGenerationWorkerTests {
+    @Test func imTitleGenerationUsesOnlyLatestTenMessages() {
+        let messages = (1...12).map { index in
+            ImMessage(
+                id: "m\(index)",
+                conversationId: "group:g1",
+                senderId: Int64(index),
+                senderName: "成员\(index)",
+                content: "内容\(index)",
+                status: .sent,
+                createdAt: Int64(index)
+            )
+        }
+
+        let prompts = ChatSessionTitleGenerationPrompt.imMessagePrompts(messages)
+
+        #expect(prompts.count == 10)
+        #expect(prompts.first == "成员3：内容3")
+        #expect(prompts.last == "成员12：内容12")
+    }
+
     @Test func loadsTrimmedUserPromptsForTitleGeneration() async throws {
         let store = try SQLiteGraphKernelStore(path: temporaryTitleWorkerURL().path)
         try store.migrate()

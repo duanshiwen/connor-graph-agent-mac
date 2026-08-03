@@ -202,6 +202,7 @@ final class AppCompositionRoot: ObservableObject {
             }
         }
 
+        let imAttentionCoordinator = ImAttentionCoordinator()
         let center = ImMessageCenter(
             store: imStore,
             service: identityStore.makeImBackendService(),
@@ -209,7 +210,10 @@ final class AppCompositionRoot: ObservableObject {
                 guard let identityStore else { return false }
                 return await identityStore.sendImFrame(text)
             },
-            currentIdentity: { identityBox.value }
+            currentIdentity: { identityBox.value },
+            onRealtimeEvent: { event in
+                await imAttentionCoordinator.handle(event)
+            }
         )
         identityStore.onImFrame = { type, rawText in
             await center.handleFrame(type: type, text: rawText)
@@ -235,8 +239,28 @@ final class AppCompositionRoot: ObservableObject {
             forwardToExistingSession: { sessionID, prompt in
                 chatActions.session.selectChatSession(sessionID)
                 return await chatActions.run.submitChat(prompt: prompt, clearComposer: false)
+            },
+            generateTitle: { [weak runtime] messages, conversationID in
+                guard let runtime else { throw CancellationError() }
+                return try await runtime.generateImConversationTitle(messages: messages, conversationID: conversationID)
             }
         )
+        imAttentionCoordinator.notificationSettings = { [weak runtime] in
+            guard let runtime else { return (false, .none) }
+            return (
+                runtime.appSettingsModel.desktopNotificationsEnabled,
+                runtime.appSettingsModel.sessionNewMessageNotificationLevel
+            )
+        }
+        imAttentionCoordinator.isConversationVisible = { [weak runtime, weak imFeature] conversationID in
+            runtime?.selection == .agentChat && imFeature?.selectedConversationId == conversationID
+        }
+        imAttentionCoordinator.isContactsVisible = { [weak runtime] in
+            runtime?.selection == .contacts
+        }
+        imAttentionCoordinator.canUseUserNotifications = {
+            Bundle.main.bundleURL.pathExtension == "app"
+        }
         runtime.graph.im = imFeature
         imFeature.start()
     }

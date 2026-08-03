@@ -55,7 +55,7 @@ struct MemoryOSBackgroundAgentModelAdapterTests {
             ]
         )
 
-        let response = try model.complete(request)
+        let response = try await model.complete(request)
         let agentRequest = try #require(await recorder.lastRequest)
 
         #expect(model.modelID == "debug-model")
@@ -76,12 +76,12 @@ struct MemoryOSBackgroundAgentModelAdapterTests {
         #expect(response.metadata["total_tokens"] == "18")
     }
 
-    @Test func agentModelBackgroundToolLoopModelExtractsFinalArtifactWhenNoToolCalls() throws {
+    @Test func agentModelBackgroundToolLoopModelExtractsFinalArtifactWhenNoToolCalls() async throws {
         let provider = AnyAgentModelProvider(modelID: "debug-model") { _ in
             AgentModelResponse(text: "{\"artifactType\":\"memory.l1.unified_projection\"}", toolCalls: [])
         }
         let model = AgentModelBackgroundToolLoopModel(provider: provider)
-        let response = try model.complete(MemoryOSBackgroundLoopModelRequest(
+        let response = try await model.complete(MemoryOSBackgroundLoopModelRequest(
             runID: "run-1",
             job: MemoryOSBackgroundModelRequest(jobID: "job-1", kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, schemaName: "schema", artifactType: "artifact", prompt: "Prompt"),
             messages: [MemoryOSBackgroundLoopMessage(role: .user, content: "Prompt")],
@@ -139,8 +139,8 @@ private actor BackgroundModelActorHarness {
     func complete(
         model: AgentModelBackgroundToolLoopModel,
         request: MemoryOSBackgroundLoopModelRequest
-    ) throws -> MemoryOSBackgroundLoopModelResponse {
-        try model.complete(request)
+    ) async throws -> MemoryOSBackgroundLoopModelResponse {
+        try await model.complete(request)
     }
 }
 

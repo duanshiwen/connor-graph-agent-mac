@@ -12,7 +12,7 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
         self.provider = provider
     }
 
-    public func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
+    public func complete(_ request: MemoryOSBackgroundLoopModelRequest) async throws -> MemoryOSBackgroundLoopModelResponse {
         let agentRequest = AgentModelRequest(
             messages: request.messages.map(Self.agentMessage),
             tools: request.availableTools.map(Self.agentToolDefinition),
@@ -27,7 +27,7 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
                 metadata: request.job.metadata.merging(["background_job_kind": request.job.kind]) { current, _ in current }
             )
         )
-        let response = try runBlocking { try await provider.complete(agentRequest) }
+        let response = try await provider.complete(agentRequest)
         var metadata: [String: String] = [
             "model_id": provider.modelID,
             "model_supports_tool_calling": String(provider.capabilities.supportsToolCalling)
@@ -138,22 +138,4 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
         return isNullable ? .nullable(schema) : schema
     }
 
-    private func runBlocking<T>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
-        let semaphore = DispatchSemaphore(value: 0)
-        let box = AgentModelBackgroundToolLoopBlockingResultBox<T>()
-        Task.detached {
-            do {
-                box.result = Result<T, Error>.success(try await operation())
-            } catch {
-                box.result = Result<T, Error>.failure(error)
-            }
-            semaphore.signal()
-        }
-        semaphore.wait()
-        return try box.result!.get()
-    }
-}
-
-private final class AgentModelBackgroundToolLoopBlockingResultBox<T>: @unchecked Sendable {
-    var result: Result<T, Error>?
 }

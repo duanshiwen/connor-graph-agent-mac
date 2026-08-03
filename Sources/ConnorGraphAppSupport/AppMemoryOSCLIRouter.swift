@@ -11,6 +11,9 @@ public enum AppMemoryOSCLIRouter {
         encoder: JSONEncoder,
         intentNormalizer: AnyMemoryOSUserIntentNormalizer? = nil
     ) async throws -> String {
+        if args.first == "pipeline", args.dropFirst().first == "debug-run-next" {
+            return try await routePipelineDebugRunNext(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
+        }
         guard args.first == "ingest-chat" else {
             return try route(args: args, inspector: inspector, encoder: encoder)
         }
@@ -243,12 +246,12 @@ public enum AppMemoryOSCLIRouter {
             )
             return try encode(try inspector.planL1(policy: policy), encoder: encoder)
         case "debug-run-next":
-            return try routePipelineDebugRunNext(args: args, inspector: inspector, encoder: encoder)
+            return try routePipelineDebugRunNextWithoutLiveExecution(args: args, inspector: inspector, encoder: encoder)
         default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1 [--min-pending-count N] [--max-events-per-block N] [--max-tokens-per-block N]|debug-run-next"), encoder: encoder)
         }
     }
 
-    private static func routePipelineDebugRunNext(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
+    private static func routePipelineDebugRunNext(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) async throws -> String {
         let kind = optionValue("--kind", in: args)
         let limit = intOption("--limit", in: args, default: 1)
         let format = optionValue("--format", in: args) ?? "text"
@@ -261,7 +264,7 @@ public enum AppMemoryOSCLIRouter {
         }
         if try inspector.hasRunnableBackgroundAIJob(kind: kind, limit: limit) {
             let model = try makeLiveDebugLoopModel()
-            result = try inspector.debugRunNextBackgroundAI(
+            result = try await inspector.debugRunNextBackgroundAI(
                 kind: kind,
                 limit: limit,
                 model: model,
@@ -271,6 +274,22 @@ public enum AppMemoryOSCLIRouter {
         } else {
             result = try inspector.debugRunNextBackgroundAI(kind: kind, limit: limit)
         }
+        return try renderDebugRunResult(result, format: format, encoder: encoder)
+    }
+
+    private static func routePipelineDebugRunNextWithoutLiveExecution(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
+        let kind = optionValue("--kind", in: args)
+        let limit = intOption("--limit", in: args, default: 1)
+        let format = optionValue("--format", in: args) ?? "text"
+        _ = try inspector.recoverExpiredBackgroundAIJobs()
+        guard try !inspector.hasRunnableBackgroundAIJob(kind: kind, limit: limit) else {
+            return try encode(MemoryOSCLIError(error: "async_command_requires_route_async", usage: "connor memory pipeline debug-run-next"), encoder: encoder)
+        }
+        let result = try inspector.debugRunNextBackgroundAI(kind: kind, limit: limit)
+        return try renderDebugRunResult(result, format: format, encoder: encoder)
+    }
+
+    private static func renderDebugRunResult(_ result: MemoryOSCLIDebugAIRunResult, format: String, encoder: JSONEncoder) throws -> String {
         switch format {
         case "json":
             return try encode(result, encoder: encoder)

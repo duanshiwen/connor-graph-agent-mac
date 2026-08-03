@@ -95,7 +95,7 @@ public struct MemoryOSBackgroundLoopModelResponse: Sendable, Equatable {
 
 public protocol MemoryOSBackgroundToolLoopModel: Sendable {
     var modelID: String { get }
-    func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse
+    func complete(_ request: MemoryOSBackgroundLoopModelRequest) async throws -> MemoryOSBackgroundLoopModelResponse
 }
 
 public enum MemoryOSHeadlessKnowledgeLoopError: Error, Sendable, Equatable, CustomStringConvertible {
@@ -138,7 +138,7 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
         self.logHandler = logHandler
     }
 
-    public func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse {
+    public func execute(_ request: MemoryOSBackgroundModelRequest) async throws -> MemoryOSBackgroundModelResponse {
         let startedAt = now()
         let runID = request.metadata["background_run_id"] ?? UUID().uuidString
         let source: String
@@ -180,7 +180,7 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                 }
                 log("--- Iteration \(iteration) ---")
                 log("Sending \(messages.count) messages to model...")
-                let response = try model.complete(MemoryOSBackgroundLoopModelRequest(runID: runID, job: request, messages: messages, availableTools: request.availableTools))
+                let response = try await model.complete(MemoryOSBackgroundLoopModelRequest(runID: runID, job: request, messages: messages, availableTools: request.availableTools))
                 totalTokens += Int(response.metadata["total_tokens"] ?? "0") ?? 0
                 mergedMetadata.merge(response.metadata) { _, new in new }
                 let calls = Array(response.toolCalls.prefix(configuration.maxToolCallsPerIteration))

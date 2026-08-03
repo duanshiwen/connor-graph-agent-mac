@@ -179,12 +179,16 @@
 		AA5A70000000000000000107 /* Sources/ConnorGraphAgentMac/MailReadinessViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5A70000000000000000007 /* Sources/ConnorGraphAgentMac/MailReadinessViews.swift */; };
 		B1A100000000000000000001 /* Sources/ConnorGraphAgentMac/ImFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000001 /* Sources/ConnorGraphAgentMac/ImFeatureModel.swift */; };
 		B1A100000000000000000002 /* Sources/ConnorGraphAgentMac/ImChatViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000002 /* Sources/ConnorGraphAgentMac/ImChatViews.swift */; };
+		B1A100000000000000000003 /* Sources/ConnorGraphAgentMac/ImMediaControllers.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000003 /* Sources/ConnorGraphAgentMac/ImMediaControllers.swift */; };
+		B1A100000000000000000004 /* Sources/ConnorGraphAgentMac/ImAttentionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A000000000000000000004 /* Sources/ConnorGraphAgentMac/ImAttentionCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		E90100000000000000000003 /* Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift; sourceTree = "<group>"; };
 		B1A000000000000000000001 /* Sources/ConnorGraphAgentMac/ImFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ImFeatureModel.swift; sourceTree = "<group>"; };
 		B1A000000000000000000002 /* Sources/ConnorGraphAgentMac/ImChatViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ImChatViews.swift; sourceTree = "<group>"; };
+		B1A000000000000000000003 /* Sources/ConnorGraphAgentMac/ImMediaControllers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ImMediaControllers.swift; sourceTree = "<group>"; };
+		B1A000000000000000000004 /* Sources/ConnorGraphAgentMac/ImAttentionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ImAttentionCoordinator.swift; sourceTree = "<group>"; };
 		51A7E0010000000000000011 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionCoordinator.swift; sourceTree = "<group>"; };
 		51A7E0010000000000000012 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionController.swift; sourceTree = "<group>"; };
 		6D47A1000000000000000001 /* Sources/ConnorGraphAgentMac/AppGlobalSearchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppGlobalSearchModels.swift; sourceTree = "<group>"; };
@@ -442,6 +446,8 @@
 				A00000000000000000000093 /* Sources/ConnorGraphAgentMac/AIConnectionsRuntimeCoordinator.swift */,
 				B1A000000000000000000001 /* Sources/ConnorGraphAgentMac/ImFeatureModel.swift */,
 				B1A000000000000000000002 /* Sources/ConnorGraphAgentMac/ImChatViews.swift */,
+				B1A000000000000000000003 /* Sources/ConnorGraphAgentMac/ImMediaControllers.swift */,
+				B1A000000000000000000004 /* Sources/ConnorGraphAgentMac/ImAttentionCoordinator.swift */,
 				C00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift */,
 				E00000000000000000000011 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift */,
 				E00000000000000000000012 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift */,
@@ -757,6 +763,8 @@
 				A00000000000000000000092 /* Sources/ConnorGraphAgentMac/AIConnectionsRuntimeCoordinator.swift in Sources */,
 				B1A100000000000000000001 /* Sources/ConnorGraphAgentMac/ImFeatureModel.swift in Sources */,
 				B1A100000000000000000002 /* Sources/ConnorGraphAgentMac/ImChatViews.swift in Sources */,
+				B1A100000000000000000003 /* Sources/ConnorGraphAgentMac/ImMediaControllers.swift in Sources */,
+				B1A100000000000000000004 /* Sources/ConnorGraphAgentMac/ImAttentionCoordinator.swift in Sources */,
 				D00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift in Sources */,
 				E00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift in Sources */,
 				E00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift in Sources */,
@@ -1017,7 +1025,7 @@
 				INFOPLIST_KEY_NSContactsUsageDescription = "康纳同学需要访问你的联系人，用于在联系人数据源中显示通讯录并辅助你管理关系上下文。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "康纳同学会在你发送请求时读取当前位置，用于提供当地时间、实时天气和环境相关支持；不会保存位置轨迹。";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "康纳同学需要访问麦克风，用于把当前会话中的语音实时转成文字。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "康纳同学需要访问麦克风，用于录制聊天语音消息和把当前会话中的语音转换为文字。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "康纳同学需要使用系统语音识别，把当前会话中的语音实时转成文字。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1055,7 +1063,7 @@
 				INFOPLIST_KEY_NSContactsUsageDescription = "康纳同学需要访问你的联系人，用于在联系人数据源中显示通讯录并辅助你管理关系上下文。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "康纳同学会在你发送请求时读取当前位置，用于提供当地时间、实时天气和环境相关支持；不会保存位置轨迹。";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "康纳同学需要访问麦克风，用于把当前会话中的语音实时转成文字。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "康纳同学需要访问麦克风，用于录制聊天语音消息和把当前会话中的语音转换为文字。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "康纳同学需要使用系统语音识别，把当前会话中的语音实时转成文字。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

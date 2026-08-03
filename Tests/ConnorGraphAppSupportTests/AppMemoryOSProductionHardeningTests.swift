@@ -139,7 +139,7 @@ private func temporaryAppMemoryOSHardeningDatabaseURL(_ name: String = UUID().uu
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_dead_letter_queue;").first?.first == "0")
 }
 
-@Test func appMemoryOSRunnerReportsPendingJobsWhenLLMUnavailable() throws {
+@Test func appMemoryOSRunnerReportsPendingJobsWhenLLMUnavailable() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSHardeningDatabaseURL().path)
     try store.migrate()
     let now = Date(timeIntervalSince1970: 3_000)
@@ -150,7 +150,7 @@ private func temporaryAppMemoryOSHardeningDatabaseURL(_ name: String = UUID().uu
         idempotencyKey: "waiting-for-llm"
     ))
 
-    let summary = try AppMemoryOSBackgroundJobRunner(aiExecutorProvider: nil).runOnce(
+    let summary = try await AppMemoryOSBackgroundJobRunner(aiExecutorProvider: nil).runOnce(
         facade: AppMemoryOSFacade(store: store),
         now: now
     )

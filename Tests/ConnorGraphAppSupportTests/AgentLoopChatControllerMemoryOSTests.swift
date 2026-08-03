@@ -92,7 +92,7 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
     #expect(!runner.shouldRecover(queueStatus: .leased, leaseExpiresAt: now.addingTimeInterval(10), now: now))
 }
 
-@Test func appMemoryOSBackgroundJobRunnerRunsProjectionQueueThroughFacade() throws {
+@Test func appMemoryOSBackgroundJobRunnerRunsProjectionQueueThroughFacade() async throws {
     let store = try SQLiteMemoryOSStore(path: ":memory:")
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
@@ -111,27 +111,27 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
     let payload = MemoryOSProjectionQueuePayload(rawContent: raw, modelID: "test-model")
     try store.enqueue(MemoryOSQueueItem(id: "background-projection", kind: "project_artifact", payloadJSON: store.json(payload), nextRunAt: now, idempotencyKey: "background-projection-key"))
 
-    let summary = try AppMemoryOSBackgroundJobRunner().runOnce(facade: facade, now: now)
+    let summary = try await AppMemoryOSBackgroundJobRunner().runOnce(facade: facade, now: now)
 
     #expect(summary.projectionRunCount == 1)
     #expect(try store.queueItem(id: "background-projection")?.status == .succeeded)
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l2_statements;").first?.first == "1")
 }
 
-@Test func appMemoryOSBackgroundJobRunnerRunsThroughFacade() throws {
+@Test func appMemoryOSBackgroundJobRunnerRunsThroughFacade() async throws {
     let store = try SQLiteMemoryOSStore(path: ":memory:")
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
     let now = Date(timeIntervalSince1970: 1_000)
 
-    let summary = try AppMemoryOSBackgroundJobRunner().runOnce(facade: facade, now: now)
+    let summary = try await AppMemoryOSBackgroundJobRunner().runOnce(facade: facade, now: now)
 
     #expect(summary.healthStatus == .healthy)
     #expect(summary.expiredLeaseCount == 0)
     #expect(summary.checkedAt == now)
 }
 
-@Test func appMemoryOSBackgroundJobRunnerExecutesL1KnowledgeJobsWithAIProvider() throws {
+@Test func appMemoryOSBackgroundJobRunnerExecutesL1KnowledgeJobsWithAIProvider() async throws {
     let store = try SQLiteMemoryOSStore(path: ":memory:")
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
@@ -149,12 +149,12 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
     let mockArtifact = try encodedL1ProjectionArtifact()
     let provider = BackgroundAIExecutorProvider { facade in
         let executor = StaticTestMemoryOSBackgroundExecutor(rawArtifactJSON: mockArtifact)
-        let runs = try facade.runBackgroundAIQueueOnce(executor: executor, limit: 3)
+        let runs = try await facade.runBackgroundAIQueueOnce(executor: executor, limit: 3)
         return runs.count
     }
 
     // Run with AI provider
-    let summary = try AppMemoryOSBackgroundJobRunner(aiExecutorProvider: provider).runOnce(facade: facade, now: now)
+    let summary = try await AppMemoryOSBackgroundJobRunner(aiExecutorProvider: provider).runOnce(facade: facade, now: now)
 
     #expect(summary.aiJobRunCount == 1)
     #expect(summary.projectionRunCount == 0) // no project_artifact jobs
@@ -163,7 +163,7 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_capture_events;").first?.first == "0")
 }
 
-@Test func appMemoryOSBackgroundJobRunnerSkipsAIJobsWithoutProvider() throws {
+@Test func appMemoryOSBackgroundJobRunnerSkipsAIJobsWithoutProvider() async throws {
     let store = try SQLiteMemoryOSStore(path: ":memory:")
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
@@ -174,7 +174,7 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
     _ = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 2, maxEventsPerBlock: 10), now: now)
 
     // Run WITHOUT AI provider — L1 jobs should remain untouched
-    let summary = try AppMemoryOSBackgroundJobRunner().runOnce(facade: facade, now: now)
+    let summary = try await AppMemoryOSBackgroundJobRunner().runOnce(facade: facade, now: now)
 
     #expect(summary.aiJobRunCount == 0)
     #expect(try !store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, limit: 10, now: now).isEmpty)
@@ -183,7 +183,7 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
 private final class StaticTestMemoryOSBackgroundExecutor: MemoryOSBackgroundModelExecutor, @unchecked Sendable {
     let rawArtifactJSON: String
     init(rawArtifactJSON: String) { self.rawArtifactJSON = rawArtifactJSON }
-    func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse {
+    func execute(_ request: MemoryOSBackgroundModelRequest) async throws -> MemoryOSBackgroundModelResponse {
         MemoryOSBackgroundModelResponse(rawArtifactJSON: rawArtifactJSON, metadata: ["model_id": "test-mock"])
     }
 }

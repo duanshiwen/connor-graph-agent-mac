@@ -14,8 +14,8 @@ import ConnorGraphStore
 /// `saveProjectionBatch` (wired through `AppMemoryOSFacade.projectionBatchRewriter`).
 public struct ImForwardAliasProjectionRewriter {
     /// Token → memory entity id of the bound person; nil means unresolvable
-    /// (missing alias row, unbound friend or the person entity does not exist),
-    /// in which case the extracted entity is kept as-is.
+    /// (missing alias row or unbound friend), in which case the extracted entity
+    /// is kept as-is.
     private let resolvePersonEntityID: (String) -> String?
 
     public init(resolvePersonEntityID: @escaping (String) -> String?) {
@@ -23,13 +23,27 @@ public struct ImForwardAliasProjectionRewriter {
     }
 
     /// Production wiring: alias token → `im_forward_alias` row → person profile
-    /// binding → bound person memory entity (must already exist in the memory store).
+    /// binding → bound person memory entity. The canonical entity is created
+    /// on first use when the person profile has not reached L4 yet.
     public init(imStore: SQLiteImStore, memoryStore: SQLiteMemoryOSStore) {
         self.init { token in
             guard let alias = try? imStore.forwardAlias(token: token) else { return nil }
             let stableKey = AppPersonMemoryBindingService.stableKey(for: ContactID(rawValue: alias.personProfileID))
             let entityID = AppPersonMemoryBindingService.entityID(forStableKey: stableKey)
-            guard (try? memoryStore.entity(id: entityID)) != nil else { return nil }
+            if (try? memoryStore.entity(id: entityID)) == nil {
+                let entity = MemoryOSEntity(
+                    id: entityID,
+                    stableKey: stableKey,
+                    entityType: "person",
+                    name: alias.displayName,
+                    confidence: 1.0,
+                    metadata: [
+                        "person_profile_id": alias.personProfileID,
+                        "source": "im_forward_alias"
+                    ]
+                )
+                guard (try? memoryStore.upsert(entity: entity)) != nil else { return nil }
+            }
             return entityID
         }
     }

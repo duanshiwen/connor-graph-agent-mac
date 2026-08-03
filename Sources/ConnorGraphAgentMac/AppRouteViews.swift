@@ -8,18 +8,13 @@ struct ChatListRouteView: View {
     var imModel: ImFeatureModel?
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let imModel, !imModel.sortedConversations.isEmpty {
-                ImConversationListSection(model: imModel)
-                Divider()
-            }
-            CraftSessionListPane(
-                model: model,
-                governanceModel: governanceModel,
-                sessionActions: sessionActions,
-                rowActions: rowActions
-            )
-        }
+        CraftSessionListPane(
+            model: model,
+            governanceModel: governanceModel,
+            sessionActions: sessionActions,
+            rowActions: rowActions,
+            imModel: imModel
+        )
         .onChange(of: model.sessions.selectedSessionID) { _, newValue in
             // Selecting an AI session dismisses the IM chat detail overlay.
             if newValue != nil, let imModel, imModel.selectedConversationId != nil {

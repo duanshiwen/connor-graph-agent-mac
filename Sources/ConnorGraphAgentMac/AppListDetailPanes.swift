@@ -826,7 +826,9 @@ struct CraftSessionListPane: View {
     @Bindable var governanceModel: GovernanceFeatureModel
     let sessionActions: any ChatSessionCommanding
     let rowActions: ChatSessionListActions
+    var imModel: ImFeatureModel? = nil
     @State private var isCreationMenuPresented = false
+    @State private var isCreateGroupPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -846,12 +848,31 @@ struct CraftSessionListPane: View {
                 model.sessions.searchQuery = ""
             }
 
-            if visibleSessionRows.isEmpty {
+            if visibleSessionRows.isEmpty && visibleImConversations.isEmpty {
                 ContentUnavailableView(sessionEmptyTitle, systemImage: "bubble.left", description: Text(sessionEmptyDescription))
                     .padding(.top, 80)
             } else {
                 ScrollView {
                     LazyVStack(spacing: AppListCardLayout.spacing) {
+                        if let imModel {
+                            ForEach(visibleImConversations) { conversation in
+                                ImConversationRow(
+                                    conversation: conversation,
+                                    participantMessages: imModel.participantMessages(for: conversation.id),
+                                    isSelected: imModel.selectedConversationId == conversation.id,
+                                    isRegeneratingTitle: imModel.regeneratingTitleConversationIDs.contains(conversation.id),
+                                    labelDefinitions: governanceModel.config.labels,
+                                    onSelect: { Task { await imModel.selectConversation(conversation.id) } },
+                                    onRename: { title in Task { await imModel.renameConversation(conversationId: conversation.id, title: title) } },
+                                    onSetStatus: { status in Task { await imModel.setStatus(conversationId: conversation.id, status: status) } },
+                                    onToggleLabel: { labelID in Task { await imModel.toggleLabel(conversationId: conversation.id, labelId: labelID) } },
+                                    onRegenerateTitle: { Task { await imModel.regenerateTitle(conversationId: conversation.id) } },
+                                    onTogglePinned: { Task { await imModel.setPinned(conversationId: conversation.id, pinned: !conversation.pinned) } },
+                                    onToggleMuted: { Task { await imModel.setMuted(conversationId: conversation.id, muted: !conversation.muted) } },
+                                    onDelete: { Task { await imModel.deleteConversation(conversation.id) } }
+                                )
+                            }
+                        }
                         ForEach(visibleSessionRows) { row in
                             sessionRow(row)
                                 .onAppear { sessionActions.loadMoreChatSessionsIfNeeded(currentSessionID: row.id) }
@@ -868,6 +889,11 @@ struct CraftSessionListPane: View {
         .onChange(of: model.sessions.searchQuery) { _, _ in
             sessionActions.reloadChatSessions(restoreWorkspaceMode: false)
         }
+        .sheet(isPresented: $isCreateGroupPresented) {
+            if let imModel {
+                ImCreateGroupSheet(model: imModel, isPresented: $isCreateGroupPresented)
+            }
+        }
     }
 
     private var sessionCreationMenu: some View {
@@ -879,6 +905,16 @@ struct CraftSessionListPane: View {
                 SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil", minHeight: 32)
             }
             .buttonStyle(SidebarActionButtonStyle())
+
+            if let imModel, imModel.isSignedIn {
+                Button {
+                    isCreationMenuPresented = false
+                    isCreateGroupPresented = true
+                } label: {
+                    SidebarActionButtonLabel(title: "新建群聊", systemImage: "person.3.fill", minHeight: 32)
+                }
+                .buttonStyle(SidebarActionButtonStyle())
+            }
 
             Button {
                 isCreationMenuPresented = false
@@ -927,6 +963,27 @@ struct CraftSessionListPane: View {
             return model.sessions.sessions.map { model.sessions.rowPresentation(for: $0) }
         }
         return model.sessions.sessions.map { model.sessions.rowPresentation(for: $0) }
+    }
+
+    private var visibleImConversations: [ImConversation] {
+        guard let imModel else { return [] }
+        let filtered = imModel.sortedConversations.filter { conversation in
+            switch model.sessions.filter {
+            case .all:
+                return conversation.status != .archived
+            case .status(let status):
+                return conversation.status == status
+            case .label(let labelID):
+                return conversation.labelIds.contains(labelID)
+            }
+        }
+        let query = model.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return filtered }
+        return filtered.filter {
+            $0.title.localizedCaseInsensitiveContains(query)
+                || $0.participantName.localizedCaseInsensitiveContains(query)
+                || $0.lastMessagePreview.localizedCaseInsensitiveContains(query)
+        }
     }
 
     private var sessionEmptyTitle: String {

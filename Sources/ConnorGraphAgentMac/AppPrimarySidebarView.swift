@@ -102,7 +102,13 @@ struct CraftPrimarySidebarView: View {
                         }
                     }
 
-                    SidebarRow(title: "人际关系", systemImage: "person.2", count: contactsBadgeCount, isSelected: selection == .contacts) { select(.contacts) }
+                    SidebarRow(
+                        title: "人际关系",
+                        systemImage: "person.2",
+                        count: contactsBadgeCount,
+                        isSelected: selection == .contacts,
+                        showsCountAsBadge: imPendingRequestCount != nil
+                    ) { select(.contacts) }
 
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
                         SidebarRow(title: "日历", systemImage: "calendar", count: graph.calendar.presentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }

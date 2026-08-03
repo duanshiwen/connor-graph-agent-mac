@@ -776,7 +776,7 @@ public struct MemoryOSBackgroundModelResponse: Sendable, Codable, Equatable {
 }
 
 public protocol MemoryOSBackgroundModelExecutor: Sendable {
-    func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse
+    func execute(_ request: MemoryOSBackgroundModelRequest) async throws -> MemoryOSBackgroundModelResponse
 }
 
 public struct MemoryOSBackgroundJobExecutionResult: Sendable, Codable, Equatable {
@@ -804,7 +804,7 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         self.executor = executor
     }
 
-    public func run(_ draft: MemoryOSL1UnifiedProjectionJobDraft) throws -> MemoryOSBackgroundJobExecutionResult {
+    public func run(_ draft: MemoryOSL1UnifiedProjectionJobDraft) async throws -> MemoryOSBackgroundJobExecutionResult {
         let artifactType = "memory_os_l1_unified_projection"
         let tools = MemoryOSBackgroundToolCatalog.l1UnifiedProjectionTools()
         let prompt = enrichedL1Prompt(draft, tools: tools)
@@ -819,7 +819,7 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
             metadata: draft.metadata,
             availableTools: tools
         )
-        let response = try executor.execute(request)
+        let response = try await executor.execute(request)
         return MemoryOSBackgroundJobExecutionResult(jobID: draft.id, kind: draft.kind, rawArtifactJSON: response.rawArtifactJSON, schemaName: draft.schemaName, artifactType: artifactType, metadata: draft.metadata.merging(response.metadata) { _, new in new })
     }
 
