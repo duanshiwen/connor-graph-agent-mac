@@ -11,6 +11,11 @@ public struct ConnorRemoteUserIdentity: Codable, Sendable, Equatable, Identifiab
     public var createdAt: Date
     public var updatedAt: Date
 
+    private enum CodingKeys: String, CodingKey {
+        case id, username, nickname, email, role, createdAt, updatedAt
+        case avatarURL = "avatarUrl"
+    }
+
     public init(id: UInt, username: String, nickname: String?, email: String, avatarURL: String?, role: String, createdAt: Date, updatedAt: Date) {
         self.id = id
         self.username = username
@@ -643,6 +648,7 @@ private actor ConnorAccountSyncEventSocket {
 @MainActor
 public final class AppUserIdentityStore: ObservableObject {
     @Published public private(set) var authenticationState: ConnorAuthenticationState = .signedOut
+    @Published public private(set) var avatarRevision: UInt = 0
     @Published public private(set) var ownedKnowledgeBases: [ConnorKnowledgeBaseSummary] = []
     @Published public private(set) var subscribedKnowledgeBases: [ConnorKnowledgeBaseSubscription] = []
     @Published public private(set) var isLoadingLibraries = false
@@ -803,6 +809,7 @@ public final class AppUserIdentityStore: ObservableObject {
         do {
             let user = try await authenticatedSession.uploadAvatar(fileURL: fileURL)
             authenticationState = .signedIn(user)
+            avatarRevision &+= 1
         } catch ConnorBackendAPIError.unauthorized, ConnorBackendAPIError.missingRefreshToken {
             clearLocalSession(state: .expired)
         } catch {

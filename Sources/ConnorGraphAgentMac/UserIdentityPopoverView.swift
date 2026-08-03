@@ -12,7 +12,7 @@ struct UserIdentityPopoverView: View {
             switch identityStore.authenticationState {
             case let .signedIn(user):
                 HStack(spacing: 12) {
-                    IdentityAvatarView(user: user, size: 44)
+                    IdentityAvatarView(user: user, size: 44, revision: identityStore.avatarRevision)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(user.displayName).font(.headline)
                         Text("@\(user.username)").font(.caption).foregroundStyle(.secondary)

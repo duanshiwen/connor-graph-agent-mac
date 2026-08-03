@@ -128,6 +128,23 @@ struct ImMessageCenterTests {
         #expect(fixture.events.events.count == 1)
     }
 
+    @Test func outOfOrderRealtimeMessageDoesNotReplaceLatestConversationPreview() async throws {
+        let fixture = try makeFixture()
+
+        await fixture.center.handleFrame(type: "chat_receive", text: """
+            {"type":"chat_receive","payload":{"sender_id":9,"message_id":"newer",
+            "content":"较新的消息","sent_at":2000}}
+            """)
+        await fixture.center.handleFrame(type: "chat_receive", text: """
+            {"type":"chat_receive","payload":{"sender_id":9,"message_id":"older",
+            "content":"迟到的旧消息","sent_at":1000}}
+            """)
+
+        let conversation = try #require(try await fixture.store.conversation(id: "peer:9"))
+        #expect(conversation.lastMessagePreview == "较新的消息")
+        #expect(conversation.lastMessageAt == 2000)
+    }
+
     @Test func activeConversationSuppressesUnreadAndAutoReads() async throws {
         let fixture = try makeFixture()
         let conversationId = try await fixture.center.openPeerConversation(peerId: 9)
@@ -304,6 +321,82 @@ struct ImMessageCenterTests {
         let paged = try #require(try await fixture.store.message(id: "m1"))
         #expect(paged.status == .read)
         #expect(paged.createdAt == ImMessageCenterTests.epochMs("2026-07-30T09:00:00Z"))
+    }
+
+    @Test func loadLatestMessagesClosesGapWhenLocalCacheAlreadyHasMessages() async throws {
+        let fixture = try makeFixture()
+        let conversationId = try await fixture.center.openPeerConversation(peerId: 9)
+        _ = try await fixture.store.upsertMessage(ImMessage(
+            id: "m1", conversationId: conversationId, senderId: 9,
+            content: "本地旧消息", status: .delivered, createdAt: 1_000
+        ))
+        fixture.service.chatHistoryResult = try decodeDTO(
+            #"{"messages":[{"messageId":"m2","senderId":9,"content":"列表中的最新消息","status":"delivered","sentAt":"2026-08-03T09:10:00Z"}],"has_more":true}"#
+        )
+
+        let hasMore = try await fixture.center.loadLatestMessages(conversationId: conversationId)
+
+        #expect(hasMore)
+        let call = try #require(fixture.service.chatHistoryCalls.first)
+        #expect(call.peerId == 9)
+        #expect(call.beforeId == nil)
+        let messages = try await fixture.store.messages(conversationId: conversationId)
+        #expect(messages.map(\.id) == ["m1", "m2"])
+        #expect(messages.last?.content == "列表中的最新消息")
+    }
+
+    @Test func socketReconnectClosesMultiPagePeerOfflineGap() async throws {
+        let fixture = try makeFixture()
+        let conversationId = try await fixture.center.openPeerConversation(peerId: 9)
+        _ = try await fixture.store.upsertMessage(ImMessage(
+            id: "m1", conversationId: conversationId, senderId: 9,
+            content: "上线前", status: .delivered,
+            createdAt: Self.epochMs("2026-08-03T09:00:00Z")
+        ))
+        await fixture.center.setActiveConversation(conversationId)
+        fixture.service.conversationsResult = try decodeDTO(
+            #"[{"peerId":9,"lastMessageId":"m3","lastMessageContent":"离线第三条","lastMessageTime":"2026-08-03T09:20:00Z"}]"#
+        )
+        fixture.service.chatHistoryResults = [
+            try decodeDTO(#"{"messages":[{"messageId":"m3","senderId":9,"content":"离线第三条","sentAt":"2026-08-03T09:20:00Z"},{"messageId":"m2","senderId":9,"content":"离线第二条","sentAt":"2026-08-03T09:10:00Z"}],"has_more":true}"#),
+            try decodeDTO(#"{"messages":[{"messageId":"m1","senderId":9,"content":"上线前","sentAt":"2026-08-03T09:00:00Z"}],"has_more":false}"#)
+        ]
+
+        await fixture.center.handleSocketConnected()
+
+        let messages = try await fixture.store.messages(conversationId: conversationId)
+        #expect(messages.map(\.id) == ["m1", "m2", "m3"])
+        #expect(fixture.service.chatHistoryCalls.map(\.beforeId) == [nil, "m2"])
+        #expect(try await fixture.store.conversation(id: conversationId)?.lastMessagePreview == "离线第三条")
+    }
+
+    @Test func socketReconnectClosesMultiPageGroupOfflineGap() async throws {
+        let fixture = try makeFixture()
+        fixture.service.groupsResult = try decodeDTO(
+            #"[{"groupId":"g1","name":"项目群","lastMessageId":"g1","lastMessageContent":"上线前","lastMessageTime":"2026-08-03T09:00:00Z"}]"#
+        )
+        await fixture.center.refreshAll()
+        let conversationId = ImConversation.groupConversationID(groupId: "g1")
+        _ = try await fixture.store.upsertMessage(ImMessage(
+            id: "g1", conversationId: conversationId, senderId: 7,
+            content: "上线前", status: .delivered,
+            createdAt: Self.epochMs("2026-08-03T09:00:00Z")
+        ))
+        await fixture.center.setActiveConversation(conversationId)
+        fixture.service.groupsResult = try decodeDTO(
+            #"[{"groupId":"g1","name":"项目群","lastMessageId":"g3","lastMessageContent":"离线群消息三","lastMessageTime":"2026-08-03T09:20:00Z"}]"#
+        )
+        fixture.service.groupHistoryResults = [
+            try decodeDTO(#"{"messages":[{"messageId":"g3","groupId":"g1","senderId":7,"content":"离线群消息三","sentAt":"2026-08-03T09:20:00Z"},{"messageId":"g2","groupId":"g1","senderId":8,"content":"离线群消息二","sentAt":"2026-08-03T09:10:00Z"}],"has_more":true}"#),
+            try decodeDTO(#"{"messages":[{"messageId":"g1","groupId":"g1","senderId":7,"content":"上线前","sentAt":"2026-08-03T09:00:00Z"}],"has_more":false}"#)
+        ]
+
+        await fixture.center.handleSocketConnected()
+
+        let messages = try await fixture.store.messages(conversationId: conversationId)
+        #expect(messages.map(\.id) == ["g1", "g2", "g3"])
+        #expect(fixture.service.groupHistoryCalls.map(\.beforeId) == [nil, "g2"])
+        #expect(try await fixture.store.conversation(id: conversationId)?.lastMessagePreview == "离线群消息三")
     }
 
     @Test func signOutClearsCachesAndCancelsPendingSends() async throws {
@@ -492,8 +585,17 @@ private final class StubImService: ImBackendServicing, @unchecked Sendable {
         get { lock.withLock { _chatHistoryResult } }
         set { lock.withLock { _chatHistoryResult = newValue } }
     }
+    var chatHistoryResults: [ImChatHistoryDTO] {
+        get { lock.withLock { _chatHistoryResults } }
+        set { lock.withLock { _chatHistoryResults = newValue } }
+    }
+    var groupHistoryResults: [ImGroupHistoryDTO] {
+        get { lock.withLock { _groupHistoryResults } }
+        set { lock.withLock { _groupHistoryResults = newValue } }
+    }
     var markReadPeerIds: [Int64] { lock.withLock { _markReadPeerIds } }
     var chatHistoryCalls: [(peerId: Int64, beforeId: String?, limit: Int)] { lock.withLock { _chatHistoryCalls } }
+    var groupHistoryCalls: [(groupId: String, beforeId: String?, limit: Int)] { lock.withLock { _groupHistoryCalls } }
     var privateMediaCachedIDs: [String] { lock.withLock { _privateMediaCachedIDs } }
     var groupReadIDs: [String] { lock.withLock { _groupReadIDs } }
     var createdGroupMemberIDs: [Int64] { lock.withLock { _createdGroupMemberIDs } }
@@ -504,8 +606,11 @@ private final class StubImService: ImBackendServicing, @unchecked Sendable {
     private var _conversationsResult: [ImConversationDTO] = []
     private var _groupsResult: [ImGroupDTO] = []
     private var _chatHistoryResult: ImChatHistoryDTO?
+    private var _chatHistoryResults: [ImChatHistoryDTO] = []
+    private var _groupHistoryResults: [ImGroupHistoryDTO] = []
     private var _markReadPeerIds: [Int64] = []
     private var _chatHistoryCalls: [(peerId: Int64, beforeId: String?, limit: Int)] = []
+    private var _groupHistoryCalls: [(groupId: String, beforeId: String?, limit: Int)] = []
     private var _privateMediaCachedIDs: [String] = []
     private var _groupReadIDs: [String] = []
     private var _createdGroupMemberIDs: [Int64] = []
@@ -515,6 +620,9 @@ private final class StubImService: ImBackendServicing, @unchecked Sendable {
 
     func chatHistory(peerId: Int64, beforeId: String?, limit: Int) async throws -> ImChatHistoryDTO {
         lock.withLock { _chatHistoryCalls.append((peerId, beforeId, limit)) }
+        if let queued = lock.withLock({ _chatHistoryResults.isEmpty ? nil : _chatHistoryResults.removeFirst() }) {
+            return queued
+        }
         return try chatHistoryResult ?? decode(#"{"messages":[],"has_more":false}"#)
     }
 
@@ -538,7 +646,11 @@ private final class StubImService: ImBackendServicing, @unchecked Sendable {
     }
 
     func groupMessages(groupId: String, beforeId: String?, limit: Int) async throws -> ImGroupHistoryDTO {
-        try decode(#"{"messages":[],"has_more":false}"#)
+        lock.withLock { _groupHistoryCalls.append((groupId, beforeId, limit)) }
+        if let queued = lock.withLock({ _groupHistoryResults.isEmpty ? nil : _groupHistoryResults.removeFirst() }) {
+            return queued
+        }
+        return try decode(#"{"messages":[],"has_more":false}"#)
     }
 
     func inviteGroupMember(groupId: String, userId: Int64) async throws {}

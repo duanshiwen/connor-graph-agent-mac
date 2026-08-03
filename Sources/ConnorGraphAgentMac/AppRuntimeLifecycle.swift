@@ -976,6 +976,7 @@ final class AppRuntimeLifecycle {
                 new: { [weak self] in self?.newChatSession() },
                 newNote: { [weak self] in self?.newNoteSession() },
                 select: { [weak self] in self?.selectChatSession($0) },
+                clearSelection: { [weak self] in self?.chatSessionCoordinator.clearSelection() },
                 rename: { [weak self] in self?.renameChatSession($0, title: $1) },
                 filter: { [weak self] in self?.setSessionListFilter($0, restoreWorkspaceMode: $1) },
                 status: { [weak self] in self?.setSelectedSessionStatus($0) },
@@ -1011,6 +1012,7 @@ final class AppRuntimeLifecycle {
             mail: mailFeatureModel,
             knowledgeMarketplace: knowledgeMarketplaceStore,
             appSettings: appSettingsModel,
+            imProvider: { [weak self] in self?.graph.im },
             openWebSearch: { [weak self] query, url in
                 self?.openGlobalWebSearch(query: query, url: url)
             }
@@ -3694,6 +3696,7 @@ extension AppRuntimeLifecycle {
             new: { [weak model] in model?.newChatSession() },
             newNote: { [weak model] in model?.newNoteSession() },
             select: { [weak sessionCoordinator] in sessionCoordinator?.select($0) },
+            clearSelection: { [weak sessionCoordinator] in sessionCoordinator?.clearSelection() },
             rename: { [weak model] in model?.renameChatSession($0, title: $1) },
             filter: { [weak sessionCoordinator] in sessionCoordinator?.setFilter($0, restoreWorkspaceMode: $1) },
             status: { [weak model] in model?.setSelectedSessionStatus($0) },

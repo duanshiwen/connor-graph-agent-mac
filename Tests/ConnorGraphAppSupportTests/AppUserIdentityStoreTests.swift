@@ -35,6 +35,17 @@ struct AppUserIdentityStoreTests {
         #expect(unnamed.displayName == "shiwen")
     }
 
+    @Test func remoteIdentityDecodesBackendAvatarUrl() throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let user = try decoder.decode(
+            ConnorRemoteUserIdentity.self,
+            from: Data(#"{"id":1,"username":"shiwen","nickname":"诗闻","email":"s@example.com","avatarUrl":"https://cdn.example/avatar.png","role":"user","createdAt":"2026-07-13T04:00:00Z","updatedAt":"2026-07-13T04:00:00Z"}"#.utf8)
+        )
+
+        #expect(user.avatarURL == "https://cdn.example/avatar.png")
+    }
+
     @Test func avatarUploadUsesAuthenticatedMultipartContract() async throws {
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("avatar-\(UUID().uuidString).png")
         try Data([0x89, 0x50, 0x4e, 0x47]).write(to: fileURL)
@@ -52,6 +63,31 @@ struct AppUserIdentityStoreTests {
         let text = String(decoding: body, as: UTF8.self)
         #expect(text.contains("name=\"avatar\""))
         #expect(text.contains("Content-Type: image/png"))
+    }
+
+    @Test @MainActor func avatarUploadRefreshesPublishedUserIdentity() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorAvatarRefreshTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let credentials = AppConnorAccountCredentialStore(store: LocalEncryptedCredentialStore(rootDirectory: root))
+        try credentials.saveTokens(.init(accessToken: "valid-access", refreshToken: "valid-refresh"))
+        let transport = IdentityTestTransport()
+        let store = AppUserIdentityStore(
+            baseURL: URL(string: "https://backend.example")!,
+            credentials: credentials,
+            transport: transport
+        )
+        await store.restoreSession()
+        #expect(store.currentUser?.avatarURL == nil)
+
+        let fileURL = root.appendingPathComponent("avatar.png")
+        try Data([0x89, 0x50, 0x4e, 0x47]).write(to: fileURL)
+        await store.uploadAvatar(fileURL: fileURL)
+
+        #expect(store.errorMessage == nil)
+        #expect(store.currentUser?.avatarURL == "https://cdn.example/avatar.png")
+        #expect(store.avatarRevision == 1)
+        #expect(await transport.avatarUploadRequestCount == 1)
+        #expect(await transport.requestCount(pathSuffix: "/users/auth/me") == 2)
     }
 
     @Test func accountCredentialStoreEncryptsAndDeletesTokenPair() throws {
@@ -148,11 +184,13 @@ struct AppUserIdentityStoreTests {
         #expect(store.currentUser?.username == "shiwen")
         #expect(store.errorMessage == nil)
     }
+
 }
 
 private actor IdentityTestTransport: ConnorBackendHTTPTransport {
     private var requests: [URLRequest] = []
     private var currentUserFailureCount: Int
+    private var avatarUploaded = false
 
     init(currentUserFailureCount: Int = 0) {
         self.currentUserFailureCount = currentUserFailureCount
@@ -160,6 +198,7 @@ private actor IdentityTestTransport: ConnorBackendHTTPTransport {
 
     var refreshRequestCount: Int { requests.filter { $0.url?.path.hasSuffix("/users/public/refresh") == true }.count }
     var logoutRequestCount: Int { requests.filter { $0.url?.path.hasSuffix("/users/auth/logout") == true }.count }
+    var avatarUploadRequestCount: Int { requests.filter { $0.url?.path.hasSuffix("/users/auth/avatar") == true }.count }
 
     func requestCount(pathSuffix: String) -> Int {
         requests.filter { $0.url?.path.hasSuffix(pathSuffix) == true }.count
@@ -175,13 +214,14 @@ private actor IdentityTestTransport: ConnorBackendHTTPTransport {
         let bearer = request.value(forHTTPHeaderField: "Authorization")
         switch path {
         case let value where value.hasSuffix("/users/auth/avatar"):
+            avatarUploaded = true
             return response(request, status: 200, json: #"{"code":0,"data":{"objectName":"avatars/1/avatar.png"}}"#)
         case let value where value.hasSuffix("/users/auth/me"):
             if currentUserFailureCount > 0 {
                 currentUserFailureCount -= 1
                 throw URLError(.networkConnectionLost)
             }
-            return response(request, status: 200, json: Self.userEnvelope)
+            return response(request, status: 200, json: avatarUploaded ? Self.userWithAvatarEnvelope : Self.userEnvelope)
         case let value where value.hasSuffix("/users/public/refresh"):
             return response(request, status: 200, json: Self.authEnvelope)
         case let value where value.hasSuffix("/knowledge-bases/subscriptions"):
@@ -203,7 +243,9 @@ private actor IdentityTestTransport: ConnorBackendHTTPTransport {
     }
 
     private static let userJSON = #"{"id":1,"username":"shiwen","nickname":"诗闻","email":"s@example.com","role":"user","createdAt":"2026-07-13T04:00:00Z","updatedAt":"2026-07-13T04:00:00Z"}"#
+    private static let userWithAvatarJSON = #"{"id":1,"username":"shiwen","nickname":"诗闻","email":"s@example.com","avatarUrl":"https://cdn.example/avatar.png","role":"user","createdAt":"2026-07-13T04:00:00Z","updatedAt":"2026-08-03T10:00:00Z"}"#
     private static let userEnvelope = #"{"code":0,"data":\#(userJSON)}"#
+    private static let userWithAvatarEnvelope = #"{"code":0,"data":\#(userWithAvatarJSON)}"#
     private static let authEnvelope = #"{"code":0,"data":{"user":\#(userJSON),"token":"fresh-access","refreshToken":"fresh-refresh"}}"#
     private static let summaryOwned = #"{"kbId":"owned-kb","name":"Owned","visibility":"private","subscriptionMode":"free","l2NodeCount":0,"l2StatementCount":0,"l3BeliefCount":0,"l4EntityCount":0,"l4RelationCount":0,"subscriberCount":0,"createdAt":"2026-07-13T04:00:00Z","updatedAt":"2026-07-13T04:00:00Z"}"#
     private static let summarySubscribed = #"{"kbId":"subscribed-kb","name":"Subscribed","visibility":"public","subscriptionMode":"free","l2NodeCount":0,"l2StatementCount":0,"l3BeliefCount":0,"l4EntityCount":0,"l4RelationCount":0,"subscriberCount":1,"createdAt":"2026-07-13T04:00:00Z","updatedAt":"2026-07-13T04:00:00Z"}"#

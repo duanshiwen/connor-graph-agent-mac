@@ -6,6 +6,7 @@ import ConnorGraphSearch
 public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
     public var id: String
     public var title: String
+    public var updatedAt: Date
     public var relativeUpdatedTime: String
     public var statusText: String
     public var status: AgentSessionStatus
@@ -15,10 +16,11 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
     public var isFlagged: Bool
     public var messageCount: Int
 
-    public init(session: AgentSession, messageCount: Int? = nil, now: Date = Date()) {
+    public init(session: AgentSession, messageCount: Int? = nil, now: Date = Date(), calendar: Calendar = .current) {
         self.id = session.id
         self.title = session.title.isEmpty || session.title == "New Chat" ? "新对话" : session.title
-        self.relativeUpdatedTime = Self.relativeTime(from: session.updatedAt, to: now)
+        self.updatedAt = session.updatedAt
+        self.relativeUpdatedTime = Self.updatedTime(from: session.updatedAt, to: now, calendar: calendar)
         self.status = session.governance.status
         self.statusText = session.governance.status.displayName
         self.labels = session.governance.labels
@@ -28,18 +30,22 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
         self.messageCount = messageCount ?? session.messages.count
     }
 
-    private static func relativeTime(from date: Date, to now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(date)))
-        if seconds < 60 { return "刚刚" }
-        let minutes = seconds / 60
-        if minutes < 60 { return "\(minutes) 分钟" }
-        let hours = minutes / 60
-        if hours < 24 { return "\(hours) 小时" }
-        let days = hours / 24
-        if days < 7 { return "\(days) 天" }
-        let weeks = days / 7
-        if weeks < 5 { return "\(weeks) 周" }
-        return "\(days) 天"
+    private static func updatedTime(from date: Date, to now: Date, calendar: Calendar) -> String {
+        if calendar.isDate(date, inSameDayAs: now) {
+            let components = calendar.dateComponents([.hour, .minute], from: date)
+            return String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
+        }
+
+        let startOfDate = calendar.startOfDay(for: date)
+        let startOfToday = calendar.startOfDay(for: now)
+        let days = calendar.dateComponents([.day], from: startOfDate, to: startOfToday).day ?? 0
+        if (1...6).contains(days) {
+            let weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"]
+            return weekdays[calendar.component(.weekday, from: date) - 1]
+        }
+
+        let components = calendar.dateComponents([.month, .day], from: date)
+        return "\(components.month ?? 0)月\(components.day ?? 0)日"
     }
 }
 

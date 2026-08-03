@@ -222,7 +222,7 @@ struct AppShellView: View {
 
                 Button { isIdentityPopoverPresented.toggle() } label: {
                     if let user = identityStore.currentUser {
-                        IdentityAvatarView(user: user, size: 24)
+                        IdentityAvatarView(user: user, size: 24, revision: identityStore.avatarRevision)
                     } else {
                         Image(systemName: "person.crop.circle")
                             .font(.system(size: 20))

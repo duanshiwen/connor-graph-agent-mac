@@ -143,7 +143,7 @@ struct UserIdentitySettingsView: View {
                         selectAndUploadAvatar()
                     } label: {
                         ZStack(alignment: .bottomTrailing) {
-                            IdentityAvatarView(user: user, size: 64)
+                            IdentityAvatarView(user: user, size: 64, revision: identityStore.avatarRevision)
                             Image(systemName: "camera.fill")
                                 .font(.system(size: 11, weight: .semibold))
                                 .padding(5)
@@ -370,16 +370,15 @@ struct UserIdentitySettingsView: View {
 struct IdentityAvatarView: View {
     var user: ConnorRemoteUserIdentity
     var size: CGFloat
+    var revision: UInt = 0
 
     var body: some View {
-        Group {
-            if let value = user.avatarURL, let url = URL(string: value) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() } else { fallback }
-                }
-            } else { fallback }
+        ZStack {
+            fallback
+            ReloadingAvatarImage(urlString: user.avatarURL ?? "", revision: revision)
         }
-        .frame(width: size, height: size).clipShape(Circle())
+        .frame(width: size, height: size)
+        .clipShape(Circle())
         .overlay(Circle().stroke(.quaternary))
         .accessibilityLabel("\(user.displayName)的头像")
     }
@@ -389,6 +388,79 @@ struct IdentityAvatarView: View {
             Circle().fill(Color.accentColor.opacity(0.16))
             Text(String(user.displayName.prefix(1)).uppercased())
                 .font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(Color.accentColor)
+        }
+    }
+}
+
+struct ReloadingAvatarImage: View {
+    let urlString: String
+    var revision: UInt = 0
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            }
+        }
+        .task(id: loadID) {
+            image = nil
+            image = await loadImage()
+        }
+    }
+
+    private var loadID: String { "\(urlString)|\(revision)" }
+
+    private func loadImage() async -> NSImage? {
+        guard let url = URL(string: urlString), !urlString.isEmpty else { return nil }
+        if url.isFileURL { return NSImage(contentsOf: url) }
+        guard let data = await AvatarImageDataLoader.shared.data(
+            for: url,
+            cacheKey: loadID
+        ), !Task.isCancelled else { return nil }
+        return NSImage(data: data)
+    }
+}
+
+private actor AvatarImageDataLoader {
+    static let shared = AvatarImageDataLoader()
+
+    private var cachedData: [String: Data] = [:]
+    private var inFlight: [String: Task<Data?, Never>] = [:]
+
+    func data(for url: URL, cacheKey: String) async -> Data? {
+        if let data = cachedData[cacheKey] { return data }
+        if let task = inFlight[cacheKey] { return await task.value }
+
+        let task = Task<Data?, Never> {
+            do {
+                var request = URLRequest(url: url)
+                request.cachePolicy = .reloadIgnoringLocalCacheData
+                request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode)
+                else { return nil }
+                return data
+            } catch {
+                return nil
+            }
+        }
+        inFlight[cacheKey] = task
+        let data = await task.value
+        inFlight[cacheKey] = nil
+        if let data {
+            cachedData[cacheKey] = data
+            trimCacheIfNeeded()
+        }
+        return data
+    }
+
+    private func trimCacheIfNeeded() {
+        while cachedData.count > 128, let key = cachedData.keys.first {
+            cachedData[key] = nil
         }
     }
 }

@@ -103,6 +103,48 @@ struct SQLiteImStoreTests {
         #expect(try await store.conversation(id: "peer:1") == nil)
     }
 
+    @Test func conversationSearchIndexesPeerGroupAndHistoricalMessages() async throws {
+        let store = try makeStore()
+        let peer = ImConversation(
+            id: "peer:7",
+            kind: .peer,
+            peerUserId: 7,
+            title: "李明",
+            participantName: "李明",
+            lastMessagePreview: "稍后联系"
+        )
+        let group = ImConversation(
+            id: "group:delivery",
+            kind: .group,
+            groupId: "delivery",
+            title: "交付讨论群",
+            participantName: "交付讨论群",
+            lastMessagePreview: "收到"
+        )
+        try await store.upsertConversations([peer, group])
+        _ = try await store.upsertMessage(makeMessage(
+            id: "group-message",
+            conversationId: group.id,
+            content: "下午同步项目交付进度"
+        ))
+
+        let messageMatches = try await store.searchConversations(query: "项目", limit: 5)
+        #expect(messageMatches.map(\.conversation.id) == [group.id])
+        #expect(messageMatches.first?.snippet == "下午同步项目交付进度")
+
+        try await store.renameConversation(
+            conversationId: peer.id,
+            title: "供应商联系人",
+            customized: true,
+            now: 200
+        )
+        let renamedMatches = try await store.searchConversations(query: "供应商", limit: 5)
+        #expect(renamedMatches.map(\.conversation.id) == [peer.id])
+
+        try await store.deleteMessage(id: "group-message")
+        #expect(try await store.searchConversations(query: "项目", limit: 5).isEmpty)
+    }
+
     @Test func markSenderMessagesReadSkipsFailed() async throws {
         let store = try makeStore()
         try await store.upsertConversation(makeConversation(id: "peer:1", peerUserId: 1))

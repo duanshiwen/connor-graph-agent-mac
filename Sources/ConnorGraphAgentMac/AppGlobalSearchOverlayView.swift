@@ -92,6 +92,7 @@ struct AppGlobalSearchOverlayView: View {
                 actionRows
                 tokenChips
 
+                imConversationSection(results: state.imConversationResults)
                 chatSessionSection(results: state.chatSessionResults)
                 knowledgeMarketplaceSection(results: state.knowledgeBaseResults)
                 resultSection(kind: .calendar, results: state.calendarResults)
@@ -243,6 +244,43 @@ struct AppGlobalSearchOverlayView: View {
                             model.openChatSession(result.id)
                         } label: {
                             GlobalSearchChatSessionRow(result: result, isSelected: stateSelected(.chatSession(result.id)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .frame(minHeight: 58, alignment: .top)
+        .padding(.bottom, 2)
+    }
+
+    private func imConversationSection(results: [GlobalSearchIMConversationResult]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: AppShellLayout.spaceXS) {
+                Image(systemName: GlobalSearchSectionKind.imConversations.systemImage)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text(GlobalSearchSectionKind.imConversations.title)
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, AppShellLayout.spaceS)
+            .padding(.top, AppShellLayout.spaceXS)
+
+            if results.isEmpty {
+                GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.imConversations.emptyTitle)
+            } else {
+                VStack(spacing: 1) {
+                    ForEach(results) { result in
+                        Button {
+                            model.openIMConversation(result.id)
+                        } label: {
+                            GlobalSearchIMConversationRow(
+                                result: result,
+                                isSelected: stateSelected(.imConversation(result.id))
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -598,6 +636,60 @@ private struct GlobalSearchChatSessionRow: View {
                 }
                 if !result.snippet.isEmpty {
                     Text(result.snippet)
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .padding(.vertical, 6)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .onHover { isHovering = $0 }
+    }
+
+    private var rowBackground: Color {
+        if isSelected { return Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.selectedAccentOpacity) }
+        return isHovering ? Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.hoverAccentOpacity) : Color.clear
+    }
+}
+
+private struct GlobalSearchIMConversationRow: View {
+    var result: GlobalSearchIMConversationResult
+    var isSelected: Bool = false
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
+            Image(systemName: result.kind == .group ? "person.3.fill" : "person.crop.circle.fill")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(result.kind == .group ? Color.orange : Color.green)
+                .frame(width: 18)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: AppShellLayout.spaceXS) {
+                    Text(result.title.isEmpty ? result.kindLabel : result.title)
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(result.kindLabel)
+                        .font(AppListTypography.rowCaptionEmphasized)
+                        .foregroundStyle(.secondary)
+                    if !result.lastMessageAtLabel.isEmpty {
+                        Text(result.lastMessageAtLabel)
+                            .font(AppListTypography.rowCaption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                let detail = [result.participantName, result.snippet]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " · ")
+                if !detail.isEmpty {
+                    Text(detail)
                         .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)

@@ -9,6 +9,7 @@ final class GlobalSearchFeatureModel {
     enum Destination {
         case newChat(prompt: String)
         case webSearch(query: String, url: URL)
+        case imConversation(String)
         case chatSession(String)
         case nativeResult(NativeSearchResult)
         case browserHistoryRecord(BrowserHistoryRecord)
@@ -37,6 +38,8 @@ final class GlobalSearchFeatureModel {
     @ObservationIgnored private var isShutdown = false
 
     @ObservationIgnored var sessionsProvider: () -> [AgentSession] = { [] }
+    @ObservationIgnored var imConversationsProvider: () -> [ImConversation] = { [] }
+    @ObservationIgnored var imConversationSearchProvider: ((String, Int) async throws -> [ImConversationSearchHit])?
     @ObservationIgnored var fallbackNativeSearchProvider: (NativeSearchSourceKind, String, Int) -> [NativeSearchResult] = { _, _, _ in [] }
     @ObservationIgnored var prepareNativeSearchProvider: @MainActor @Sendable (NativeSearchSourceKind) async -> Void = { _ in }
     @ObservationIgnored var defaultSearchURLProvider: (String) -> URL? = { _ in nil }
@@ -62,6 +65,7 @@ final class GlobalSearchFeatureModel {
             return historyEntries.prefix(8).map { .recentSearch($0.id) }
         }
         var items: [GlobalSearchSelectableItem] = [.action(.newChat), .action(.webSearch)]
+        items.append(contentsOf: previewState.imConversationResults.map { .imConversation($0.id) })
         items.append(contentsOf: previewState.chatSessionResults.map { .chatSession($0.id) })
         items.append(contentsOf: previewState.knowledgeBaseResults.map { .knowledgeBase($0.id) })
         items.append(contentsOf: previewState.calendarResults.map { .nativeResult($0.id) })
@@ -121,6 +125,7 @@ final class GlobalSearchFeatureModel {
             selectHistoryEntry(entry)
         case .action(.newChat): performNewChat()
         case .action(.webSearch): performWebSearch()
+        case .imConversation(let conversationID): openIMConversation(conversationID)
         case .chatSession(let sessionID): openChatSession(sessionID)
         case .nativeResult(let resultID):
             let results = previewState.calendarResults + previewState.rssResults + previewState.mailResults + previewState.browserHistoryResults
@@ -174,6 +179,12 @@ final class GlobalSearchFeatureModel {
         onDestination?(.chatSession(sessionID))
     }
 
+    func openIMConversation(_ conversationID: String) {
+        recordHistoryIfNeeded(query)
+        dismissOverlay()
+        onDestination?(.imConversation(conversationID))
+    }
+
     func openResult(_ result: NativeSearchResult) {
         recordHistoryIfNeeded(query)
         dismissOverlay()
@@ -204,6 +215,9 @@ final class GlobalSearchFeatureModel {
         let generation = refreshGeneration
         let tokens = GlobalSearchDisplayTokenBuilder.tokens(for: trimmed)
         timings = []
+        let imStartedAt = Date()
+        let imResults = await searchIMConversations(query: trimmed, limit: 5)
+        recordTiming(query: trimmed, section: "imConversations", startedAt: imStartedAt, returnedCount: imResults.count, backend: "loaded-conversations")
         let chatStartedAt = Date()
         let chatResults = await searchChatSessions(query: trimmed, limit: 3)
         recordTiming(query: trimmed, section: "chatSessions", startedAt: chatStartedAt, returnedCount: chatResults.count, backend: sessionSearchIndexService == nil ? "fallback-scan" : "session-fts")
@@ -211,6 +225,7 @@ final class GlobalSearchFeatureModel {
         previewState = GlobalSearchPreviewState(
             query: trimmed,
             loadingSections: [.knowledgeMarketplace, .calendar, .rss, .mail, .browserHistory],
+            imConversationResults: imResults,
             chatSessionResults: chatResults,
             searchTokens: tokens,
             errorMessage: nil
@@ -431,6 +446,7 @@ final class GlobalSearchFeatureModel {
         if let message = result.errorMessage, state.errorMessage == nil { state.errorMessage = message }
         if !result.results.isEmpty || result.errorMessage != nil { state.sectionStatusMessages[result.kind] = nil }
         switch result.kind {
+        case .imConversations: break
         case .chatSessions: break
         case .calendar: state.calendarResults = result.results
         case .rss: state.rssResults = result.results
@@ -472,6 +488,49 @@ final class GlobalSearchFeatureModel {
             return GlobalSearchSessionResult(id: result.id, title: result.title, snippet: result.snippet, updatedAt: result.updatedAt, messageCount: result.messageCount)
         }
         return Array((loadedResults + indexedResults).prefix(limit))
+    }
+
+    private func searchIMConversations(query: String, limit: Int) async -> [GlobalSearchIMConversationResult] {
+        if let imConversationSearchProvider,
+           let indexed = try? await imConversationSearchProvider(query, limit) {
+            return indexed.map { hit in
+                let conversation = hit.conversation
+                return GlobalSearchIMConversationResult(
+                    id: conversation.id,
+                    kind: conversation.kind,
+                    title: conversation.title.isEmpty ? conversation.participantName : conversation.title,
+                    participantName: conversation.participantName,
+                    snippet: hit.snippet,
+                    lastMessageAt: conversation.lastMessageAt
+                )
+            }
+        }
+
+        let terms = Self.matchTerms(for: query)
+        guard !terms.isEmpty else { return [] }
+        return imConversationsProvider().compactMap { conversation -> (GlobalSearchIMConversationResult, Double)? in
+            let titleScore = Self.matchScore(text: conversation.title, terms: terms, weight: 20)
+            let participantScore = Self.matchScore(text: conversation.participantName, terms: terms, weight: 16)
+            let previewScore = Self.matchScore(text: conversation.lastMessagePreview, terms: terms, weight: 8)
+            let total = titleScore + participantScore + previewScore
+            guard total > 0 else { return nil }
+            return (
+                GlobalSearchIMConversationResult(
+                    id: conversation.id,
+                    kind: conversation.kind,
+                    title: conversation.title.isEmpty ? conversation.participantName : conversation.title,
+                    participantName: conversation.participantName,
+                    snippet: conversation.lastMessagePreview,
+                    lastMessageAt: conversation.lastMessageAt
+                ),
+                total
+            )
+        }
+        .sorted {
+            $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.lastMessageAt > $1.0.lastMessageAt
+        }
+        .prefix(limit)
+        .map(\.0)
     }
 
     private static func matchTerms(for query: String) -> [String] {

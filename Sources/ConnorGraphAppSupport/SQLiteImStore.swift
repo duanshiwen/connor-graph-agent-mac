@@ -19,12 +19,14 @@ public protocol ImStore: Sendable {
     func setConversationStatus(conversationId: String, status: AgentSessionStatus, now: Int64) async throws
     func setConversationLabels(conversationId: String, labelIds: [String], now: Int64) async throws
     func deleteConversation(id: String) async throws
+    func searchConversations(query: String, limit: Int) async throws -> [ImConversationSearchHit]
 
     // Messages
     func messages(conversationId: String) async throws -> [ImMessage]
     func message(id: String) async throws -> ImMessage?
     @discardableResult
     func upsertMessage(_ message: ImMessage) async throws -> ImMessage
+    func upsertMessages(_ messages: [ImMessage], conversationId: String) async throws -> [ImMessage]
     func replaceMessageId(oldId: String, newId: String, status: ImMessageStatus) async throws
     func updateMessageStatus(id: String, status: ImMessageStatus) async throws
     func deleteMessage(id: String) async throws
@@ -56,6 +58,16 @@ public protocol ImStore: Sendable {
     func clearFriends() async throws
     func clearFriendRequests() async throws
     func clearForwardAliases() async throws
+}
+
+public struct ImConversationSearchHit: Sendable, Equatable {
+    public var conversation: ImConversation
+    public var snippet: String
+
+    public init(conversation: ImConversation, snippet: String) {
+        self.conversation = conversation
+        self.snippet = snippet
+    }
 }
 
 public enum SQLiteImStoreError: Error, LocalizedError, Sendable, Equatable {
@@ -103,6 +115,9 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
         try Self.configurePragmas(db: openedDB)
         try Self.createTables(db: openedDB)
         try Self.migrateTables(db: openedDB)
+        try queue.sync {
+            try rebuildSearchIndexIfNeeded()
+        }
     }
 
     deinit {
@@ -180,6 +195,12 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
                 "UPDATE im_conversations SET title = ?, title_customized = ?, updated_at = ? WHERE id = ?;",
                 bindings: [.text(title), .integer(customized ? 1 : 0), .integer(now), .text(conversationId)]
             )
+            if let conversation = try queryConversations(
+                sql: "SELECT * FROM im_conversations WHERE id = ? LIMIT 1;",
+                bindings: [.text(conversationId)]
+            ).first {
+                try indexConversationInternal(conversation)
+            }
         }
         postChange(scope: .conversations, conversationID: conversationId)
     }
@@ -208,9 +229,50 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
     /// Deletes a conversation; its messages are removed via FK cascade.
     public func deleteConversation(id: String) async throws {
         try queue.sync {
+            try executePrepared("DELETE FROM im_search_fts WHERE conversation_id = ?;", bindings: [.text(id)])
             try executePrepared("DELETE FROM im_conversations WHERE id = ?;", bindings: [.text(id)])
         }
         postChange(scope: .conversations, conversationID: id)
+    }
+
+    public func searchConversations(query: String, limit: Int) async throws -> [ImConversationSearchHit] {
+        let normalized = NativeSearchQueryNormalizer.normalize(query)
+        let match = NativeSourceSearchFTSQueryBuilder.query(for: normalized)
+        guard !match.isEmpty else { return [] }
+        return try queue.sync {
+            let candidates = try queryRows(
+                sql: """
+                    SELECT f.conversation_id, f.message_id, f.content
+                    FROM im_search_fts f
+                    JOIN im_conversations c ON c.id = f.conversation_id
+                    WHERE im_search_fts MATCH ?
+                    ORDER BY bm25(im_search_fts, 0, 0, 0, 8, 6, 3, 2, 1) ASC,
+                             c.last_message_at DESC
+                    LIMIT ?;
+                    """,
+                bindings: [.text(match), .integer(Int64(max(limit, 1) * 20))]
+            ) { statement in
+                (
+                    conversationID: columnText(statement, 0),
+                    messageID: columnText(statement, 1),
+                    content: columnText(statement, 2)
+                )
+            }
+            var seen: Set<String> = []
+            var results: [ImConversationSearchHit] = []
+            for candidate in candidates where seen.insert(candidate.conversationID).inserted {
+                guard let conversation = try queryConversations(
+                    sql: "SELECT * FROM im_conversations WHERE id = ? LIMIT 1;",
+                    bindings: [.text(candidate.conversationID)]
+                ).first else { continue }
+                let snippet = candidate.messageID.isEmpty
+                    ? conversation.lastMessagePreview
+                    : Self.searchSnippet(candidate.content, normalized: normalized)
+                results.append(ImConversationSearchHit(conversation: conversation, snippet: snippet))
+                if results.count == max(limit, 1) { break }
+            }
+            return results
+        }
     }
 
     // MARK: - Messages
@@ -241,14 +303,34 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
         return saved
     }
 
+    public func upsertMessages(_ messages: [ImMessage], conversationId: String) async throws -> [ImMessage] {
+        guard !messages.isEmpty else { return [] }
+        let saved = try queue.sync {
+            var result: [ImMessage] = []
+            result.reserveCapacity(messages.count)
+            try inTransaction {
+                for message in messages {
+                    result.append(try upsertMessageInternal(message))
+                }
+            }
+            return result
+        }
+        postChange(scope: .messages, conversationID: conversationId)
+        return saved
+    }
+
     /// Ack arrived: replace the optimistic temp id with the server id in place (seq unchanged).
     public func replaceMessageId(oldId: String, newId: String, status: ImMessageStatus) async throws {
         let conversationID = try queue.sync {
             let conversationID = try messageInternal(id: oldId)?.conversationId
+            try executePrepared("DELETE FROM im_search_fts WHERE doc_id = ?;", bindings: [.text(Self.messageSearchDocumentID(oldId))])
             try executePrepared(
                 "UPDATE im_messages SET id = ?, status = ? WHERE id = ?;",
                 bindings: [.text(newId), .text(status.rawValue), .text(oldId)]
             )
+            if let updated = try messageInternal(id: newId) {
+                try indexMessageInternal(updated)
+            }
             return conversationID
         }
         postChange(scope: .messages, conversationID: conversationID)
@@ -270,6 +352,7 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
     public func deleteMessage(id: String) async throws {
         let conversationID = try queue.sync {
             let conversationID = try messageInternal(id: id)?.conversationId
+            try executePrepared("DELETE FROM im_search_fts WHERE doc_id = ?;", bindings: [.text(Self.messageSearchDocumentID(id))])
             try executePrepared("DELETE FROM im_messages WHERE id = ?;", bindings: [.text(id)])
             return conversationID
         }
@@ -485,6 +568,7 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
 
     public func clearConversations() async throws {
         try queue.sync {
+            try executeInternal("DELETE FROM im_search_fts;")
             try executeInternal("DELETE FROM im_conversations;")
         }
         postChange(scope: .conversations)
@@ -610,6 +694,25 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
         try addColumnIfMissing("label_ids_json", definition: "TEXT NOT NULL DEFAULT '[]'", table: "im_conversations", db: db)
         try addColumnIfMissing("title_customized", definition: "INTEGER NOT NULL DEFAULT 0", table: "im_conversations", db: db)
         try execute("UPDATE im_conversations SET participant_name = title WHERE participant_name = '';", db: db)
+        try execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS im_search_fts USING fts5(
+                doc_id UNINDEXED,
+                conversation_id UNINDEXED,
+                message_id UNINDEXED,
+                title,
+                participant_name,
+                sender_name,
+                content,
+                indexed_text,
+                tokenize = 'unicode61'
+            );
+        """, db: db)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS im_search_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+        """, db: db)
     }
 
     private static func addColumnIfMissing(
@@ -672,6 +775,7 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
                 .integer(conversation.titleCustomized ? 1 : 0)
             ]
         )
+        try indexConversationInternal(conversation)
     }
 
     private func upsertMessageInternal(_ message: ImMessage) throws -> ImMessage {
@@ -697,6 +801,7 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
                     .integer(existing.seq)
                 ]
             )
+            try indexMessageInternal(updated)
             return updated
         }
 
@@ -722,7 +827,104 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
         )
         var inserted = message
         inserted.seq = sqlite3_last_insert_rowid(db)
+        try indexMessageInternal(inserted)
         return inserted
+    }
+
+    private func indexConversationInternal(_ conversation: ImConversation) throws {
+        let documentID = Self.conversationSearchDocumentID(conversation.id)
+        try executePrepared("DELETE FROM im_search_fts WHERE doc_id = ?;", bindings: [.text(documentID)])
+        try executePrepared(
+            """
+                INSERT INTO im_search_fts(
+                    doc_id, conversation_id, message_id, title, participant_name,
+                    sender_name, content, indexed_text
+                ) VALUES (?, ?, '', ?, ?, '', ?, ?);
+            """,
+            bindings: [
+                .text(documentID),
+                .text(conversation.id),
+                .text(conversation.title),
+                .text(conversation.participantName),
+                .text(conversation.lastMessagePreview),
+                .text(NativeSourceSearchIndexedTextBuilder.searchableText(
+                    title: conversation.title,
+                    summary: conversation.participantName,
+                    body: conversation.lastMessagePreview
+                ))
+            ]
+        )
+    }
+
+    private func indexMessageInternal(_ message: ImMessage) throws {
+        let documentID = Self.messageSearchDocumentID(message.id)
+        try executePrepared("DELETE FROM im_search_fts WHERE doc_id = ?;", bindings: [.text(documentID)])
+        try executePrepared(
+            """
+                INSERT INTO im_search_fts(
+                    doc_id, conversation_id, message_id, title, participant_name,
+                    sender_name, content, indexed_text
+                ) VALUES (?, ?, ?, '', '', ?, ?, ?);
+            """,
+            bindings: [
+                .text(documentID),
+                .text(message.conversationId),
+                .text(message.id),
+                .text(message.senderName),
+                .text(message.content),
+                .text(NativeSourceSearchIndexedTextBuilder.searchableText(
+                    title: message.senderName,
+                    body: message.content
+                ))
+            ]
+        )
+    }
+
+    private func rebuildSearchIndexIfNeeded() throws {
+        let version = try queryRows(
+            sql: "SELECT value FROM im_search_metadata WHERE key = 'schema_version' LIMIT 1;",
+            bindings: []
+        ) { columnText($0, 0) }.first
+        guard version != "1" else { return }
+
+        let conversations = try queryConversations(sql: "SELECT * FROM im_conversations;", bindings: [])
+        let messages = try queryMessages(sql: "SELECT * FROM im_messages;", bindings: [])
+        try inTransaction {
+            try executeInternal("DELETE FROM im_search_fts;")
+            for conversation in conversations { try indexConversationInternal(conversation) }
+            for message in messages { try indexMessageInternal(message) }
+            try executePrepared(
+                """
+                    INSERT INTO im_search_metadata(key, value) VALUES ('schema_version', '1')
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                """,
+                bindings: []
+            )
+        }
+    }
+
+    private static func conversationSearchDocumentID(_ id: String) -> String { "conversation:\(id)" }
+    private static func messageSearchDocumentID(_ id: String) -> String { "message:\(id)" }
+
+    private static func searchSnippet(
+        _ text: String,
+        normalized: NativeSearchNormalizedQuery,
+        maxLength: Int = 120
+    ) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let token = normalized.displayTokenValues.first(where: { !$0.isEmpty }) else {
+            return String(trimmed.prefix(maxLength))
+        }
+        let lower = trimmed.lowercased()
+        guard let range = lower.range(of: token.lowercased()) else {
+            return String(trimmed.prefix(maxLength))
+        }
+        let distance = lower.distance(from: lower.startIndex, to: range.lowerBound)
+        let start = max(0, distance - 36)
+        let end = min(trimmed.count, start + maxLength)
+        return String(trimmed[
+            trimmed.index(trimmed.startIndex, offsetBy: start)..<trimmed.index(trimmed.startIndex, offsetBy: end)
+        ])
     }
 
     private func messageInternal(id: String) throws -> ImMessage? {

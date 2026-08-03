@@ -35,6 +35,8 @@ final class ImFeatureModel {
     private(set) var socketConnected = false
     private(set) var isSignedIn = false
     private(set) var selfUserId: Int64?
+    private(set) var selfAvatarURL = ""
+    private(set) var selfAvatarRevision: UInt = 0
     private(set) var participantMessagesByConversation: [String: [ImMessage]] = [:]
     private(set) var regeneratingTitleConversationIDs: Set<String> = []
 
@@ -61,16 +63,6 @@ final class ImFeatureModel {
     var selectedConversation: ImConversation? {
         guard let selectedConversationId else { return nil }
         return conversations.first { $0.id == selectedConversationId }
-    }
-
-    /// Android parity: pinned first, then most recent activity.
-    var sortedConversations: [ImConversation] {
-        conversations.sorted { lhs, rhs in
-            if lhs.pinned != rhs.pinned { return lhs.pinned }
-            let lhsAt = max(lhs.lastMessageAt, lhs.updatedAt)
-            let rhsAt = max(rhs.lastMessageAt, rhs.updatedAt)
-            return lhsAt > rhsAt
-        }
     }
 
     var totalUnreadCount: Int {
@@ -154,10 +146,12 @@ final class ImFeatureModel {
                 case .signedIn(let user):
                     self.isSignedIn = true
                     self.selfUserId = Int64(user.id)
+                    self.selfAvatarURL = user.avatarURL ?? ""
                 case .signedOut, .expired:
                     let wasSignedIn = self.isSignedIn
                     self.isSignedIn = false
                     self.selfUserId = nil
+                    self.selfAvatarURL = ""
                     if wasSignedIn {
                         Task { [weak self] in await self?.handleSignOut() }
                     }
@@ -167,9 +161,17 @@ final class ImFeatureModel {
             }
             .store(in: &cancellables)
 
+        identityStore.$avatarRevision
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] revision in
+                self?.selfAvatarRevision = revision
+            }
+            .store(in: &cancellables)
+
         Task { [weak self] in
             guard let self else { return }
             await self.center.prepareAfterLaunch()
+            await self.center.refreshAll()
             await self.reloadAll()
         }
     }
@@ -246,11 +248,17 @@ final class ImFeatureModel {
             messages = []
             return
         }
-        messages = (try? await store.messages(conversationId: id)) ?? []
+
+        let cachedMessages = (try? await store.messages(conversationId: id)) ?? []
+        messages = cachedMessages
+        hasOlderMessages = (try? await center.reconcileLatestMessages(conversationId: id, limit: 50)) ?? true
+        guard selectedConversationId == id else { return }
+        messages = (try? await store.messages(conversationId: id)) ?? cachedMessages
         await center.markConversationRead(id)
-        if messages.isEmpty {
-            await loadOlderMessages()
-        }
+    }
+
+    func searchConversations(query: String, limit: Int) async throws -> [ImConversationSearchHit] {
+        try await store.searchConversations(query: query, limit: limit)
     }
 
     func sendMessage(_ text: String) async {
@@ -297,10 +305,6 @@ final class ImFeatureModel {
     func loadOlderMessages() async {
         guard let selectedConversationId else { return }
         hasOlderMessages = (try? await center.loadOlderMessages(conversationId: selectedConversationId, limit: 20)) ?? false
-    }
-
-    func setPinned(conversationId: String, pinned: Bool) async {
-        try? await center.setPinned(conversationId: conversationId, pinned: pinned)
     }
 
     func setMuted(conversationId: String, muted: Bool) async {

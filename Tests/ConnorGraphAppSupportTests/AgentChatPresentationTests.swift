@@ -5,19 +5,35 @@ import ConnorGraphAgent
 import ConnorGraphSearch
 import ConnorGraphAppSupport
 
-@Test func agentChatSessionPresentationFormatsRelativeUpdatedTime() {
-    let session = AgentSession(
-        id: "session-1",
-        title: "Prompt inspection timeline",
-        createdAt: Date(timeIntervalSince1970: 1_000),
-        updatedAt: Date(timeIntervalSince1970: 1_900)
-    )
+@Test func agentChatSessionPresentationFormatsCalendarUpdatedTime() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let now = DateComponents(
+        calendar: calendar,
+        timeZone: calendar.timeZone,
+        year: 2026,
+        month: 8,
+        day: 3,
+        hour: 18
+    ).date!
 
-    let row = AgentChatSessionPresentation(session: session, now: Date(timeIntervalSince1970: 2_800))
+    func row(id: String, year: Int = 2026, month: Int, day: Int, hour: Int, minute: Int = 0) -> AgentChatSessionPresentation {
+        let updatedAt = DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: year,
+            month: month,
+            day: day,
+            hour: hour,
+            minute: minute
+        ).date!
+        let session = AgentSession(id: id, title: id, createdAt: updatedAt, updatedAt: updatedAt)
+        return AgentChatSessionPresentation(session: session, now: now, calendar: calendar)
+    }
 
-    #expect(row.id == "session-1")
-    #expect(row.title == "Prompt inspection timeline")
-    #expect(row.relativeUpdatedTime == "15 分钟")
+    #expect(row(id: "today", month: 8, day: 3, hour: 9, minute: 5).relativeUpdatedTime == "09:05")
+    #expect(row(id: "recent", month: 7, day: 31, hour: 12).relativeUpdatedTime == "星期五")
+    #expect(row(id: "older", month: 7, day: 20, hour: 12).relativeUpdatedTime == "7月20日")
 }
 
 @Test func agentChatMessagePresentationAssignsTurnNumbersByUserAssistantPairs() {

@@ -28,11 +28,19 @@ private enum ImTimeFormat {
         return day.string(from: date)
     }
 }
+
+private enum ImChatLayout {
+    static let messageBubbleMaxWidth: CGFloat = 420
+}
+
 // MARK: - Conversation list row
 
 struct ImConversationRow: View {
     let conversation: ImConversation
     let participantMessages: [ImMessage]
+    let selfUserId: Int64?
+    let selfAvatarURL: String
+    let selfAvatarRevision: UInt
     let isSelected: Bool
     let isRegeneratingTitle: Bool
     let labelDefinitions: [AgentSessionLabelDefinition]
@@ -41,7 +49,6 @@ struct ImConversationRow: View {
     let onSetStatus: (AgentSessionStatus) -> Void
     let onToggleLabel: (String) -> Void
     let onRegenerateTitle: () -> Void
-    let onTogglePinned: () -> Void
     let onToggleMuted: () -> Void
     let onDelete: () -> Void
 
@@ -51,13 +58,14 @@ struct ImConversationRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: AppListCardLayout.contentPadding) {
-            Image(systemName: conversation.pinned ? "pin.fill" : statusIcon)
-                .foregroundStyle(conversation.pinned ? .orange : .secondary)
+            Image(systemName: statusIcon)
+                .foregroundStyle(.secondary)
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                 titleRow
-                participantRow
+                metadataRow
                 labelRow
+                participantRow
             }
         }
         .appListRowSurface(isSelected: isSelected)
@@ -97,20 +105,19 @@ struct ImConversationRow: View {
         }
     }
 
-    private var participantRow: some View {
+    private var metadataRow: some View {
         HStack(spacing: 6) {
-            ImParticipantAvatarStack(conversation: conversation, messages: participantMessages)
-            Image(systemName: "plus")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.tertiary)
-            Text(conversation.participantName)
-                .font(AppListTypography.rowSubtitle)
+            Text(conversation.status.displayName)
+                .font(AppListTypography.rowCaptionEmphasized)
+                .foregroundStyle(statusColor)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(statusColor.opacity(0.14), in: Capsule())
+            Text(conversation.lastMessagePreview.isEmpty ? conversationKindLabel : conversation.lastMessagePreview)
+                .font(AppListTypography.rowCaption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            Text(conversation.status.displayName)
-                .font(AppListTypography.rowCaptionEmphasized)
-                .foregroundStyle(Color.accentColor)
             if conversation.unreadCount > 0 {
                 Text("\(min(conversation.unreadCount, 99))")
                     .font(AppListTypography.rowCaptionEmphasized)
@@ -120,6 +127,34 @@ struct ImConversationRow: View {
                     .background(conversation.muted ? Color.gray : Color.red, in: Capsule())
             }
         }
+    }
+
+    private var participantRow: some View {
+        HStack(spacing: 6) {
+            ImParticipantAvatarStack(
+                conversation: conversation,
+                messages: participantMessages,
+                selfUserId: selfUserId,
+                selfAvatarURL: selfAvatarURL,
+                selfAvatarRevision: selfAvatarRevision
+            )
+                .fixedSize(horizontal: true, vertical: false)
+            Text(conversation.participantName)
+                .font(AppListTypography.rowSubtitle)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var conversationKindLabel: String {
+        conversation.kind == .peer ? "联系人会话" : "群组会话"
+    }
+
+    private var statusColor: Color {
+        AppSessionStatusVisualStyle.color(for: conversation.status)
     }
 
     @ViewBuilder private var labelRow: some View {
@@ -154,7 +189,6 @@ struct ImConversationRow: View {
         Divider()
         Button("重命名", systemImage: "pencil", action: beginTitleEdit)
         Button("AI 重设标题", systemImage: "sparkles", action: onRegenerateTitle).disabled(isRegeneratingTitle)
-        Button(conversation.pinned ? "取消置顶" : "置顶", systemImage: "pin", action: onTogglePinned)
         Button(conversation.muted ? "取消免打扰" : "免打扰", systemImage: "bell.slash", action: onToggleMuted)
         Divider()
         Button("删除会话", systemImage: "trash", role: .destructive, action: onDelete)
@@ -182,20 +216,46 @@ struct ImConversationRow: View {
 private struct ImParticipantAvatarStack: View {
     let conversation: ImConversation
     let messages: [ImMessage]
+    let selfUserId: Int64?
+    let selfAvatarURL: String
+    let selfAvatarRevision: UInt
 
     var body: some View {
         HStack(spacing: -6) {
             ForEach(Array(avatars.prefix(5).enumerated()), id: \.offset) { _, avatar in
-                ImUserAvatar(urlString: avatar.url, name: avatar.name, size: 20)
+                ImUserAvatar(
+                    urlString: avatar.url,
+                    name: avatar.name,
+                    size: 20,
+                    revision: avatar.revision
+                )
+            }
+            if avatars.count >= 5 {
+                Image(systemName: "plus")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 20, height: 20)
+                    .background(Color(nsColor: .windowBackgroundColor), in: Circle())
+                    .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+                    .accessibilityLabel("更多成员")
             }
         }
         .frame(minWidth: 20, alignment: .leading)
     }
 
-    private var avatars: [(url: String, name: String)] {
-        if conversation.kind == .peer { return [(conversation.avatar, conversation.participantName)] }
-        let messageAvatars = messages.map { ($0.senderAvatar, $0.senderName) }
-        return messageAvatars.isEmpty ? [(conversation.avatar, conversation.participantName)] : messageAvatars
+    private var avatars: [(url: String, name: String, revision: UInt)] {
+        if conversation.kind == .peer {
+            return [(conversation.avatar, conversation.participantName, 0)]
+        }
+        let messageAvatars: [(url: String, name: String, revision: UInt)] = messages.map { message in
+            if message.senderId == selfUserId {
+                return (selfAvatarURL, message.senderName, selfAvatarRevision)
+            }
+            return (message.senderAvatar, message.senderName, UInt(0))
+        }
+        return messageAvatars.isEmpty
+            ? [(conversation.avatar, conversation.participantName, UInt(0))]
+            : messageAvatars
     }
 }
 
@@ -203,15 +263,13 @@ private struct ImUserAvatar: View {
     let urlString: String
     let name: String
     let size: CGFloat
+    var revision: UInt = 0
 
     var body: some View {
         ZStack {
             Circle().fill(Color.accentColor.opacity(0.14))
-            if let url = URL(string: urlString), !urlString.isEmpty {
-                AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { initials }
-            } else {
-                initials
-            }
+            initials
+            ReloadingAvatarImage(urlString: urlString, revision: revision)
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
@@ -243,9 +301,7 @@ struct ImChatDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             messageList
-            Divider()
             if model.isSelectionMode {
                 selectionBar
             } else {
@@ -318,6 +374,8 @@ struct ImChatDetailView: View {
                             message: message,
                             conversation: model.selectedConversation,
                             isMine: message.senderId == (model.selfUserId ?? -1),
+                            selfAvatarURL: model.selfAvatarURL,
+                            selfAvatarRevision: model.selfAvatarRevision,
                             isGroup: model.selectedConversation?.kind == .group,
                             isSelectionMode: model.isSelectionMode,
                             isSelected: model.selectedMessageIds.contains(message.id),
@@ -662,6 +720,8 @@ private struct ImMessageBubble: View {
     let message: ImMessage
     let conversation: ImConversation?
     let isMine: Bool
+    let selfAvatarURL: String
+    let selfAvatarRevision: UInt
     let isGroup: Bool
     let isSelectionMode: Bool
     let isSelected: Bool
@@ -721,30 +781,28 @@ private struct ImMessageBubble: View {
     }
 
     private var avatarURL: String {
+        if isMine { return selfAvatarURL }
         if !message.senderAvatar.isEmpty { return message.senderAvatar }
-        return isMine ? "" : (conversation?.avatar ?? "")
+        return conversation?.avatar ?? ""
     }
 
     @ViewBuilder
     private var messageContent: some View {
         switch message.type {
         case .text, .system:
-            AgentMarkdownPreviewText(
-                markdown: message.content,
-                font: AgentChatTypography.messageBody(pointSize: messageBodyPointSize),
-                bodyPointSize: messageBodyPointSize
-            )
-            .textSelection(.enabled)
-            .padding(.horizontal, isMine ? AgentChatLayout.messageBubbleHorizontalPadding : 0)
-            .padding(.vertical, isMine ? AgentChatLayout.messageBubbleVerticalPadding : 0)
-            .frame(
-                maxWidth: isMine ? AgentChatLayout.userMessageMaxWidth : AgentChatLayout.messageMaxWidth,
-                alignment: .leading
-            )
-            .background(
-                isMine ? ConnorCraftPalette.userBubble : Color.clear,
-                in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-            )
+            Text(message.content)
+                .font(AgentChatTypography.messageBody(pointSize: messageBodyPointSize))
+                .textSelection(.enabled)
+                .padding(.horizontal, AgentChatLayout.messageBubbleHorizontalPadding)
+                .padding(.vertical, AgentChatLayout.messageBubbleVerticalPadding)
+                .background(
+                    isMine ? ConnorCraftPalette.userBubble : Color.secondary.opacity(0.10),
+                    in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                )
+                .frame(
+                    maxWidth: ImChatLayout.messageBubbleMaxWidth,
+                    alignment: isMine ? .trailing : .leading
+                )
         case .image:
             ImImageMessageContent(message: message, isMine: isMine)
         case .video:
@@ -767,7 +825,12 @@ private struct ImMessageBubble: View {
     private var identityRow: some View {
         HStack(spacing: AgentChatLayout.spaceS) {
             if isMine { Spacer(minLength: 0) }
-            ImUserAvatar(urlString: avatarURL, name: displayName, size: AgentChatLayout.avatarSize)
+            ImUserAvatar(
+                urlString: avatarURL,
+                name: displayName,
+                size: AgentChatLayout.avatarSize,
+                revision: isMine ? selfAvatarRevision : 0
+            )
             Text(displayName)
                 .font(AgentChatTypography.metaEmphasis)
                 .foregroundStyle(.primary.opacity(0.88))

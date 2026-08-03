@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ConnorGraphCore
+import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
 import ConnorGraphAgent
@@ -285,6 +286,20 @@ private struct AppListRowSurfaceModifier: ViewModifier {
 extension View {
     func appListRowSurface(isSelected: Bool, backgroundColor: Color? = nil) -> some View {
         modifier(AppListRowSurfaceModifier(isSelected: isSelected, backgroundColor: backgroundColor))
+    }
+}
+
+enum AppSessionStatusVisualStyle {
+    static func color(for status: AgentSessionStatus) -> Color {
+        switch status {
+        case .todo: .secondary
+        case .inProgress: .blue
+        case .waiting: .orange
+        case .needsReview: .purple
+        case .done: .green
+        case .blocked: .red
+        case .cancelled, .archived: .gray
+        }
     }
 }
 

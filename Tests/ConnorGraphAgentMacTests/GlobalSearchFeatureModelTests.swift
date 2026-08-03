@@ -156,6 +156,48 @@ struct GlobalSearchFeatureModelTests {
         model.shutdown()
     }
 
+    @Test func peerAndGroupConversationsJoinUnifiedSearchAndOpenConversation() async throws {
+        let model = makeModel()
+        model.imConversationsProvider = {
+            [
+                ImConversation(
+                    id: "peer:7",
+                    kind: .peer,
+                    peerUserId: 7,
+                    title: "项目联系人",
+                    participantName: "李明",
+                    lastMessagePreview: "项目方案已经发你了",
+                    lastMessageAt: 1_754_200_000_000
+                ),
+                ImConversation(
+                    id: "group:delivery",
+                    kind: .group,
+                    groupId: "delivery",
+                    title: "项目交付群",
+                    participantName: "项目交付群",
+                    lastMessagePreview: "下午同步交付进度",
+                    lastMessageAt: 1_754_300_000_000
+                )
+            ]
+        }
+        var openedConversationID: String?
+        model.onDestination = {
+            if case let .imConversation(id) = $0 { openedConversationID = id }
+        }
+        model.updateQuery("项目")
+
+        await model.refreshPreview(for: "项目")
+
+        #expect(Set(model.previewState.imConversationResults.map(\.kind)) == Set([.peer, .group]))
+        #expect(model.selectableItems.contains(.imConversation("peer:7")))
+        #expect(model.selectableItems.contains(.imConversation("group:delivery")))
+
+        model.openIMConversation("group:delivery")
+        #expect(openedConversationID == "group:delivery")
+        #expect(!model.isOverlayPresented)
+        model.shutdown()
+    }
+
     private func makeModel() -> GlobalSearchFeatureModel {
         GlobalSearchFeatureModel(nativeSourceSearchBackend: nil, sessionSearchIndexService: nil, historyRepository: nil)
     }

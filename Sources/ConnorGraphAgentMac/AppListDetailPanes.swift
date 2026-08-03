@@ -821,6 +821,28 @@ private struct ContactProfileThumbnail: View {
     }
 }
 
+private enum MixedConversationListItem: Identifiable {
+    case im(ImConversation)
+    case session(AgentChatSessionPresentation)
+
+    var id: String {
+        switch self {
+        case .im(let conversation): "im:\(conversation.id)"
+        case .session(let row): "session:\(row.id)"
+        }
+    }
+
+    var updatedAt: Date {
+        switch self {
+        case .im(let conversation):
+            // Read/status metadata updates updatedAt; only messages may reorder chats.
+            Date(timeIntervalSince1970: TimeInterval(conversation.lastMessageAt) / 1_000)
+        case .session(let row):
+            row.updatedAt
+        }
+    }
+}
+
 struct CraftSessionListPane: View {
     @Bindable var model: ChatFeatureModel
     @Bindable var governanceModel: GovernanceFeatureModel
@@ -831,6 +853,7 @@ struct CraftSessionListPane: View {
     @State private var isCreateGroupPresented = false
 
     var body: some View {
+        let items = mixedConversationItems
         VStack(spacing: 0) {
             AppListPaneHeader(title: sessionListTitle) {
                 Button(action: { isCreationMenuPresented.toggle() }) {
@@ -848,34 +871,20 @@ struct CraftSessionListPane: View {
                 model.sessions.searchQuery = ""
             }
 
-            if visibleSessionRows.isEmpty && visibleImConversations.isEmpty {
+            if items.isEmpty {
                 ContentUnavailableView(sessionEmptyTitle, systemImage: "bubble.left", description: Text(sessionEmptyDescription))
                     .padding(.top, 80)
             } else {
                 ScrollView {
                     LazyVStack(spacing: AppListCardLayout.spacing) {
-                        if let imModel {
-                            ForEach(visibleImConversations) { conversation in
-                                ImConversationRow(
-                                    conversation: conversation,
-                                    participantMessages: imModel.participantMessages(for: conversation.id),
-                                    isSelected: imModel.selectedConversationId == conversation.id,
-                                    isRegeneratingTitle: imModel.regeneratingTitleConversationIDs.contains(conversation.id),
-                                    labelDefinitions: governanceModel.config.labels,
-                                    onSelect: { Task { await imModel.selectConversation(conversation.id) } },
-                                    onRename: { title in Task { await imModel.renameConversation(conversationId: conversation.id, title: title) } },
-                                    onSetStatus: { status in Task { await imModel.setStatus(conversationId: conversation.id, status: status) } },
-                                    onToggleLabel: { labelID in Task { await imModel.toggleLabel(conversationId: conversation.id, labelId: labelID) } },
-                                    onRegenerateTitle: { Task { await imModel.regenerateTitle(conversationId: conversation.id) } },
-                                    onTogglePinned: { Task { await imModel.setPinned(conversationId: conversation.id, pinned: !conversation.pinned) } },
-                                    onToggleMuted: { Task { await imModel.setMuted(conversationId: conversation.id, muted: !conversation.muted) } },
-                                    onDelete: { Task { await imModel.deleteConversation(conversation.id) } }
-                                )
+                        ForEach(items) { item in
+                            switch item {
+                            case .im(let conversation):
+                                imConversationRow(conversation)
+                            case .session(let row):
+                                sessionRow(row)
+                                    .onAppear { sessionActions.loadMoreChatSessionsIfNeeded(currentSessionID: row.id) }
                             }
-                        }
-                        ForEach(visibleSessionRows) { row in
-                            sessionRow(row)
-                                .onAppear { sessionActions.loadMoreChatSessionsIfNeeded(currentSessionID: row.id) }
                         }
                     }
                     .padding(.horizontal, AppListCardLayout.horizontalInset)
@@ -893,6 +902,29 @@ struct CraftSessionListPane: View {
             if let imModel {
                 ImCreateGroupSheet(model: imModel, isPresented: $isCreateGroupPresented)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func imConversationRow(_ conversation: ImConversation) -> some View {
+        if let imModel {
+            ImConversationRow(
+                conversation: conversation,
+                participantMessages: imModel.participantMessages(for: conversation.id),
+                selfUserId: imModel.selfUserId,
+                selfAvatarURL: imModel.selfAvatarURL,
+                selfAvatarRevision: imModel.selfAvatarRevision,
+                isSelected: imModel.selectedConversationId == conversation.id,
+                isRegeneratingTitle: imModel.regeneratingTitleConversationIDs.contains(conversation.id),
+                labelDefinitions: governanceModel.config.labels,
+                onSelect: { selectImConversation(conversation.id) },
+                onRename: { title in Task { await imModel.renameConversation(conversationId: conversation.id, title: title) } },
+                onSetStatus: { status in Task { await imModel.setStatus(conversationId: conversation.id, status: status) } },
+                onToggleLabel: { labelID in Task { await imModel.toggleLabel(conversationId: conversation.id, labelId: labelID) } },
+                onRegenerateTitle: { Task { await imModel.regenerateTitle(conversationId: conversation.id) } },
+                onToggleMuted: { Task { await imModel.setMuted(conversationId: conversation.id, muted: !conversation.muted) } },
+                onDelete: { Task { await imModel.deleteConversation(conversation.id) } }
+            )
         }
     }
 
@@ -932,7 +964,7 @@ struct CraftSessionListPane: View {
         CraftSessionRow(
             row: row,
             readState: model.sessions.readStates[row.id],
-            isSelected: row.id == model.sessions.selectedSessionID,
+            isSelected: imModel?.selectedConversationId == nil && row.id == model.sessions.selectedSessionID,
             executionState: .resolve(
                 isSubmitting: rowActions.isSubmitting(row.id),
                 hasPendingApproval: model.approvals.hasPendingApproval(sessionID: row.id)
@@ -957,6 +989,25 @@ struct CraftSessionListPane: View {
         }
     }
 
+    private func selectImConversation(_ id: String) {
+        guard let imModel else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            sessionActions.clearSelectedChatSession()
+        }
+        Task { await imModel.selectConversation(id) }
+    }
+
+    private var mixedConversationItems: [MixedConversationListItem] {
+        let imItems = visibleImConversations.map(MixedConversationListItem.im)
+        let sessionItems = visibleSessionRows.map(MixedConversationListItem.session)
+        return (imItems + sessionItems).sorted {
+            if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+            return $0.id < $1.id
+        }
+    }
+
     private var visibleSessionRows: [AgentChatSessionPresentation] {
         let query = model.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
@@ -967,7 +1018,7 @@ struct CraftSessionListPane: View {
 
     private var visibleImConversations: [ImConversation] {
         guard let imModel else { return [] }
-        let filtered = imModel.sortedConversations.filter { conversation in
+        let filtered = imModel.conversations.filter { conversation in
             switch model.sessions.filter {
             case .all:
                 return conversation.status != .archived
@@ -3857,11 +3908,11 @@ struct CraftSessionRow: View {
     }
 
     private var statusPillForegroundColor: Color {
-        usesFilledAttentionStyle ? .white : statusColor(row.status)
+        usesFilledAttentionStyle ? .white : AppSessionStatusVisualStyle.color(for: row.status)
     }
 
     private var statusPillBackgroundColor: Color {
-        usesFilledAttentionStyle ? Color.white.opacity(0.18) : statusColor(row.status).opacity(0.14)
+        usesFilledAttentionStyle ? Color.white.opacity(0.18) : AppSessionStatusVisualStyle.color(for: row.status).opacity(0.14)
     }
 
     private var labelForegroundColor: Color {
@@ -3962,18 +4013,6 @@ struct CraftSessionRow: View {
         }
     }
 
-    private func statusColor(_ status: AgentSessionStatus) -> Color {
-        switch status {
-        case .todo: .secondary
-        case .inProgress: .blue
-        case .waiting: .orange
-        case .needsReview: .purple
-        case .done: .green
-        case .blocked: .red
-        case .cancelled: .gray
-        case .archived: .gray
-        }
-    }
 }
 
 struct CraftSettingsListPane: View {

@@ -36,9 +36,27 @@ struct GlobalSearchSessionResult: Identifiable, Equatable {
     }
 }
 
+struct GlobalSearchIMConversationResult: Identifiable, Equatable {
+    var id: String
+    var kind: ImConversationKind
+    var title: String
+    var participantName: String
+    var snippet: String
+    var lastMessageAt: Int64
+
+    var kindLabel: String { kind == .group ? "群聊" : "单聊" }
+
+    var lastMessageAtLabel: String {
+        guard lastMessageAt > 0 else { return "" }
+        return Date(timeIntervalSince1970: TimeInterval(lastMessageAt) / 1_000)
+            .connorLocalFormatted(date: .medium, time: .short)
+    }
+}
+
 struct GlobalSearchPreviewState: Equatable {
     var query: String = ""
     var loadingSections: Set<GlobalSearchSectionKind> = []
+    var imConversationResults: [GlobalSearchIMConversationResult] = []
     var chatSessionResults: [GlobalSearchSessionResult] = []
     var calendarResults: [NativeSearchResult] = []
     var rssResults: [NativeSearchResult] = []
@@ -53,6 +71,7 @@ struct GlobalSearchPreviewState: Equatable {
         query: String = "",
         isLoading: Bool = false,
         loadingSections: Set<GlobalSearchSectionKind>? = nil,
+        imConversationResults: [GlobalSearchIMConversationResult] = [],
         chatSessionResults: [GlobalSearchSessionResult] = [],
         calendarResults: [NativeSearchResult] = [],
         rssResults: [NativeSearchResult] = [],
@@ -65,6 +84,7 @@ struct GlobalSearchPreviewState: Equatable {
     ) {
         self.query = query
         self.loadingSections = loadingSections ?? (isLoading ? Set(GlobalSearchSectionKind.allCases) : [])
+        self.imConversationResults = imConversationResults
         self.chatSessionResults = chatSessionResults
         self.calendarResults = calendarResults
         self.rssResults = rssResults
@@ -89,7 +109,7 @@ struct GlobalSearchPreviewState: Equatable {
     }
 
     var hasAnySourceResults: Bool {
-        !chatSessionResults.isEmpty || !knowledgeBaseResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !mailResults.isEmpty || !browserHistoryResults.isEmpty
+        !imConversationResults.isEmpty || !chatSessionResults.isEmpty || !knowledgeBaseResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !mailResults.isEmpty || !browserHistoryResults.isEmpty
     }
 }
 
@@ -113,6 +133,7 @@ struct GlobalSearchNativeSectionResult: Sendable {
 }
 
 enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
+    case imConversations
     case chatSessions
     case calendar
     case rss
@@ -133,6 +154,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
+        case .imConversations: "真人会话"
         case .chatSessions: "对话历史"
         case .calendar: "日历"
         case .rss: "RSS"
@@ -144,6 +166,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
 
     var systemImage: String {
         switch self {
+        case .imConversations: "person.2"
         case .chatSessions: "bubble.left.and.bubble.right"
         case .calendar: "calendar"
         case .rss: "dot.radiowaves.left.and.right"
@@ -155,6 +178,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
 
     var emptyTitle: String {
         switch self {
+        case .imConversations: "没有匹配的单聊或群聊"
         case .chatSessions: "没有匹配的对话"
         case .calendar: "没有匹配的日程"
         case .rss: "没有匹配的 RSS"
@@ -168,6 +192,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
 enum GlobalSearchSelectableItem: Equatable {
     case recentSearch(String)
     case action(GlobalSearchActionKind)
+    case imConversation(String)
     case chatSession(String)
     case nativeResult(String)
     case knowledgeBase(String)

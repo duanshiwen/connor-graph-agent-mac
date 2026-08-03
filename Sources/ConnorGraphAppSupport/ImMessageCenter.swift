@@ -116,6 +116,9 @@ public actor ImMessageCenter {
     }
 
     private var pendingSends: [PendingSend] = []
+    private var latestReconciliationTasks: [String: Task<Bool, Error>] = [:]
+    private var refreshAllTask: Task<Bool, Never>?
+    private var refreshRetryTask: Task<Void, Never>?
 
     /// Currently opened conversation: its incoming messages neither count as unread
     /// nor stay unacknowledged (auto read receipt).
@@ -152,12 +155,27 @@ public actor ImMessageCenter {
     /// Socket (re)connected: full backfill covers cold start and pushes missed offline.
     public func handleSocketConnected() async {
         await refreshAll()
+        if let activeConversationId {
+            _ = try? await reconcileLatestMessages(conversationId: activeConversationId)
+        }
     }
 
     /// Sign-out / account switch: IM caches are per-account server projections.
     public func handleSignOut() async {
         for pending in pendingSends { pending.timeoutTask?.cancel() }
         pendingSends.removeAll()
+        let reconciliationTasks = Array(latestReconciliationTasks.values)
+        for task in reconciliationTasks { task.cancel() }
+        latestReconciliationTasks.removeAll()
+        let activeRefreshTask = refreshAllTask
+        activeRefreshTask?.cancel()
+        refreshAllTask = nil
+        let activeRetryTask = refreshRetryTask
+        activeRetryTask?.cancel()
+        refreshRetryTask = nil
+        for task in reconciliationTasks { _ = try? await task.value }
+        _ = await activeRefreshTask?.value
+        await activeRetryTask?.value
         try? await store.clearConversations()
         try? await store.clearFriends()
         try? await store.clearFriendRequests()
@@ -484,7 +502,7 @@ public actor ImMessageCenter {
                 peerUserId: peerId,
                 title: friendTitle ?? fallbackTitle ?? "用户 \(peerId)",
                 avatar: friend?.avatar ?? "",
-                lastMessageAt: now,
+                lastMessageAt: 0,
                 updatedAt: now
             ))
         }
@@ -500,7 +518,7 @@ public actor ImMessageCenter {
                 kind: .group,
                 groupId: groupId,
                 title: title ?? "群聊",
-                lastMessageAt: now,
+                lastMessageAt: 0,
                 updatedAt: now
             ))
         }
@@ -509,8 +527,10 @@ public actor ImMessageCenter {
 
     private func touchConversation(id: String, preview: String, at: Int64, unreadDelta: Int) async throws {
         guard var existing = try await store.conversation(id: id) else { return }
-        existing.lastMessagePreview = preview
-        existing.lastMessageAt = max(existing.lastMessageAt, at)
+        if at >= existing.lastMessageAt {
+            existing.lastMessagePreview = preview
+            existing.lastMessageAt = at
+        }
         existing.unreadCount += unreadDelta
         existing.updatedAt = configuration.now()
         try await store.upsertConversation(existing)
@@ -571,9 +591,51 @@ public actor ImMessageCenter {
     /// Full backfill: friends + conversations + groups (login and socket reconnect).
     public func refreshAll() async {
         guard currentIdentity() != nil else { return }
-        try? await refreshFriendData()
-        try? await refreshConversations()
-        try? await refreshGroups()
+        let succeeded = await coalescedRefreshAll()
+        if succeeded {
+            refreshRetryTask?.cancel()
+            refreshRetryTask = nil
+        } else {
+            scheduleRefreshRetry()
+        }
+    }
+
+    private func coalescedRefreshAll() async -> Bool {
+        if let refreshAllTask { return await refreshAllTask.value }
+        let task = Task { await self.performRefreshAll() }
+        refreshAllTask = task
+        let result = await task.value
+        refreshAllTask = nil
+        return result
+    }
+
+    private func performRefreshAll() async -> Bool {
+        guard currentIdentity() != nil, !Task.isCancelled else { return true }
+        var succeeded = true
+        do { try await refreshFriendData() } catch { succeeded = false }
+        do { try await refreshConversations() } catch { succeeded = false }
+        do { try await refreshGroups() } catch { succeeded = false }
+        return succeeded
+    }
+
+    private func scheduleRefreshRetry() {
+        guard refreshRetryTask == nil, currentIdentity() != nil else { return }
+        refreshRetryTask = Task { [weak self] in
+            var delay = 2
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled, let self else { return }
+                if await self.coalescedRefreshAll() {
+                    await self.finishRefreshRetry()
+                    return
+                }
+                delay = min(delay * 2, 30)
+            }
+        }
+    }
+
+    private func finishRefreshRetry() {
+        refreshRetryTask = nil
     }
 
     private func refreshConversations() async throws {
@@ -650,6 +712,96 @@ public actor ImMessageCenter {
 
     // MARK: - History paging
 
+    /// Fetches the newest server page without a cursor. This closes gaps where the
+    /// conversation summary advanced while the local message cache missed a push.
+    public func loadLatestMessages(conversationId: String, limit: Int = 20) async throws -> Bool {
+        guard let conversation = try await store.conversation(id: conversationId) else { return false }
+        let selfUser = currentIdentity()
+        switch conversation.kind {
+        case .group:
+            guard let groupId = conversation.groupId else { return false }
+            let page = try await service.groupMessages(groupId: groupId, beforeId: nil, limit: limit)
+            try await storeGroupHistory(page.messages, conversationId: conversationId, selfUser: selfUser)
+            return page.hasMore
+        case .peer:
+            guard let peerId = conversation.peerUserId else { return false }
+            let page = try await service.chatHistory(peerId: peerId, beforeId: nil, limit: limit)
+            try await storePeerHistory(page.messages, conversationId: conversationId, selfUser: selfUser)
+            return page.hasMore
+        }
+    }
+
+    /// Reconciles a missed-offline gap from the newest server page backwards until
+    /// it overlaps the pre-existing local cache. An empty local cache intentionally
+    /// fetches only the newest page; older history remains user-paged.
+    public func reconcileLatestMessages(conversationId: String, limit: Int = 50) async throws -> Bool {
+        if let task = latestReconciliationTasks[conversationId] {
+            return try await task.value
+        }
+        let task = Task {
+            try await self.performLatestReconciliation(conversationId: conversationId, limit: limit)
+        }
+        latestReconciliationTasks[conversationId] = task
+        do {
+            let result = try await task.value
+            latestReconciliationTasks[conversationId] = nil
+            return result
+        } catch {
+            latestReconciliationTasks[conversationId] = nil
+            throw error
+        }
+    }
+
+    private func performLatestReconciliation(conversationId: String, limit: Int) async throws -> Bool {
+        guard let conversation = try await store.conversation(id: conversationId) else { return false }
+        let baselineIDs = Set(try await store.messages(conversationId: conversationId)
+            .filter { !$0.hasTemporaryID }
+            .map(\.id))
+        let selfUser = currentIdentity()
+        var beforeId: String?
+        var usedCursors: Set<String> = []
+
+        while !Task.isCancelled {
+            switch conversation.kind {
+            case .peer:
+                guard let peerId = conversation.peerUserId else { return false }
+                let page = try await service.chatHistory(peerId: peerId, beforeId: beforeId, limit: limit)
+                try Task.checkCancellation()
+                let overlap = page.messages.contains { baselineIDs.contains($0.messageId) }
+                try await storePeerHistory(page.messages, conversationId: conversationId, selfUser: selfUser)
+                if baselineIDs.isEmpty || overlap || !page.hasMore { return page.hasMore }
+                guard let cursor = oldestPeerMessageID(page.messages), usedCursors.insert(cursor).inserted else {
+                    return page.hasMore
+                }
+                beforeId = cursor
+            case .group:
+                guard let groupId = conversation.groupId else { return false }
+                let page = try await service.groupMessages(groupId: groupId, beforeId: beforeId, limit: limit)
+                try Task.checkCancellation()
+                let overlap = page.messages.contains { baselineIDs.contains($0.messageId) }
+                try await storeGroupHistory(page.messages, conversationId: conversationId, selfUser: selfUser)
+                if baselineIDs.isEmpty || overlap || !page.hasMore { return page.hasMore }
+                guard let cursor = oldestGroupMessageID(page.messages), usedCursors.insert(cursor).inserted else {
+                    return page.hasMore
+                }
+                beforeId = cursor
+            }
+        }
+        throw CancellationError()
+    }
+
+    private func oldestPeerMessageID(_ messages: [ImChatMessageDTO]) -> String? {
+        messages.min {
+            Self.epochMilliseconds(fromRFC3339: $0.sentAt) < Self.epochMilliseconds(fromRFC3339: $1.sentAt)
+        }?.messageId
+    }
+
+    private func oldestGroupMessageID(_ messages: [ImGroupMessageDTO]) -> String? {
+        messages.min {
+            Self.epochMilliseconds(fromRFC3339: $0.sentAt) < Self.epochMilliseconds(fromRFC3339: $1.sentAt)
+        }?.messageId
+    }
+
     /// Page backwards using the oldest locally cached server message as the
     /// `before_id` cursor; returns whether even older messages remain.
     public func loadOlderMessages(conversationId: String, limit: Int = 20) async throws -> Bool {
@@ -660,41 +812,85 @@ public actor ImMessageCenter {
         case .group:
             guard let groupId = conversation.groupId else { return false }
             let page = try await service.groupMessages(groupId: groupId, beforeId: beforeId, limit: limit)
-            for dto in page.messages {
-                if (try? await store.message(id: dto.messageId)) != nil { continue }
-                let stored = try await store.upsertMessage(ImMessage(
-                    id: dto.messageId,
-                    conversationId: conversationId,
-                    senderId: dto.senderId,
-                    senderName: await senderName(senderId: dto.senderId, selfUser: selfUser),
-                    messageType: dto.messageType,
-                    content: dto.content,
-                    status: .sent,
-                    createdAt: Self.epochMilliseconds(fromRFC3339: dto.sentAt),
-                    extraJson: dto.extra
-                ))
-                await cacheMediaIfNeeded(stored)
-            }
+            try await storeGroupHistory(page.messages, conversationId: conversationId, selfUser: selfUser)
             return page.hasMore
         case .peer:
             guard let peerId = conversation.peerUserId else { return false }
             let page = try await service.chatHistory(peerId: peerId, beforeId: beforeId, limit: limit)
-            for dto in page.messages {
-                if (try? await store.message(id: dto.messageId)) != nil { continue }
-                let stored = try await store.upsertMessage(ImMessage(
-                    id: dto.messageId,
-                    conversationId: conversationId,
-                    senderId: dto.senderId,
-                    senderName: await senderName(senderId: dto.senderId, selfUser: selfUser),
-                    messageType: dto.messageType,
-                    content: dto.content,
-                    status: ImMessageStatus(rawValue: dto.status.uppercased()) ?? .sent,
-                    createdAt: Self.epochMilliseconds(fromRFC3339: dto.sentAt),
-                    extraJson: dto.extra
-                ))
-                await cacheMediaIfNeeded(stored)
-            }
+            try await storePeerHistory(page.messages, conversationId: conversationId, selfUser: selfUser)
             return page.hasMore
+        }
+    }
+
+    private func storeGroupHistory(
+        _ messages: [ImGroupMessageDTO],
+        conversationId: String,
+        selfUser: ImSelfIdentity?
+    ) async throws {
+        var pending: [ImMessage] = []
+        pending.reserveCapacity(messages.count)
+        for dto in messages {
+            if (try? await store.message(id: dto.messageId)) != nil { continue }
+            pending.append(ImMessage(
+                id: dto.messageId,
+                conversationId: conversationId,
+                senderId: dto.senderId,
+                senderName: await senderName(senderId: dto.senderId, selfUser: selfUser),
+                messageType: dto.messageType,
+                content: dto.content,
+                status: .sent,
+                createdAt: Self.epochMilliseconds(fromRFC3339: dto.sentAt),
+                extraJson: dto.extra
+            ))
+        }
+        for stored in try await store.upsertMessages(pending, conversationId: conversationId) {
+            await cacheMediaIfNeeded(stored)
+        }
+        if let latest = messages.max(by: {
+            Self.epochMilliseconds(fromRFC3339: $0.sentAt) < Self.epochMilliseconds(fromRFC3339: $1.sentAt)
+        }) {
+            try await touchConversation(
+                id: conversationId,
+                preview: Self.preview(type: latest.messageType, content: latest.content),
+                at: Self.epochMilliseconds(fromRFC3339: latest.sentAt),
+                unreadDelta: 0
+            )
+        }
+    }
+
+    private func storePeerHistory(
+        _ messages: [ImChatMessageDTO],
+        conversationId: String,
+        selfUser: ImSelfIdentity?
+    ) async throws {
+        var pending: [ImMessage] = []
+        pending.reserveCapacity(messages.count)
+        for dto in messages {
+            if (try? await store.message(id: dto.messageId)) != nil { continue }
+            pending.append(ImMessage(
+                id: dto.messageId,
+                conversationId: conversationId,
+                senderId: dto.senderId,
+                senderName: await senderName(senderId: dto.senderId, selfUser: selfUser),
+                messageType: dto.messageType,
+                content: dto.content,
+                status: ImMessageStatus(rawValue: dto.status.uppercased()) ?? .sent,
+                createdAt: Self.epochMilliseconds(fromRFC3339: dto.sentAt),
+                extraJson: dto.extra
+            ))
+        }
+        for stored in try await store.upsertMessages(pending, conversationId: conversationId) {
+            await cacheMediaIfNeeded(stored)
+        }
+        if let latest = messages.max(by: {
+            Self.epochMilliseconds(fromRFC3339: $0.sentAt) < Self.epochMilliseconds(fromRFC3339: $1.sentAt)
+        }) {
+            try await touchConversation(
+                id: conversationId,
+                preview: Self.preview(type: latest.messageType, content: latest.content),
+                at: Self.epochMilliseconds(fromRFC3339: latest.sentAt),
+                unreadDelta: 0
+            )
         }
     }
 

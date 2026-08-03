@@ -23,6 +23,7 @@ final class GlobalSearchRuntimeCoordinator {
     private let mail: MailFeatureModel
     private let appSettings: AppSettingsFeatureModel
     private let knowledgeMarketplace: CloudKnowledgeMarketplaceStore
+    private let imProvider: () -> ImFeatureModel?
     private let openWebSearch: (String, URL) -> Void
 
     init(
@@ -37,6 +38,7 @@ final class GlobalSearchRuntimeCoordinator {
         mail: MailFeatureModel,
         knowledgeMarketplace: CloudKnowledgeMarketplaceStore,
         appSettings: AppSettingsFeatureModel,
+        imProvider: @escaping () -> ImFeatureModel?,
         openWebSearch: @escaping (String, URL) -> Void
     ) {
         self.search = search
@@ -50,11 +52,17 @@ final class GlobalSearchRuntimeCoordinator {
         self.mail = mail
         self.knowledgeMarketplace = knowledgeMarketplace
         self.appSettings = appSettings
+        self.imProvider = imProvider
         self.openWebSearch = openWebSearch
     }
 
     func activate() {
         search.sessionsProvider = { [weak chat] in chat?.sessions.allSessions ?? [] }
+        search.imConversationsProvider = { [weak self] in self?.imProvider()?.conversations ?? [] }
+        search.imConversationSearchProvider = { [weak self] query, limit in
+            guard let im = self?.imProvider() else { throw CancellationError() }
+            return try await im.searchConversations(query: query, limit: limit)
+        }
         search.fallbackNativeSearchProvider = { [weak self] kind, query, limit in
             self?.fallbackResults(kind: kind, query: query, limit: limit) ?? []
         }
@@ -155,6 +163,11 @@ final class GlobalSearchRuntimeCoordinator {
         case .chatSession(let sessionID):
             shell.selection = .agentChat
             chatSessions.selectChatSession(sessionID)
+        case .imConversation(let conversationID):
+            shell.selection = .agentChat
+            Task { [weak self] in
+                await self?.imProvider()?.selectConversation(conversationID)
+            }
         case .nativeResult(let result):
             open(result)
         case .browserHistoryRecord(let record):
@@ -164,6 +177,8 @@ final class GlobalSearchRuntimeCoordinator {
             Task { await knowledgeMarketplace.loadDetail(id: id) }
         case .showAll(let kind, let query):
             switch kind {
+            case .imConversations:
+                shell.selection = .agentChat
             case .chatSessions:
                 chat.sessions.searchQuery = query
                 chatSessions.reloadChatSessions(restoreWorkspaceMode: false)
