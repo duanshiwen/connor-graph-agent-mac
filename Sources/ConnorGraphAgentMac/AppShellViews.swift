@@ -267,6 +267,14 @@ struct AppShellView: View {
             guard let sessionID = notification.userInfo?["sessionID"] as? String else { return }
             sendCommand(.openSessionNotification(sessionID))
         }
+        .onReceive(NotificationCenter.default.publisher(for: .connorImNotificationActivated)) { notification in
+            if let conversationID = notification.userInfo?["imConversationID"] as? String {
+                graph.shell.selection = .agentChat
+                Task { await graph.im?.selectConversation(conversationID) }
+            } else if notification.userInfo?["openContacts"] as? Bool == true {
+                graph.shell.selection = .contacts
+            }
+        }
     }
 
     private func installTopSearchKeyMonitorIfNeeded() {

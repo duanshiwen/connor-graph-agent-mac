@@ -34,6 +34,7 @@ struct SidebarRow: View {
     var count: Int?
     var isSelected: Bool
     var isEnabled: Bool = true
+    var showsCountAsBadge = false
     var action: () -> Void
 
     @State private var isHovering = false
@@ -50,7 +51,11 @@ struct SidebarRow: View {
                     .foregroundStyle(textColor)
                 Spacer(minLength: AppShellLayout.spaceXS)
                 if let count {
-                    SidebarRowCountText(count: count, isVisible: isHovering || isSelected)
+                    SidebarRowCountText(
+                        count: count,
+                        isVisible: showsCountAsBadge || isHovering || isSelected,
+                        isBadge: showsCountAsBadge
+                    )
                 }
             }
             .padding(.horizontal, AppShellLayout.spaceS)
@@ -87,11 +92,16 @@ struct SidebarRow: View {
 struct SidebarRowCountText: View {
     var count: Int
     var isVisible: Bool
+    var isBadge = false
 
     var body: some View {
         Text("\(count)")
             .font(AppListTypography.rowCaption.monospacedDigit())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(isBadge ? Color.white : Color.secondary)
+            .padding(.horizontal, isBadge ? 6 : 0)
+            .padding(.vertical, isBadge ? 1 : 0)
+            .frame(minWidth: isBadge ? 18 : nil)
+            .background(isBadge ? Color.red : Color.clear, in: Capsule())
             .opacity(isVisible ? 1 : 0)
             .accessibilityHidden(true)
     }

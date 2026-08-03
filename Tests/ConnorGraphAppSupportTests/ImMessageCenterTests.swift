@@ -118,12 +118,14 @@ struct ImMessageCenterTests {
         #expect(message.status == .delivered)
         #expect(message.createdAt == 1722400000000)
         #expect(message.extraJson == #"{"k":"v"}"#)
+        #expect(fixture.events.events == [.incomingMessage(message: message, conversation: conversation)])
 
         // Duplicate push with the same message id is a no-op.
         await fixture.center.handleFrame(type: "chat_receive", text: """
             {"type":"chat_receive","payload":{"sender_id":9,"message_id":"m1","content":"最近怎么样"}}
             """)
         #expect(try await fixture.store.conversation(id: conversationId)?.unreadCount == 1)
+        #expect(fixture.events.events.count == 1)
     }
 
     @Test func activeConversationSuppressesUnreadAndAutoReads() async throws {
@@ -137,6 +139,7 @@ struct ImMessageCenterTests {
 
         #expect(try await fixture.store.conversation(id: conversationId)?.unreadCount == 0)
         #expect(fixture.service.markReadPeerIds == [9])
+        #expect(fixture.events.events.count == 1)
     }
 
     @Test func groupEchoBeforeAckDeduplicatesByServerId() async throws {
@@ -157,6 +160,7 @@ struct ImMessageCenterTests {
         let messages = try await fixture.store.messages(conversationId: conversationId)
         #expect(messages.count == 1)
         #expect(messages.first?.id == "srv-9")
+        #expect(fixture.events.events.isEmpty)
     }
 
     @Test func groupReceiveFromOthersCountsUnread() async throws {
@@ -172,6 +176,21 @@ struct ImMessageCenterTests {
         let message = try #require(try await fixture.store.message(id: "gm1"))
         #expect(message.status == .delivered)
         #expect(message.senderAvatar == "a.png")
+        #expect(fixture.events.events.count == 1)
+    }
+
+    @Test func friendRequestReceivedEmitsOnlyForNewPendingInvitation() async throws {
+        let fixture = try makeFixture()
+        fixture.service.receivedRequestsResult = try decodeDTO(
+            #"[{"ID":5,"senderId":9,"receiverId":1,"status":"pending","senderUsername":"alice"}]"#
+        )
+        let frame = #"{"type":"friend_request_received","payload":{"request_id":5}}"#
+
+        await fixture.center.handleFrame(type: "friend_request_received", text: frame)
+        await fixture.center.handleFrame(type: "friend_request_received", text: frame)
+
+        let request = try #require(try await fixture.store.loadFriendRequests().first)
+        #expect(fixture.events.events == [.incomingFriendRequest(request)])
     }
 
     @Test func friendDeletedFrameRemovesLocalFriend() async throws {
@@ -201,6 +220,21 @@ struct ImMessageCenterTests {
         #expect(friend.username == "alice")
         #expect(friend.nickname == "爱丽丝")
         #expect(friend.avatar == "https://example.com/alice.png")
+        #expect(try await fixture.store.loadFriendRequests().first?.status == "accepted")
+    }
+
+    @Test func rejectingFriendRequestClearsPendingStateBeforeRemoteListConverges() async throws {
+        let fixture = try makeFixture(selfId: 2)
+        try await fixture.store.upsertFriendRequests([ImFriendRequest(
+            id: 78,
+            senderId: 1,
+            receiverId: 2,
+            status: "pending"
+        )])
+
+        try await fixture.center.rejectFriendRequest(requestId: 78)
+
+        #expect(try await fixture.store.loadFriendRequests().first?.status == "rejected")
     }
 
     @Test func refreshAllBackfillsFriendsConversationsAndGroups() async throws {
@@ -295,6 +329,7 @@ struct ImMessageCenterTests {
         let store: SQLiteImStore
         let service: StubImService
         let frames: FrameRecorder
+        let events: EventRecorder
     }
 
     private func makeFixture(sendTimeout: Duration = .seconds(15), selfId: Int64 = 1) throws -> Fixture {
@@ -305,14 +340,16 @@ struct ImMessageCenterTests {
         let store = try SQLiteImStore(databaseURL: root.appendingPathComponent("im.sqlite"))
         let service = StubImService()
         let frames = FrameRecorder()
+        let events = EventRecorder()
         let center = ImMessageCenter(
             store: store,
             service: service,
             sendFrame: { frames.record($0) },
             currentIdentity: { ImSelfIdentity(id: selfId, displayName: "康纳") },
+            onRealtimeEvent: { events.record($0) },
             configuration: .init(sendTimeout: sendTimeout)
         )
-        return Fixture(center: center, store: store, service: service, frames: frames)
+        return Fixture(center: center, store: store, service: service, frames: frames, events: events)
     }
 
     private func decodeDTO<T: Decodable>(_ json: String) throws -> T {
@@ -355,6 +392,17 @@ private final class FrameRecorder: @unchecked Sendable {
             _sentFrames.append(frame)
             return _accept
         }
+    }
+}
+
+private final class EventRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [ImRealtimeEvent] = []
+
+    var events: [ImRealtimeEvent] { lock.withLock { _events } }
+
+    func record(_ event: ImRealtimeEvent) {
+        lock.withLock { _events.append(event) }
     }
 }
 

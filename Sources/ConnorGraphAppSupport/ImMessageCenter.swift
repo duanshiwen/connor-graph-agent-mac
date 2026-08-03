@@ -12,6 +12,11 @@ public struct ImSelfIdentity: Sendable, Equatable {
     }
 }
 
+public enum ImRealtimeEvent: Sendable, Equatable {
+    case incomingMessage(message: ImMessage, conversation: ImConversation)
+    case incomingFriendRequest(ImFriendRequest)
+}
+
 /// REST surface consumed by `ImMessageCenter`; `ImBackendService` is the production
 /// implementation, tests substitute a stub.
 public protocol ImBackendServicing: Sendable {
@@ -71,6 +76,7 @@ public actor ImMessageCenter {
     private let service: any ImBackendServicing
     private let sendFrame: @Sendable (String) async -> Bool
     private let currentIdentity: @Sendable () -> ImSelfIdentity?
+    private let onRealtimeEvent: @Sendable (ImRealtimeEvent) async -> Void
     private let configuration: Configuration
 
     private struct PendingSend {
@@ -90,12 +96,14 @@ public actor ImMessageCenter {
         service: any ImBackendServicing,
         sendFrame: @escaping @Sendable (String) async -> Bool,
         currentIdentity: @escaping @Sendable () -> ImSelfIdentity?,
+        onRealtimeEvent: @escaping @Sendable (ImRealtimeEvent) async -> Void = { _ in },
         configuration: Configuration = Configuration()
     ) {
         self.store = store
         self.service = service
         self.sendFrame = sendFrame
         self.currentIdentity = currentIdentity
+        self.onRealtimeEvent = onRealtimeEvent
         self.configuration = configuration
     }
 
@@ -239,7 +247,17 @@ public actor ImMessageCenter {
             if let payload { await onChatReceive(payload) }
         case "group_receive":
             if let payload { await onGroupReceive(payload) }
-        case "friend_request_received", "friend_request_accepted", "friend_request_rejected":
+        case "friend_request_received":
+            let existingPendingIDs = await pendingIncomingRequestIDs()
+            try? await refreshFriendData()
+            guard let selfId = selfUserId() else { break }
+            let requests = (try? await store.loadFriendRequests()) ?? []
+            for request in requests where request.receiverId == selfId
+                && request.status == "pending"
+                && !existingPendingIDs.contains(request.id) {
+                await onRealtimeEvent(.incomingFriendRequest(request))
+            }
+        case "friend_request_accepted", "friend_request_rejected":
             try? await refreshFriendData()
         case "friend_deleted":
             if let userId = Self.int64Value(payload?["user_id"]) {
@@ -321,17 +339,26 @@ public actor ImMessageCenter {
     /// Idempotent insert keyed by the unique message id, then bump the conversation.
     private func insertIncoming(_ message: ImMessage, countUnread: Bool = true) async {
         if (try? await store.message(id: message.id)) != nil { return }
-        _ = try? await store.upsertMessage(message)
-        let active = message.conversationId == activeConversationId
+        guard let storedMessage = try? await store.upsertMessage(message) else { return }
+        let active = storedMessage.conversationId == activeConversationId
         try? await touchConversation(
-            id: message.conversationId,
-            preview: String(message.content.prefix(100)),
-            at: message.createdAt,
+            id: storedMessage.conversationId,
+            preview: String(storedMessage.content.prefix(100)),
+            at: storedMessage.createdAt,
             unreadDelta: (countUnread && !active) ? 1 : 0
         )
         if active && countUnread {
-            await markConversationRead(message.conversationId)
+            await markConversationRead(storedMessage.conversationId)
         }
+        if countUnread, let conversation = try? await store.conversation(id: storedMessage.conversationId) {
+            await onRealtimeEvent(.incomingMessage(message: storedMessage, conversation: conversation))
+        }
+    }
+
+    private func pendingIncomingRequestIDs() async -> Set<Int64> {
+        guard let selfId = selfUserId() else { return [] }
+        let requests = (try? await store.loadFriendRequests()) ?? []
+        return Set(requests.lazy.filter { $0.receiverId == selfId && $0.status == "pending" }.map(\.id))
     }
 
     // MARK: - Conversations
@@ -497,21 +524,7 @@ public actor ImMessageCenter {
         }
         let received = try await service.receivedFriendRequests()
         let sent = try await service.sentFriendRequests()
-        let requests = (received + sent).map { dto in
-            ImFriendRequest(
-                id: dto.id,
-                senderId: dto.senderId,
-                receiverId: dto.receiverId,
-                message: dto.message,
-                status: dto.status,
-                senderUsername: dto.senderUsername,
-                senderNickname: dto.senderNickname,
-                senderAvatar: dto.senderAvatar,
-                receiverUsername: dto.receiverUsername,
-                receiverNickname: dto.receiverNickname,
-                createdAt: Self.epochMilliseconds(fromRFC3339: dto.createdAt)
-            )
-        }
+        let requests = (received + sent).map(Self.friendRequest(from:))
         try await store.upsertFriendRequests(requests)
     }
 
@@ -580,12 +593,14 @@ public actor ImMessageCenter {
         let cachedRequest = try? await store.loadFriendRequests().first { $0.id == requestId }
         let accepted = try await service.acceptFriendRequest(requestId: requestId)
         try? await refreshFriendData()
+        try await store.upsertFriendRequests([Self.friendRequest(from: accepted)])
         try await cacheAcceptedFriendIfNeeded(accepted, cachedRequest: cachedRequest)
     }
 
     public func rejectFriendRequest(requestId: Int64) async throws {
-        _ = try await service.rejectFriendRequest(requestId: requestId)
+        let rejected = try await service.rejectFriendRequest(requestId: requestId)
         try? await refreshFriendData()
+        try await store.upsertFriendRequests([Self.friendRequest(from: rejected)])
     }
 
     public func removeFriend(userId: Int64) async throws {
@@ -636,6 +651,22 @@ public actor ImMessageCenter {
         }
         guard friend.userId > 0, try await store.friend(userId: friend.userId) == nil else { return }
         try await store.upsertFriends([friend])
+    }
+
+    private static func friendRequest(from dto: ImFriendRequestDTO) -> ImFriendRequest {
+        ImFriendRequest(
+            id: dto.id,
+            senderId: dto.senderId,
+            receiverId: dto.receiverId,
+            message: dto.message,
+            status: dto.status,
+            senderUsername: dto.senderUsername,
+            senderNickname: dto.senderNickname,
+            senderAvatar: dto.senderAvatar,
+            receiverUsername: dto.receiverUsername,
+            receiverNickname: dto.receiverNickname,
+            createdAt: epochMilliseconds(fromRFC3339: dto.createdAt)
+        )
     }
 
     // MARK: - Group management

@@ -203,6 +203,7 @@ private struct NoteImportFileCommands: Commands {
 
 extension Notification.Name {
     static let connorSessionNotificationActivated = Notification.Name("connorSessionNotificationActivated")
+    static let connorImNotificationActivated = Notification.Name("connorImNotificationActivated")
 }
 
 @MainActor
@@ -275,6 +276,8 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     ) {
         let userInfo = response.notification.request.content.userInfo
         let sessionID = userInfo["sessionID"] as? String
+        let imConversationID = userInfo["imConversationID"] as? String
+        let openContacts = userInfo["openContacts"] as? String == "true"
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
             self.orderExistingMainWindowToFront()
@@ -283,6 +286,14 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
                     name: .connorSessionNotificationActivated,
                     object: nil,
                     userInfo: ["sessionID": sessionID]
+                )
+            } else if imConversationID != nil || openContacts {
+                var activationInfo: [String: Any] = ["openContacts": openContacts]
+                if let imConversationID { activationInfo["imConversationID"] = imConversationID }
+                NotificationCenter.default.post(
+                    name: .connorImNotificationActivated,
+                    object: nil,
+                    userInfo: activationInfo
                 )
             }
             completionHandler()
