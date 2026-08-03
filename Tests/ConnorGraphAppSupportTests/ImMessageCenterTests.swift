@@ -268,6 +268,18 @@ struct ImMessageCenterTests {
         #expect(group.lastMessagePreview == "收到")
     }
 
+    @Test func createGroupPassesInitialMembersAndLeaveRemovesConversation() async throws {
+        let fixture = try makeFixture()
+        let group = try await fixture.center.createGroup(name: "项目群", description: "讨论", memberIds: [7, 9])
+        #expect(group.groupId == "g-new")
+        #expect(fixture.service.createdGroupMemberIDs == [7, 9])
+        #expect(try await fixture.store.conversation(id: "group:g-new") != nil)
+
+        try await fixture.center.leaveGroup(groupId: "g-new")
+        #expect(fixture.service.leftGroupIDs == ["g-new"])
+        #expect(try await fixture.store.conversation(id: "group:g-new") == nil)
+    }
+
     @Test func loadOlderMessagesUsesOldestServerCursor() async throws {
         let fixture = try makeFixture()
         let conversationId = try await fixture.center.openPeerConversation(peerId: 9)
@@ -322,6 +334,54 @@ struct ImMessageCenterTests {
         #expect(try await fixture.store.message(id: "temp_dangling")?.status == .failed)
     }
 
+    @Test func mediaSendCachesLocallyAndKeepsLocalPathOffWire() async throws {
+        let fixture = try makeFixture()
+        let conversationId = try await fixture.center.openPeerConversation(peerId: 9)
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        try await fixture.center.sendMediaMessage(
+            conversationId: conversationId,
+            fileURL: file,
+            messageType: .image,
+            metadata: ImMediaMetadata(width: 320, height: 200, fileName: "photo.png")
+        )
+
+        let optimistic = try #require(try await fixture.store.messages(conversationId: conversationId).first)
+        #expect(optimistic.messageType == "image")
+        #expect(optimistic.mediaMetadata?.localPath != nil)
+        #expect(FileManager.default.fileExists(atPath: optimistic.mediaMetadata?.localPath ?? ""))
+        #expect(try await fixture.store.conversation(id: conversationId)?.lastMessagePreview == "[图片]")
+
+        let frame = try #require(fixture.frames.sentFrames.first)
+        let root = try #require(try JSONSerialization.jsonObject(with: Data(frame.utf8)) as? [String: Any])
+        let payload = try #require(root["payload"] as? [String: Any])
+        #expect(payload["content"] as? String == "chat/1/image/server.png")
+        let extra = try #require(payload["extra"] as? [String: Any])
+        #expect(extra["localPath"] == nil)
+        #expect(extra["width"] as? Int == 320)
+
+        await fixture.center.handleFrame(type: nil, text: #"{"messageId":"media-1"}"#)
+        #expect(fixture.service.privateMediaCachedIDs == ["media-1"])
+    }
+
+    @Test func groupReadIsReportedAndLocalMessagesBecomeRead() async throws {
+        let fixture = try makeFixture()
+        await fixture.center.handleFrame(type: "group_receive", text: """
+            {"type":"group_receive","payload":{"group_id":"g1","message_id":"gm1","sender_id":7,
+            "message_type":"text","content":"hello"}}
+            """)
+        let conversationId = ImConversation.groupConversationID(groupId: "g1")
+
+        await fixture.center.markConversationRead(conversationId)
+
+        #expect(try await fixture.store.message(id: "gm1")?.status == .read)
+        #expect(fixture.service.groupReadIDs == ["g1"])
+    }
+
     // MARK: - Helpers
 
     private struct Fixture {
@@ -347,7 +407,10 @@ struct ImMessageCenterTests {
             sendFrame: { frames.record($0) },
             currentIdentity: { ImSelfIdentity(id: selfId, displayName: "康纳") },
             onRealtimeEvent: { events.record($0) },
-            configuration: .init(sendTimeout: sendTimeout)
+            configuration: .init(
+                sendTimeout: sendTimeout,
+                mediaCacheDirectory: root.appendingPathComponent("media", isDirectory: true)
+            )
         )
         return Fixture(center: center, store: store, service: service, frames: frames, events: events)
     }
@@ -431,6 +494,10 @@ private final class StubImService: ImBackendServicing, @unchecked Sendable {
     }
     var markReadPeerIds: [Int64] { lock.withLock { _markReadPeerIds } }
     var chatHistoryCalls: [(peerId: Int64, beforeId: String?, limit: Int)] { lock.withLock { _chatHistoryCalls } }
+    var privateMediaCachedIDs: [String] { lock.withLock { _privateMediaCachedIDs } }
+    var groupReadIDs: [String] { lock.withLock { _groupReadIDs } }
+    var createdGroupMemberIDs: [Int64] { lock.withLock { _createdGroupMemberIDs } }
+    var leftGroupIDs: [String] { lock.withLock { _leftGroupIDs } }
 
     private var _friendsResult: [ImFriendDTO] = []
     private var _receivedRequestsResult: [ImFriendRequestDTO] = []
@@ -439,6 +506,10 @@ private final class StubImService: ImBackendServicing, @unchecked Sendable {
     private var _chatHistoryResult: ImChatHistoryDTO?
     private var _markReadPeerIds: [Int64] = []
     private var _chatHistoryCalls: [(peerId: Int64, beforeId: String?, limit: Int)] = []
+    private var _privateMediaCachedIDs: [String] = []
+    private var _groupReadIDs: [String] = []
+    private var _createdGroupMemberIDs: [Int64] = []
+    private var _leftGroupIDs: [String] = []
 
     func conversations() async throws -> [ImConversationDTO] { conversationsResult }
 
@@ -454,8 +525,16 @@ private final class StubImService: ImBackendServicing, @unchecked Sendable {
 
     func myGroups() async throws -> [ImGroupDTO] { groupsResult }
 
-    func createGroup(name: String, description: String) async throws -> ImGroupDTO {
-        try decode(#"{"groupId":"g-new","name":"\#(name)"}"#)
+    func groupDetail(groupId: String) async throws -> ImGroupDTO {
+        if let group = groupsResult.first(where: { $0.groupId == groupId }) { return group }
+        return try decode(#"{"groupId":"\#(groupId)","name":"测试群"}"#)
+    }
+
+    func groupMembers(groupId: String) async throws -> [ImGroupMemberDTO] { [] }
+
+    func createGroup(name: String, description: String, memberIds: [Int64]) async throws -> ImGroupDTO {
+        lock.withLock { _createdGroupMemberIDs = memberIds }
+        return try decode(#"{"groupId":"g-new","name":"\#(name)"}"#)
     }
 
     func groupMessages(groupId: String, beforeId: String?, limit: Int) async throws -> ImGroupHistoryDTO {
@@ -464,6 +543,7 @@ private final class StubImService: ImBackendServicing, @unchecked Sendable {
 
     func inviteGroupMember(groupId: String, userId: Int64) async throws {}
     func removeGroupMember(groupId: String, userId: Int64) async throws {}
+    func leaveGroup(groupId: String) async throws { lock.withLock { _leftGroupIDs.append(groupId) } }
 
     func friends() async throws -> [ImFriendDTO] { friendsResult }
 
@@ -485,6 +565,23 @@ private final class StubImService: ImBackendServicing, @unchecked Sendable {
     func deleteFriend(userId: Int64) async throws {}
 
     func searchUsers(query: String, limit: Int) async throws -> [ImPublicUserDTO] { [] }
+
+    func uploadMedia(fileURL: URL, messageType: ImMessageType) async throws -> ImMediaUploadDTO {
+        try decode("""
+            {"upload_url":"https://upload.example/file","object_name":"chat/1/\(messageType.rawValue)/server.png",
+            "download_url":"https://download.example/file","expires_in":3600}
+            """)
+    }
+
+    func markPrivateMediaCached(messageId: String) async throws {
+        lock.withLock { _privateMediaCachedIDs.append(messageId) }
+    }
+
+    func markGroupMediaCached(groupId: String, messageId: String) async throws {}
+
+    func markGroupRead(groupId: String) async throws {
+        lock.withLock { _groupReadIDs.append(groupId) }
+    }
 
     private func decode<T: Decodable>(_ json: String) throws -> T {
         try JSONDecoder().decode(T.self, from: Data(json.utf8))

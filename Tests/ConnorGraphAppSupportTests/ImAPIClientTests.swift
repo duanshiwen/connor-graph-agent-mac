@@ -57,6 +57,24 @@ struct ImAPIClientTests {
         #expect(transport.lastRequest?.url?.absoluteString == "https://backend.example/api/v1/chat/history/9?limit=20&before_id=m0")
     }
 
+    @Test func mediaHistoryAcceptsObjectExtraAndMillisecondTimestamp() async throws {
+        let transport = StubTransport(json: """
+            {"code":0,"data":{"messages":[
+                {"messageId":"m-media","senderId":9,"messageType":"audio","content":"https://cdn.example/a.m4a",
+                 "extra":{"duration":12,"fileSize":1024,"expired":false},"status":"read","sentAt":1722400000000}
+            ],"has_more":false}}
+            """)
+        let client = makeClient(transport: transport)
+
+        let history = try await client.chatHistory(token: "t", peerId: 9)
+
+        let message = try #require(history.messages.first)
+        #expect(message.sentAt == "1722400000000")
+        let extra = try #require(try JSONSerialization.jsonObject(with: Data(message.extra.utf8)) as? [String: Any])
+        #expect(extra["duration"] as? Int == 12)
+        #expect(extra["fileSize"] as? Int == 1024)
+    }
+
     @Test func friendsDecodeUppercaseIDKey() async throws {
         let transport = StubTransport(json: """
             {"code":0,"data":[
@@ -105,7 +123,7 @@ struct ImAPIClientTests {
         }
     }
 
-    @Test func inviteGroupMemberSendsSnakeCaseUserId() async throws {
+    @Test func inviteGroupMemberUsesNormalGroupContract() async throws {
         let transport = StubTransport(json: #"{"code":0,"msg":"ok"}"#)
         let client = makeClient(transport: transport)
 
@@ -132,6 +150,27 @@ struct ImAPIClientTests {
         #expect(history.messages.first?.messageId == "gm1")
         #expect(history.messages.first?.isAgent == false)
         #expect(!history.hasMore)
+        #expect(transport.lastRequest?.url?.absoluteString == "https://backend.example/api/v1/group-chats/g-1/messages?limit=20")
+    }
+
+    @Test func groupListUsesNonVersionedEnvelopeAndCreateIncludesMembers() async throws {
+        let listTransport = StubTransport(json: #"{"code":0,"data":[{"groupId":"g-1","name":"普通群"}]}"#)
+        let groups = try await makeClient(transport: listTransport).myGroups(token: "t")
+        #expect(groups.map(\.groupId) == ["g-1"])
+        #expect(listTransport.lastRequest?.url?.absoluteString == "https://backend.example/api/v1/group-chats")
+
+        let createTransport = SequencedStubTransport(jsonResponses: [
+            #"{"code":0,"data":{"groupId":"g-new","name":"项目群"}}"#
+        ])
+        let client = ImAPIClient(baseURL: URL(string: "https://backend.example")!, transport: createTransport)
+        let group = try await client.createGroup(token: "t", name: "项目群", description: "讨论", memberIds: [2, 3])
+        #expect(group.groupId == "g-new")
+        let requests = createTransport.requests
+        #expect(requests.count == 1)
+        #expect(requests[0].url?.absoluteString == "https://backend.example/api/v1/group-chats")
+        let body = try #require(requests[0].httpBody)
+        let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(object["member_ids"] as? [Int] == [2, 3])
     }
 
     // MARK: - Helpers
@@ -165,5 +204,26 @@ private final class StubTransport: ConnorBackendHTTPTransport, @unchecked Sendab
             headerFields: ["Content-Type": "application/json"]
         )!
         return (Data(json.utf8), response)
+    }
+}
+
+private final class SequencedStubTransport: ConnorBackendHTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var responses: [String]
+    private var _requests: [URLRequest] = []
+
+    var requests: [URLRequest] { lock.withLock { _requests } }
+
+    init(jsonResponses: [String]) { responses = jsonResponses }
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let json = lock.withLock { () -> String in
+            _requests.append(request)
+            return responses.removeFirst()
+        }
+        return (
+            Data(json.utf8),
+            HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        )
     }
 }

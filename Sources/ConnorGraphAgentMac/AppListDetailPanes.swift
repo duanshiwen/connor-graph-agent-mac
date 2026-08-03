@@ -828,6 +828,7 @@ struct CraftSessionListPane: View {
     let rowActions: ChatSessionListActions
     var imModel: ImFeatureModel? = nil
     @State private var isCreationMenuPresented = false
+    @State private var isCreateGroupPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -888,6 +889,11 @@ struct CraftSessionListPane: View {
         .onChange(of: model.sessions.searchQuery) { _, _ in
             sessionActions.reloadChatSessions(restoreWorkspaceMode: false)
         }
+        .sheet(isPresented: $isCreateGroupPresented) {
+            if let imModel {
+                ImCreateGroupSheet(model: imModel, isPresented: $isCreateGroupPresented)
+            }
+        }
     }
 
     private var sessionCreationMenu: some View {
@@ -899,6 +905,16 @@ struct CraftSessionListPane: View {
                 SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil", minHeight: 32)
             }
             .buttonStyle(SidebarActionButtonStyle())
+
+            if let imModel, imModel.isSignedIn {
+                Button {
+                    isCreationMenuPresented = false
+                    isCreateGroupPresented = true
+                } label: {
+                    SidebarActionButtonLabel(title: "新建群聊", systemImage: "person.3.fill", minHeight: 32)
+                }
+                .buttonStyle(SidebarActionButtonStyle())
+            }
 
             Button {
                 isCreationMenuPresented = false

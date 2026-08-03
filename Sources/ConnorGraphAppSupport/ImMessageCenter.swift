@@ -25,10 +25,13 @@ public protocol ImBackendServicing: Sendable {
     @discardableResult
     func markRead(peerId: Int64, messageIds: [String]) async throws -> ImMarkReadResultDTO
     func myGroups() async throws -> [ImGroupDTO]
-    func createGroup(name: String, description: String) async throws -> ImGroupDTO
+    func groupDetail(groupId: String) async throws -> ImGroupDTO
+    func groupMembers(groupId: String) async throws -> [ImGroupMemberDTO]
+    func createGroup(name: String, description: String, memberIds: [Int64]) async throws -> ImGroupDTO
     func groupMessages(groupId: String, beforeId: String?, limit: Int) async throws -> ImGroupHistoryDTO
     func inviteGroupMember(groupId: String, userId: Int64) async throws
     func removeGroupMember(groupId: String, userId: Int64) async throws
+    func leaveGroup(groupId: String) async throws
     func friends() async throws -> [ImFriendDTO]
     @discardableResult
     func sendFriendRequest(username: String, message: String) async throws -> ImFriendRequestDTO
@@ -40,6 +43,19 @@ public protocol ImBackendServicing: Sendable {
     func rejectFriendRequest(requestId: Int64) async throws -> ImFriendRequestDTO
     func deleteFriend(userId: Int64) async throws
     func searchUsers(query: String, limit: Int) async throws -> [ImPublicUserDTO]
+    func uploadMedia(fileURL: URL, messageType: ImMessageType) async throws -> ImMediaUploadDTO
+    func markPrivateMediaCached(messageId: String) async throws
+    func markGroupMediaCached(groupId: String, messageId: String) async throws
+    func markGroupRead(groupId: String) async throws
+}
+
+public extension ImBackendServicing {
+    func uploadMedia(fileURL: URL, messageType: ImMessageType) async throws -> ImMediaUploadDTO {
+        throw ConnorBackendAPIError.invalidResponse
+    }
+    func markPrivateMediaCached(messageId: String) async throws {}
+    func markGroupMediaCached(groupId: String, messageId: String) async throws {}
+    func markGroupRead(groupId: String) async throws {}
 }
 
 extension ImBackendService: ImBackendServicing {}
@@ -62,13 +78,26 @@ public actor ImMessageCenter {
         public var sendTimeout: Duration
         /// Injectable clock (Unix milliseconds) for deterministic tests.
         public var now: @Sendable () -> Int64
+        public var mediaCacheDirectory: URL
+        public var downloadMedia: @Sendable (URL) async throws -> Data
 
         public init(
             sendTimeout: Duration = .seconds(15),
-            now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
+            now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
+            mediaCacheDirectory: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Connor/IMMedia", isDirectory: true),
+            downloadMedia: @escaping @Sendable (URL) async throws -> Data = {
+                let (data, response) = try await URLSession.shared.data(from: $0)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                return data
+            }
         ) {
             self.sendTimeout = sendTimeout
             self.now = now
+            self.mediaCacheDirectory = mediaCacheDirectory
+            self.downloadMedia = downloadMedia
         }
     }
 
@@ -78,6 +107,7 @@ public actor ImMessageCenter {
     private let currentIdentity: @Sendable () -> ImSelfIdentity?
     private let onRealtimeEvent: @Sendable (ImRealtimeEvent) async -> Void
     private let configuration: Configuration
+    private var knownGroupIDs: Set<String> = []
 
     private struct PendingSend {
         let tempId: String
@@ -147,6 +177,60 @@ public actor ImMessageCenter {
         try await sendOptimistic(conversationId: conversationId, content: content, messageType: messageType, frame: frame)
     }
 
+    public func sendMediaMessage(
+        conversationId: String,
+        fileURL: URL,
+        messageType: ImMessageType,
+        metadata: ImMediaMetadata
+    ) async throws {
+        guard messageType.isMedia else { return }
+        guard let conversation = try await store.conversation(id: conversationId) else { return }
+        try Self.validateMedia(fileURL: fileURL, messageType: messageType)
+
+        let tempId = ImMessage.makeTemporaryID()
+        let localURL = try cacheLocalFile(fileURL, messageId: tempId, messageType: messageType)
+        var localMetadata = metadata
+        localMetadata.localPath = localURL.path
+        let upload = try await service.uploadMedia(fileURL: localURL, messageType: messageType)
+
+        var remoteMetadata = metadata
+        remoteMetadata.localPath = nil
+        remoteMetadata.localThumbnailPath = nil
+        let remoteExtra = Self.jsonObject(from: remoteMetadata)
+        let localExtra = Self.jsonString(from: localMetadata)
+        let payload: [String: Any]
+        let frameType: String
+        switch conversation.kind {
+        case .peer:
+            guard let peerId = conversation.peerUserId else { return }
+            frameType = "chat_send"
+            payload = [
+                "receiver_id": peerId,
+                "message_type": messageType.rawValue,
+                "content": upload.objectName,
+                "extra": remoteExtra,
+            ]
+        case .group:
+            guard let groupId = conversation.groupId else { return }
+            frameType = "group_send"
+            payload = [
+                "group_id": groupId,
+                "message_type": messageType.rawValue,
+                "content": upload.objectName,
+                "extra": remoteExtra,
+            ]
+        }
+        try await sendOptimistic(
+            conversationId: conversationId,
+            content: upload.objectName,
+            messageType: messageType.rawValue,
+            frame: Self.encodeFrame(type: frameType, payload: payload),
+            tempId: tempId,
+            extraJson: localExtra,
+            preview: messageType.conversationPreview
+        )
+    }
+
     /// Send a group message.
     public func sendGroupMessage(groupId: String, content: String, messageType: String = "text") async throws {
         let conversationId = try await ensureGroupConversation(groupId: groupId)
@@ -170,6 +254,7 @@ public actor ImMessageCenter {
                 "group_id": groupId,
                 "message_type": message.messageType,
                 "content": message.content,
+                "extra": Self.remoteExtraObject(message.extraJson),
             ])
         case .peer:
             guard let peerId = conversation.peerUserId else { return }
@@ -177,16 +262,24 @@ public actor ImMessageCenter {
                 "receiver_id": peerId,
                 "message_type": message.messageType,
                 "content": message.content,
+                "extra": Self.remoteExtraObject(message.extraJson),
             ])
         }
         try await store.updateMessageStatus(id: message.id, status: .sending)
         await dispatchPending(tempId: message.id, conversationId: message.conversationId, frame: frame)
     }
 
-    private func sendOptimistic(conversationId: String, content: String, messageType: String, frame: String) async throws {
+    private func sendOptimistic(
+        conversationId: String,
+        content: String,
+        messageType: String,
+        frame: String,
+        tempId: String = ImMessage.makeTemporaryID(),
+        extraJson: String = "{}",
+        preview: String? = nil
+    ) async throws {
         guard let selfUser = currentIdentity() else { throw ConnorBackendAPIError.unauthorized }
         let now = configuration.now()
-        let tempId = ImMessage.makeTemporaryID()
         _ = try await store.upsertMessage(ImMessage(
             id: tempId,
             conversationId: conversationId,
@@ -196,9 +289,14 @@ public actor ImMessageCenter {
             content: content,
             status: .sending,
             createdAt: now,
-            extraJson: "{}"
+            extraJson: extraJson
         ))
-        try await touchConversation(id: conversationId, preview: String(content.prefix(100)), at: now, unreadDelta: 0)
+        try await touchConversation(
+            id: conversationId,
+            preview: preview ?? String(content.prefix(100)),
+            at: now,
+            unreadDelta: 0
+        )
         await dispatchPending(tempId: tempId, conversationId: conversationId, frame: frame)
     }
 
@@ -286,6 +384,9 @@ public actor ImMessageCenter {
         } else {
             try? await store.replaceMessageId(oldId: pending.tempId, newId: serverId, status: .sent)
         }
+        if let message = try? await store.message(id: serverId) {
+            await cacheMediaIfNeeded(message)
+        }
     }
 
     /// chat_receive push (snake_case payload, `sent_at` in Unix milliseconds).
@@ -317,6 +418,7 @@ public actor ImMessageCenter {
         guard let groupId = payload["group_id"] as? String else { return }
         guard let messageId = payload["message_id"] as? String else { return }
         guard let senderId = Self.int64Value(payload["sender_id"]) else { return }
+        guard await isKnownGroup(groupId) else { return }
         guard let conversationId = try? await ensureGroupConversation(groupId: groupId) else { return }
         let sentAt = Self.int64Value(payload["sent_at"]) ?? configuration.now()
         await insertIncoming(
@@ -343,7 +445,7 @@ public actor ImMessageCenter {
         let active = storedMessage.conversationId == activeConversationId
         try? await touchConversation(
             id: storedMessage.conversationId,
-            preview: String(storedMessage.content.prefix(100)),
+            preview: Self.preview(for: storedMessage),
             at: storedMessage.createdAt,
             unreadDelta: (countUnread && !active) ? 1 : 0
         )
@@ -353,6 +455,7 @@ public actor ImMessageCenter {
         if countUnread, let conversation = try? await store.conversation(id: storedMessage.conversationId) {
             await onRealtimeEvent(.incomingMessage(message: storedMessage, conversation: conversation))
         }
+        await cacheMediaIfNeeded(storedMessage)
     }
 
     private func pendingIncomingRequestIDs() async -> Set<Int64> {
@@ -413,14 +516,25 @@ public actor ImMessageCenter {
         try await store.upsertConversation(existing)
     }
 
-    /// Opening a conversation clears the local unread counter; peer chats also
-    /// report read state to the server (group read receipts are not supported yet).
+    /// Opening a conversation clears local unread state and reports the matching
+    /// private/group read cursor to the server.
     public func markConversationRead(_ conversationId: String) async {
         try? await store.clearUnread(conversationId: conversationId, now: configuration.now())
-        guard let conversation = try? await store.conversation(id: conversationId),
-              conversation.kind == .peer,
-              let peerId = conversation.peerUserId else { return }
-        _ = try? await service.markRead(peerId: peerId, messageIds: [])
+        guard let conversation = try? await store.conversation(id: conversationId) else { return }
+        switch conversation.kind {
+        case .peer:
+            guard let peerId = conversation.peerUserId else { return }
+            try? await store.markSenderMessagesRead(conversationId: conversationId, senderId: peerId)
+            _ = try? await service.markRead(peerId: peerId, messageIds: [])
+        case .group:
+            guard let groupId = conversation.groupId else { return }
+            let selfID = currentIdentity()?.id
+            let senderIDs = Set(((try? await store.messages(conversationId: conversationId)) ?? []).map(\.senderId))
+            for senderID in senderIDs where senderID != selfID {
+                try? await store.markSenderMessagesRead(conversationId: conversationId, senderId: senderID)
+            }
+            try? await service.markGroupRead(groupId: groupId)
+        }
     }
 
     public func setPinned(conversationId: String, pinned: Bool) async throws {
@@ -467,7 +581,7 @@ public actor ImMessageCenter {
         for dto in remote {
             let id = try await ensurePeerConversation(peerId: dto.peerId)
             guard var existing = try await store.conversation(id: id) else { continue }
-            existing.lastMessagePreview = String(dto.lastMessageContent.prefix(100))
+            existing.lastMessagePreview = Self.preview(type: dto.lastMessageType, content: dto.lastMessageContent)
             existing.lastMessageAt = max(existing.lastMessageAt, Self.epochMilliseconds(fromRFC3339: dto.lastMessageTime))
             existing.unreadCount = dto.unreadCount
             existing.updatedAt = configuration.now()
@@ -476,7 +590,13 @@ public actor ImMessageCenter {
     }
 
     private func refreshGroups() async throws {
-        for group in try await service.myGroups() {
+        let groups = try await service.myGroups()
+        knownGroupIDs = Set(groups.map(\.groupId))
+        let localGroups = try await store.loadConversations().filter { $0.kind == .group }
+        for conversation in localGroups where conversation.groupId.map({ !knownGroupIDs.contains($0) }) ?? true {
+            try await store.deleteConversation(id: conversation.id)
+        }
+        for group in groups {
             let id = try await ensureGroupConversation(groupId: group.groupId, title: group.name)
             guard var existing = try await store.conversation(id: id) else { continue }
             existing.participantName = group.name
@@ -484,7 +604,7 @@ public actor ImMessageCenter {
                 existing.title = group.name
             }
             existing.avatar = group.avatar
-            existing.lastMessagePreview = String(group.lastMessageContent.prefix(100))
+            existing.lastMessagePreview = Self.preview(type: group.lastMessageType, content: group.lastMessageContent)
             existing.lastMessageAt = max(existing.lastMessageAt, Self.epochMilliseconds(fromRFC3339: group.lastMessageTime))
             existing.updatedAt = configuration.now()
             try await store.upsertConversation(existing)
@@ -542,7 +662,7 @@ public actor ImMessageCenter {
             let page = try await service.groupMessages(groupId: groupId, beforeId: beforeId, limit: limit)
             for dto in page.messages {
                 if (try? await store.message(id: dto.messageId)) != nil { continue }
-                _ = try await store.upsertMessage(ImMessage(
+                let stored = try await store.upsertMessage(ImMessage(
                     id: dto.messageId,
                     conversationId: conversationId,
                     senderId: dto.senderId,
@@ -553,6 +673,7 @@ public actor ImMessageCenter {
                     createdAt: Self.epochMilliseconds(fromRFC3339: dto.sentAt),
                     extraJson: dto.extra
                 ))
+                await cacheMediaIfNeeded(stored)
             }
             return page.hasMore
         case .peer:
@@ -560,7 +681,7 @@ public actor ImMessageCenter {
             let page = try await service.chatHistory(peerId: peerId, beforeId: beforeId, limit: limit)
             for dto in page.messages {
                 if (try? await store.message(id: dto.messageId)) != nil { continue }
-                _ = try await store.upsertMessage(ImMessage(
+                let stored = try await store.upsertMessage(ImMessage(
                     id: dto.messageId,
                     conversationId: conversationId,
                     senderId: dto.senderId,
@@ -571,6 +692,7 @@ public actor ImMessageCenter {
                     createdAt: Self.epochMilliseconds(fromRFC3339: dto.sentAt),
                     extraJson: dto.extra
                 ))
+                await cacheMediaIfNeeded(stored)
             }
             return page.hasMore
         }
@@ -580,6 +702,109 @@ public actor ImMessageCenter {
         if senderId == selfUser?.id { return selfUser?.displayName ?? "" }
         guard let friend = try? await store.friend(userId: senderId) else { return "" }
         return friend.nickname.isEmpty ? friend.username : friend.nickname
+    }
+
+    // MARK: - Media cache lifecycle
+
+    private func cacheMediaIfNeeded(_ message: ImMessage) async {
+        guard let messageType = message.type, messageType.isMedia else { return }
+        var metadata = message.mediaMetadata ?? ImMediaMetadata()
+        if let localPath = metadata.localPath,
+           FileManager.default.fileExists(atPath: localPath) {
+            await acknowledgeMediaCached(message)
+            return
+        }
+        guard !metadata.expired, let remoteURL = URL(string: message.content), remoteURL.scheme != nil else { return }
+        do {
+            let data = try await configuration.downloadMedia(remoteURL)
+            guard !data.isEmpty else { return }
+            let localURL = try mediaCacheURL(
+                messageId: message.id,
+                messageType: messageType,
+                preferredExtension: Self.preferredExtension(message: message, metadata: metadata)
+            )
+            try data.write(to: localURL, options: .atomic)
+            metadata.localPath = localURL.path
+            var updated = message
+            updated.extraJson = Self.jsonString(from: metadata)
+            _ = try await store.upsertMessage(updated)
+            await acknowledgeMediaCached(updated)
+        } catch {
+            // Signed download URLs are short-lived. A later history refresh can retry.
+        }
+    }
+
+    private func acknowledgeMediaCached(_ message: ImMessage) async {
+        guard !message.hasTemporaryID,
+              let conversation = try? await store.conversation(id: message.conversationId) else { return }
+        switch conversation.kind {
+        case .peer:
+            try? await service.markPrivateMediaCached(messageId: message.id)
+        case .group:
+            guard let groupId = conversation.groupId else { return }
+            try? await service.markGroupMediaCached(groupId: groupId, messageId: message.id)
+        }
+    }
+
+    private func cacheLocalFile(_ source: URL, messageId: String, messageType: ImMessageType) throws -> URL {
+        let destination = try mediaCacheURL(
+            messageId: messageId,
+            messageType: messageType,
+            preferredExtension: source.pathExtension
+        )
+        if source.standardizedFileURL != destination.standardizedFileURL {
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: source, to: destination)
+        }
+        return destination
+    }
+
+    private func mediaCacheURL(
+        messageId: String,
+        messageType: ImMessageType,
+        preferredExtension: String
+    ) throws -> URL {
+        let directory = configuration.mediaCacheDirectory.appendingPathComponent(messageType.rawValue, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let sanitizedID = messageId.replacingOccurrences(of: "/", with: "_")
+        let ext = preferredExtension.isEmpty ? Self.defaultExtension(for: messageType) : preferredExtension
+        return directory.appendingPathComponent(sanitizedID).appendingPathExtension(ext)
+    }
+
+    private static func validateMedia(fileURL: URL, messageType: ImMessageType) throws {
+        let values = try fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        guard values.isRegularFile == true, let size = values.fileSize, size > 0 else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let limits: [ImMessageType: Int] = [.image: 10 * 1_024 * 1_024, .video: 100 * 1_024 * 1_024, .audio: 20 * 1_024 * 1_024]
+        guard size <= (limits[messageType] ?? 0) else { throw CocoaError(.fileWriteOutOfSpace) }
+        let allowed: [ImMessageType: Set<String>] = [
+            .image: ["jpg", "jpeg", "png", "gif", "webp"],
+            .video: ["mp4", "mov", "avi", "mkv"],
+            .audio: ["mp3", "m4a", "wav", "ogg"],
+        ]
+        guard allowed[messageType]?.contains(fileURL.pathExtension.lowercased()) == true else {
+            throw CocoaError(.fileReadUnsupportedScheme)
+        }
+    }
+
+    private static func preferredExtension(message: ImMessage, metadata: ImMediaMetadata) -> String {
+        if let fileName = metadata.fileName, !URL(fileURLWithPath: fileName).pathExtension.isEmpty {
+            return URL(fileURLWithPath: fileName).pathExtension
+        }
+        if let url = URL(string: message.content), !url.pathExtension.isEmpty { return url.pathExtension }
+        return defaultExtension(for: message.type ?? .image)
+    }
+
+    private static func defaultExtension(for type: ImMessageType) -> String {
+        switch type {
+        case .image: return "jpg"
+        case .video: return "mp4"
+        case .audio: return "m4a"
+        case .text, .system: return "bin"
+        }
     }
 
     // MARK: - Friends / contact list (bridge to person profiles)
@@ -672,18 +897,39 @@ public actor ImMessageCenter {
     // MARK: - Group management
 
     @discardableResult
-    public func createGroup(name: String, description: String = "") async throws -> ImGroupDTO {
-        let group = try await service.createGroup(name: name, description: description)
+    public func createGroup(name: String, description: String = "", memberIds: [Int64] = []) async throws -> ImGroupDTO {
+        let group = try await service.createGroup(name: name, description: description, memberIds: memberIds)
+        knownGroupIDs.insert(group.groupId)
         _ = try await ensureGroupConversation(groupId: group.groupId, title: group.name)
         return group
     }
 
+    public func groupDetail(groupId: String) async throws -> ImGroupDTO {
+        let group = try await service.groupDetail(groupId: groupId)
+        knownGroupIDs.insert(groupId)
+        return group
+    }
+
+    public func groupMembers(groupId: String) async throws -> [ImGroupMemberDTO] {
+        _ = try await groupDetail(groupId: groupId)
+        return try await service.groupMembers(groupId: groupId)
+    }
+
     public func inviteGroupMember(groupId: String, userId: Int64) async throws {
+        _ = try await groupDetail(groupId: groupId)
         try await service.inviteGroupMember(groupId: groupId, userId: userId)
     }
 
     public func removeGroupMember(groupId: String, userId: Int64) async throws {
+        _ = try await groupDetail(groupId: groupId)
         try await service.removeGroupMember(groupId: groupId, userId: userId)
+    }
+
+    public func leaveGroup(groupId: String) async throws {
+        _ = try await groupDetail(groupId: groupId)
+        try await service.leaveGroup(groupId: groupId)
+        knownGroupIDs.remove(groupId)
+        try await store.deleteConversation(id: ImConversation.groupConversationID(groupId: groupId))
     }
 
     // MARK: - Helpers
@@ -692,6 +938,15 @@ public actor ImMessageCenter {
         let object: [String: Any] = ["type": type, "payload": payload]
         guard let data = try? JSONSerialization.data(withJSONObject: object) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private func isKnownGroup(_ groupId: String) async -> Bool {
+        if knownGroupIDs.contains(groupId) { return true }
+        guard (try? await service.groupDetail(groupId: groupId)) != nil else {
+            return false
+        }
+        knownGroupIDs.insert(groupId)
+        return true
     }
 
     private static func int64Value(_ value: Any?) -> Int64? {
@@ -708,6 +963,36 @@ public actor ImMessageCenter {
         guard let object = value as? [String: Any],
               let data = try? JSONSerialization.data(withJSONObject: object) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func jsonString<T: Encodable>(from value: T) -> String {
+        guard let data = try? JSONEncoder().encode(value) else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func jsonObject<T: Encodable>(from value: T) -> [String: Any] {
+        guard let data = try? JSONEncoder().encode(value),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return object
+    }
+
+    private static func remoteExtraObject(_ json: String) -> [String: Any] {
+        guard let data = json.data(using: .utf8),
+              var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        object.removeValue(forKey: "localPath")
+        object.removeValue(forKey: "localThumbnailPath")
+        return object
+    }
+
+    private static func preview(for message: ImMessage) -> String {
+        preview(type: message.messageType, content: message.content)
+    }
+
+    private static func preview(type rawType: String, content: String) -> String {
+        let normalizedType = rawType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let type = normalizedType.isEmpty ? ImMessageType.text : ImMessageType(rawValue: normalizedType)
+        guard let type else { return "[不支持的消息]" }
+        return type == .text ? String(content.prefix(100)) : type.conversationPreview
     }
 
     private static let rfc3339 = epochFormatter(options: [.withInternetDateTime])
@@ -727,6 +1012,7 @@ public actor ImMessageCenter {
 
     static func epochMilliseconds(fromRFC3339 value: String) -> Int64 {
         guard !value.isEmpty else { return 0 }
+        if let milliseconds = Int64(value) { return milliseconds }
         let date = rfc3339.date(from: value) ?? rfc3339Fractional.date(from: value)
         guard let date else { return 0 }
         return Int64(date.timeIntervalSince1970 * 1000)

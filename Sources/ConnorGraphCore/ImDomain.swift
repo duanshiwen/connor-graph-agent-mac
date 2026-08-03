@@ -9,6 +9,100 @@ public enum ImConversationKind: String, Codable, Sendable, Equatable, Hashable, 
     case group
 }
 
+public enum ImMessageType: String, Codable, Sendable, Equatable, Hashable, CaseIterable {
+    case text
+    case image
+    case video
+    case audio
+    case system
+
+    public var isMedia: Bool {
+        self == .image || self == .video || self == .audio
+    }
+
+    public var conversationPreview: String {
+        switch self {
+        case .text: return ""
+        case .image: return "[图片]"
+        case .video: return "[视频]"
+        case .audio: return "[语音]"
+        case .system: return "[系统消息]"
+        }
+    }
+}
+
+public struct ImMediaMetadata: Codable, Sendable, Equatable, Hashable {
+    public var width: Int?
+    public var height: Int?
+    public var duration: Int?
+    public var fileSize: Int64?
+    public var fileName: String?
+    public var mimeType: String?
+    public var thumbnail: String?
+    public var expired: Bool
+    public var localPath: String?
+    public var localThumbnailPath: String?
+
+    public init(
+        width: Int? = nil,
+        height: Int? = nil,
+        duration: Int? = nil,
+        fileSize: Int64? = nil,
+        fileName: String? = nil,
+        mimeType: String? = nil,
+        thumbnail: String? = nil,
+        expired: Bool = false,
+        localPath: String? = nil,
+        localThumbnailPath: String? = nil
+    ) {
+        self.width = width
+        self.height = height
+        self.duration = duration
+        self.fileSize = fileSize
+        self.fileName = fileName
+        self.mimeType = mimeType
+        self.thumbnail = thumbnail
+        self.expired = expired
+        self.localPath = localPath
+        self.localThumbnailPath = localThumbnailPath
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case width, height, duration, fileSize, size, fileName, mimeType, format
+        case thumbnail, expired, localPath, localThumbnailPath
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        width = try values.decodeIfPresent(Int.self, forKey: .width)
+        height = try values.decodeIfPresent(Int.self, forKey: .height)
+        duration = try values.decodeIfPresent(Int.self, forKey: .duration)
+        fileSize = try values.decodeIfPresent(Int64.self, forKey: .fileSize)
+            ?? values.decodeIfPresent(Int64.self, forKey: .size)
+        fileName = try values.decodeIfPresent(String.self, forKey: .fileName)
+        mimeType = try values.decodeIfPresent(String.self, forKey: .mimeType)
+            ?? values.decodeIfPresent(String.self, forKey: .format)
+        thumbnail = try values.decodeIfPresent(String.self, forKey: .thumbnail)
+        expired = try values.decodeIfPresent(Bool.self, forKey: .expired) ?? false
+        localPath = try values.decodeIfPresent(String.self, forKey: .localPath)
+        localThumbnailPath = try values.decodeIfPresent(String.self, forKey: .localThumbnailPath)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encodeIfPresent(width, forKey: .width)
+        try values.encodeIfPresent(height, forKey: .height)
+        try values.encodeIfPresent(duration, forKey: .duration)
+        try values.encodeIfPresent(fileSize, forKey: .fileSize)
+        try values.encodeIfPresent(fileName, forKey: .fileName)
+        try values.encodeIfPresent(mimeType, forKey: .mimeType)
+        try values.encodeIfPresent(thumbnail, forKey: .thumbnail)
+        if expired { try values.encode(true, forKey: .expired) }
+        try values.encodeIfPresent(localPath, forKey: .localPath)
+        try values.encodeIfPresent(localThumbnailPath, forKey: .localThumbnailPath)
+    }
+}
+
 /// Message delivery state machine: SENDING → SENT → DELIVERED → READ, one-way only.
 /// FAILED is terminal but retryable (retry resets the same message back to SENDING).
 public enum ImMessageStatus: String, Codable, Sendable, Equatable, Hashable, CaseIterable {
@@ -149,6 +243,13 @@ public struct ImMessage: Codable, Sendable, Equatable, Hashable, Identifiable {
     public static func makeTemporaryID() -> String { temporaryIDPrefix + UUID().uuidString }
 
     public var hasTemporaryID: Bool { id.hasPrefix(Self.temporaryIDPrefix) }
+
+    public var type: ImMessageType? { ImMessageType(rawValue: messageType.lowercased()) }
+
+    public var mediaMetadata: ImMediaMetadata? {
+        guard type?.isMedia == true, let data = extraJson.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(ImMediaMetadata.self, from: data)
+    }
 }
 
 /// Cached friend row (projection of the server-side friendship).

@@ -52,6 +52,10 @@ final class ImFeatureModel {
     private(set) var isForwarding = false
     /// Whether older history may remain before the oldest cached message.
     private(set) var hasOlderMessages = true
+    private(set) var isSendingMedia = false
+    private(set) var selectedGroupDetail: ImGroupDTO?
+    private(set) var selectedGroupMembers: [ImGroupMemberDTO] = []
+    private(set) var isLoadingGroupDetails = false
     var errorMessage: String?
 
     var selectedConversation: ImConversation? {
@@ -187,6 +191,8 @@ final class ImFeatureModel {
         contactMessage = nil
         clearSelection()
         isForwardSheetPresented = false
+        selectedGroupDetail = nil
+        selectedGroupMembers = []
     }
 
     // MARK: - Store reload
@@ -261,6 +267,22 @@ final class ImFeatureModel {
             }
         } catch {
             errorMessage = "发送失败：\(error.localizedDescription)"
+        }
+    }
+
+    func sendMedia(fileURL: URL, messageType: ImMessageType, metadata: ImMediaMetadata) async {
+        guard let conversation = selectedConversation, !isSendingMedia else { return }
+        isSendingMedia = true
+        defer { isSendingMedia = false }
+        do {
+            try await center.sendMediaMessage(
+                conversationId: conversation.id,
+                fileURL: fileURL,
+                messageType: messageType,
+                metadata: metadata
+            )
+        } catch {
+            errorMessage = "媒体发送失败：\(error.localizedDescription)"
         }
     }
 
@@ -344,6 +366,79 @@ final class ImFeatureModel {
 
     func participantMessages(for conversationId: String) -> [ImMessage] {
         participantMessagesByConversation[conversationId] ?? []
+    }
+
+    // MARK: - Normal groups
+
+    @discardableResult
+    func createGroup(name: String, description: String, memberIds: [Int64]) async -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return false }
+        do {
+            let group = try await center.createGroup(
+                name: trimmedName,
+                description: description.trimmingCharacters(in: .whitespacesAndNewlines),
+                memberIds: memberIds
+            )
+            conversations = (try? await store.loadConversations()) ?? []
+            await selectConversation(ImConversation.groupConversationID(groupId: group.groupId))
+            return true
+        } catch {
+            errorMessage = "创建群聊失败：\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func loadSelectedGroupDetails() async {
+        guard let groupId = selectedConversation?.groupId else { return }
+        isLoadingGroupDetails = true
+        defer { isLoadingGroupDetails = false }
+        do {
+            async let detail = center.groupDetail(groupId: groupId)
+            async let members = center.groupMembers(groupId: groupId)
+            selectedGroupDetail = try await detail
+            selectedGroupMembers = try await members
+        } catch {
+            selectedGroupDetail = nil
+            selectedGroupMembers = []
+            errorMessage = "加载群聊详情失败：\(error.localizedDescription)"
+        }
+    }
+
+    func inviteGroupMember(userId: Int64) async {
+        guard let groupId = selectedConversation?.groupId else { return }
+        do {
+            try await center.inviteGroupMember(groupId: groupId, userId: userId)
+            await loadSelectedGroupDetails()
+        } catch {
+            errorMessage = "邀请成员失败：\(error.localizedDescription)"
+        }
+    }
+
+    func removeGroupMember(userId: Int64) async {
+        guard let groupId = selectedConversation?.groupId else { return }
+        do {
+            try await center.removeGroupMember(groupId: groupId, userId: userId)
+            await loadSelectedGroupDetails()
+        } catch {
+            errorMessage = "移除成员失败：\(error.localizedDescription)"
+        }
+    }
+
+    @discardableResult
+    func leaveSelectedGroup() async -> Bool {
+        guard let groupId = selectedConversation?.groupId else { return false }
+        do {
+            try await center.leaveGroup(groupId: groupId)
+            selectedGroupDetail = nil
+            selectedGroupMembers = []
+            await selectConversation(nil)
+            conversations = (try? await store.loadConversations()) ?? []
+            return true
+        } catch {
+            errorMessage = "退出群聊失败：\(error.localizedDescription)"
+            return false
+        }
     }
 
     private func reloadParticipantMessages() async {
