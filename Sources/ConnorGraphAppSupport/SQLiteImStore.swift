@@ -15,6 +15,9 @@ public protocol ImStore: Sendable {
     func clearUnread(conversationId: String, now: Int64) async throws
     func setPinned(conversationId: String, pinned: Bool, now: Int64) async throws
     func setMuted(conversationId: String, muted: Bool, now: Int64) async throws
+    func renameConversation(conversationId: String, title: String, customized: Bool, now: Int64) async throws
+    func setConversationStatus(conversationId: String, status: AgentSessionStatus, now: Int64) async throws
+    func setConversationLabels(conversationId: String, labelIds: [String], now: Int64) async throws
     func deleteConversation(id: String) async throws
 
     // Messages
@@ -99,6 +102,7 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
 
         try Self.configurePragmas(db: openedDB)
         try Self.createTables(db: openedDB)
+        try Self.migrateTables(db: openedDB)
     }
 
     deinit {
@@ -165,6 +169,37 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
             try executePrepared(
                 "UPDATE im_conversations SET muted = ?, updated_at = ? WHERE id = ?;",
                 bindings: [.integer(muted ? 1 : 0), .integer(now), .text(conversationId)]
+            )
+        }
+        postChange(scope: .conversations, conversationID: conversationId)
+    }
+
+    public func renameConversation(conversationId: String, title: String, customized: Bool, now: Int64) async throws {
+        try queue.sync {
+            try executePrepared(
+                "UPDATE im_conversations SET title = ?, title_customized = ?, updated_at = ? WHERE id = ?;",
+                bindings: [.text(title), .integer(customized ? 1 : 0), .integer(now), .text(conversationId)]
+            )
+        }
+        postChange(scope: .conversations, conversationID: conversationId)
+    }
+
+    public func setConversationStatus(conversationId: String, status: AgentSessionStatus, now: Int64) async throws {
+        try queue.sync {
+            try executePrepared(
+                "UPDATE im_conversations SET governance_status = ?, updated_at = ? WHERE id = ?;",
+                bindings: [.text(status.rawValue), .integer(now), .text(conversationId)]
+            )
+        }
+        postChange(scope: .conversations, conversationID: conversationId)
+    }
+
+    public func setConversationLabels(conversationId: String, labelIds: [String], now: Int64) async throws {
+        let encoded = (try? JSONEncoder().encode(labelIds)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        try queue.sync {
+            try executePrepared(
+                "UPDATE im_conversations SET label_ids_json = ?, updated_at = ? WHERE id = ?;",
+                bindings: [.text(encoded), .integer(now), .text(conversationId)]
             )
         }
         postChange(scope: .conversations, conversationID: conversationId)
@@ -501,7 +536,11 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
                 unread_count INTEGER NOT NULL,
                 pinned INTEGER NOT NULL,
                 muted INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
+                updated_at INTEGER NOT NULL,
+                participant_name TEXT NOT NULL DEFAULT '',
+                governance_status TEXT NOT NULL DEFAULT 'todo',
+                label_ids_json TEXT NOT NULL DEFAULT '[]',
+                title_customized INTEGER NOT NULL DEFAULT 0
             );
         """, db: db)
         try execute("""
@@ -565,6 +604,32 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
         try execute("CREATE INDEX IF NOT EXISTS idx_im_forward_alias_person ON im_forward_alias(person_profile_id);", db: db)
     }
 
+    private static func migrateTables(db: OpaquePointer) throws {
+        try addColumnIfMissing("participant_name", definition: "TEXT NOT NULL DEFAULT ''", table: "im_conversations", db: db)
+        try addColumnIfMissing("governance_status", definition: "TEXT NOT NULL DEFAULT 'todo'", table: "im_conversations", db: db)
+        try addColumnIfMissing("label_ids_json", definition: "TEXT NOT NULL DEFAULT '[]'", table: "im_conversations", db: db)
+        try addColumnIfMissing("title_customized", definition: "INTEGER NOT NULL DEFAULT 0", table: "im_conversations", db: db)
+        try execute("UPDATE im_conversations SET participant_name = title WHERE participant_name = '';", db: db)
+    }
+
+    private static func addColumnIfMissing(
+        _ column: String,
+        definition: String,
+        table: String,
+        db: OpaquePointer
+    ) throws {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(table));", -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw SQLiteImStoreError.sqlite(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(statement) }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let name = sqlite3_column_text(statement, 1), String(cString: name) == column { return }
+        }
+        try execute("ALTER TABLE \(table) ADD COLUMN \(column) \(definition);", db: db)
+    }
+
     // MARK: - Internal writes
 
     private func upsertConversationInternal(_ conversation: ImConversation) throws {
@@ -574,14 +639,19 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
             """
             INSERT INTO im_conversations (
                 id, kind, peer_user_id, group_id, title, avatar, last_message_preview,
-                last_message_at, unread_count, pinned, muted, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                last_message_at, unread_count, pinned, muted, updated_at, participant_name,
+                governance_status, label_ids_json, title_customized
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 kind = excluded.kind, peer_user_id = excluded.peer_user_id,
                 group_id = excluded.group_id, title = excluded.title, avatar = excluded.avatar,
                 last_message_preview = excluded.last_message_preview,
                 last_message_at = excluded.last_message_at, unread_count = excluded.unread_count,
-                pinned = excluded.pinned, muted = excluded.muted, updated_at = excluded.updated_at;
+                pinned = excluded.pinned, muted = excluded.muted, updated_at = excluded.updated_at,
+                participant_name = excluded.participant_name,
+                governance_status = excluded.governance_status,
+                label_ids_json = excluded.label_ids_json,
+                title_customized = excluded.title_customized;
             """,
             bindings: [
                 .text(conversation.id),
@@ -595,7 +665,11 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
                 .integer(Int64(conversation.unreadCount)),
                 .integer(conversation.pinned ? 1 : 0),
                 .integer(conversation.muted ? 1 : 0),
-                .integer(conversation.updatedAt)
+                .integer(conversation.updatedAt),
+                .text(conversation.participantName),
+                .text(conversation.status.rawValue),
+                .text(Self.encodeLabelIds(conversation.labelIds)),
+                .integer(conversation.titleCustomized ? 1 : 0)
             ]
         )
     }
@@ -684,15 +758,28 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
                 peerUserId: columnOptionalInt64(statement, 2),
                 groupId: columnOptionalText(statement, 3),
                 title: columnText(statement, 4),
+                participantName: columnText(statement, 12),
                 avatar: columnText(statement, 5),
                 lastMessagePreview: columnText(statement, 6),
                 lastMessageAt: sqlite3_column_int64(statement, 7),
                 unreadCount: Int(sqlite3_column_int64(statement, 8)),
                 pinned: sqlite3_column_int64(statement, 9) != 0,
                 muted: sqlite3_column_int64(statement, 10) != 0,
+                status: AgentSessionStatus(rawValue: columnText(statement, 13)) ?? .todo,
+                labelIds: Self.decodeLabelIds(columnText(statement, 14)),
+                titleCustomized: sqlite3_column_int64(statement, 15) != 0,
                 updatedAt: sqlite3_column_int64(statement, 11)
             )
         }
+    }
+
+    private static func encodeLabelIds(_ labelIds: [String]) -> String {
+        (try? JSONEncoder().encode(labelIds)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+    }
+
+    private static func decodeLabelIds(_ json: String) -> [String] {
+        guard let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
     }
 
     private func queryMessages(sql: String, bindings: [Binding]) throws -> [ImMessage] {

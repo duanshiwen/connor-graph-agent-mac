@@ -404,6 +404,23 @@ public actor ImMessageCenter {
         try await store.setMuted(conversationId: conversationId, muted: muted, now: configuration.now())
     }
 
+    public func renameConversation(conversationId: String, title: String, customized: Bool = true) async throws {
+        try await store.renameConversation(
+            conversationId: conversationId,
+            title: title,
+            customized: customized,
+            now: configuration.now()
+        )
+    }
+
+    public func setConversationStatus(conversationId: String, status: AgentSessionStatus) async throws {
+        try await store.setConversationStatus(conversationId: conversationId, status: status, now: configuration.now())
+    }
+
+    public func setConversationLabels(conversationId: String, labelIds: [String]) async throws {
+        try await store.setConversationLabels(conversationId: conversationId, labelIds: labelIds, now: configuration.now())
+    }
+
     public func deleteConversation(_ conversationId: String) async throws {
         try await store.deleteConversation(id: conversationId)
     }
@@ -435,7 +452,10 @@ public actor ImMessageCenter {
         for group in try await service.myGroups() {
             let id = try await ensureGroupConversation(groupId: group.groupId, title: group.name)
             guard var existing = try await store.conversation(id: id) else { continue }
-            existing.title = group.name
+            existing.participantName = group.name
+            if !existing.titleCustomized {
+                existing.title = group.name
+            }
             existing.avatar = group.avatar
             existing.lastMessagePreview = String(group.lastMessageContent.prefix(100))
             existing.lastMessageAt = max(existing.lastMessageAt, Self.epochMilliseconds(fromRFC3339: group.lastMessageTime))

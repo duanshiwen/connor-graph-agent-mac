@@ -46,6 +46,8 @@ public struct ImConversation: Codable, Sendable, Equatable, Hashable, Identifiab
     public var peerUserId: Int64?
     public var groupId: String?
     public var title: String
+    /// Server-backed peer/group name shown beneath the locally managed title.
+    public var participantName: String
     public var avatar: String
     public var lastMessagePreview: String
     /// Unix milliseconds of the newest message; 0 when empty.
@@ -54,6 +56,10 @@ public struct ImConversation: Codable, Sendable, Equatable, Hashable, Identifiab
     /// Local-only preferences, preserved across server-side conversation merges.
     public var pinned: Bool
     public var muted: Bool
+    public var status: AgentSessionStatus
+    public var labelIds: [String]
+    /// Prevents server refreshes from replacing a manual or AI-generated title.
+    public var titleCustomized: Bool
     public var updatedAt: Int64
 
     public init(
@@ -62,12 +68,16 @@ public struct ImConversation: Codable, Sendable, Equatable, Hashable, Identifiab
         peerUserId: Int64? = nil,
         groupId: String? = nil,
         title: String,
+        participantName: String = "",
         avatar: String = "",
         lastMessagePreview: String = "",
         lastMessageAt: Int64 = 0,
         unreadCount: Int = 0,
         pinned: Bool = false,
         muted: Bool = false,
+        status: AgentSessionStatus = .todo,
+        labelIds: [String] = [],
+        titleCustomized: Bool = false,
         updatedAt: Int64 = 0
     ) {
         self.id = id
@@ -75,12 +85,16 @@ public struct ImConversation: Codable, Sendable, Equatable, Hashable, Identifiab
         self.peerUserId = peerUserId
         self.groupId = groupId
         self.title = title
+        self.participantName = participantName.isEmpty ? title : participantName
         self.avatar = avatar
         self.lastMessagePreview = lastMessagePreview
         self.lastMessageAt = lastMessageAt
         self.unreadCount = unreadCount
         self.pinned = pinned
         self.muted = muted
+        self.status = status
+        self.labelIds = labelIds
+        self.titleCustomized = titleCustomized
         self.updatedAt = updatedAt
     }
 
