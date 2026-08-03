@@ -235,6 +235,10 @@ final class AppCompositionRoot: ObservableObject {
             forwardToExistingSession: { sessionID, prompt in
                 chatActions.session.selectChatSession(sessionID)
                 return await chatActions.run.submitChat(prompt: prompt, clearComposer: false)
+            },
+            generateTitle: { [weak runtime] messages, conversationID in
+                guard let runtime else { throw CancellationError() }
+                return try await runtime.generateImConversationTitle(messages: messages, conversationID: conversationID)
             }
         )
         runtime.graph.im = imFeature

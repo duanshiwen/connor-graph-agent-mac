@@ -26,111 +26,200 @@ private enum ImTimeFormat {
         return day.string(from: date)
     }
 }
-// MARK: - Conversation list section (embedded above the AI session list)
+// MARK: - Conversation list row
 
-/// IM conversations shown above the AI session list; Android renders one mixed
-/// list, the Mac list pane keeps a dedicated section (pinned first, newest first).
-struct ImConversationListSection: View {
-    var model: ImFeatureModel
+struct ImConversationRow: View {
+    let conversation: ImConversation
+    let participantMessages: [ImMessage]
+    let isSelected: Bool
+    let isRegeneratingTitle: Bool
+    let labelDefinitions: [AgentSessionLabelDefinition]
+    let onSelect: () -> Void
+    let onRename: (String) -> Void
+    let onSetStatus: (AgentSessionStatus) -> Void
+    let onToggleLabel: (String) -> Void
+    let onRegenerateTitle: () -> Void
+    let onTogglePinned: () -> Void
+    let onToggleMuted: () -> Void
+    let onDelete: () -> Void
+
+    @State private var isEditingTitle = false
+    @State private var titleDraft = ""
+    @FocusState private var isTitleFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Text("好友消息")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if !model.socketConnected {
-                    Label("离线", systemImage: "wifi.slash")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .labelStyle(.titleAndIcon)
-                }
-                Spacer()
+        HStack(alignment: .top, spacing: AppListCardLayout.contentPadding) {
+            Image(systemName: conversation.pinned ? "pin.fill" : statusIcon)
+                .foregroundStyle(conversation.pinned ? .orange : .secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
+                titleRow
+                participantRow
+                labelRow
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
+        }
+        .appListRowSurface(isSelected: isSelected)
+        .contentShape(Rectangle())
+        .onTapGesture { if !isEditingTitle { onSelect() } }
+        .onAppear { titleDraft = conversation.title }
+        .onChange(of: conversation.title) { _, title in if !isEditingTitle { titleDraft = title } }
+        .onChange(of: isTitleFocused) { _, focused in if !focused && isEditingTitle { commitTitleEdit() } }
+        .contextMenu { contextMenu }
+    }
 
-            ForEach(model.sortedConversations) { conversation in
-                ImConversationRow(
-                    conversation: conversation,
-                    isSelected: model.selectedConversationId == conversation.id
-                )
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    Task { await model.selectConversation(conversation.id) }
-                }
-                .contextMenu {
-                    Button(conversation.pinned ? "取消置顶" : "置顶") {
-                        Task { await model.setPinned(conversationId: conversation.id, pinned: !conversation.pinned) }
-                    }
-                    Button(conversation.muted ? "取消免打扰" : "免打扰") {
-                        Task { await model.setMuted(conversationId: conversation.id, muted: !conversation.muted) }
-                    }
-                    Divider()
-                    Button("删除会话", role: .destructive) {
-                        Task { await model.deleteConversation(conversation.id) }
-                    }
+    private var titleRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            if isEditingTitle {
+                TextField("会话标题", text: $titleDraft)
+                    .textFieldStyle(.plain)
+                    .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                    .focused($isTitleFocused)
+                    .onSubmit(commitTitleEdit)
+            } else {
+                Text(conversation.title.isEmpty ? "会话" : conversation.title)
+                    .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                    .lineLimit(AppListCardLayout.titleLineLimit)
+                    .onTapGesture(count: 2, perform: beginTitleEdit)
+            }
+            if conversation.muted {
+                Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            if isRegeneratingTitle {
+                ProgressView().controlSize(.small)
+            } else {
+                Text(ImTimeFormat.label(forUnixMilliseconds: conversation.lastMessageAt))
+                    .font(AppListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var participantRow: some View {
+        HStack(spacing: 6) {
+            ImParticipantAvatarStack(conversation: conversation, messages: participantMessages)
+            Image(systemName: "plus")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+            Text(conversation.participantName)
+                .font(AppListTypography.rowSubtitle)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(conversation.status.displayName)
+                .font(AppListTypography.rowCaptionEmphasized)
+                .foregroundStyle(Color.accentColor)
+            if conversation.unreadCount > 0 {
+                Text("\(min(conversation.unreadCount, 99))")
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(conversation.muted ? Color.gray : Color.red, in: Capsule())
+            }
+        }
+    }
+
+    @ViewBuilder private var labelRow: some View {
+        if !conversation.labelIds.isEmpty {
+            HStack(spacing: 4) {
+                ForEach(conversation.labelIds.prefix(3), id: \.self) { labelID in
+                    Text(labelDefinitions.first(where: { $0.id == labelID })?.name ?? labelID)
+                        .font(AppListTypography.rowCaption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.10), in: Capsule())
                 }
             }
         }
-        .padding(.bottom, 6)
+    }
+
+    @ViewBuilder private var contextMenu: some View {
+        Menu("更改状态", systemImage: "circle.dashed") {
+            ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
+                Button(status.displayName) { onSetStatus(status) }
+            }
+        }
+        Menu("标签", systemImage: "tag") {
+            ForEach(labelDefinitions) { definition in
+                Button {
+                    onToggleLabel(definition.id)
+                } label: {
+                    Label(definition.name, systemImage: conversation.labelIds.contains(definition.id) ? "checkmark.circle.fill" : "tag")
+                }
+            }
+        }
+        Divider()
+        Button("重命名", systemImage: "pencil", action: beginTitleEdit)
+        Button("AI 重设标题", systemImage: "sparkles", action: onRegenerateTitle).disabled(isRegeneratingTitle)
+        Button(conversation.pinned ? "取消置顶" : "置顶", systemImage: "pin", action: onTogglePinned)
+        Button(conversation.muted ? "取消免打扰" : "免打扰", systemImage: "bell.slash", action: onToggleMuted)
+        Divider()
+        Button("删除会话", systemImage: "trash", role: .destructive, action: onDelete)
+    }
+
+    private var statusIcon: String {
+        AgentSessionStatusDefinition.defaults.first(where: { $0.id == conversation.status.rawValue })?.systemImage ?? "circle"
+    }
+
+    private func beginTitleEdit() {
+        titleDraft = conversation.title
+        isEditingTitle = true
+        isTitleFocused = true
+    }
+
+    private func commitTitleEdit() {
+        let title = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditingTitle = false
+        isTitleFocused = false
+        guard !title.isEmpty, title != conversation.title else { return }
+        onRename(title)
     }
 }
 
-private struct ImConversationRow: View {
+private struct ImParticipantAvatarStack: View {
     let conversation: ImConversation
-    let isSelected: Bool
+    let messages: [ImMessage]
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: conversation.kind == .group ? "person.3.fill" : "person.crop.circle.fill")
-                .font(.title3)
-                .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(conversation.title.isEmpty ? "会话" : conversation.title)
-                        .font(.body)
-                        .lineLimit(1)
-                    if conversation.pinned {
-                        Image(systemName: "pin.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if conversation.muted {
-                        Image(systemName: "bell.slash.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                if !conversation.lastMessagePreview.isEmpty {
-                    Text(conversation.lastMessagePreview)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 4)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(ImTimeFormat.label(forUnixMilliseconds: conversation.lastMessageAt))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                if conversation.unreadCount > 0 {
-                    Text("\(min(conversation.unreadCount, 99))")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(conversation.muted ? Color.gray : Color.red, in: Capsule())
-                }
+        HStack(spacing: -6) {
+            ForEach(Array(avatars.prefix(5).enumerated()), id: \.offset) { _, avatar in
+                ImUserAvatar(urlString: avatar.url, name: avatar.name, size: 20)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
-                .padding(.horizontal, 6)
-        )
+        .frame(minWidth: 20, alignment: .leading)
+    }
+
+    private var avatars: [(url: String, name: String)] {
+        if conversation.kind == .peer { return [(conversation.avatar, conversation.participantName)] }
+        let messageAvatars = messages.map { ($0.senderAvatar, $0.senderName) }
+        return messageAvatars.isEmpty ? [(conversation.avatar, conversation.participantName)] : messageAvatars
+    }
+}
+
+private struct ImUserAvatar: View {
+    let urlString: String
+    let name: String
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Color.accentColor.opacity(0.14))
+            if let url = URL(string: urlString), !urlString.isEmpty {
+                AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { initials }
+            } else {
+                initials
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+    }
+
+    private var initials: some View {
+        Text(name.trimmingCharacters(in: .whitespacesAndNewlines).first.map(String.init) ?? "?")
+            .font(.system(size: max(9, size * 0.48), weight: .semibold))
+            .foregroundStyle(Color.accentColor)
     }
 }
 

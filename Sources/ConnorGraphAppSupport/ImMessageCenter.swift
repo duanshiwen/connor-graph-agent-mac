@@ -484,6 +484,17 @@ public actor ImMessageCenter {
         }
         try await store.upsertFriends(local)
         try await store.pruneFriends(keepUserIds: local.map(\.userId))
+        for friend in local {
+            let conversationID = ImConversation.peerConversationID(peerUserId: friend.userId)
+            guard var conversation = try await store.conversation(id: conversationID) else { continue }
+            conversation.participantName = friend.displayName
+            conversation.avatar = friend.avatar
+            if !conversation.titleCustomized {
+                conversation.title = friend.displayName
+            }
+            conversation.updatedAt = now
+            try await store.upsertConversation(conversation)
+        }
         let received = try await service.receivedFriendRequests()
         let sent = try await service.sentFriendRequests()
         let requests = (received + sent).map { dto in

@@ -35,6 +35,8 @@ final class ImFeatureModel {
     private(set) var socketConnected = false
     private(set) var isSignedIn = false
     private(set) var selfUserId: Int64?
+    private(set) var participantMessagesByConversation: [String: [ImMessage]] = [:]
+    private(set) var regeneratingTitleConversationIDs: Set<String> = []
 
     // MARK: - Contacts screen transient state
 
@@ -89,6 +91,7 @@ final class ImFeatureModel {
     @ObservationIgnored private let forwardToNewSession: @MainActor (String) async -> String?
     /// Submit into an existing AI session (selecting it first); returns the session id.
     @ObservationIgnored private let forwardToExistingSession: @MainActor (String, String) async -> String?
+    @ObservationIgnored private let generateTitle: @MainActor ([ImMessage], String) async throws -> String
 
     @ObservationIgnored private var cancellables: Set<AnyCancellable> = []
     @ObservationIgnored private var storeObserver: NSObjectProtocol?
@@ -101,7 +104,8 @@ final class ImFeatureModel {
         friendProvisioner: ImFriendPersonProvisioner? = nil,
         forwardFacade: @escaping @MainActor () -> AppMemoryOSFacade?,
         forwardToNewSession: @escaping @MainActor (String) async -> String?,
-        forwardToExistingSession: @escaping @MainActor (String, String) async -> String?
+        forwardToExistingSession: @escaping @MainActor (String, String) async -> String?,
+        generateTitle: @escaping @MainActor ([ImMessage], String) async throws -> String
     ) {
         self.store = store
         self.center = center
@@ -110,6 +114,7 @@ final class ImFeatureModel {
         self.forwardFacade = forwardFacade
         self.forwardToNewSession = forwardToNewSession
         self.forwardToExistingSession = forwardToExistingSession
+        self.generateTitle = generateTitle
     }
 
     // MARK: - Lifecycle
@@ -194,8 +199,10 @@ final class ImFeatureModel {
         switch scope {
         case .conversations:
             conversations = (try? await store.loadConversations()) ?? []
+            await reloadParticipantMessages()
         case .messages:
             conversations = (try? await store.loadConversations()) ?? []
+            await reloadParticipantMessages()
             if let selectedConversationId, conversationID == nil || conversationID == selectedConversationId {
                 messages = (try? await store.messages(conversationId: selectedConversationId)) ?? []
             }
@@ -211,6 +218,7 @@ final class ImFeatureModel {
 
     private func reloadAll() async {
         conversations = (try? await store.loadConversations()) ?? []
+        await reloadParticipantMessages()
         friends = (try? await store.loadFriends()) ?? []
         friendRequests = (try? await store.loadFriendRequests()) ?? []
         await reconcileFriendProfiles()
@@ -277,11 +285,75 @@ final class ImFeatureModel {
         try? await center.setMuted(conversationId: conversationId, muted: muted)
     }
 
+    func renameConversation(conversationId: String, title: String) async {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try await center.renameConversation(conversationId: conversationId, title: trimmed)
+        } catch {
+            errorMessage = "重命名失败：\(error.localizedDescription)"
+        }
+    }
+
+    func setStatus(conversationId: String, status: AgentSessionStatus) async {
+        do {
+            try await center.setConversationStatus(conversationId: conversationId, status: status)
+        } catch {
+            errorMessage = "更新状态失败：\(error.localizedDescription)"
+        }
+    }
+
+    func toggleLabel(conversationId: String, labelId: String) async {
+        guard let conversation = conversations.first(where: { $0.id == conversationId }) else { return }
+        var labels = conversation.labelIds
+        if let index = labels.firstIndex(of: labelId) {
+            labels.remove(at: index)
+        } else {
+            labels.append(labelId)
+        }
+        do {
+            try await center.setConversationLabels(conversationId: conversationId, labelIds: labels)
+        } catch {
+            errorMessage = "更新标签失败：\(error.localizedDescription)"
+        }
+    }
+
+    func regenerateTitle(conversationId: String) async {
+        guard !regeneratingTitleConversationIDs.contains(conversationId) else { return }
+        let latestMessages = ((try? await store.messages(conversationId: conversationId)) ?? []).suffix(10)
+        guard !latestMessages.isEmpty else {
+            errorMessage = "至少需要一条消息才能生成标题"
+            return
+        }
+        regeneratingTitleConversationIDs.insert(conversationId)
+        defer { regeneratingTitleConversationIDs.remove(conversationId) }
+        do {
+            let title = try await generateTitle(Array(latestMessages), conversationId)
+            try await center.renameConversation(conversationId: conversationId, title: title)
+        } catch {
+            errorMessage = "生成标题失败：\(error.localizedDescription)"
+        }
+    }
+
     func deleteConversation(_ conversationId: String) async {
         try? await center.deleteConversation(conversationId)
         if selectedConversationId == conversationId {
             await selectConversation(nil)
         }
+    }
+
+    func participantMessages(for conversationId: String) -> [ImMessage] {
+        participantMessagesByConversation[conversationId] ?? []
+    }
+
+    private func reloadParticipantMessages() async {
+        var previews: [String: [ImMessage]] = [:]
+        for conversation in conversations {
+            let recent = ((try? await store.messages(conversationId: conversation.id)) ?? []).reversed()
+            var seen: Set<Int64> = []
+            previews[conversation.id] = recent.filter { seen.insert($0.senderId).inserted }.prefix(5).map { $0 }
+        }
+        participantMessagesByConversation = previews
     }
 
     // MARK: - Contacts (friends / requests / search)

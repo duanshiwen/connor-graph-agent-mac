@@ -2466,6 +2466,11 @@ final class AppRuntimeLifecycle {
         return sanitizedSessionTitle(response.text ?? "")
     }
 
+    func generateImConversationTitle(messages: [ImMessage], conversationID: String) async throws -> String {
+        let prompts = ChatSessionTitleGenerationPrompt.imMessagePrompts(messages)
+        return try await generateTitleFromUserPrompts(prompts, sessionID: conversationID)
+    }
+
     private func sanitizedSessionTitle(_ raw: String) -> String {
         var title = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
