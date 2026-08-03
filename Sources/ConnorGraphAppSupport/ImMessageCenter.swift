@@ -577,8 +577,10 @@ public actor ImMessageCenter {
     }
 
     public func acceptFriendRequest(requestId: Int64) async throws {
-        _ = try await service.acceptFriendRequest(requestId: requestId)
+        let cachedRequest = try? await store.loadFriendRequests().first { $0.id == requestId }
+        let accepted = try await service.acceptFriendRequest(requestId: requestId)
         try? await refreshFriendData()
+        try await cacheAcceptedFriendIfNeeded(accepted, cachedRequest: cachedRequest)
     }
 
     public func rejectFriendRequest(requestId: Int64) async throws {
@@ -603,6 +605,37 @@ public actor ImMessageCenter {
 
     public func friendByPerson(personProfileID: String) async throws -> ImFriend? {
         try await store.friendByPerson(personProfileID: personProfileID)
+    }
+
+    private func cacheAcceptedFriendIfNeeded(
+        _ accepted: ImFriendRequestDTO,
+        cachedRequest: ImFriendRequest?
+    ) async throws {
+        guard let selfID = currentIdentity()?.id else { return }
+        let friend: ImFriend
+        if accepted.receiverId == selfID {
+            friend = ImFriend(
+                userId: accepted.senderId,
+                username: accepted.senderUsername.nonEmpty ?? cachedRequest?.senderUsername ?? "",
+                nickname: accepted.senderNickname.nonEmpty ?? cachedRequest?.senderNickname ?? "",
+                email: accepted.senderEmail,
+                avatar: accepted.senderAvatar.nonEmpty ?? cachedRequest?.senderAvatar ?? "",
+                updatedAt: configuration.now()
+            )
+        } else if accepted.senderId == selfID {
+            friend = ImFriend(
+                userId: accepted.receiverId,
+                username: accepted.receiverUsername.nonEmpty ?? cachedRequest?.receiverUsername ?? "",
+                nickname: accepted.receiverNickname.nonEmpty ?? cachedRequest?.receiverNickname ?? "",
+                email: accepted.receiverEmail,
+                avatar: accepted.receiverAvatar,
+                updatedAt: configuration.now()
+            )
+        } else {
+            return
+        }
+        guard friend.userId > 0, try await store.friend(userId: friend.userId) == nil else { return }
+        try await store.upsertFriends([friend])
     }
 
     // MARK: - Group management
@@ -666,5 +699,12 @@ public actor ImMessageCenter {
         let date = rfc3339.date(from: value) ?? rfc3339Fractional.date(from: value)
         guard let date else { return 0 }
         return Int64(date.timeIntervalSince1970 * 1000)
+    }
+}
+
+private extension String {
+    var nonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

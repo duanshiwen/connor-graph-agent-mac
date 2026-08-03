@@ -183,6 +183,26 @@ struct ImMessageCenterTests {
         #expect(try await fixture.store.friend(userId: 9) == nil)
     }
 
+    @Test func acceptingFriendRequestCachesFriendBeforeRemoteListConverges() async throws {
+        let fixture = try makeFixture(selfId: 2)
+        try await fixture.store.upsertFriendRequests([ImFriendRequest(
+            id: 77,
+            senderId: 1,
+            receiverId: 2,
+            senderUsername: "alice",
+            senderNickname: "爱丽丝",
+            senderAvatar: "https://example.com/alice.png"
+        )])
+        fixture.service.friendsResult = []
+
+        try await fixture.center.acceptFriendRequest(requestId: 77)
+
+        let friend = try #require(try await fixture.store.friend(userId: 1))
+        #expect(friend.username == "alice")
+        #expect(friend.nickname == "爱丽丝")
+        #expect(friend.avatar == "https://example.com/alice.png")
+    }
+
     @Test func refreshAllBackfillsFriendsConversationsAndGroups() async throws {
         let fixture = try makeFixture()
         // Pre-existing bridge + a stale friend that the server no longer returns.
@@ -277,7 +297,7 @@ struct ImMessageCenterTests {
         let frames: FrameRecorder
     }
 
-    private func makeFixture(sendTimeout: Duration = .seconds(15)) throws -> Fixture {
+    private func makeFixture(sendTimeout: Duration = .seconds(15), selfId: Int64 = 1) throws -> Fixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ImMessageCenterTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -289,7 +309,7 @@ struct ImMessageCenterTests {
             store: store,
             service: service,
             sendFrame: { frames.record($0) },
-            currentIdentity: { ImSelfIdentity(id: 1, displayName: "康纳") },
+            currentIdentity: { ImSelfIdentity(id: selfId, displayName: "康纳") },
             configuration: .init(sendTimeout: sendTimeout)
         )
         return Fixture(center: center, store: store, service: service, frames: frames)
