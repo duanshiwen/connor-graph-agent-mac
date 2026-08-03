@@ -106,3 +106,33 @@ private struct BootstrapFixtureTool: AgentTool {
     #expect(query.contains("Agent"))
     #expect(!query.contains("Please investigate"))
 }
+
+@Test func bootstrapRenderDistinguishesAnEmptySuccessfulReadFromPermissionFailure() {
+    let report = AssistantBootstrapReport(
+        contextPack: AssistantContextPack(failures: ["note_search: denied"]),
+        query: "小小基金;XIAOXIAO FUND",
+        attemptedToolNames: ["memory_os_recent_context", "note_search"],
+        succeededToolNames: ["memory_os_recent_context"]
+    )
+
+    let rendered = AssistantEvidenceReducer().render(report)
+
+    #expect(rendered.contains("memory_os_recent_context: succeeded"))
+    #expect(rendered.contains("note_search: failed"))
+    #expect(rendered.contains("completed with zero matches"))
+    #expect(rendered.contains("小小基金;XIAOXIAO FUND"))
+}
+
+@Test func evidenceReducerReadsMemoryToolSnakeCaseMetadata() throws {
+    let output = AssistantBootstrapToolOutput(
+        name: "memory_os_recent_context",
+        payload: #"{"records":[{"record_id":"memory-1","text":"Relevant memory","occurred_at":"2026-08-03T05:42:38Z","retrieval_score":0.75}]}"#,
+        error: nil
+    )
+
+    let item = try #require(AssistantEvidenceReducer().reduce([output]).recentMemory.first)
+
+    #expect(item.id == "memory-1")
+    #expect(item.relevance == 0.75)
+    #expect(item.occurredAt != nil)
+}
