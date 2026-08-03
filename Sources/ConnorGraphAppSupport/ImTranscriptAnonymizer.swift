@@ -59,6 +59,18 @@ public struct ImTranscriptAnonymizer: Sendable {
         displayName: String
     ) async throws -> String {
         if let existing = try await store.aliasBySender(senderId: senderId) {
+            if existing.imConversationId != conversationId
+                || existing.personProfileID != personProfileID
+                || existing.displayName != displayName {
+                try await store.insertAlias(ImForwardAlias(
+                    aliasToken: existing.aliasToken,
+                    senderId: senderId,
+                    imConversationId: conversationId,
+                    personProfileID: personProfileID,
+                    displayName: displayName,
+                    createdAt: existing.createdAt
+                ))
+            }
             return existing.aliasToken
         }
         var token = generateToken()
