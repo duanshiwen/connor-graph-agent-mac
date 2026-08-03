@@ -325,10 +325,29 @@ public struct ImMediaUploadDTO: Decodable, Sendable, Equatable {
     public var expiresIn: Int64
 
     private enum CodingKeys: String, CodingKey {
-        case uploadURL = "upload_url"
-        case objectName = "object_name"
-        case downloadURL = "download_url"
-        case expiresIn = "expires_in"
+        case uploadURL, objectName, downloadURL, expiresIn
+        case uploadURLSnake = "upload_url"
+        case objectNameSnake = "object_name"
+        case downloadURLSnake = "download_url"
+        case expiresInSnake = "expires_in"
+        case uploadUrlCamel = "uploadUrl"
+        case downloadUrlCamel = "downloadUrl"
+        case expiresAt = "expiresAt"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        uploadURL = try values.decodeIfPresent(String.self, forKey: .uploadURL)
+            ?? values.decodeIfPresent(String.self, forKey: .uploadURLSnake)
+            ?? values.decodeIfPresent(String.self, forKey: .uploadUrlCamel) ?? ""
+        objectName = try values.decodeIfPresent(String.self, forKey: .objectName)
+            ?? values.decodeIfPresent(String.self, forKey: .objectNameSnake) ?? ""
+        downloadURL = try values.decodeIfPresent(String.self, forKey: .downloadURL)
+            ?? values.decodeIfPresent(String.self, forKey: .downloadURLSnake)
+            ?? values.decodeIfPresent(String.self, forKey: .downloadUrlCamel) ?? ""
+        expiresIn = try values.decodeIfPresent(Int64.self, forKey: .expiresIn)
+            ?? values.decodeIfPresent(Int64.self, forKey: .expiresInSnake)
+            ?? values.decodeIfPresent(Int64.self, forKey: .expiresAt) ?? 0
     }
 }
 
@@ -471,25 +490,28 @@ public struct ImAPIClient: Sendable {
     }
 
     public func mediaUpload(token: String, fileURL: URL, messageType: ImMessageType) async throws -> ImMediaUploadDTO {
-        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-        guard let fileSize = attributes[.size] as? NSNumber else { throw ConnorBackendAPIError.invalidResponse }
-        let upload: ImMediaUploadDTO = try await request(
-            "chat/upload-url",
-            method: "POST",
-            token: token,
-            body: MediaUploadBody(
-                fileName: fileURL.lastPathComponent,
-                fileSize: fileSize.int64Value,
-                messageType: messageType.rawValue
-            )
-        )
-        guard let uploadURL = URL(string: upload.uploadURL) else { throw ConnorBackendAPIError.invalidResponse }
-        var uploadRequest = URLRequest(url: uploadURL)
-        uploadRequest.httpMethod = "PUT"
-        uploadRequest.httpBody = try Data(contentsOf: fileURL)
-        uploadRequest.setValue(Self.mimeType(for: fileURL, messageType: messageType), forHTTPHeaderField: "Content-Type")
-        let (_, response) = try await transport.data(for: uploadRequest)
+        let boundary = "ConnorBoundary\(UUID().uuidString)"
+        var body = Data()
+        func append(_ value: String) { body.append(contentsOf: value.utf8) }
+        append("--\(boundary)\r\nContent-Disposition: form-data; name=\"message_type\"\r\n\r\n\(messageType.rawValue)\r\n")
+        append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\r\n")
+        append("Content-Type: \(Self.mimeType(for: fileURL, messageType: messageType))\r\n\r\n")
+        body.append(try Data(contentsOf: fileURL, options: .mappedIfSafe))
+        append("\r\n--\(boundary)--\r\n")
+
+        let url = baseURL.appendingPathComponent("api/v1/chat/upload")
+        var uploadRequest = URLRequest(url: url)
+        uploadRequest.httpMethod = "POST"
+        uploadRequest.httpBody = body
+        uploadRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        uploadRequest.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await transport.data(for: uploadRequest)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["msg"] as? String
+            throw ConnorBackendAPIError.server(status: (response as? HTTPURLResponse)?.statusCode ?? 500, message: message ?? "上传失败")
+        }
+        let envelope = try decoder.decode(ImAPIEnvelope<ImMediaUploadDTO>.self, from: data)
+        guard envelope.code == 0, let upload = envelope.data, !upload.objectName.isEmpty else {
             throw ConnorBackendAPIError.invalidResponse
         }
         return upload
@@ -751,6 +773,21 @@ public struct ImAPIClient: Sendable {
         case "mp3": return "audio/mpeg"
         case "wav": return "audio/wav"
         case "ogg": return "audio/ogg"
+        case "pdf": return "application/pdf"
+        case "txt": return "text/plain"
+        case "md": return "text/markdown"
+        case "csv": return "text/csv"
+        case "json": return "application/json"
+        case "rtf": return "application/rtf"
+        case "doc": return "application/msword"
+        case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        case "xls": return "application/vnd.ms-excel"
+        case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        case "ppt": return "application/vnd.ms-powerpoint"
+        case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        case "odt": return "application/vnd.oasis.opendocument.text"
+        case "ods": return "application/vnd.oasis.opendocument.spreadsheet"
+        case "odp": return "application/vnd.oasis.opendocument.presentation"
         default: return messageType == .audio ? "audio/mp4" : "application/octet-stream"
         }
     }

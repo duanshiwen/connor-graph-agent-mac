@@ -332,8 +332,13 @@ import ConnorGraphStore
     #expect(enabled.contains("call `interactive_web_publish` with the exact projectID and manifestHash"))
     #expect(enabled.contains("interactive_web_update_draft"))
     #expect(enabled.contains("interactive_web_get_draft"))
+    #expect(enabled.contains("../sdk/v1.js"))
+    #expect(enabled.contains("registrations"))
+    #expect(enabled.contains("interactive_web_get_project"))
     #expect(enabled.contains("Never reconstruct an existing draft from conversation memory"))
-    #expect(enabled.contains("Return its published URL"))
+    #expect(enabled.contains("return the exact publishedURL as a Markdown link"))
+    #expect(enabled.contains("[Open webpage](https://...)"))
+    #expect(enabled.contains("never return only a bare URL"))
     #expect(enabled.contains("interactive_web_publish"))
 }
 

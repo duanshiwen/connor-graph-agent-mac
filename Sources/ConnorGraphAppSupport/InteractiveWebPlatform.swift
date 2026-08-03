@@ -172,7 +172,8 @@ public struct InteractiveWebCollectionField: Codable, Sendable, Equatable {
     public var required: Bool
     public var maxLength: Int
     public var `enum`: [String]
-    public init(name: String, type: String, required: Bool = false, maxLength: Int = 0, enum: [String] = []) { self.name = name; self.type = type; self.required = required; self.maxLength = maxLength; self.enum = `enum` }
+    public var pattern: String?
+    public init(name: String, type: String, required: Bool = false, maxLength: Int = 0, enum: [String] = [], pattern: String = "") { self.name = name; self.type = type; self.required = required; self.maxLength = maxLength; self.enum = `enum`; self.pattern = pattern }
 }
 
 public struct InteractiveWebCollectionDefinition: Codable, Sendable, Equatable {
@@ -191,8 +192,21 @@ public struct InteractiveWebManifest: Codable, Sendable, Equatable {
     public init(files: [InteractiveWebManifestFile], collections: [InteractiveWebCollectionDefinition] = []) { self.files = files; self.collections = collections }
 }
 
+private struct InteractiveWebProjectConfiguration: Codable {
+    var formatVersion = 1
+    var collections: [InteractiveWebCollectionDefinition]
+}
+
 public struct InteractiveWebPackager: Sendable {
+    public static let configurationFileName = "connor.web.json"
     public init() {}
+
+    public static func configurationJSON(collections: [InteractiveWebCollectionDefinition]) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return String(decoding: try encoder.encode(InteractiveWebProjectConfiguration(collections: collections)), as: UTF8.self)
+    }
+
     public func package(rootURL: URL, fileManager: FileManager = .default) throws -> InteractiveWebManifest {
         let root = rootURL.resolvingSymlinksInPath().standardizedFileURL
         let allowed = Set(["html", "css", "js", "json", "png", "jpg", "jpeg", "gif", "webp", "svg", "woff", "woff2"])
@@ -213,7 +227,19 @@ public struct InteractiveWebPackager: Sendable {
         }
         files.sort { $0.path < $1.path }
         guard files.contains(where: { $0.path == "index.html" }), files.count <= 500, files.reduce(0, { $0 + $1.sizeBytes }) <= 100 * 1_024 * 1_024 else { throw CocoaError(.fileReadCorruptFile) }
-        return InteractiveWebManifest(files: files)
+        let configurationURL = root.appendingPathComponent(Self.configurationFileName)
+        let collections: [InteractiveWebCollectionDefinition]
+        if fileManager.fileExists(atPath: configurationURL.path) {
+            let data = try Data(contentsOf: configurationURL)
+            guard data.count <= 2 * 1_024 * 1_024 else { throw CocoaError(.fileReadTooLarge) }
+            let configuration = try JSONDecoder().decode(InteractiveWebProjectConfiguration.self, from: data)
+            guard configuration.formatVersion == 1 else { throw CocoaError(.fileReadUnsupportedScheme) }
+            collections = configuration.collections
+        } else {
+            collections = []
+        }
+        try validate(collections: collections)
+        return InteractiveWebManifest(files: files, collections: collections)
     }
 
     public func fingerprint(_ manifest: InteractiveWebManifest) -> String {
@@ -224,7 +250,7 @@ public struct InteractiveWebPackager: Sendable {
         for collection in manifest.collections.sorted(by: { $0.name < $1.name }) {
             canonical += "collection\t\(collection.name)\t\(collection.anonymousCreate)\t\(collection.anonymousRead)\n"
             for field in collection.fields.sorted(by: { $0.name < $1.name }) {
-                canonical += "\(field.name)\t\(field.type)\t\(field.required)\t\(field.maxLength)\t\(field.enum.joined(separator: ","))\n"
+                canonical += "\(field.name)\t\(field.type)\t\(field.required)\t\(field.maxLength)\t\(field.enum.joined(separator: ","))\t\(field.pattern ?? "")\n"
             }
         }
         return SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -232,6 +258,26 @@ public struct InteractiveWebPackager: Sendable {
 
     private static func mediaType(_ ext: String) -> String {
         ["html":"text/html", "css":"text/css", "js":"text/javascript", "json":"application/json", "png":"image/png", "jpg":"image/jpeg", "jpeg":"image/jpeg", "gif":"image/gif", "webp":"image/webp", "svg":"image/svg+xml", "woff":"font/woff", "woff2":"font/woff2"][ext] ?? "application/octet-stream"
+    }
+
+    private func validate(collections: [InteractiveWebCollectionDefinition]) throws {
+        guard Set(collections.map(\.name)).count == collections.count else { throw CocoaError(.fileReadCorruptFile) }
+        let namePattern = try NSRegularExpression(pattern: "^[a-z][a-z0-9_]{0,63}$")
+        func validName(_ value: String) -> Bool {
+            namePattern.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)) != nil
+        }
+        for collection in collections {
+            guard validName(collection.name), (1...50).contains(collection.fields.count), Set(collection.fields.map(\.name)).count == collection.fields.count else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            for field in collection.fields {
+                let pattern = field.pattern ?? ""
+                guard validName(field.name), ["string", "number", "boolean", "enum"].contains(field.type), (0...5000).contains(field.maxLength), pattern.count <= 256, field.type != "enum" || !field.enum.isEmpty, pattern.isEmpty || field.type == "string" else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                if !pattern.isEmpty { _ = try NSRegularExpression(pattern: pattern) }
+            }
+        }
     }
 }
 

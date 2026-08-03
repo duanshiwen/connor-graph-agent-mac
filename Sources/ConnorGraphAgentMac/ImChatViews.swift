@@ -293,6 +293,7 @@ struct ImChatDetailView: View {
     @State private var voiceRecorder = ImVoiceRecorder()
     @State private var mediaPlayback = ImMediaPlaybackController()
     @State private var isConversationInfoPresented = false
+    @State private var mediaPreview: ChatMediaPreviewItem?
 
     private var conversationTitle: String {
         model.selectedConversation?.title ?? "会话"
@@ -324,6 +325,12 @@ struct ImChatDetailView: View {
         }
         .sheet(isPresented: $isConversationInfoPresented) {
             ImConversationInfoSheet(model: model, isPresented: $isConversationInfoPresented)
+        }
+        .overlay {
+            if let mediaPreview {
+                ChatMediaPreviewOverlay(item: mediaPreview, onClose: { self.mediaPreview = nil })
+                    .transition(.opacity)
+            }
         }
         .alert(
             "出错了",
@@ -403,6 +410,7 @@ struct ImChatDetailView: View {
                             onToggleSelection: { model.toggleMessageSelection(message.id) },
                             onEnterSelection: { model.enterSelectionMode(initialMessageId: message.id) },
                             onRetry: { Task { await model.retryMessage(message.id) } },
+                            onOpenMedia: { mediaPreview = $0 },
                             playback: mediaPlayback
                         )
                         .id(message.id)
@@ -466,6 +474,7 @@ struct ImChatDetailView: View {
                     Button("图片", systemImage: "photo") { chooseMedia(type: .image) }
                     Button("视频", systemImage: "video") { chooseMedia(type: .video) }
                     Button("音频文件", systemImage: "waveform") { chooseMedia(type: .audio) }
+                    Button("文件", systemImage: "doc") { chooseMedia(type: .file) }
                 } label: {
                     Image(systemName: "plus")
                         .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
@@ -473,7 +482,7 @@ struct ImChatDetailView: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .disabled(!model.socketConnected || model.isSendingMedia || voiceRecorder.isRecording)
-                .help("发送图片、视频或音频")
+                .help("发送图片、视频、音频或文件")
 
                 Button {
                     toggleVoiceRecording()
@@ -537,6 +546,10 @@ struct ImChatDetailView: View {
         case .image: [.image]
         case .video: [.movie]
         case .audio: [.audio]
+        case .file: [
+            "pdf", "txt", "md", "csv", "json", "rtf", "doc", "docx", "xls", "xlsx",
+            "ppt", "pptx", "odt", "ods", "odp",
+        ].compactMap { UTType(filenameExtension: $0) }
         case .text, .system: []
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -796,6 +809,7 @@ private struct ImMessageBubble: View {
     let onToggleSelection: () -> Void
     let onEnterSelection: () -> Void
     let onRetry: () -> Void
+    let onOpenMedia: (ChatMediaPreviewItem) -> Void
     var playback: ImMediaPlaybackController
 
     @State private var forwardedDetail: ForwardedChatBundle?
@@ -865,6 +879,9 @@ private struct ImMessageBubble: View {
                     ForwardedChatDetailView(bundle: selected, onClose: { forwardedDetail = nil })
                 }
         } else {
+        if message.mediaMetadata?.attachmentKind == "file" {
+            ImFileMessageContent(message: message, isMine: isMine, onOpenMedia: onOpenMedia)
+        } else {
         switch message.type {
         case .text, .system:
             Text(message.content)
@@ -881,11 +898,13 @@ private struct ImMessageBubble: View {
                     alignment: isMine ? .trailing : .leading
                 )
         case .image:
-            ImImageMessageContent(message: message, isMine: isMine)
+            ImImageMessageContent(message: message, isMine: isMine, onOpenMedia: onOpenMedia)
         case .video:
-            ImVideoMessageContent(message: message, isMine: isMine)
+            ImVideoMessageContent(message: message, isMine: isMine, onOpenMedia: onOpenMedia)
         case .audio:
             ImAudioMessageContent(message: message, isMine: isMine, playback: playback)
+        case .file:
+            ImFileMessageContent(message: message, isMine: isMine, onOpenMedia: onOpenMedia)
         case nil:
             Label(
                 message.messageType.lowercased() == "location" ? "不支持的位置消息" : "不支持的消息",
@@ -896,6 +915,7 @@ private struct ImMessageBubble: View {
             .padding(.horizontal, AgentChatLayout.spaceM)
             .padding(.vertical, AgentChatLayout.spaceS)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM))
+        }
         }
         }
     }
@@ -951,27 +971,20 @@ private struct ImMessageBubble: View {
 private struct ImImageMessageContent: View {
     let message: ImMessage
     let isMine: Bool
+    let onOpenMedia: (ChatMediaPreviewItem) -> Void
 
     var body: some View {
         if isExpired {
             ImExpiredMediaContent(icon: "photo", label: "图片", isMine: isMine)
         } else if let url = displayURL {
-            Group {
-                if url.isFileURL, let image = NSImage(contentsOf: url) {
-                    Image(nsImage: image).resizable().scaledToFill()
-                } else {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image): image.resizable().scaledToFill()
-                        case .failure: ImExpiredMediaContent(icon: "photo", label: "图片", isMine: isMine)
-                        default: ProgressView()
-                        }
-                    }
-                }
+            Button {
+                onOpenMedia(ChatMediaPreviewItem(type: .image, url: url, title: metadata.fileName ?? "图片"))
+            } label: {
+                ChatThumbnailImage(url: url, width: 240, height: imageHeight)
             }
-            .frame(width: 240, height: imageHeight)
-            .clipped()
+            .buttonStyle(.plain)
             .clipShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusM))
+            .help("放大预览图片")
         }
     }
 
@@ -991,6 +1004,7 @@ private struct ImImageMessageContent: View {
 private struct ImVideoMessageContent: View {
     let message: ImMessage
     let isMine: Bool
+    let onOpenMedia: (ChatMediaPreviewItem) -> Void
 
     var body: some View {
         if isExpired {
@@ -1029,7 +1043,7 @@ private struct ImVideoMessageContent: View {
     private var isExpired: Bool { metadata.expired && displayURL == nil }
     private func openVideo() {
         guard let displayURL else { return }
-        NSWorkspace.shared.open(displayURL)
+        onOpenMedia(ChatMediaPreviewItem(type: .video, url: displayURL, title: metadata.fileName ?? "视频"))
     }
     private static func durationLabel(_ seconds: Int) -> String {
         String(format: "%d:%02d", seconds / 60, seconds % 60)
@@ -1079,6 +1093,47 @@ private struct ImAudioMessageContent: View {
     }
     private var isExpired: Bool { metadata.expired && displayURL == nil }
     private var isPlaying: Bool { playback.playingMessageID == message.id }
+}
+
+private struct ImFileMessageContent: View {
+    let message: ImMessage
+    let isMine: Bool
+    let onOpenMedia: (ChatMediaPreviewItem) -> Void
+
+    var body: some View {
+        Button {
+            guard let displayURL else { return }
+            onOpenMedia(ChatMediaPreviewItem(type: .file, url: displayURL, title: metadata.fileName ?? "文件"))
+        } label: {
+            HStack(spacing: AgentChatLayout.spaceS) {
+                Image(systemName: "doc")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(metadata.fileName ?? "文件").lineLimit(2)
+                    if let size = metadata.fileSize {
+                        Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, AgentChatLayout.spaceS)
+            .background(
+                isMine ? ConnorCraftPalette.userBubble : Color(nsColor: .controlBackgroundColor),
+                in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(displayURL == nil)
+        .help("预览文件")
+    }
+
+    private var metadata: ImMediaMetadata { message.mediaMetadata ?? ImMediaMetadata() }
+    private var displayURL: URL? {
+        if let path = metadata.localPath, FileManager.default.fileExists(atPath: path) {
+            return URL(fileURLWithPath: path)
+        }
+        return URL(string: message.content)
+    }
 }
 
 private struct ImExpiredMediaContent: View {

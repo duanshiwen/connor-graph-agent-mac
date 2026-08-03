@@ -193,6 +193,21 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(linkRanges == 1)
     }
 
+    @Test @MainActor func bareWebAddressesBecomeClickableLinks() {
+        let address = "https://pages.example.test/s/site-1"
+        let rendered = AgentMarkdownLinkText.renderedAttributedString(
+            AttributedString("Published: \(address)"),
+            baseFont: .systemFont(ofSize: 14),
+            baseColor: .labelColor,
+            strikethrough: false
+        )
+        let addressRange = (rendered.string as NSString).range(of: address)
+
+        #expect(addressRange.location != NSNotFound)
+        #expect((rendered.attribute(.link, at: addressRange.location, effectiveRange: nil) as? URL)?.absoluteString == address)
+        #expect(rendered.attribute(.cursor, at: addressRange.location, effectiveRange: nil) as? NSCursor === NSCursor.pointingHand)
+    }
+
     @Test @MainActor func markdownLinkTextViewWrapsInsideNarrowListRows() {
         let textView = AgentMarkdownLinkText.LinkTextView()
 

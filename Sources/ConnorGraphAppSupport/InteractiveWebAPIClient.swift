@@ -67,7 +67,7 @@ public struct InteractiveWebAPIClient: Sendable {
         let _: RollbackResult = try await send("api/v1/projects/\(projectID)/rollback", method: "POST", body: Rollback(deploymentId: deploymentID))
     }
 
-    public func records(projectID: String, collection: String, limit: Int = 100) async throws -> [InteractiveWebRecordMetadata] {
+    public func records(projectID: String, collection: String, limit: Int = 100) async throws -> InteractiveWebRecordPage {
         guard collection.range(of: #"^[a-z_][a-z0-9_]{0,63}$"#, options: .regularExpression) != nil else { throw InteractiveWebAPIError.invalidResponse }
         return try await get("api/v1/projects/\(projectID)/collections/\(collection)/records?limit=\(min(max(limit, 1), 1000))")
     }
@@ -191,6 +191,11 @@ public struct InteractiveWebRecordMetadata: Codable, Sendable, Equatable {
     public var status: String
     public var checkedInAt: Date?
     public var createdAt: Date
+}
+
+public struct InteractiveWebRecordPage: Codable, Sendable, Equatable {
+	public var items: [InteractiveWebRecordMetadata]
+	public var total: Int
 }
 
 public struct InteractiveWebAuditEntry: Decodable, Sendable, Equatable {

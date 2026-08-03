@@ -5,6 +5,25 @@ import ConnorGraphAppSupport
 
 @Suite("IM Message Center Tests")
 struct ImMessageCenterTests {
+    @Test func mediaMetadataEncodesSnakeKeysForAndroidCompatibility() throws {
+        let metadata = ImMediaMetadata(
+            fileSize: 2048,
+            fileName: "报告.pdf",
+            mimeType: "application/pdf",
+            attachmentKind: "file",
+            objectName: "chat/1/2026/08/report.pdf"
+        )
+        let data = try JSONEncoder().encode(metadata)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        #expect(object["attachment_kind"] as? String == "file")
+        #expect(object["attachmentKind"] as? String == "file")
+        #expect(object["file_name"] as? String == "报告.pdf")
+        #expect(object["mime_type"] as? String == "application/pdf")
+        #expect(object["object_name"] as? String == "chat/1/2026/08/report.pdf")
+        #expect(object["size"] as? Int == 2048)
+    }
+
     @Test func sendChatMessageInsertsOptimisticallyAndSendsFrame() async throws {
         let fixture = try makeFixture()
         try await fixture.center.sendChatMessage(peerId: 9, content: "你好")
@@ -489,10 +508,11 @@ struct ImMessageCenterTests {
         let frame = try #require(fixture.frames.sentFrames.first)
         let root = try #require(try JSONSerialization.jsonObject(with: Data(frame.utf8)) as? [String: Any])
         let payload = try #require(root["payload"] as? [String: Any])
-        #expect(payload["content"] as? String == "chat/1/image/server.png")
+        #expect(payload["content"] as? String == "https://download.example/file")
         let extra = try #require(payload["extra"] as? [String: Any])
         #expect(extra["localPath"] == nil)
         #expect(extra["width"] as? Int == 320)
+        #expect(extra["objectName"] as? String == "chat/1/image/server.png")
 
         await fixture.center.handleFrame(type: nil, text: #"{"messageId":"media-1"}"#)
         #expect(fixture.service.privateMediaCachedIDs == ["media-1"])

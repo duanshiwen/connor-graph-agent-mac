@@ -37,7 +37,8 @@ enum ImMediaInspector {
             duration: resolvedDuration,
             fileSize: values?.fileSize.map(Int64.init),
             fileName: url.lastPathComponent,
-            mimeType: values?.contentType?.preferredMIMEType
+            mimeType: values?.contentType?.preferredMIMEType,
+            attachmentKind: type == .file ? "file" : nil
         )
     }
 }

@@ -14,10 +14,11 @@ public enum ImMessageType: String, Codable, Sendable, Equatable, Hashable, CaseI
     case image
     case video
     case audio
+    case file
     case system
 
     public var isMedia: Bool {
-        self == .image || self == .video || self == .audio
+        self == .image || self == .video || self == .audio || self == .file
     }
 
     public var conversationPreview: String {
@@ -26,6 +27,7 @@ public enum ImMessageType: String, Codable, Sendable, Equatable, Hashable, CaseI
         case .image: return "[图片]"
         case .video: return "[视频]"
         case .audio: return "[语音]"
+        case .file: return "[文件]"
         case .system: return "[系统消息]"
         }
     }
@@ -42,6 +44,8 @@ public struct ImMediaMetadata: Codable, Sendable, Equatable, Hashable {
     public var expired: Bool
     public var localPath: String?
     public var localThumbnailPath: String?
+    public var attachmentKind: String?
+    public var objectName: String?
 
     public init(
         width: Int? = nil,
@@ -53,7 +57,9 @@ public struct ImMediaMetadata: Codable, Sendable, Equatable, Hashable {
         thumbnail: String? = nil,
         expired: Bool = false,
         localPath: String? = nil,
-        localThumbnailPath: String? = nil
+        localThumbnailPath: String? = nil,
+        attachmentKind: String? = nil,
+        objectName: String? = nil
     ) {
         self.width = width
         self.height = height
@@ -65,11 +71,17 @@ public struct ImMediaMetadata: Codable, Sendable, Equatable, Hashable {
         self.expired = expired
         self.localPath = localPath
         self.localThumbnailPath = localThumbnailPath
+        self.attachmentKind = attachmentKind
+        self.objectName = objectName
     }
 
     private enum CodingKeys: String, CodingKey {
         case width, height, duration, fileSize, size, fileName, mimeType, format
-        case thumbnail, expired, localPath, localThumbnailPath
+        case fileNameSnake = "file_name"
+        case mimeTypeSnake = "mime_type"
+        case thumbnail, expired, localPath, localThumbnailPath, attachmentKind, objectName
+        case objectNameSnake = "object_name"
+        case attachmentKindSnake = "attachment_kind"
     }
 
     public init(from decoder: Decoder) throws {
@@ -80,12 +92,18 @@ public struct ImMediaMetadata: Codable, Sendable, Equatable, Hashable {
         fileSize = try values.decodeIfPresent(Int64.self, forKey: .fileSize)
             ?? values.decodeIfPresent(Int64.self, forKey: .size)
         fileName = try values.decodeIfPresent(String.self, forKey: .fileName)
+            ?? values.decodeIfPresent(String.self, forKey: .fileNameSnake)
         mimeType = try values.decodeIfPresent(String.self, forKey: .mimeType)
+            ?? values.decodeIfPresent(String.self, forKey: .mimeTypeSnake)
             ?? values.decodeIfPresent(String.self, forKey: .format)
         thumbnail = try values.decodeIfPresent(String.self, forKey: .thumbnail)
         expired = try values.decodeIfPresent(Bool.self, forKey: .expired) ?? false
         localPath = try values.decodeIfPresent(String.self, forKey: .localPath)
         localThumbnailPath = try values.decodeIfPresent(String.self, forKey: .localThumbnailPath)
+        attachmentKind = try values.decodeIfPresent(String.self, forKey: .attachmentKind)
+            ?? values.decodeIfPresent(String.self, forKey: .attachmentKindSnake)
+        objectName = try values.decodeIfPresent(String.self, forKey: .objectName)
+            ?? values.decodeIfPresent(String.self, forKey: .objectNameSnake)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -94,12 +112,19 @@ public struct ImMediaMetadata: Codable, Sendable, Equatable, Hashable {
         try values.encodeIfPresent(height, forKey: .height)
         try values.encodeIfPresent(duration, forKey: .duration)
         try values.encodeIfPresent(fileSize, forKey: .fileSize)
+        try values.encodeIfPresent(fileSize, forKey: .size)
         try values.encodeIfPresent(fileName, forKey: .fileName)
+        try values.encodeIfPresent(fileName, forKey: .fileNameSnake)
         try values.encodeIfPresent(mimeType, forKey: .mimeType)
+        try values.encodeIfPresent(mimeType, forKey: .mimeTypeSnake)
         try values.encodeIfPresent(thumbnail, forKey: .thumbnail)
         if expired { try values.encode(true, forKey: .expired) }
         try values.encodeIfPresent(localPath, forKey: .localPath)
         try values.encodeIfPresent(localThumbnailPath, forKey: .localThumbnailPath)
+        try values.encodeIfPresent(attachmentKind, forKey: .attachmentKind)
+        try values.encodeIfPresent(attachmentKind, forKey: .attachmentKindSnake)
+        try values.encodeIfPresent(objectName, forKey: .objectName)
+        try values.encodeIfPresent(objectName, forKey: .objectNameSnake)
     }
 }
 

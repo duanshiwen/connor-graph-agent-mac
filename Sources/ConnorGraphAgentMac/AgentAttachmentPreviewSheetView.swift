@@ -144,17 +144,15 @@ struct AgentAttachmentPreviewSheetView: View {
         case .pdfKit:
             NativeFilePDFPreview(fileURL: url)
         case .quickLook:
-            if model.attachment.kind == .image, let image = NSImage(contentsOf: url) {
-                ZoomableImagePreview(image: image)
+            if model.attachment.kind == .image {
+                DownsampledImagePreview(url: url)
+            } else if model.attachment.kind == .video {
+                ChatVideoPreview(url: url)
             } else {
                 NativeFileQuickLookPreview(fileURL: url)
             }
         case .audioPlayer:
-            ContentUnavailableView(
-                "音频播放器即将可用",
-                systemImage: "waveform",
-                description: Text(url.lastPathComponent)
-            )
+            ChatAudioPreview(url: url, title: model.title)
         case .none:
             EmptyView()
         }
@@ -162,8 +160,8 @@ struct AgentAttachmentPreviewSheetView: View {
 
     @ViewBuilder
     private var imagePreview: some View {
-        if let url = model.sourceFileURL, let image = NSImage(contentsOf: url) {
-            ZoomableImagePreview(image: image)
+        if let url = model.sourceFileURL {
+            DownsampledImagePreview(url: url)
         } else {
             ContentUnavailableView(
                 "无法预览图片",

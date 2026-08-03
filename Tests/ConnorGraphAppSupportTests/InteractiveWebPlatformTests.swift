@@ -27,6 +27,25 @@ struct InteractiveWebPlatformTests {
         #expect(manifest.collections.first?.name == "registrations")
     }
 
+    @Test func packageReadsCollectionSchemaFromProjectConfiguration() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("<form></form>".utf8).write(to: root.appendingPathComponent("index.html"))
+        let collection = InteractiveWebCollectionDefinition(
+            name: "registrations",
+            fields: [.init(name: "student_name", type: "string", required: true, maxLength: 80, pattern: "^.+$")],
+            anonymousCreate: true
+        )
+        try Data(InteractiveWebPackager.configurationJSON(collections: [collection]).utf8)
+            .write(to: root.appendingPathComponent(InteractiveWebPackager.configurationFileName))
+
+        let manifest = try InteractiveWebPackager().package(rootURL: root)
+        #expect(manifest.collections == [collection])
+        #expect(manifest.collections.first?.fields.first?.pattern == "^.+$")
+        #expect(manifest.files.map(\.path) == ["connor.web.json", "index.html"])
+    }
+
     @Test func accessModesRemainProtocolStable() {
         #expect([
             InteractiveWebAccessMode.public.rawValue,

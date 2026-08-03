@@ -84,7 +84,7 @@ public actor ImMessageCenter {
         public init(
             sendTimeout: Duration = .seconds(15),
             now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
-            mediaCacheDirectory: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            mediaCacheDirectory: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("Connor/IMMedia", isDirectory: true),
             downloadMedia: @escaping @Sendable (URL) async throws -> Data = {
                 let (data, response) = try await URLSession.shared.data(from: $0)
@@ -211,8 +211,10 @@ public actor ImMessageCenter {
         var localMetadata = metadata
         localMetadata.localPath = localURL.path
         let upload = try await service.uploadMedia(fileURL: localURL, messageType: messageType)
+        localMetadata.objectName = upload.objectName
 
         var remoteMetadata = metadata
+        remoteMetadata.objectName = upload.objectName
         remoteMetadata.localPath = nil
         remoteMetadata.localThumbnailPath = nil
         let remoteExtra = Self.jsonObject(from: remoteMetadata)
@@ -225,8 +227,8 @@ public actor ImMessageCenter {
             frameType = "chat_send"
             payload = [
                 "receiver_id": peerId,
-                "message_type": messageType.rawValue,
-                "content": upload.objectName,
+                "message_type": messageType == .file ? ImMessageType.text.rawValue : messageType.rawValue,
+                "content": upload.downloadURL.isEmpty ? upload.objectName : upload.downloadURL,
                 "extra": remoteExtra,
             ]
         case .group:
@@ -234,14 +236,14 @@ public actor ImMessageCenter {
             frameType = "group_send"
             payload = [
                 "group_id": groupId,
-                "message_type": messageType.rawValue,
-                "content": upload.objectName,
+                "message_type": messageType == .file ? ImMessageType.text.rawValue : messageType.rawValue,
+                "content": upload.downloadURL.isEmpty ? upload.objectName : upload.downloadURL,
                 "extra": remoteExtra,
             ]
         }
         try await sendOptimistic(
             conversationId: conversationId,
-            content: upload.objectName,
+            content: upload.downloadURL.isEmpty ? upload.objectName : upload.downloadURL,
             messageType: messageType.rawValue,
             frame: Self.encodeFrame(type: frameType, payload: payload),
             tempId: tempId,
@@ -922,8 +924,15 @@ public actor ImMessageCenter {
     // MARK: - Media cache lifecycle
 
     private func cacheMediaIfNeeded(_ message: ImMessage) async {
-        guard let messageType = message.type, messageType.isMedia else { return }
         var metadata = message.mediaMetadata ?? ImMediaMetadata()
+        let messageType: ImMessageType
+        if metadata.attachmentKind == "file" {
+            messageType = .file
+        } else if let type = message.type, type.isMedia {
+            messageType = type
+        } else {
+            return
+        }
         if let localPath = metadata.localPath,
            FileManager.default.fileExists(atPath: localPath) {
             await acknowledgeMediaCached(message)
@@ -993,12 +1002,13 @@ public actor ImMessageCenter {
         guard values.isRegularFile == true, let size = values.fileSize, size > 0 else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        let limits: [ImMessageType: Int] = [.image: 10 * 1_024 * 1_024, .video: 100 * 1_024 * 1_024, .audio: 20 * 1_024 * 1_024]
+        let limits: [ImMessageType: Int] = [.image: 25 * 1_024 * 1_024, .video: 25 * 1_024 * 1_024, .audio: 25 * 1_024 * 1_024, .file: 25 * 1_024 * 1_024]
         guard size <= (limits[messageType] ?? 0) else { throw CocoaError(.fileWriteOutOfSpace) }
         let allowed: [ImMessageType: Set<String>] = [
             .image: ["jpg", "jpeg", "png", "gif", "webp"],
             .video: ["mp4", "mov", "avi", "mkv"],
             .audio: ["mp3", "m4a", "wav", "ogg"],
+            .file: ["pdf", "txt", "md", "csv", "json", "rtf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp"],
         ]
         guard allowed[messageType]?.contains(fileURL.pathExtension.lowercased()) == true else {
             throw CocoaError(.fileReadUnsupportedScheme)
@@ -1018,6 +1028,7 @@ public actor ImMessageCenter {
         case .image: return "jpg"
         case .video: return "mp4"
         case .audio: return "m4a"
+        case .file: return "bin"
         case .text, .system: return "bin"
         }
     }

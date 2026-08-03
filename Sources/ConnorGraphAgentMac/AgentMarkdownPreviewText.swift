@@ -733,7 +733,30 @@ struct AgentMarkdownLinkText: NSViewRepresentable {
             }
             result.append(NSAttributedString(string: text, attributes: attributes))
         }
+        addLinksForBareWebAddresses(in: result)
         return result
+    }
+
+    private static func addLinksForBareWebAddresses(in result: NSMutableAttributedString) {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return }
+        let fullRange = NSRange(location: 0, length: result.length)
+        detector.enumerateMatches(in: result.string, options: [], range: fullRange) { match, _, _ in
+            guard let match, let url = match.url, match.range.length > 0 else { return }
+            var overlapsExistingLink = false
+            result.enumerateAttribute(.link, in: match.range) { value, _, stop in
+                if value != nil {
+                    overlapsExistingLink = true
+                    stop.pointee = true
+                }
+            }
+            guard !overlapsExistingLink else { return }
+            result.addAttributes([
+                .link: url,
+                .cursor: NSCursor.pointingHand,
+                .foregroundColor: NSColor.linkColor,
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ], range: match.range)
+        }
     }
 }
 

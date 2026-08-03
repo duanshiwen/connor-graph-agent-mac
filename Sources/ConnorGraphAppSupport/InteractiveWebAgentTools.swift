@@ -28,7 +28,7 @@ public actor InteractiveWebToolRuntime {
         self.fileManager = fileManager
     }
 
-    public func createDraft(sessionID: String, name: String, html: String, css: String?, javascript: String?) async throws -> InteractiveWebProjectStatus {
+    public func createDraft(sessionID: String, name: String, html: String, css: String?, javascript: String?, collections: [InteractiveWebCollectionDefinition] = []) async throws -> InteractiveWebProjectStatus {
         guard (1...120).contains(name.count) else { throw AgentToolError.invalidArguments("name must contain 1 to 120 characters") }
         let project = LocalInteractiveWebProject(
             accountID: accountID,
@@ -40,6 +40,13 @@ public actor InteractiveWebToolRuntime {
         try write(html, named: "index.html", in: project.rootURL)
         if let css { try write(css, named: "style.css", in: project.rootURL) }
         if let javascript { try write(javascript, named: "app.js", in: project.rootURL) }
+        if !collections.isEmpty {
+            try write(
+                InteractiveWebPackager.configurationJSON(collections: collections),
+                named: InteractiveWebPackager.configurationFileName,
+                in: project.rootURL
+            )
+        }
         try await store.save(project: project)
         return try status(project)
     }
@@ -204,22 +211,30 @@ public actor InteractiveWebToolRuntime {
         return try status(project)
     }
 
-    public func records(projectID: String, collection: String, limit: Int) async throws -> [InteractiveWebRecordMetadata] {
+    public func records(projectID: String, collection: String, limit: Int) async throws -> InteractiveWebRecordPage {
         let api = try requireAPI()
-        let project = try await requireProject(projectID)
-        guard let remoteProjectID = project.remoteProjectID else { throw AgentToolError.invalidArguments("project has not been published") }
+        let remoteProjectID = try await remoteProjectID(for: projectID)
         return try await api.records(projectID: remoteProjectID, collection: collection, limit: limit)
     }
 
     public func exportRecords(projectID: String, collection: String) async throws -> InteractiveWebExportResult {
         let api = try requireAPI()
-        let project = try await requireProject(projectID)
-        guard let remoteProjectID = project.remoteProjectID else { throw AgentToolError.invalidArguments("project has not been published") }
+        let remoteProjectID = try await remoteProjectID(for: projectID)
         let data = try await api.exportCSV(projectID: remoteProjectID, collection: collection)
         try fileManager.createDirectory(at: exportsRoot, withIntermediateDirectories: true)
-        let target = exportsRoot.appendingPathComponent("\(project.id)-\(collection).csv")
+        let target = exportsRoot.appendingPathComponent("\(projectID)-\(collection).csv")
         try data.write(to: target, options: .atomic)
-        return InteractiveWebExportResult(projectID: project.id, collection: collection, fileURL: target, sizeBytes: Int64(data.count))
+        return InteractiveWebExportResult(projectID: projectID, collection: collection, fileURL: target, sizeBytes: Int64(data.count))
+    }
+
+    /// Accepts either a local draft project ID (resolved to its remote ID) or an online project ID
+    /// from interactive_web_list_projects, so record queries work even without a local draft.
+    private func remoteProjectID(for projectID: String) async throws -> String {
+        if let project = try await store.project(id: projectID) {
+            guard let remoteProjectID = project.remoteProjectID else { throw AgentToolError.invalidArguments("project has not been published") }
+            return remoteProjectID
+        }
+        return projectID
     }
 
     private func requireProject(_ id: String) async throws -> LocalInteractiveWebProject {
@@ -375,7 +390,7 @@ public struct InteractiveWebAgentTool: AgentTool {
 		case .listProjects: "List the signed-in user's published interactive webpage projects."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
-        case .createDraft: "Create a local interactive webpage draft from complete HTML, CSS, and JavaScript generated in the current model response. The tool writes these files into the app-managed user-data sandbox; no selected workspace, local file tool, staging file, or documentation lookup is required. This does not publish anything."
+		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas when the page accepts registrations, feedback, votes, or other submissions. Generated pages must load ../sdk/v1.js and use window.platform instead of constructing API URLs. The tool writes files into the app-managed user-data sandbox and does not publish anything."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash."
         case .updateDraft: "Atomically update an app-managed interactive webpage draft using exact text edits or full file replacements. Pass expectedManifestHash from interactive_web_get_draft to prevent overwriting a newer revision."
         case .getStatus: "Read the current local and published status of an interactive webpage project."
@@ -394,7 +409,25 @@ public struct InteractiveWebAgentTool: AgentTool {
 		case .getProject, .downloadProject:
 			.closedObject(properties: ["remoteProjectID": .string(description: "Exact online project ID")], required: ["remoteProjectID"])
         case .createDraft:
-            .object(properties: ["name": .string(description: "Webpage name"), "html": .string(description: "Complete index.html"), "css": .string(description: "Optional stylesheet"), "javascript": .string(description: "Optional script")], required: ["name", "html"])
+            .object(properties: [
+                "name": .string(description: "Webpage name"),
+                "html": .string(description: "Complete index.html"),
+                "css": .string(description: "Optional stylesheet"),
+                "javascript": .string(description: "Optional script"),
+                "collections": .array(items: .object(properties: [
+                    "name": .string(description: "Lowercase collection name"),
+                    "fields": .array(items: .object(properties: [
+                        "name": .string(description: "Lowercase field name"),
+                        "type": .stringEnumeration(values: ["string", "number", "boolean", "enum"], description: "Stored value type"),
+                        "required": .boolean(description: "Whether the value is required"),
+                        "maxLength": .integer(description: "Maximum string length, or 0"),
+                        "enum": .array(items: .string(description: "Allowed enum value"), description: "Allowed values for enum fields"),
+                        "pattern": .string(description: "Optional RE2-compatible server-side validation pattern for string fields")
+                    ], required: ["name", "type"]), description: "One to fifty validated fields"),
+                    "anonymousCreate": .boolean(description: "Allow a public visitor to submit"),
+                    "anonymousRead": .boolean(description: "Allow a public visitor to read records; normally false")
+                ], required: ["name", "fields", "anonymousCreate", "anonymousRead"]), description: "Persistent data schemas required by the page")
+            ], required: ["name", "html"])
         case .getDraft:
 			.closedObject(properties: ["projectID": .string(description: "Exact local project ID"), "fileName": .string(description: "Relative text source path")], required: ["projectID", "fileName"])
         case .updateDraft:
@@ -420,9 +453,9 @@ public struct InteractiveWebAgentTool: AgentTool {
         case .setAccess:
             .object(properties: ["projectID": .string(description: "Exact local project ID"), "accessMode": .stringEnumeration(values: ["public", "password", "private"], description: "Who can access the site"), "password": .string(description: "Required only for password access")], required: ["projectID", "accessMode"])
         case .recordsSummary:
-            .object(properties: ["projectID": .string(description: "Exact local project ID"), "collection": .string(description: "Collection name"), "limit": .integer(description: "1 through 1000")], required: ["projectID", "collection"])
+            .object(properties: ["projectID": .string(description: "Exact local project ID, or the online project ID from interactive_web_list_projects"), "collection": .string(description: "Collection name"), "limit": .integer(description: "1 through 1000")], required: ["projectID", "collection"])
         case .exportRecords:
-            .closedObject(properties: ["projectID": .string(description: "Exact local project ID"), "collection": .string(description: "Collection name")], required: ["projectID", "collection"])
+            .closedObject(properties: ["projectID": .string(description: "Exact local project ID, or the online project ID from interactive_web_list_projects"), "collection": .string(description: "Collection name")], required: ["projectID", "collection"])
         }
     }
 
@@ -475,7 +508,7 @@ public struct InteractiveWebAgentTool: AgentTool {
 			status = try await runtime.downloadRemoteProject(sessionID: context.sessionID, remoteProjectID: requiredString("remoteProjectID", arguments))
 			text = "Online webpage downloaded to Connor's user data directory."
         case .createDraft:
-            status = try await runtime.createDraft(sessionID: context.sessionID, name: requiredString("name", arguments), html: requiredString("html", arguments), css: optionalString("css", arguments), javascript: optionalString("javascript", arguments))
+            status = try await runtime.createDraft(sessionID: context.sessionID, name: requiredString("name", arguments), html: requiredString("html", arguments), css: optionalString("css", arguments), javascript: optionalString("javascript", arguments), collections: try parseCollections(arguments))
             text = "Local webpage draft created."
         case .getDraft:
             status = nil
@@ -514,8 +547,15 @@ public struct InteractiveWebAgentTool: AgentTool {
             status = try await runtime.offline(projectID: requiredString("projectID", arguments)); text = "Published webpage is offline."
         case .recordsSummary:
             status = nil
-            let records = try await runtime.records(projectID: requiredString("projectID", arguments), collection: requiredString("collection", arguments), limit: min(max(arguments.int("limit") ?? 100, 1), 1000))
-            json = try encode(records); text = "Interactive webpage records loaded."
+            let collection = try requiredString("collection", arguments)
+            let page = try await runtime.records(projectID: requiredString("projectID", arguments), collection: collection, limit: min(max(arguments.int("limit") ?? 100, 1), 1000))
+            json = try encode(page)
+            let visible = page.items.prefix(50)
+            let lines = visible.map { record in
+                "id=\(record.id), status=\(record.status), createdAt=\(Self.isoDate(record.createdAt)), data=\(Self.compactJSON(record.data))"
+            }
+            let truncated = page.items.count > visible.count ? "\n[showing first \(visible.count) of \(page.total) records]" : ""
+            text = "Loaded \(page.items.count) of \(page.total) interactive webpage records for \(collection):\n" + lines.joined(separator: "\n") + truncated
         case .exportRecords:
             try requireExternalApproval(context)
             status = nil
@@ -523,7 +563,7 @@ public struct InteractiveWebAgentTool: AgentTool {
             json = try encode(result); text = "Interactive webpage records exported to \(result.fileURL.path)."
         }
         if let status { json = try encode(status) }
-        let suffix = status.map { " projectID=\($0.projectID), revision=\($0.revision), manifestHash=\($0.manifestHash)" + ($0.publishedURL.map { ", url=\($0.absoluteString)" } ?? "") } ?? ""
+        let suffix = status.map { " projectID=\($0.projectID), revision=\($0.revision), manifestHash=\($0.manifestHash)" + ($0.publishedURL.map { ", publishedURL=[Open published webpage](\($0.absoluteString))" } ?? "") } ?? ""
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: text + suffix, contentJSON: json)
     }
 
@@ -554,6 +594,40 @@ public struct InteractiveWebAgentTool: AgentTool {
         }
         return replacements
     }
+    private func parseCollections(_ arguments: AgentToolArguments) throws -> [InteractiveWebCollectionDefinition] {
+        try (arguments.array("collections") ?? []).map { value in
+            guard let object = value.objectValue,
+                  let name = object["name"]?.stringValue,
+                  case .array(let fieldValues)? = object["fields"],
+                  case .bool(let anonymousCreate)? = object["anonymousCreate"],
+                  case .bool(let anonymousRead)? = object["anonymousRead"] else {
+                throw AgentToolError.invalidArguments("each collection requires name, fields, anonymousCreate, and anonymousRead")
+            }
+            let fields = try fieldValues.map { fieldValue -> InteractiveWebCollectionField in
+                guard let field = fieldValue.objectValue,
+                      let fieldName = field["name"]?.stringValue,
+                      let type = field["type"]?.stringValue else {
+                    throw AgentToolError.invalidArguments("each collection field requires name and type")
+                }
+                let required: Bool
+                if case .bool(let value)? = field["required"] { required = value } else { required = false }
+                let maxLength: Int
+                if case .int(let value)? = field["maxLength"] { maxLength = value } else { maxLength = 0 }
+                let enumValues: [String]
+                if case .array(let values)? = field["enum"] {
+                    enumValues = try values.map {
+                        guard let value = $0.stringValue else { throw AgentToolError.invalidArguments("enum values must be strings") }
+                        return value
+                    }
+                } else {
+                    enumValues = []
+                }
+                let pattern = field["pattern"]?.stringValue ?? ""
+                return InteractiveWebCollectionField(name: fieldName, type: type, required: required, maxLength: maxLength, enum: enumValues, pattern: pattern)
+            }
+            return InteractiveWebCollectionDefinition(name: name, fields: fields, anonymousCreate: anonymousCreate, anonymousRead: anonymousRead)
+        }
+    }
     private func parseEdits(_ arguments: AgentToolArguments) throws -> [String: [(oldText: String, newText: String)]] {
         var edits: [String: [(oldText: String, newText: String)]] = [:]
         for value in arguments.array("edits") ?? [] {
@@ -570,6 +644,16 @@ public struct InteractiveWebAgentTool: AgentTool {
     private func encode<T: Encodable>(_ value: T) throws -> String {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         return String(decoding: try encoder.encode(value), as: UTF8.self)
+    }
+
+    private static func compactJSON<T: Encodable>(_ value: T) -> String {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(value), let text = String(data: data, encoding: .utf8) else { return "{}" }
+        return text
+    }
+
+    private static func isoDate(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
     }
 }
 
