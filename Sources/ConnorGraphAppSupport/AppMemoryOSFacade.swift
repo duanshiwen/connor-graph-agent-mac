@@ -670,7 +670,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return inserted
     }
 
-    public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date(), kinds requestedKinds: [String]? = nil) throws -> [MemoryOSProjectionRunSummary] {
+    public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date(), kinds requestedKinds: [String]? = nil) async throws -> [MemoryOSProjectionRunSummary] {
         let kinds = requestedKinds ?? MemoryOSBackgroundJobKind.executableRawValues
         let candidates = try kinds.flatMap { kind in
             try store.runnableQueueItems(kind: kind, limit: limit, now: now)
@@ -687,7 +687,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 case let kind where MemoryOSBackgroundJobKind.isL1KnowledgeKind(kind):
                     var draft = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, leased.payloadJSON)
                     draft.metadata = backgroundRunMetadata(draft.metadata, queueItem: leased)
-                    _ = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
+                    _ = try await MemoryOSBackgroundJobWorker(executor: executor).run(draft)
                     // LLM has written L2/L3/L4 directly via tool calls — clean up L1 events.
                     try deleteL1CaptureEvents(ids: draft.captureEventIDs)
                     _ = try recordQueueSuccess(leased, now: now)

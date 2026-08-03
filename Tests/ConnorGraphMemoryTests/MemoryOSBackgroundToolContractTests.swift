@@ -5,7 +5,7 @@ import ConnorGraphMemory
 
 @Suite("Memory OS Background Tool Contract Tests")
 struct MemoryOSBackgroundToolContractTests {
-    @Test func l1WorkerRequestIncludesReadAndWriteTools() throws {
+    @Test func l1WorkerRequestIncludesReadAndWriteTools() async throws {
         let draft = MemoryOSL1UnifiedProjectionJobDraft(
             id: "job-l1-tools",
             captureEventIDs: ["cap-1"],
@@ -15,7 +15,7 @@ struct MemoryOSBackgroundToolContractTests {
         )
         let executor = ToolRecordingMemoryOSBackgroundExecutor(response: MemoryOSBackgroundModelResponse(rawArtifactJSON: "{}"))
 
-        _ = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
+        _ = try await MemoryOSBackgroundJobWorker(executor: executor).run(draft)
 
         let request = try #require(executor.requests.first)
         let toolNames = request.availableTools.map(\.name)
@@ -73,7 +73,7 @@ private final class ToolRecordingMemoryOSBackgroundExecutor: MemoryOSBackgroundM
         self.response = response
     }
 
-    func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse {
+    func execute(_ request: MemoryOSBackgroundModelRequest) async throws -> MemoryOSBackgroundModelResponse {
         requests.append(request)
         return response
     }

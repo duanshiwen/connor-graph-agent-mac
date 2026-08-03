@@ -5,7 +5,7 @@ import ConnorGraphMemory
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
-@Test func appMemoryOSFacadeRunsL1UnifiedProjectionBackgroundJobProjectsArtifactAndPhysicallyClearsL1() throws {
+@Test func appMemoryOSFacadeRunsL1UnifiedProjectionBackgroundJobProjectsArtifactAndPhysicallyClearsL1() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSBackgroundWorkerDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
@@ -14,7 +14,7 @@ import ConnorGraphAppSupport
     _ = try facade.ingestChatMessage(messageID: "message-2", sessionID: "session", role: "user", content: "Memory OS 需要后台 L1 到 L2。", occurredAt: now.addingTimeInterval(1))
     _ = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 2, maxEventsPerBlock: 10), now: now)
 
-    let summaries = try facade.runBackgroundAIQueueOnce(executor: StaticMemoryOSBackgroundExecutor(rawArtifactJSON: try encodedGraphArtifact()), now: now)
+    let summaries = try await facade.runBackgroundAIQueueOnce(executor: StaticMemoryOSBackgroundExecutor(rawArtifactJSON: try encodedGraphArtifact()), now: now)
 
     #expect(summaries.count == 1)
     #expect(summaries[0].accepted)
@@ -32,7 +32,7 @@ private final class StaticMemoryOSBackgroundExecutor: MemoryOSBackgroundModelExe
         self.rawArtifactJSON = rawArtifactJSON
     }
 
-    func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse {
+    func execute(_ request: MemoryOSBackgroundModelRequest) async throws -> MemoryOSBackgroundModelResponse {
         MemoryOSBackgroundModelResponse(rawArtifactJSON: rawArtifactJSON, metadata: ["model_id": "mock-memory-worker"])
     }
 }

@@ -85,7 +85,7 @@ import ConnorGraphAppSupport
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_processing_queue;").first?.first == "1")
 }
 
-@Test func successfulL1JobDeletesCaptureEventsAndTimeBlockLinks() throws {
+@Test func successfulL1JobDeletesCaptureEventsAndTimeBlockLinks() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSBackgroundPipelineDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
@@ -99,7 +99,7 @@ import ConnorGraphAppSupport
     """)
     _ = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1, maxEventsPerBlock: 10), now: now)
 
-    let summaries = try facade.runBackgroundAIQueueOnce(executor: PipelineStaticMemoryOSBackgroundExecutor(rawArtifactJSON: try pipelineEncodedGraphArtifact()), now: now)
+    let summaries = try await facade.runBackgroundAIQueueOnce(executor: PipelineStaticMemoryOSBackgroundExecutor(rawArtifactJSON: try pipelineEncodedGraphArtifact()), now: now)
 
     #expect(summaries.count == 1)
     #expect(summaries[0].accepted)
@@ -111,7 +111,7 @@ import ConnorGraphAppSupport
 private final class PipelineStaticMemoryOSBackgroundExecutor: MemoryOSBackgroundModelExecutor, @unchecked Sendable {
     let rawArtifactJSON: String
     init(rawArtifactJSON: String) { self.rawArtifactJSON = rawArtifactJSON }
-    func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse {
+    func execute(_ request: MemoryOSBackgroundModelRequest) async throws -> MemoryOSBackgroundModelResponse {
         MemoryOSBackgroundModelResponse(rawArtifactJSON: rawArtifactJSON, metadata: ["model_id": "mock-memory-worker"])
     }
 }

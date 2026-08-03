@@ -483,7 +483,7 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(transcript.contains("swift run connor memory run memory-run:queue-1 messages"))
     }
 
-    @Test func memoryOSCLIDebugRunNextExecutesQueueWithTrace() throws {
+    @Test func memoryOSCLIDebugRunNextExecutesQueueWithTrace() async throws {
         let store = try makeMemoryOSCLIInspectorStore()
         let now = Date(timeIntervalSince1970: 40_000)
         try seedMemoryOSCLIInspectorFixture(store: store, now: now)
@@ -498,7 +498,7 @@ struct AppMemoryOSCLIInspectorTests {
             MemoryOSBackgroundLoopModelResponse(assistantText: try memoryOSCLIDebugEncodedL1Artifact(), metadata: ["final": "true"])
         ])
 
-        let result = try inspector.debugRunNextBackgroundAI(
+        let result = try await inspector.debugRunNextBackgroundAI(
             kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
             limit: 1,
             model: model,
@@ -860,7 +860,7 @@ private final class MemoryOSCLIDebugScriptedLoopModel: MemoryOSBackgroundToolLoo
         self.script = script
     }
 
-    func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
+    func complete(_ request: MemoryOSBackgroundLoopModelRequest) async throws -> MemoryOSBackgroundLoopModelResponse {
         guard !script.isEmpty else { return MemoryOSBackgroundLoopModelResponse(assistantText: "{}") }
         return script.removeFirst()
     }

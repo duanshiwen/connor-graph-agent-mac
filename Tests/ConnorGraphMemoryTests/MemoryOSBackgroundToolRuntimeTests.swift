@@ -17,11 +17,11 @@ struct MemoryOSBackgroundToolRuntimeTests {
         #expect(decodedResult == result)
     }
 
-    @Test func workerPreservesExecutorToolTraceMetadata() throws {
+    @Test func workerPreservesExecutorToolTraceMetadata() async throws {
         let draft = MemoryOSL1UnifiedProjectionJobDraft(id: "job-tool-trace", captureEventIDs: ["cap-1"], provenanceObjectIDs: ["prov-1"], sourceSpanIDs: ["span-1"], prompt: "Extract facts.", metadata: ["event_count": "1"])
         let executor = ToolTraceExecutor(response: MemoryOSBackgroundModelResponse(rawArtifactJSON: "{}", metadata: ["tool_trace_count": "2", "tool_trace_ids": "call-1,call-2"]))
 
-        let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
+        let result = try await MemoryOSBackgroundJobWorker(executor: executor).run(draft)
 
         #expect(result.metadata["event_count"] == "1")
         #expect(result.metadata["tool_trace_count"] == "2")
@@ -32,5 +32,5 @@ struct MemoryOSBackgroundToolRuntimeTests {
 private final class ToolTraceExecutor: MemoryOSBackgroundModelExecutor, @unchecked Sendable {
     let response: MemoryOSBackgroundModelResponse
     init(response: MemoryOSBackgroundModelResponse) { self.response = response }
-    func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse { response }
+    func execute(_ request: MemoryOSBackgroundModelRequest) async throws -> MemoryOSBackgroundModelResponse { response }
 }

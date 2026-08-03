@@ -48,9 +48,9 @@ public struct AppMemoryOSBackgroundRunSummary: Sendable, Equatable, Codable {
 }
 
 public struct BackgroundAIExecutorProvider: Sendable {
-    public var runAIBatch: @Sendable (AppMemoryOSFacade) throws -> Int
+    public var runAIBatch: @Sendable (AppMemoryOSFacade) async throws -> Int
 
-    public init(runAIBatch: @escaping @Sendable (AppMemoryOSFacade) throws -> Int) {
+    public init(runAIBatch: @escaping @Sendable (AppMemoryOSFacade) async throws -> Int) {
         self.runAIBatch = runAIBatch
     }
 }
@@ -71,13 +71,13 @@ public struct AppMemoryOSBackgroundJobRunner: Sendable {
         recoveryService.shouldRecoverLease(status: queueStatus, leaseExpiresAt: leaseExpiresAt, now: now)
     }
 
-    public func runOnce(facade: AppMemoryOSFacade, now: Date = Date()) throws -> AppMemoryOSBackgroundRunSummary {
+    public func runOnce(facade: AppMemoryOSFacade, now: Date = Date()) async throws -> AppMemoryOSBackgroundRunSummary {
         let recoveredLeaseCount = try facade.recoverExpiredBackgroundQueueLeases(now: now)
         let projectionRuns = try facade.runProjectionQueueOnce(now: now)
 
         var aiRunCount = 0
         if let aiExecutorProvider {
-            aiRunCount = try aiExecutorProvider.runAIBatch(facade)
+            aiRunCount = try await aiExecutorProvider.runAIBatch(facade)
         }
 
         let summary = try facade.operationalSummary(now: now)

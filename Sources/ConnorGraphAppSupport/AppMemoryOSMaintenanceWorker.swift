@@ -8,8 +8,8 @@ public actor AppMemoryOSMaintenanceWorker {
         facade: AppMemoryOSFacade,
         aiExecutorProvider: BackgroundAIExecutorProvider?,
         now: Date = Date()
-    ) throws -> AppMemoryOSBackgroundRunSummary {
-        try AppMemoryOSBackgroundJobRunner(aiExecutorProvider: aiExecutorProvider).runOnce(facade: facade, now: now)
+    ) async throws -> AppMemoryOSBackgroundRunSummary {
+        try await AppMemoryOSBackgroundJobRunner(aiExecutorProvider: aiExecutorProvider).runOnce(facade: facade, now: now)
     }
 
     public func runDailySweep(

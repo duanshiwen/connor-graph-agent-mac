@@ -328,7 +328,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
         )
     }
 
-    public func debugRunNextBackgroundAI<Model: MemoryOSBackgroundToolLoopModel>(kind: String? = nil, limit: Int = 1, model: Model, configuration: MemoryOSBackgroundToolLoopConfiguration = MemoryOSBackgroundToolLoopConfiguration(), now: Date = Date(), logHandler: MemoryOSLoopLogHandler? = nil) throws -> MemoryOSCLIDebugAIRunResult {
+    public func debugRunNextBackgroundAI<Model: MemoryOSBackgroundToolLoopModel>(kind: String? = nil, limit: Int = 1, model: Model, configuration: MemoryOSBackgroundToolLoopConfiguration = MemoryOSBackgroundToolLoopConfiguration(), now: Date = Date(), logHandler: MemoryOSLoopLogHandler? = nil) async throws -> MemoryOSCLIDebugAIRunResult {
         let effectiveLimit = safeLimit(limit)
         let executableKinds = kind.map { [$0] } ?? MemoryOSBackgroundJobKind.executableRawValues
         let plannedCandidates = try executableKinds.flatMap { executableKind in
@@ -351,7 +351,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
             now: { now },
             logHandler: logHandler
         )
-        let summaries = try facade.runBackgroundAIQueueOnce(executor: executor, limit: effectiveLimit, now: now, kinds: executableKinds)
+        let summaries = try await facade.runBackgroundAIQueueOnce(executor: executor, limit: effectiveLimit, now: now, kinds: executableKinds)
         let queueRuns = try plannedCandidates.enumerated().map { index, candidate in
             let runID = "memory-run:\(candidate.id)"
             let messages = try store.backgroundMessages(runID: runID)

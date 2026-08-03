@@ -177,7 +177,7 @@ final class AppRuntimeLifecycle {
                 ),
                 store: store
             )
-            let runs = try facade.runBackgroundAIQueueOnce(executor: executor, limit: 3)
+            let runs = try await facade.runBackgroundAIQueueOnce(executor: executor, limit: 3)
             return runs.count
         }
     }

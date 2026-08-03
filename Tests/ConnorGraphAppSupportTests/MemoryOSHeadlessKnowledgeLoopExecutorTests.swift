@@ -7,7 +7,7 @@ import ConnorGraphAppSupport
 
 @Suite("Memory OS Headless Knowledge Loop Executor Tests")
 struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
-    @Test func executesToolCallPersistsRunTraceAndReturnsFinalArtifact() throws {
+    @Test func executesToolCallPersistsRunTraceAndReturnsFinalArtifact() async throws {
         let store = try SQLiteMemoryOSStore(path: temporaryHeadlessLoopDatabaseURL().path)
         try store.migrate()
         let model = ScriptedLoopModel(script: [
@@ -23,7 +23,7 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
             store: store
         )
 
-        let response = try executor.execute(MemoryOSBackgroundModelRequest(
+        let response = try await executor.execute(MemoryOSBackgroundModelRequest(
             jobID: "job-1",
             kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
             schemaName: "MemoryOSL1UnifiedProjectionOutput",
@@ -48,7 +48,7 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
         #expect(try store.backgroundToolCalls(runID: "run-1").count == 1)
     }
 
-    @Test func facadeQueueRunnerInjectsQueueMetadataIntoHeadlessRun() throws {
+    @Test func facadeQueueRunnerInjectsQueueMetadataIntoHeadlessRun() async throws {
         let store = try SQLiteMemoryOSStore(path: temporaryHeadlessLoopDatabaseURL().path)
         try store.migrate()
         let facade = AppMemoryOSFacade(store: store)
@@ -63,7 +63,7 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
             store: store
         )
 
-        _ = try facade.runBackgroundAIQueueOnce(executor: executor, limit: 1, now: now)
+        _ = try await facade.runBackgroundAIQueueOnce(executor: executor, limit: 1, now: now)
 
         let run = try #require(try store.backgroundRuns(limit: 10).first { $0.queueItemID == queueID })
         #expect(run.id == "memory-run:\(queueID)")
@@ -71,7 +71,7 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
         #expect(run.metadata["queue_item_id"] == queueID)
     }
 
-    @Test func secondRunDoesNotInheritFirstRunMessagesOrToolResults() throws {
+    @Test func secondRunDoesNotInheritFirstRunMessagesOrToolResults() async throws {
         let store = try SQLiteMemoryOSStore(path: temporaryHeadlessLoopDatabaseURL().path)
         try store.migrate()
         let model = CapturingLoopModel()
@@ -81,7 +81,7 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
             store: store
         )
 
-        _ = try executor.execute(MemoryOSBackgroundModelRequest(
+        _ = try await executor.execute(MemoryOSBackgroundModelRequest(
             jobID: "job-1",
             kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
             schemaName: "MemoryOSL1UnifiedProjectionOutput",
@@ -89,7 +89,7 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
             prompt: "First batch prompt",
             metadata: ["background_run_id": "run-1"]
         ))
-        _ = try executor.execute(MemoryOSBackgroundModelRequest(
+        _ = try await executor.execute(MemoryOSBackgroundModelRequest(
             jobID: "job-2",
             kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
             schemaName: "MemoryOSL1UnifiedProjectionOutput",
@@ -104,7 +104,7 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
         #expect(try store.backgroundMessages(runID: "run-2").map(\.content) == ["Second batch prompt"])
     }
 
-    @Test func retryReusesSuccessfulWriteToolResultInsteadOfWritingTwice() throws {
+    @Test func retryReusesSuccessfulWriteToolResultInsteadOfWritingTwice() async throws {
         let store = try SQLiteMemoryOSStore(path: temporaryHeadlessLoopDatabaseURL().path)
         try store.migrate()
         let model = RetryWriteLoopModel()
@@ -122,8 +122,13 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
             metadata: ["background_run_id": "retry-run"]
         )
 
-        #expect(throws: RetryWriteLoopModel.Failure.self) { try executor.execute(request) }
-        _ = try executor.execute(request)
+        do {
+            _ = try await executor.execute(request)
+            Issue.record("Expected the first execution to fail")
+        } catch is RetryWriteLoopModel.Failure {
+            // The retry below verifies idempotent write replay after interruption.
+        }
+        _ = try await executor.execute(request)
 
         #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l3_beliefs;").first?.first == "1")
         #expect(try store.backgroundToolCalls(runID: "retry-run").contains { $0.metadata["idempotent_replay"] == "true" })
@@ -138,7 +143,7 @@ private final class ScriptedLoopModel: MemoryOSBackgroundToolLoopModel, @uncheck
         self.script = script
     }
 
-    func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
+    func complete(_ request: MemoryOSBackgroundLoopModelRequest) async throws -> MemoryOSBackgroundLoopModelResponse {
         guard !script.isEmpty else { return MemoryOSBackgroundLoopModelResponse(assistantText: "{}") }
         return script.removeFirst()
     }
@@ -148,7 +153,7 @@ private final class CapturingLoopModel: MemoryOSBackgroundToolLoopModel, @unchec
     let modelID = "capturing-loop-model"
     var capturedInitialMessageContents: [String] = []
 
-    func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
+    func complete(_ request: MemoryOSBackgroundLoopModelRequest) async throws -> MemoryOSBackgroundLoopModelResponse {
         capturedInitialMessageContents.append(request.messages.map(\.content).joined(separator: "\n"))
         return MemoryOSBackgroundLoopModelResponse(assistantText: "{}")
     }
@@ -162,7 +167,7 @@ private final class RetryWriteLoopModel: MemoryOSBackgroundToolLoopModel, @unche
     private let legacyArguments = #"{"beliefs":[{"statement":"Retries must be idempotent.","domain":"engineering","related_entity_names":"Background tools"}]}"#
     private let canonicalArguments = #"{"beliefs":[{"statement":"Retries must be idempotent.","domain":"engineering","relatedEntityNames":"Background tools"}]}"#
 
-    func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
+    func complete(_ request: MemoryOSBackgroundLoopModelRequest) async throws -> MemoryOSBackgroundLoopModelResponse {
         invocation += 1
         switch invocation {
         case 1:
