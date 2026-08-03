@@ -185,15 +185,34 @@ struct ImMessageCenterTests {
 
         await fixture.center.handleFrame(type: "group_receive", text: """
             {"type":"group_receive","payload":{"group_id":"g1","message_id":"gm1","sender_id":7,
-            "sender_username":"bob","sender_avatar":"a.png","content":"午饭吃啥"}}
+            "sender_username":"kevin_account","sender_nickname":"Kevin","sender_avatar":"a.png","content":"午饭吃啥"}}
             """)
 
         let conversationId = ImConversation.groupConversationID(groupId: "g1")
         #expect(try await fixture.store.conversation(id: conversationId)?.unreadCount == 1)
         let message = try #require(try await fixture.store.message(id: "gm1"))
         #expect(message.status == .delivered)
+        #expect(message.senderName == "Kevin")
         #expect(message.senderAvatar == "a.png")
         #expect(fixture.events.events.count == 1)
+    }
+
+    @Test func groupHistoryUsesServerMemberProfileWithoutFriendship() async throws {
+        let fixture = try makeFixture()
+        fixture.service.groupsResult = try decodeDTO(
+            #"[{"groupId":"g1","name":"测试群聊 001"}]"#
+        )
+        await fixture.center.refreshAll()
+        let conversationId = ImConversation.groupConversationID(groupId: "g1")
+        fixture.service.groupHistoryResults = [try decodeDTO(
+            #"{"messages":[{"messageId":"gm-kevin","groupId":"g1","senderId":7,"senderUsername":"kevin_account","senderNickname":"Kevin","senderAvatar":"kevin.png","content":"晚上开会","sentAt":"2026-08-03T09:20:00Z"}],"has_more":false}"#
+        )]
+
+        _ = try await fixture.center.loadOlderMessages(conversationId: conversationId)
+
+        let message = try #require(try await fixture.store.message(id: "gm-kevin"))
+        #expect(message.senderName == "Kevin")
+        #expect(message.senderAvatar == "kevin.png")
     }
 
     @Test func friendRequestReceivedEmitsOnlyForNewPendingInvitation() async throws {

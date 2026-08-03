@@ -284,6 +284,9 @@ public struct ImGroupMessageDTO: Decodable, Sendable, Equatable {
     public var messageId: String
     public var groupId: String
     public var senderId: Int64
+    public var senderUsername: String
+    public var senderNickname: String
+    public var senderAvatar: String
     public var messageType: String
     public var content: String
     public var extra: String
@@ -295,6 +298,9 @@ public struct ImGroupMessageDTO: Decodable, Sendable, Equatable {
         messageId = try values.decode(String.self, forKey: .messageId)
         groupId = try values.decodeIfPresent(String.self, forKey: .groupId) ?? ""
         senderId = try values.decode(Int64.self, forKey: .senderId)
+        senderUsername = try values.decodeIfPresent(String.self, forKey: .senderUsername) ?? ""
+        senderNickname = try values.decodeIfPresent(String.self, forKey: .senderNickname) ?? ""
+        senderAvatar = try values.decodeIfPresent(String.self, forKey: .senderAvatar) ?? ""
         messageType = try values.decodeIfPresent(String.self, forKey: .messageType) ?? "text"
         content = try values.decodeIfPresent(String.self, forKey: .content) ?? ""
         extra = try values.decodeJSONStringIfPresent(forKey: .extra) ?? "{}"
@@ -303,7 +309,12 @@ public struct ImGroupMessageDTO: Decodable, Sendable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case messageId, groupId, senderId, messageType, content, extra, isAgent, sentAt
+        case messageId, groupId, senderId, senderUsername, senderNickname, senderAvatar
+        case messageType, content, extra, isAgent, sentAt
+    }
+
+    public var senderDisplayName: String {
+        senderNickname.isEmpty ? senderUsername : senderNickname
     }
 }
 

@@ -666,7 +666,7 @@ public final class AppUserIdentityStore: ObservableObject {
     private let serverIsReachable: @MainActor () -> Bool
     private let syncDefaults: UserDefaults
     private var syncAvailabilityCancellable: AnyCancellable?
-    private var deviceSyncTask: Task<Void, Never>?
+    private var l1CoordinationTask: Task<Void, Never>?
     private var syncSocketTask: Task<Void, Never>?
     private var syncPassTask: Task<Void, Never>?
     private var localChangeDebounceTask: Task<Void, Never>?
@@ -783,6 +783,7 @@ public final class AppUserIdentityStore: ObservableObject {
             let user = try await authenticatedSession.currentUser()
             authenticationState = .signedIn(user)
             startEventSocketIfNeeded()
+            startL1Coordination()
             if isDeviceSyncEnabled { startDeviceSync() }
             await refreshLibraries()
         } catch ConnorBackendAPIError.unauthorized, ConnorBackendAPIError.missingRefreshToken {
@@ -830,6 +831,7 @@ public final class AppUserIdentityStore: ObservableObject {
             try credentials.saveSyncKey(syncKey, userID: userID)
             authenticationState = .signedIn(identity.user)
             startEventSocketIfNeeded()
+            startL1Coordination()
             if isDeviceSyncEnabled { startDeviceSync() }
             await refreshLibraries()
         } catch {
@@ -884,6 +886,7 @@ public final class AppUserIdentityStore: ObservableObject {
 
     private func clearLocalSession(state: ConnorAuthenticationState) {
         stopDeviceSync()
+        stopL1Coordination()
         stopEventSocket()
         try? credentials.clearTokens()
         authenticationState = state
@@ -894,11 +897,13 @@ public final class AppUserIdentityStore: ObservableObject {
     }
 
     private func syncAvailabilityDidChange(_ available: Bool) {
-        guard isDeviceSyncEnabled, currentUser != nil else { return }
+        guard currentUser != nil else { return }
         if available {
-            startDeviceSync()
+            startL1Coordination()
+            if isDeviceSyncEnabled { startDeviceSync() }
         } else {
             stopDeviceSync()
+            stopL1Coordination()
             deviceSyncStatus = .offline
         }
     }
@@ -914,23 +919,25 @@ public final class AppUserIdentityStore: ObservableObject {
             return
         }
         deviceSyncStatus = .connecting
+        startEventSocketIfNeeded()
+        startL1Coordination()
+        requestDeviceSyncPass()
+    }
+
+    private func startL1Coordination() {
+        guard l1CoordinationTask == nil, currentUser != nil,
+              networkIsAvailable(), serverIsReachable() else { return }
         let session = authenticatedSession
         let deviceID = deviceID
-        startEventSocketIfNeeded()
-        deviceSyncTask = Task {
-            var needsInitialReconcile = true
+        l1CoordinationTask = Task {
             while !Task.isCancelled {
                 do {
                     _ = try await session.syncHeartbeat(deviceID: deviceID, name: Host.current().localizedName ?? "Mac", appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
                     let lease = try await session.acquireL1Lease(deviceID: deviceID)
                     L1ExtractionEligibility.shared.update(granted: lease.granted, expiresAt: lease.expiresAt)
-                    if needsInitialReconcile {
-                        needsInitialReconcile = false
-                        requestDeviceSyncPass()
-                    }
                 } catch {
                     L1ExtractionEligibility.shared.update(granted: false, expiresAt: nil)
-                    if !networkIsAvailable() || !serverIsReachable() {
+                    if isDeviceSyncEnabled && (!networkIsAvailable() || !serverIsReachable()) {
                         deviceSyncStatus = .offline
                     }
                 }
@@ -942,10 +949,13 @@ public final class AppUserIdentityStore: ObservableObject {
     /// Stops sync passes only; the event socket stays up because IM depends on it
     /// for as long as the user remains signed in.
     private func stopDeviceSync() {
-        deviceSyncTask?.cancel(); deviceSyncTask = nil
         syncPassTask?.cancel(); syncPassTask = nil
         localChangeDebounceTask?.cancel(); localChangeDebounceTask = nil
         syncPassRequested = false
+    }
+
+    private func stopL1Coordination() {
+        l1CoordinationTask?.cancel(); l1CoordinationTask = nil
         L1ExtractionEligibility.shared.update(granted: false, expiresAt: nil)
     }
 

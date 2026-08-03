@@ -439,12 +439,14 @@ public actor ImMessageCenter {
         guard await isKnownGroup(groupId) else { return }
         guard let conversationId = try? await ensureGroupConversation(groupId: groupId) else { return }
         let sentAt = Self.int64Value(payload["sent_at"]) ?? configuration.now()
+        let senderNickname = payload["sender_nickname"] as? String ?? ""
+        let senderUsername = payload["sender_username"] as? String ?? ""
         await insertIncoming(
             ImMessage(
                 id: messageId,
                 conversationId: conversationId,
                 senderId: senderId,
-                senderName: payload["sender_username"] as? String ?? "",
+                senderName: senderNickname.isEmpty ? senderUsername : senderNickname,
                 senderAvatar: payload["sender_avatar"] as? String ?? "",
                 messageType: payload["message_type"] as? String ?? "text",
                 content: payload["content"] as? String ?? "",
@@ -458,7 +460,14 @@ public actor ImMessageCenter {
 
     /// Idempotent insert keyed by the unique message id, then bump the conversation.
     private func insertIncoming(_ message: ImMessage, countUnread: Bool = true) async {
-        if (try? await store.message(id: message.id)) != nil { return }
+        if var existing = try? await store.message(id: message.id) {
+            if existing.senderName.isEmpty, !message.senderName.isEmpty {
+                existing.senderName = message.senderName
+                existing.senderAvatar = message.senderAvatar
+                _ = try? await store.upsertMessage(existing)
+            }
+            return
+        }
         guard let storedMessage = try? await store.upsertMessage(message) else { return }
         let active = storedMessage.conversationId == activeConversationId
         try? await touchConversation(
@@ -830,12 +839,26 @@ public actor ImMessageCenter {
         var pending: [ImMessage] = []
         pending.reserveCapacity(messages.count)
         for dto in messages {
-            if (try? await store.message(id: dto.messageId)) != nil { continue }
+            let resolvedName: String
+            if let serverName = dto.senderDisplayName.nonEmpty {
+                resolvedName = serverName
+            } else {
+                resolvedName = await senderName(senderId: dto.senderId, selfUser: selfUser)
+            }
+            if var existing = try? await store.message(id: dto.messageId) {
+                if existing.senderName.isEmpty, !resolvedName.isEmpty {
+                    existing.senderName = resolvedName
+                    existing.senderAvatar = dto.senderAvatar
+                    pending.append(existing)
+                }
+                continue
+            }
             pending.append(ImMessage(
                 id: dto.messageId,
                 conversationId: conversationId,
                 senderId: dto.senderId,
-                senderName: await senderName(senderId: dto.senderId, selfUser: selfUser),
+                senderName: resolvedName,
+                senderAvatar: dto.senderAvatar,
                 messageType: dto.messageType,
                 content: dto.content,
                 status: .sent,
