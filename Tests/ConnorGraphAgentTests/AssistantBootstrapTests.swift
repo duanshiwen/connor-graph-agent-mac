@@ -61,3 +61,78 @@ private struct BootstrapFixtureTool: AgentTool {
     #expect(pack.userProfile.count <= 10)
     #expect(AgentPromptBudgetEstimator().estimate(rendered).estimatedTokenCount <= 500)
 }
+
+@Test func bootstrapQueryPlannerDoesNotUseAChineseQuestionAsOneFTSPhrase() {
+    let request = AgentChatRequest(
+        sessionID: "session",
+        userMessage: "为什么你不能查询历史记录？查询记忆系统？为什么？是有什么限制吗？"
+    )
+
+    let query = AssistantBootstrapQueryPlanner().query(for: request)
+
+    #expect(query.contains("历史记录"))
+    #expect(query.contains("记忆系统"))
+    #expect(!query.contains("为什么你不能查询历史记录"))
+    #expect(query.count <= 240)
+}
+
+@Test func bootstrapQueryPlannerCarriesForwardAReferencedConversationEntity() {
+    let request = AgentChatRequest(
+        sessionID: "session",
+        userMessage: "我想以康纳同学的身份给她写一封邮件，跟小小分享这段旅程。",
+        recentMessages: [
+            AgentMessage(role: .user, content: "这就是我们讨论过的小小基金。"),
+            AgentMessage(role: .assistant, content: "确认是 **小小基金（XIAOXIAO FUND）**。")
+        ]
+    )
+
+    let query = AssistantBootstrapQueryPlanner().query(for: request)
+
+    #expect(query.contains("康纳同学"))
+    #expect(query.contains("小小基金"))
+    #expect(query.contains("XIAOXIAO FUND"))
+}
+
+@Test func bootstrapQueryPlannerKeepsTechnicalNamesWithoutNarrativeNoise() {
+    let request = AgentChatRequest(
+        sessionID: "session",
+        userMessage: "Please investigate why Memory OS and GPT-5.6 failed in the Agent bootstrap."
+    )
+
+    let query = AssistantBootstrapQueryPlanner().query(for: request)
+
+    #expect(query.contains("Memory OS"))
+    #expect(query.contains("GPT-5.6"))
+    #expect(query.contains("Agent"))
+    #expect(!query.contains("Please investigate"))
+}
+
+@Test func bootstrapRenderDistinguishesAnEmptySuccessfulReadFromPermissionFailure() {
+    let report = AssistantBootstrapReport(
+        contextPack: AssistantContextPack(failures: ["note_search: denied"]),
+        query: "小小基金;XIAOXIAO FUND",
+        attemptedToolNames: ["memory_os_recent_context", "note_search"],
+        succeededToolNames: ["memory_os_recent_context"]
+    )
+
+    let rendered = AssistantEvidenceReducer().render(report)
+
+    #expect(rendered.contains("memory_os_recent_context: succeeded"))
+    #expect(rendered.contains("note_search: failed"))
+    #expect(rendered.contains("completed with zero matches"))
+    #expect(rendered.contains("小小基金;XIAOXIAO FUND"))
+}
+
+@Test func evidenceReducerReadsMemoryToolSnakeCaseMetadata() throws {
+    let output = AssistantBootstrapToolOutput(
+        name: "memory_os_recent_context",
+        payload: #"{"records":[{"record_id":"memory-1","text":"Relevant memory","occurred_at":"2026-08-03T05:42:38Z","retrieval_score":0.75}]}"#,
+        error: nil
+    )
+
+    let item = try #require(AssistantEvidenceReducer().reduce([output]).recentMemory.first)
+
+    #expect(item.id == "memory-1")
+    #expect(item.relevance == 0.75)
+    #expect(item.occurredAt != nil)
+}

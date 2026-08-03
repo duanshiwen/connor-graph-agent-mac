@@ -330,7 +330,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 let dynamicRuntime = [
                     runtimeContext.trustedPrompt,
                     environmentText,
-                    AssistantEvidenceReducer().render(assistantBootstrap.contextPack),
+                    AssistantEvidenceReducer().render(assistantBootstrap),
                     assistantToolRouter.compactCatalogSummary(definitions: availableRegisteredToolDefinitions),
                     "Memory, user-profile context, and Note candidates were already loaded once by the deterministic assistant bootstrap. Do not repeat those generic startup reads. Shell and ApplyPatch are direct workspace tools. Other applicable native tools are supplied through the routed catalog above."
                 ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")

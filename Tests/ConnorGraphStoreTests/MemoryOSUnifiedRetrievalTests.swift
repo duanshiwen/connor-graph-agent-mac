@@ -22,6 +22,18 @@ import ConnorGraphStore
     #expect(sorted.map(\.recordID) == ["higher", "a", "b", "older", "missing"])
 }
 
+@Test func memoryOSNonEmptySearchSortsByRelevanceBeforeRecency() {
+    let hits = [
+        MemoryOSRetrievalHit(layer: .l2, recordID: "new-low", title: "new-low", score: 0.2, metadata: ["effective_updated_at": "2026-08-03T10:00:00Z"]),
+        MemoryOSRetrievalHit(layer: .l2, recordID: "old-high", title: "old-high", score: 0.9, metadata: ["effective_updated_at": "2026-07-01T10:00:00Z"]),
+        MemoryOSRetrievalHit(layer: .l2, recordID: "new-high", title: "new-high", score: 0.9, metadata: ["effective_updated_at": "2026-08-01T10:00:00Z"])
+    ]
+
+    let sorted = hits.sorted(by: SQLiteMemoryOSUnifiedRetrievalService.isRelevanceOrderedBefore)
+
+    #expect(sorted.map(\.recordID) == ["new-high", "old-high", "new-low"])
+}
+
 @Test func memoryOSRetrievalExposesTemporalStatusSemantics() {
     let conflicted = MemoryOSRetrievalHit(layer: .l3, recordID: "conflict", title: "conflict", metadata: ["status": "conflicted"])
     let unspecified = MemoryOSRetrievalHit(layer: .l3, recordID: "active", title: "active")

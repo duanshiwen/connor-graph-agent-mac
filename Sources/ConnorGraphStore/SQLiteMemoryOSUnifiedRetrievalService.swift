@@ -132,8 +132,22 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         let isTimeRangeQuery = query.startDate != nil || query.endDate != nil
         return Array(hits
             .filter { $0.score >= minimumRelevanceScore }
-            .sorted { isTimeRangeQuery ? Self.isOccurrenceOrderedBefore($0, $1) : Self.isOrderedBefore($0, $1) }
+            .sorted { lhs, rhs in
+                if isTimeRangeQuery { return Self.isOccurrenceOrderedBefore(lhs, rhs) }
+                if trimmed.isEmpty { return Self.isOrderedBefore(lhs, rhs) }
+                return Self.isRelevanceOrderedBefore(lhs, rhs)
+            }
             .prefix(max(0, query.limit)))
+    }
+
+    public static func isRelevanceOrderedBefore(_ lhs: MemoryOSRetrievalHit, _ rhs: MemoryOSRetrievalHit) -> Bool {
+        if lhs.score != rhs.score { return lhs.score > rhs.score }
+        switch (lhs.effectiveUpdatedAt, rhs.effectiveUpdatedAt) {
+        case let (left?, right?) where left != right: return left > right
+        case (_?, nil): return true
+        case (nil, _?): return false
+        default: return lhs.recordID < rhs.recordID
+        }
     }
 
     public static func isOrderedBefore(_ lhs: MemoryOSRetrievalHit, _ rhs: MemoryOSRetrievalHit) -> Bool {
