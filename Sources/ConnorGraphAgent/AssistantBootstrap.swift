@@ -60,7 +60,7 @@ public struct AssistantBootstrapCoordinator: Sendable {
         registry: AgentToolRegistry,
         policy: AgentPolicyEngine
     ) async -> AssistantBootstrapReport {
-        let query = compactQuery(request.userMessage)
+        let query = AssistantBootstrapQueryPlanner().query(for: request)
         let specs = bootstrapSpecs(query: query).filter { registry.definition(named: $0.name) != nil }
         let attempted = Set(specs.map(\.name))
         var completed: [AssistantBootstrapToolOutput] = []
@@ -114,10 +114,6 @@ public struct AssistantBootstrapCoordinator: Sendable {
             attemptedToolNames: attempted,
             succeededToolNames: Set(completed.filter { $0.error == nil }.map(\.name))
         )
-    }
-
-    private func compactQuery(_ message: String) -> String {
-        String(message.trimmingCharacters(in: .whitespacesAndNewlines).prefix(240))
     }
 
     private func bootstrapSpecs(query: String) -> [AssistantBootstrapToolSpec] {
