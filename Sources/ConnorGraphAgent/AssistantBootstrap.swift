@@ -210,7 +210,10 @@ public struct AssistantEvidenceReducer: Sendable {
         ]
         if !attemptedToolNames.isEmpty {
             lines.append("[retrieval-status]")
-            if let query { lines.append("- lexical-query: \(query.isEmpty ? \"(unfiltered)\" : query)") }
+            if let query {
+                let displayedQuery = query.isEmpty ? "(unfiltered)" : query
+                lines.append("- lexical-query: \(displayedQuery)")
+            }
             for name in attemptedToolNames.sorted() {
                 let status = succeededToolNames.contains(name) ? "succeeded" : "failed"
                 lines.append("- \(name): \(status)")

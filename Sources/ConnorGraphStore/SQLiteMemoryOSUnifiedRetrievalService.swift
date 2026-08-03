@@ -130,12 +130,13 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             if layers.contains(.l4) { hits += try searchL4(trimmed, query: query) }
         }
         let isTimeRangeQuery = query.startDate != nil || query.endDate != nil
-        let ordering: (MemoryOSRetrievalHit, MemoryOSRetrievalHit) -> Bool = isTimeRangeQuery
-            ? Self.isOccurrenceOrderedBefore
-            : trimmed.isEmpty ? Self.isOrderedBefore : Self.isRelevanceOrderedBefore
         return Array(hits
             .filter { $0.score >= minimumRelevanceScore }
-            .sorted(by: ordering)
+            .sorted { lhs, rhs in
+                if isTimeRangeQuery { return Self.isOccurrenceOrderedBefore(lhs, rhs) }
+                if trimmed.isEmpty { return Self.isOrderedBefore(lhs, rhs) }
+                return Self.isRelevanceOrderedBefore(lhs, rhs)
+            }
             .prefix(max(0, query.limit)))
     }
 

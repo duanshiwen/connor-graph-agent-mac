@@ -99,18 +99,27 @@ struct AssistantBootstrapQueryPlanner: Sendable {
     }
 
     private func technicalTerms(in text: String) -> [String] {
-        let pattern = #"[A-Za-z0-9][A-Za-z0-9._+\-]*(?:[ \t]+[A-Za-z0-9][A-Za-z0-9._+\-]*){0,2}"#
+        let knownPhrases = ["Memory OS", "AI Agent"]
+        var output = knownPhrases.compactMap { phrase -> String? in
+            guard let range = text.range(of: phrase, options: .caseInsensitive) else { return nil }
+            return String(text[range])
+        }
+
+        let pattern = #"[A-Za-z0-9][A-Za-z0-9._+\-]*"#
         guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let recognizedLowercaseTerms: Set<String> = ["ai", "agent", "llm", "rag", "mcp", "memory", "os"]
-        return expression.matches(in: text, range: range).compactMap { match in
+        output += expression.matches(in: text, range: range).compactMap { match in
             guard let swiftRange = Range(match.range, in: text) else { return nil }
             let value = String(text[swiftRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let words = value.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-            let isDistinctive = value.contains(where: { $0.isUppercase || $0.isNumber })
-                || words.contains { recognizedLowercaseTerms.contains($0.lowercased()) }
+            let letters = value.filter(\.isLetter)
+            let isUppercaseIdentifier = letters.count >= 2 && letters.allSatisfy { !$0.isLowercase }
+            let isDistinctive = recognizedLowercaseTerms.contains(value.lowercased())
+                || value.contains(where: \.isNumber)
+                || isUppercaseIdentifier
             return isDistinctive && isUseful(value) ? value : nil
         }
+        return output
     }
 
     private func fallbackTerms(from text: String) -> [String] {
