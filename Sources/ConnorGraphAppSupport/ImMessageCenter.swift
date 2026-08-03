@@ -160,8 +160,10 @@ public actor ImMessageCenter {
         }
     }
 
-    /// Sign-out / account switch: IM caches are per-account server projections.
+    /// Sign-out / account switch stops account-bound work while preserving local
+    /// conversations, messages, friends, requests, and forwarding aliases.
     public func handleSignOut() async {
+        let pendingIDs = pendingSends.map(\.tempId)
         for pending in pendingSends { pending.timeoutTask?.cancel() }
         pendingSends.removeAll()
         let reconciliationTasks = Array(latestReconciliationTasks.values)
@@ -176,10 +178,9 @@ public actor ImMessageCenter {
         for task in reconciliationTasks { _ = try? await task.value }
         _ = await activeRefreshTask?.value
         await activeRetryTask?.value
-        try? await store.clearConversations()
-        try? await store.clearFriends()
-        try? await store.clearFriendRequests()
-        try? await store.clearForwardAliases()
+        for id in pendingIDs {
+            try? await store.updateMessageStatus(id: id, status: .failed)
+        }
     }
 
     // MARK: - Sending (optimistic insert → WS uplink → typeless-reply FIFO pairing)
@@ -663,10 +664,6 @@ public actor ImMessageCenter {
     private func refreshGroups() async throws {
         let groups = try await service.myGroups()
         knownGroupIDs = Set(groups.map(\.groupId))
-        let localGroups = try await store.loadConversations().filter { $0.kind == .group }
-        for conversation in localGroups where conversation.groupId.map({ !knownGroupIDs.contains($0) }) ?? true {
-            try await store.deleteConversation(id: conversation.id)
-        }
         for group in groups {
             let id = try await ensureGroupConversation(groupId: group.groupId, title: group.name)
             guard var existing = try await store.conversation(id: id) else { continue }
@@ -701,7 +698,6 @@ public actor ImMessageCenter {
             ))
         }
         try await store.upsertFriends(local)
-        try await store.pruneFriends(keepUserIds: local.map(\.userId))
         for friend in local {
             let conversationID = ImConversation.peerConversationID(peerUserId: friend.userId)
             guard var conversation = try await store.conversation(id: conversationID) else { continue }

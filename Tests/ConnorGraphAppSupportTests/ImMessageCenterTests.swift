@@ -275,7 +275,7 @@ struct ImMessageCenterTests {
 
     @Test func refreshAllBackfillsFriendsConversationsAndGroups() async throws {
         let fixture = try makeFixture()
-        // Pre-existing bridge + a stale friend that the server no longer returns.
+        // Preserve the local bridge and friends originating from another account.
         try await fixture.store.upsertFriends([
             ImFriend(userId: 9, username: "alice", personProfileID: "person-1"),
             ImFriend(userId: 99, username: "stale"),
@@ -290,7 +290,7 @@ struct ImMessageCenterTests {
         let friend = try #require(try await fixture.store.friend(userId: 9))
         #expect(friend.nickname == "艾丽")
         #expect(friend.personProfileID == "person-1")
-        #expect(try await fixture.store.friend(userId: 99) == nil)
+        #expect(try await fixture.store.friend(userId: 99)?.username == "stale")
         #expect(try await fixture.store.loadFriendRequests().map(\.id) == [5])
 
         let peer = try #require(try await fixture.store.conversation(id: "peer:9"))
@@ -418,19 +418,37 @@ struct ImMessageCenterTests {
         #expect(try await fixture.store.conversation(id: conversationId)?.lastMessagePreview == "离线群消息三")
     }
 
-    @Test func signOutClearsCachesAndCancelsPendingSends() async throws {
+    @Test func signOutPreservesLocalDataAndCancelsPendingSends() async throws {
         let fixture = try makeFixture()
         try await fixture.center.sendChatMessage(peerId: 9, content: "hi")
         try await fixture.store.upsertFriends([ImFriend(userId: 9, username: "alice")])
+        try await fixture.store.upsertFriendRequests([ImFriendRequest(id: 1, senderId: 9, receiverId: 1)])
 
         await fixture.center.handleSignOut()
 
-        #expect(try await fixture.store.loadConversations().isEmpty)
-        #expect(try await fixture.store.loadFriends().isEmpty)
-        #expect(try await fixture.store.loadFriendRequests().isEmpty)
+        #expect(try await fixture.store.loadConversations().count == 1)
+        #expect(try await fixture.store.loadFriends().map(\.userId) == [9])
+        #expect(try await fixture.store.loadFriendRequests().map(\.id) == [1])
+        let retained = try #require(try await fixture.store.messages(conversationId: "peer:9").first)
+        #expect(retained.status == .failed)
         // A late ack after sign-out pairs with nothing and must not crash.
         await fixture.center.handleFrame(type: nil, text: #"{"messageId":"srv-1"}"#)
         #expect(try await fixture.store.message(id: "srv-1") == nil)
+    }
+
+    @Test func accountRefreshDoesNotPrunePreviousAccountFriendsOrGroups() async throws {
+        let fixture = try makeFixture()
+        try await fixture.store.upsertFriends([ImFriend(userId: 99, username: "old-friend")])
+        try await fixture.store.upsertConversation(ImConversation(
+            id: "group:old-group", kind: .group, groupId: "old-group", title: "旧账号群聊"
+        ))
+        fixture.service.friendsResult = []
+        fixture.service.groupsResult = []
+
+        await fixture.center.refreshAll()
+
+        #expect(try await fixture.store.friend(userId: 99)?.username == "old-friend")
+        #expect(try await fixture.store.conversation(id: "group:old-group")?.title == "旧账号群聊")
     }
 
     @Test func prepareAfterLaunchFailsDanglingOptimisticSends() async throws {

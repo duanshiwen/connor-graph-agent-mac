@@ -144,8 +144,12 @@ final class ImFeatureModel {
                 guard let self else { return }
                 switch state {
                 case .signedIn(let user):
+                    let nextUserId = Int64(user.id)
+                    if let previousUserId = self.selfUserId, previousUserId != nextUserId {
+                        Task { [weak self] in await self?.handleSignOut() }
+                    }
                     self.isSignedIn = true
-                    self.selfUserId = Int64(user.id)
+                    self.selfUserId = nextUserId
                     self.selfAvatarURL = user.avatarURL ?? ""
                 case .signedOut, .expired:
                     let wasSignedIn = self.isSignedIn
