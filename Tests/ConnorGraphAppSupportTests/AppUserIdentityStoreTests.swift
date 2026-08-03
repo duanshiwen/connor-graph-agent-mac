@@ -35,6 +35,25 @@ struct AppUserIdentityStoreTests {
         #expect(unnamed.displayName == "shiwen")
     }
 
+    @Test func avatarUploadUsesAuthenticatedMultipartContract() async throws {
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("avatar-\(UUID().uuidString).png")
+        try Data([0x89, 0x50, 0x4e, 0x47]).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let transport = IdentityTestTransport()
+        let client = ConnorBackendAPIClient(baseURL: URL(string: "https://backend.example")!, transport: transport)
+
+        try await client.uploadAvatar(token: "avatar-token", fileURL: fileURL)
+
+        let request = try #require(await transport.lastRequest(pathSuffix: "/users/auth/avatar"))
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer avatar-token")
+        #expect(request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("multipart/form-data; boundary=ConnorAvatar-") == true)
+        let body = try #require(request.httpBody)
+        let text = String(decoding: body, as: UTF8.self)
+        #expect(text.contains("name=\"avatar\""))
+        #expect(text.contains("Content-Type: image/png"))
+    }
+
     @Test func accountCredentialStoreEncryptsAndDeletesTokenPair() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorIdentityCredentialTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -146,11 +165,17 @@ private actor IdentityTestTransport: ConnorBackendHTTPTransport {
         requests.filter { $0.url?.path.hasSuffix(pathSuffix) == true }.count
     }
 
+    func lastRequest(pathSuffix: String) -> URLRequest? {
+        requests.last { $0.url?.path.hasSuffix(pathSuffix) == true }
+    }
+
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         requests.append(request)
         let path = request.url?.path ?? ""
         let bearer = request.value(forHTTPHeaderField: "Authorization")
         switch path {
+        case let value where value.hasSuffix("/users/auth/avatar"):
+            return response(request, status: 200, json: #"{"code":0,"data":{"objectName":"avatars/1/avatar.png"}}"#)
         case let value where value.hasSuffix("/users/auth/me"):
             if currentUserFailureCount > 0 {
                 currentUserFailureCount -= 1

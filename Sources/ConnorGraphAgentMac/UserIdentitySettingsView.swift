@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
@@ -14,6 +16,7 @@ struct UserIdentitySettingsView: View {
     @State private var isSubmitting = false
     @State private var didAttemptSubmit = false
     @State private var didRetryStoredSession = false
+    @State private var isUploadingAvatar = false
 
     enum AuthenticationMode: String, CaseIterable, Identifiable {
         case login = "登录"
@@ -136,13 +139,28 @@ struct UserIdentitySettingsView: View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
             SettingsGroup(title: "康纳账号") {
                 HStack(spacing: SettingsListLayout.spaceL) {
-                    IdentityAvatarView(user: user, size: 64)
+                    Button {
+                        selectAndUploadAvatar()
+                    } label: {
+                        ZStack(alignment: .bottomTrailing) {
+                            IdentityAvatarView(user: user, size: 64)
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .padding(5)
+                                .foregroundStyle(.white)
+                                .background(Color.accentColor, in: Circle())
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canUseAccountService || isUploadingAvatar)
+                    .help("更换头像")
                     VStack(alignment: .leading, spacing: 4) {
                         Text(user.displayName).font(AppTypography.pageTitle)
                         Text("@\(user.username)").foregroundStyle(.secondary)
                         Text(user.email).font(SettingsListTypography.rowSubtitle).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    if isUploadingAvatar { ProgressView().controlSize(.small) }
                     Button("退出登录", role: .destructive) { Task { await identityStore.logout() } }
                         .buttonStyle(.bordered)
                         .disabled(!canUseAccountService)
@@ -156,6 +174,21 @@ struct UserIdentitySettingsView: View {
                 SettingsValueRow(title: "注册时间", value: user.createdAt.formatted(date: .long, time: .omitted))
             }
 
+        }
+    }
+
+    private func selectAndUploadAvatar() {
+        let panel = NSOpenPanel()
+        panel.title = "选择头像"
+        panel.prompt = "上传"
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.jpeg, .png, .gif, .webP]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        isUploadingAvatar = true
+        Task {
+            await identityStore.uploadAvatar(fileURL: url)
+            isUploadingAvatar = false
         }
     }
 

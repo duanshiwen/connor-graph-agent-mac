@@ -147,6 +147,7 @@ private struct LoginRequest: Encodable { var username: String; var password: Str
 private struct RegisterRequest: Encodable { var username: String; var email: String; var password: String }
 private struct RefreshRequest: Encodable { var refreshToken: String }
 private struct LogoutRequest: Encodable { var refreshToken: String }
+private struct AvatarUploadResponse: Decodable { var objectName: String }
 private struct SyncHeartbeatRequest: Encodable { var deviceId: String; var platform: String; var name: String; var appVersion: String }
 private struct L1LeaseRequest: Encodable { var deviceId: String }
 
@@ -287,6 +288,27 @@ public struct ConnorBackendAPIClient: Sendable {
         try await request("users/auth/me", token: token)
     }
 
+    public func uploadAvatar(token: String, fileURL: URL) async throws {
+        let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+        guard !data.isEmpty, data.count <= 5 * 1024 * 1024 else {
+            throw ConnorBackendAPIError.server(status: 400, message: "头像图片不能超过 5 MB。")
+        }
+        let boundary = "ConnorAvatar-\(UUID().uuidString)"
+        var body = Data()
+        body.append(Data("--\(boundary)\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"avatar\"; filename=\"\(fileURL.lastPathComponent)\"\r\n".utf8))
+        body.append(Data("Content-Type: \(Self.avatarMIMEType(for: fileURL))\r\n\r\n".utf8))
+        body.append(data)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        let _: AvatarUploadResponse = try await request(
+            "users/auth/avatar",
+            method: "POST",
+            token: token,
+            bodyData: body,
+            contentType: "multipart/form-data; boundary=\(boundary)"
+        )
+    }
+
     public func ownedKnowledgeBases(token: String) async throws -> ConnorPage<ConnorKnowledgeBaseSummary> {
         try await request("knowledge-bases?page=1&page_size=100", token: token)
     }
@@ -331,14 +353,20 @@ public struct ConnorBackendAPIClient: Sendable {
         try await request(path, method: method, token: token, bodyData: try encoder.encode(body))
     }
 
-    private func request<T: Decodable>(_ path: String, method: String, token: String?, bodyData: Data?) async throws -> T {
+    private func request<T: Decodable>(
+        _ path: String,
+        method: String,
+        token: String?,
+        bodyData: Data?,
+        contentType: String = "application/json"
+    ) async throws -> T {
         guard let url = URL(string: path, relativeTo: baseURL.appendingPathComponent("api/v1/")) else {
             throw ConnorBackendAPIError.invalidResponse
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = bodyData
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         let (data, response) = try await transport.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ConnorBackendAPIError.invalidResponse }
@@ -351,6 +379,15 @@ public struct ConnorBackendAPIClient: Sendable {
             return EmptyResponse() as! T
         }
         return try decoder.decode(APIEnvelope<T>.self, from: data).data
+    }
+
+    private static func avatarMIMEType(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "png": return "image/png"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        default: return "image/jpeg"
+        }
     }
 }
 
@@ -429,6 +466,13 @@ public actor ConnorBackendAuthenticatedSession {
 
     public func currentUser() async throws -> ConnorRemoteUserIdentity {
         try await authenticated { try await api.currentUser(token: $0) }
+    }
+
+    public func uploadAvatar(fileURL: URL) async throws -> ConnorRemoteUserIdentity {
+        try await authenticated {
+            try await api.uploadAvatar(token: $0, fileURL: fileURL)
+            return try await api.currentUser(token: $0)
+        }
     }
 
     public func ownedKnowledgeBases() async throws -> ConnorPage<ConnorKnowledgeBaseSummary> {
@@ -751,6 +795,19 @@ public final class AppUserIdentityStore: ObservableObject {
     public func register(username: String, email: String, password: String) async {
         guard requireNetwork() else { return }
         await authenticate(password: password) { try await self.api.register(username: username, email: email, password: password) }
+    }
+
+    public func uploadAvatar(fileURL: URL) async {
+        guard requireNetwork() else { return }
+        errorMessage = nil
+        do {
+            let user = try await authenticatedSession.uploadAvatar(fileURL: fileURL)
+            authenticationState = .signedIn(user)
+        } catch ConnorBackendAPIError.unauthorized, ConnorBackendAPIError.missingRefreshToken {
+            clearLocalSession(state: .expired)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func authenticate(password: String, _ action: () async throws -> ConnorAuthenticatedIdentity) async {
