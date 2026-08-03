@@ -14,23 +14,39 @@ struct ForwardDestination: Identifiable, Hashable {
     var title: String
     var subtitle: String
     var kind: ForwardDestinationKind
+    var updatedAt: TimeInterval? = nil
 }
 
 func forwardDestinations(sessions: [AgentSession], conversations: [ImConversation]) -> [ForwardDestination] {
-    var result = [ForwardDestination(key: "agent:new", targetID: "", title: "新建与康纳的会话", subtitle: "创建后保存聊天记录", kind: .agent)]
-    result += sessions.filter { $0.governance.kind == .chat }.map {
-        ForwardDestination(key: "agent:\($0.id)", targetID: $0.id, title: $0.title, subtitle: "与康纳的会话", kind: .agent)
+    let newSession = ForwardDestination(key: "agent:new", targetID: "", title: "新建与康纳的会话", subtitle: "创建后保存聊天记录", kind: .agent)
+    var existing = sessions.filter { $0.governance.kind == .chat }.map {
+        ForwardDestination(
+            key: "agent:\($0.id)",
+            targetID: $0.id,
+            title: $0.title,
+            subtitle: "与康纳的会话",
+            kind: .agent,
+            updatedAt: $0.updatedAt.timeIntervalSince1970
+        )
     }
-    result += conversations.map {
+    existing += conversations.map {
         ForwardDestination(
             key: "im:\($0.id)",
             targetID: $0.id,
             title: $0.title,
             subtitle: $0.kind == .group ? "群聊" : "跟 \($0.participantName)",
-            kind: $0.kind == .group ? .group : .peer
+            kind: $0.kind == .group ? .group : .peer,
+            updatedAt: TimeInterval($0.updatedAt) / 1_000
         )
     }
-    return result
+    return [newSession] + sortForwardDestinationsByRecency(existing)
+}
+
+func sortForwardDestinationsByRecency(_ destinations: [ForwardDestination]) -> [ForwardDestination] {
+    destinations.sorted {
+        if $0.updatedAt == $1.updatedAt { return $0.key < $1.key }
+        return ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0)
+    }
 }
 
 struct ForwardDestinationSheet: View {
