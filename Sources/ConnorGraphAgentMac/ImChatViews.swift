@@ -274,14 +274,6 @@ struct ImChatDetailView: View {
                     .foregroundStyle(.orange)
             }
             Spacer()
-            if !model.isSelectionMode {
-                Button("多选转发", systemImage: "checkmark.circle") {
-                    if let last = model.messages.last {
-                        model.enterSelectionMode(initialMessageId: last.id)
-                    }
-                }
-                .disabled(model.messages.isEmpty)
-            }
             Button("关闭", systemImage: "xmark.circle") {
                 Task { await model.selectConversation(nil) }
             }
@@ -295,7 +287,7 @@ struct ImChatDetailView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: AgentChatLayout.conversationTurnSpacing) {
                     if model.hasOlderMessages && !model.messages.isEmpty {
                         Button("加载更早的消息") {
                             Task { await model.loadOlderMessages() }
@@ -307,6 +299,7 @@ struct ImChatDetailView: View {
                     ForEach(model.messages) { message in
                         ImMessageBubble(
                             message: message,
+                            conversation: model.selectedConversation,
                             isMine: message.senderId == (model.selfUserId ?? -1),
                             isGroup: model.selectedConversation?.kind == .group,
                             isSelectionMode: model.isSelectionMode,
@@ -318,8 +311,10 @@ struct ImChatDetailView: View {
                         .id(message.id)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .frame(maxWidth: AgentChatLayout.chatContentMaxWidth)
+                .padding(.horizontal, AgentChatLayout.chatViewportSpacing)
+                .padding(.vertical, AgentChatLayout.chatViewportVerticalInset)
+                .frame(maxWidth: .infinity)
             }
             .onChange(of: model.messages.last?.id) { _, newValue in
                 if let newValue {
@@ -350,20 +345,61 @@ struct ImChatDetailView: View {
     }
 
     private var composer: some View {
-        HStack(spacing: 8) {
+        VStack(spacing: 0) {
             TextField(
                 model.socketConnected ? "发送消息…" : "连接已断开，无法发送",
-                text: $composerText
+                text: $composerText,
+                axis: .vertical
             )
-            .textFieldStyle(.roundedBorder)
+            .textFieldStyle(.plain)
+            .lineLimit(3...6)
+            .font(AgentChatTypography.body)
             .onSubmit(sendCurrentMessage)
             .disabled(!model.socketConnected)
-            Button("发送", systemImage: "paperplane.fill", action: sendCurrentMessage)
-                .buttonStyle(.borderedProminent)
-                .disabled(!model.socketConnected || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .padding(.horizontal, AgentChatLayout.spaceL)
+            .padding(.vertical, AgentChatLayout.spaceM)
+            .frame(
+                minHeight: AgentChatLayout.composerTextMinHeight,
+                maxHeight: AgentChatLayout.composerTextMaxHeight,
+                alignment: .topLeading
+            )
+
+            HStack(spacing: AgentChatLayout.spaceS) {
+                Button {
+                    if let last = model.messages.last {
+                        model.enterSelectionMode(initialMessageId: last.id)
+                    }
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                        .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(model.messages.isEmpty)
+                .help("多选转发")
+
+                Spacer(minLength: AgentChatLayout.spaceXS)
+
+                AgentSendControlButton(
+                    isSubmitting: false,
+                    isDisabled: !model.socketConnected || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    action: sendCurrentMessage
+                )
+                .fixedSize()
+            }
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, AgentChatLayout.spaceS)
+            .frame(minHeight: AgentChatLayout.hitTargetSize)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.58), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        )
+        .frame(maxWidth: AgentChatLayout.chatContentMaxWidth)
+        .padding(.horizontal, AgentChatLayout.chatViewportSpacing)
+        .padding(.bottom, AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity)
     }
 
     private func sendCurrentMessage() {
@@ -376,6 +412,7 @@ struct ImChatDetailView: View {
 
 private struct ImMessageBubble: View {
     let message: ImMessage
+    let conversation: ImConversation?
     let isMine: Bool
     let isGroup: Bool
     let isSelectionMode: Bool
@@ -384,28 +421,32 @@ private struct ImMessageBubble: View {
     let onEnterSelection: () -> Void
     let onRetry: () -> Void
 
+    @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
+    private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
+
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
             if isSelectionMode {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
             }
-            if isMine { Spacer(minLength: 40) }
-            VStack(alignment: isMine ? .trailing : .leading, spacing: 2) {
-                if !isMine && isGroup && !message.senderName.isEmpty {
-                    Text(message.senderName)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Text(message.content)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        isMine ? Color.accentColor.opacity(0.85) : Color(nsColor: .controlBackgroundColor),
-                        in: RoundedRectangle(cornerRadius: 10)
-                    )
-                    .foregroundStyle(isMine ? Color.white : Color.primary)
+            if isMine { Spacer(minLength: AgentChatLayout.messageSideInset) }
+            VStack(alignment: isMine ? .trailing : .leading, spacing: AgentChatLayout.spaceXS) {
+                identityRow
+
+                AgentMarkdownPreviewText(
+                    markdown: message.content,
+                    font: AgentChatTypography.messageBody(pointSize: messageBodyPointSize),
+                    bodyPointSize: messageBodyPointSize
+                )
+                .textSelection(.enabled)
+                .padding(.horizontal, isMine ? AgentChatLayout.messageBubbleHorizontalPadding : 0)
+                .padding(.vertical, isMine ? AgentChatLayout.messageBubbleVerticalPadding : 0)
+                .frame(maxWidth: isMine ? AgentChatLayout.userMessageMaxWidth : AgentChatLayout.messageMaxWidth, alignment: .leading)
+                .background(
+                    isMine ? ConnorCraftPalette.userBubble : Color.clear,
+                    in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                )
                 HStack(spacing: 4) {
                     Text(ImTimeFormat.label(forUnixMilliseconds: message.createdAt))
                         .font(.caption2)
@@ -415,7 +456,7 @@ private struct ImMessageBubble: View {
                     }
                 }
             }
-            if !isMine { Spacer(minLength: 40) }
+            if !isMine { Spacer(minLength: AgentChatLayout.messageSideInset) }
         }
         .contentShape(Rectangle())
         .onTapGesture {
@@ -428,6 +469,33 @@ private struct ImMessageBubble: View {
             if message.status == .failed {
                 Button("重新发送", systemImage: "arrow.clockwise") { onRetry() }
             }
+        }
+    }
+
+    private var messageBodyPointSize: CGFloat {
+        AgentChatFontPreferences.validatedMessageBodyPointSize(preferredMessageBodyPointSize)
+    }
+
+    private var displayName: String {
+        let sender = message.senderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sender.isEmpty { return sender }
+        if isMine { return "我" }
+        return conversation?.participantName ?? (isGroup ? "群成员" : "好友")
+    }
+
+    private var avatarURL: String {
+        if !message.senderAvatar.isEmpty { return message.senderAvatar }
+        return isMine ? "" : (conversation?.avatar ?? "")
+    }
+
+    private var identityRow: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            if isMine { Spacer(minLength: 0) }
+            ImUserAvatar(urlString: avatarURL, name: displayName, size: AgentChatLayout.avatarSize)
+            Text(displayName)
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.primary.opacity(0.88))
+            if !isMine { Spacer(minLength: 0) }
         }
     }
 
