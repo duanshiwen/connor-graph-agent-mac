@@ -355,9 +355,43 @@ struct InteractiveWebPlatformTests {
             arguments: try AgentToolArguments(json: "{}"),
             context: context
         )
-        for expected in ["/api/v1/sdk/v1.js", "window.platform", "auth.login", "myRecords", "data-connor-collection", "connor:submit-error", "collection.rules"] {
+        for expected in ["/api/v1/sdk/v1.js", "window.platform", "auth.login", "myRecords", "data-connor-collection", "connor:submit-error", "collection.rules", "data-connor-auth-required", "app.js", "script-src 'self'"] {
             #expect(result.contentText.contains(expected), "SDK contract is missing \(expected)")
         }
+    }
+
+    @Test func createDraftRejectsInlineScriptWithGuidance() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        do {
+            _ = try await runtime.createDraft(
+                sessionID: "session-1",
+                name: "Result",
+                html: "<h1>Hi</h1><script src=\"/api/v1/sdk/v1.js\"></script><script>window.x=1</script>",
+                css: nil,
+                javascript: nil
+            )
+            Issue.record("createDraft must reject inline <script> blocks")
+        } catch let error as AgentToolError {
+            let message = String(describing: error)
+            #expect(message.contains("inline <script>"))
+            #expect(message.contains("app.js"))
+        }
+    }
+
+    @Test func createDraftAcceptsExternalScriptPage() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let status = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<html><head><script src=\"/api/v1/sdk/v1.js\"></script></head><body><form data-connor-collection=\"registrations\" data-connor-auth-required=\"registrations\"></form><script src=\"app.js\"></script></body></html>",
+            css: nil,
+            javascript: "window.platform.auth.onAuthChange(() => {});"
+        )
+        #expect(status.fileCount >= 1)
     }
 
     private func makeRuntimeFixture() throws -> (paths: AppStoragePaths, root: URL) {

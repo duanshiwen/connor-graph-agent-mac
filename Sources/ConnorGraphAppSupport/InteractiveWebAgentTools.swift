@@ -13,6 +13,10 @@ Fix it step by step:
 5. After fixing the HTML, create or update the draft again (keep the exact manifestHash from interactive_web_get_draft), then publish.
 """
 
+private let interactiveWebInlineScriptHint = """
+index.html must not contain inline <script> blocks. Content pages are served with a strict Content-Security-Policy (script-src 'self') that blocks inline scripts and inline event handlers, so page JavaScript would never run and login-state rendering would silently fail. Move all page logic to the external app.js file (pass it as the javascript parameter of interactive_web_create_draft) and reference <script src="app.js"></script>. Keep submission forms in the DOM and let the SDK's data-connor-auth-required declarative login gate (or window.platform.auth.onAuthChange) handle login-state visibility; never toggle content from a login-button click handler.
+"""
+
 private let interactiveWebSDKUsageContract = """
 Interactive-web SDK v1 usage (window.platform):
 
@@ -26,26 +30,28 @@ Interactive-web SDK v1 usage (window.platform):
 
 3. Forms and events: set data-connor-collection="<name>" on submission forms and add a hidden _connor_honeypot input (autocomplete="off"); the SDK submits automatically and blocks duplicate submissions. Listen for connor:submit-success, connor:submit-error, connor:auth-required and connor:already-submitted to show clear submitting, success, failure, login-needed and already-submitted states.
 
-4. Login gating: for login-required collections (anonymousCreate=false), check window.platform.auth.status() and window.platform.collection.rules(name); offer a login button that calls window.platform.auth.login(), or let the SDK render its built-in login gate. Never draw a password input or a login form inside the page.
+4. Login gating: for login-required collections (anonymousCreate=false), mark the submission form or a container with data-connor-auth-required="<name>"; the SDK hides that content and shows a login guide when anonymous, then restores it when authenticated, re-evaluating on load and on auth change. You may also check window.platform.auth.status() and window.platform.collection.rules(name) yourself, or rely on the SDK's built-in gate. Never draw a password input or a login form inside the page, and never toggle content visibility from a login-button click handler.
+
+CSP: content pages forbid inline scripts (script-src 'self'). Put all page JavaScript in the external app.js file (pass it as the javascript parameter of interactive_web_create_draft) and reference <script src="app.js"></script>; never write inline <script> blocks or inline event handlers - they are blocked and will silently not run.
 
 5. Data reads: show a visitor's own records with window.platform.collection.myRecords(name), never data.list; use collection.ranking/stats for leaderboards and statistics, collection.capacity for remaining slots, and data.updateMine/deleteMine for edits.
 
 Pagination: records, myRecords and ranking return {items, total, page, pageSize, hasNextPage}; data.list accepts query {limit, page}. When complete coverage is required, continue with page + 1 until hasNextPage is false (or fewer than pageSize items are returned) and do not claim full coverage before then.
 
 6. Minimal example:
-   <form data-connor-collection="registrations">
+   index.html:
+   <form data-connor-collection="registrations" data-connor-auth-required="registrations">
      <input name="name" required>
      <input name="_connor_honeypot" autocomplete="off" hidden>
      <button type="submit">Submit</button>
    </form>
-   <script>
-     window.platform.auth.status().then(s => {
-       if (!s.authenticated) { /* show a button that calls window.platform.auth.login() */ }
-     });
-     document.querySelector('form').addEventListener('connor:submit-success', () => {
-       window.platform.collection.myRecords('registrations').then(renderMyRecords);
-     });
-   </script>
+   <script src="app.js"></script>
+
+   app.js (the javascript parameter of interactive_web_create_draft):
+   window.platform.auth.onAuthChange(s => { /* optionally re-render personalized content */ });
+   document.querySelector('form').addEventListener('connor:submit-success', () => {
+     window.platform.collection.myRecords('registrations').then(renderMyRecords);
+   });
 """
 
 public actor InteractiveWebToolRuntime {
@@ -340,9 +346,26 @@ public actor InteractiveWebToolRuntime {
         guard Data(content.utf8).count <= 2 * 1_024 * 1_024 else {
             throw AgentToolError.invalidArguments("\(name) exceeds draft size limit")
         }
-        if name == "index.html", !content.contains("sdk/v1.js") {
-            throw AgentToolError.invalidArguments(interactiveWebSDKRequiredHint)
+        if name == "index.html" {
+            if !content.contains("sdk/v1.js") {
+                throw AgentToolError.invalidArguments(interactiveWebSDKRequiredHint)
+            }
+            if containsInlineScript(content) {
+                throw AgentToolError.invalidArguments(interactiveWebInlineScriptHint)
+            }
         }
+    }
+
+    private func containsInlineScript(_ html: String) -> Bool {
+        let lower = html.lowercased()
+        var cursor = lower.startIndex
+        while let open = lower.range(of: "<script", range: cursor..<lower.endIndex) {
+            guard let close = lower.range(of: ">", range: open.upperBound..<lower.endIndex) else { break }
+            let tag = lower[open.lowerBound..<close.upperBound]
+            if !tag.contains("src=") { return true }
+            cursor = close.upperBound
+        }
+        return false
     }
 
     private func applyingEdits(
@@ -443,7 +466,7 @@ public struct InteractiveWebAgentTool: AgentTool {
 		case .listProjects: "List the signed-in user's published interactive webpage projects, one page at a time (default 50 per page, max 100). Continue with page until fewer than limit items are returned."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
-		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas and submission rules when the page accepts registrations, feedback, votes, or other submissions. Before generating the page, call interactive_web_sdk_usage to get the complete SDK contract and example. Every page must load the backend-provided absolute SDK path /api/v1/sdk/v1.js and use window.platform instead of constructing API URLs; drafts without the SDK script are rejected with step-by-step fix guidance. The tool writes files into the app-managed user-data sandbox and does not publish anything."
+		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas and submission rules when the page accepts registrations, feedback, votes, or other submissions. Before generating the page, call interactive_web_sdk_usage to get the complete SDK contract and example. Every page must load the backend-provided absolute SDK path /api/v1/sdk/v1.js and use window.platform instead of constructing API URLs; put all page JavaScript in the javascript parameter (app.js) and never write inline <script> blocks (CSP blocks them); drafts without the SDK script or with inline scripts are rejected with step-by-step fix guidance. The tool writes files into the app-managed user-data sandbox and does not publish anything."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash."
         case .updateDraft: "Atomically update an app-managed interactive webpage draft using exact text edits or full file replacements. Pass expectedManifestHash from interactive_web_get_draft to prevent overwriting a newer revision. Edits to index.html must keep the SDK script tag (/api/v1/sdk/v1.js)."
         case .getStatus: "Read the current local and published status of an interactive webpage project."
