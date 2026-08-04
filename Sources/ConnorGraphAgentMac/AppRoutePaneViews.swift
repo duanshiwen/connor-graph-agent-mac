@@ -26,7 +26,8 @@ struct CraftListPaneView: View {
                     governanceModel: graph.governance,
                     sessionActions: graph.chatActions.session,
                     rowActions: graph.chatSessionListActions,
-                    imModel: graph.im
+                    imModel: graph.im,
+                    onAddFriend: { graph.shell.requestAddFriend() }
                 )
             case .llmSettings:
                 CraftSettingsListPane(shellModel: graph.shell, selection: $selection)
@@ -36,7 +37,8 @@ struct CraftListPaneView: View {
                 CraftContactsListPane(
                     model: graph.contacts,
                     im: graph.im,
-                    onOpenPeerChat: openPeerChat
+                    onOpenPeerChat: openPeerChat,
+                    addFriendRequestID: graph.shell.addFriendRequestID
                 )
             case .rss:
                 RSSListRouteView(model: graph.rss)

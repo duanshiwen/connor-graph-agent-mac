@@ -94,11 +94,15 @@ public actor AppAccountDataSyncCoordinator {
     private enum SyncCollection {
         static let sessions = "sessions"
         static let settings = "settings"
+        static let memoryL0 = "memory_l0"
+        static let memoryL0Spans = "memory_l0_spans"
+        static let memoryL1 = "memory_l1"
         static let memoryL2 = "memory_l2"
         static let memoryL2Nodes = "memory_l2_nodes"
         static let memoryL3 = "memory_l3"
         static let memoryL4Entities = "memory_l4_entities"
         static let memoryL4Relations = "memory_l4_relations"
+        static let skills = "skills"
     }
 
     /// 记录级同步边界：sessions 全量同步；settings 仅同步运行时设置与人格
@@ -109,7 +113,9 @@ public actor AppAccountDataSyncCoordinator {
         switch collection {
         case SyncCollection.sessions: return true
         case SyncCollection.settings: return recordId == "macos_runtime" || recordId == "personality"
+        case SyncCollection.memoryL0, SyncCollection.memoryL0Spans, SyncCollection.memoryL1: return true
         case "memory_l2", "memory_l2_nodes", "memory_l3", "memory_l4_entities", "memory_l4_relations": return true
+        case SyncCollection.skills: return true
         default: return false
         }
     }
@@ -121,13 +127,14 @@ public actor AppAccountDataSyncCoordinator {
     private let sessions: AppChatSessionRepository
     private let settings: AppRuntimeSettingsRepository
     private let memory: SQLiteMemoryOSStore?
+    private let skillStore: SkillSyncStore?
     private let identity: AppUserIdentityStore
     private let defaults: UserDefaults
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, memory: SQLiteMemoryOSStore?, identity: AppUserIdentityStore, defaults: UserDefaults = .standard) {
-        self.sessions = sessions; self.settings = settings; self.memory = memory; self.identity = identity; self.defaults = defaults
+    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, memory: SQLiteMemoryOSStore?, skillStore: SkillSyncStore? = nil, identity: AppUserIdentityStore, defaults: UserDefaults = .standard) {
+        self.sessions = sessions; self.settings = settings; self.memory = memory; self.skillStore = skillStore; self.identity = identity; self.defaults = defaults
         encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
         decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
     }
@@ -144,14 +151,27 @@ public actor AppAccountDataSyncCoordinator {
         repeat {
             let page = try await identity.pullSyncChanges(cursor: state.cursor)
             for change in page.changes where isSyncableRecord(change.collection, change.recordId) {
-                // 合并同步：tombstone 一律跳过，任何端都不会因同步删除记录。
-                guard !change.deleted else { continue }
-                let clear = try decrypted(change, using: cipher)
+                // 合并同步：除技能包与 L0/L1 记忆层（按“最新操作优先”应用删除）外，
+                // tombstone 一律跳过；其它记忆/会话等记录不会被同步删除。
+                let isTombstoneCollection = change.collection == SyncCollection.skills
+                    || change.collection == SyncCollection.memoryL0
+                    || change.collection == SyncCollection.memoryL0Spans
+                    || change.collection == SyncCollection.memoryL1
+                guard !change.deleted || isTombstoneCollection else { continue }
+                let clear: (change: ConnorSyncChange, encrypted: Bool)
+                if change.deleted && isTombstoneCollection {
+                    let decrypted = try cipher.decrypt(change.payload, collection: change.collection, recordID: change.recordId)
+                    var copy = change
+                    copy.payload = decrypted.payload
+                    clear = (copy, decrypted.encrypted)
+                } else {
+                    clear = try decrypted(change, using: cipher)
+                }
                 if change.sourceDeviceId != deviceID, let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(clear.change) }) {
                     record(kind, in: &syncResult)
                 }
                 let key = recordKey(change.collection, change.recordId)
-                state.records[key] = RecordState(version: change.version ?? 0, hash: "", deleted: false, encrypted: clear.encrypted)
+                state.records[key] = RecordState(version: change.version ?? 0, hash: "", deleted: change.deleted, encrypted: clear.encrypted)
                 appliedKeys.append(key)
             }
             state.cursor = page.nextCursor; hasMore = page.hasMore
@@ -172,12 +192,27 @@ public actor AppAccountDataSyncCoordinator {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
             mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: cipher.encrypt(payload, collection: parts[0], recordID: parts[1])))
         }
+        // 技能包与 L0/L1 按“最新操作优先”：本地已删除且此前同步过的记录回推 tombstone（载荷带删除时间）。
+        let nowMillis = Int64(Date().timeIntervalSince1970 * 1_000)
+        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|"]
+        for key in state.records.keys where tombstonePrefixes.contains(where: { key.hasPrefix($0) }) {
+            guard state.records[key]?.deleted != true, projected[key] == nil else { continue }
+            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+            let tombstone = SyncTombstone(updatedAt: nowMillis)
+            mutations.append(try ConnorSyncChange(
+                collection: parts[0],
+                recordId: parts[1],
+                baseVersion: state.records[key]?.version ?? 0,
+                payload: cipher.encrypt(jsonValue(tombstone), collection: parts[0], recordID: parts[1]),
+                deleted: true
+            ))
+        }
 
         for batch in mutations.chunked(into: 200) {
             let results = try await identity.pushSyncChanges(batch)
             for (pushResult, mutation) in zip(results, batch) where pushResult.applied {
                 let clear = try cipher.decrypt(mutation.payload, collection: mutation.collection, recordID: mutation.recordId)
-                state.records[recordKey(mutation.collection, mutation.recordId)] = RecordState(version: (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(clear.payload), deleted: false, encrypted: true)
+                state.records[recordKey(mutation.collection, mutation.recordId)] = RecordState(version: (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(clear.payload), deleted: mutation.deleted, encrypted: true)
                 syncResult.pushedChangeCount += 1
             }
         }
@@ -203,6 +238,15 @@ public actor AppAccountDataSyncCoordinator {
         syncedSettings.preferences = AgentRuntimePreferenceSettings()
         values[recordKey("settings", "macos_runtime")] = try jsonValue(syncedSettings)
         if let memory {
+            for provenance in try memory.listAllProvenanceObjects() {
+                values[recordKey(SyncCollection.memoryL0, provenance.id)] = try jsonValue(SyncL0Provenance(provenance: provenance))
+            }
+            for span in try memory.listAllProvenanceSpans() {
+                values[recordKey(SyncCollection.memoryL0Spans, span.id)] = try jsonValue(SyncL0Span(span: span))
+            }
+            for event in try memory.listAllCaptureEvents().filter({ $0.processingState == .pending }) {
+                values[recordKey(SyncCollection.memoryL1, event.id)] = try jsonValue(SyncL1Capture(event: event))
+            }
             for statement in try memory.listAllStatements() {
                 values[recordKey(SyncCollection.memoryL2, statement.id)] = try jsonValue(SyncMemoryL2Statement(statement))
             }
@@ -217,6 +261,11 @@ public actor AppAccountDataSyncCoordinator {
             }
             for relation in try memory.listAllEntityStatements() {
                 values[recordKey(SyncCollection.memoryL4Relations, relation.id)] = try jsonValue(SyncMemoryL4Relation(relation))
+            }
+        }
+        if let skillStore {
+            for pack in try skillStore.listUserPacks() {
+                values[recordKey(SyncCollection.skills, pack.id)] = try jsonValue(pack)
             }
         }
         return values
@@ -238,6 +287,39 @@ public actor AppAccountDataSyncCoordinator {
             let wire: SyncPersonality = try decode(change.payload)
             try settings.applySyncedPersonality(wire.connorPersonality(), revision: wire.revision ?? 0, updatedAtMillis: wire.updatedAt ?? 0)
             return .settings
+        case ("memory_l0", let id):
+            guard let memory else { return nil }
+            try memory.withForeignKeysDisabled {
+                if change.deleted {
+                    try memory.deleteProvenanceObject(id: id)
+                } else {
+                    let wire: SyncL0Provenance = try decode(change.payload)
+                    try memory.upsert(provenance: wire.makeProvenance())
+                }
+            }
+            return nil
+        case ("memory_l0_spans", let id):
+            guard let memory else { return nil }
+            try memory.withForeignKeysDisabled {
+                if change.deleted {
+                    try memory.deleteSpan(id: id)
+                } else {
+                    let wire: SyncL0Span = try decode(change.payload)
+                    try memory.upsert(span: wire.makeSpan())
+                }
+            }
+            return nil
+        case ("memory_l1", let id):
+            guard let memory else { return nil }
+            try memory.withForeignKeysDisabled {
+                if change.deleted {
+                    try memory.deleteCaptureEvent(id: id)
+                } else {
+                    let wire: SyncL1Capture = try decode(change.payload)
+                    try memory.upsert(captureEvent: wire.makeCaptureEvent())
+                }
+            }
+            return nil
         case ("memory_l2", _):
             guard let memory else { return nil }
             let wire: SyncMemoryL2Statement = try decode(change.payload)
@@ -262,6 +344,22 @@ public actor AppAccountDataSyncCoordinator {
             guard let memory else { return nil }
             let wire: SyncMemoryL4Relation = try decode(change.payload)
             try memory.withForeignKeysDisabled { try memory.upsert(entityStatement: wire.makeEntityStatement()) }
+            return nil
+        case ("skills", let id):
+            guard let skillStore else { return nil }
+            if change.deleted {
+                let tombstone: SyncSkillTombstone = try decode(change.payload)
+                let local = try skillStore.pack(id: id)
+                if tombstone.updatedAt > (local?.updatedAt ?? 0) {
+                    try skillStore.delete(id: id)
+                }
+            } else {
+                let wire: SyncSkillPack = try decode(change.payload)
+                let local = try skillStore.pack(id: id)
+                if local == nil || wire.updatedAt > local!.updatedAt {
+                    try skillStore.apply(wire)
+                }
+            }
             return nil
         default: return nil
         }

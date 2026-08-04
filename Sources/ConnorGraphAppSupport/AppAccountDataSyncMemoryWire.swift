@@ -57,6 +57,148 @@ struct SyncPersonality: Codable, Sendable {
     }
 }
 
+// MARK: - 技能包同步（skills；仅用户级技能包，内置技能不参与）
+
+public struct SyncSkillPack: Codable, Sendable {
+    var id: String
+    var title: String
+    var category: String
+    var summary: String
+    var instructionsJson: String
+    var templatesJson: String
+    var enabled: Bool
+    var createdAt: Int64
+    var updatedAt: Int64
+}
+
+/// 技能删除 tombstone 载荷：仅含删除时间（epoch ms），按“最新操作优先”比较。
+public struct SyncSkillTombstone: Codable, Sendable {
+    var updatedAt: Int64
+}
+
+/// L0/L1 删除 tombstone 载荷：仅含删除时间（epoch ms）。
+public struct SyncTombstone: Codable, Sendable {
+    var updatedAt: Int64
+}
+
+// MARK: - L0/L1 记忆层同步（安卓不持有提取租约时由 Mac 提取；以最近更新为准，删除同样传播）
+
+public struct SyncL0Provenance: Codable, Sendable {
+    var id: String
+    var sourceType: String
+    var sourceId: String?
+    var title: String
+    var content: String
+    var contentHash: String
+    var occurredAt: String
+    var ingestedAt: String
+    var sessionId: String?
+    var workObjectId: String?
+    var confidentiality: String
+    var status: String
+    var metadataJson: String
+
+    init(provenance: MemoryOSProvenanceObject) {
+        id = provenance.id
+        sourceType = provenance.sourceType.rawValue
+        sourceId = provenance.sourceID
+        title = provenance.title
+        content = provenance.content
+        contentHash = provenance.contentHash
+        occurredAt = syncISOString(provenance.occurredAt)
+        ingestedAt = syncISOString(provenance.ingestedAt)
+        sessionId = provenance.sessionID
+        workObjectId = provenance.workObjectID
+        confidentiality = provenance.confidentiality.rawValue
+        status = provenance.status.rawValue
+        metadataJson = syncJSONString(provenance.metadata)
+    }
+
+    func makeProvenance() -> MemoryOSProvenanceObject {
+        MemoryOSProvenanceObject(
+            id: id,
+            sourceType: MemoryOSSourceType(rawValue: sourceType) ?? .manual,
+            sourceID: sourceId,
+            title: title,
+            content: content,
+            contentHash: contentHash,
+            occurredAt: syncDate(occurredAt) ?? Date(),
+            ingestedAt: syncDate(ingestedAt) ?? Date(),
+            sessionID: sessionId,
+            workObjectID: workObjectId,
+            confidentiality: MemoryOSConfidentiality(rawValue: confidentiality) ?? .personal,
+            status: MemoryOSRecordStatus(rawValue: status) ?? .active,
+            metadata: syncJSONDictionary(metadataJson)
+        )
+    }
+}
+
+public struct SyncL0Span: Codable, Sendable {
+    var id: String
+    var provenanceId: String
+    var startOffset: Int?
+    var endOffset: Int?
+    var text: String
+
+    init(span: MemoryOSProvenanceSpan) {
+        id = span.id
+        provenanceId = span.provenanceObjectID
+        startOffset = span.startOffset
+        endOffset = span.endOffset
+        text = span.text
+    }
+
+    func makeSpan() -> MemoryOSProvenanceSpan {
+        MemoryOSProvenanceSpan(
+            id: id,
+            provenanceObjectID: provenanceId,
+            startOffset: startOffset,
+            endOffset: endOffset,
+            text: text
+        )
+    }
+}
+
+public struct SyncL1Capture: Codable, Sendable {
+    var id: String
+    var provenanceId: String
+    var role: String
+    var retrievalText: String?
+    var normalizationStatus: String
+    var occurredAt: String
+    var capturedAt: String
+    var metadataJson: String
+
+    init(event: MemoryOSCaptureEvent) {
+        id = event.id
+        provenanceId = event.provenanceObjectID
+        role = event.eventType
+        retrievalText = event.retrievalText
+        normalizationStatus = event.normalizationStatus.rawValue
+        occurredAt = syncISOString(event.occurredAt)
+        capturedAt = event.metadata["captured_at"] ?? syncISOString(event.occurredAt)
+        var metadata = event.metadata
+        metadata.removeValue(forKey: "captured_at")
+        metadataJson = syncJSONString(metadata)
+    }
+
+    func makeCaptureEvent() -> MemoryOSCaptureEvent {
+        var metadata = syncJSONDictionary(metadataJson)
+        metadata["captured_at"] = capturedAt
+        return MemoryOSCaptureEvent(
+            id: id,
+            provenanceObjectID: provenanceId,
+            eventType: role,
+            occurredAt: syncDate(occurredAt) ?? Date(),
+            tokenEstimate: 0,
+            processingState: .pending,
+            retrievalText: retrievalText,
+            normalizationStatus: MemoryOSIntentNormalizationStatus(rawValue: normalizationStatus) ?? .notRequired,
+            metadata: metadata
+        )
+    }
+}
+
 struct SyncMemoryL2Node: Codable, Sendable {
     var id: String
     var stableKey: String

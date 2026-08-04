@@ -3849,6 +3849,7 @@ extension AppRuntimeLifecycle {
             sessions: chatSessionRepository,
             settings: AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory),
             memory: memoryOSStore,
+            skillStore: SkillSyncStore(storagePaths: storagePaths),
             identity: identityStore
         )
         let result = try await Task.detached(priority: .utility) {

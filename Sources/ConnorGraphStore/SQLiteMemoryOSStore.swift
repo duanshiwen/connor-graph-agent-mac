@@ -242,12 +242,42 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """).map(decodeProvenanceObject).first
     }
 
+    public func listAllProvenanceObjects() throws -> [MemoryOSProvenanceObject] {
+        try query(sql: """
+        SELECT id, source_type, source_id, title, content, content_hash, occurred_at, ingested_at, session_id, work_object_id, confidentiality, status, metadata_json
+        FROM memory_l0_provenance_objects
+        ORDER BY ingested_at ASC, id ASC
+        """).map(decodeProvenanceObject)
+    }
+
+    public func deleteProvenanceObject(id: String) throws {
+        try execute("DELETE FROM memory_l0_provenance_spans WHERE provenance_object_id = \(quote(id));")
+        try execute("DELETE FROM memory_l0_derivations WHERE source_span_id IN (SELECT id FROM memory_l0_provenance_spans WHERE provenance_object_id = \(quote(id)))")
+        try execute("DELETE FROM memory_l0_content_hashes WHERE provenance_object_id = \(quote(id));")
+        try execute("DELETE FROM memory_l0_provenance_objects WHERE id = \(quote(id));")
+        try execute("DELETE FROM memory_l0_provenance_fts WHERE object_id = \(quote(id));")
+        try enqueueSearchIndexChange(layer: "L0", recordID: id)
+        onChange?()
+    }
+
     public func upsert(span: MemoryOSProvenanceSpan) throws {
         try execute("""
         INSERT OR REPLACE INTO memory_l0_provenance_spans
         (id, provenance_object_id, start_offset, end_offset, text, metadata_json)
         VALUES (\(quote(span.id)), \(quote(span.provenanceObjectID)), \(quote(span.startOffset.map(String.init))), \(quote(span.endOffset.map(String.init))), \(quote(span.text)), \(quote(json(span.metadata))))
         """)
+    }
+
+    public func listAllProvenanceSpans() throws -> [MemoryOSProvenanceSpan] {
+        try query(sql: """
+        SELECT id, provenance_object_id, start_offset, end_offset, text, metadata_json
+        FROM memory_l0_provenance_spans
+        ORDER BY id ASC
+        """).map(decodeProvenanceSpan)
+    }
+
+    public func deleteSpan(id: String) throws {
+        try execute("DELETE FROM memory_l0_provenance_spans WHERE id = \(quote(id));")
     }
 
     // MARK: - L1
@@ -266,6 +296,21 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
             """)
         }
         try enqueueSearchIndexChange(layer: "L1", recordID: event.id)
+    }
+
+    public func listAllCaptureEvents() throws -> [MemoryOSCaptureEvent] {
+        try query(sql: """
+        SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, retrieval_text, normalization_status, metadata_json
+        FROM memory_l1_capture_events
+        ORDER BY occurred_at ASC, id ASC
+        """).map(decodeCaptureEvent)
+    }
+
+    public func deleteCaptureEvent(id: String) throws {
+        try execute("DELETE FROM memory_l1_capture_events WHERE id = \(quote(id));")
+        try execute("DELETE FROM memory_l1_retrieval_fts WHERE capture_event_id = \(quote(id));")
+        try enqueueSearchIndexChange(layer: "L1", recordID: id)
+        onChange?()
     }
 
     public func upsert(timeBlock block: MemoryOSTimeBlock) throws {
@@ -857,6 +902,31 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
 
     private func decodeProvenanceObject(_ row: [String]) throws -> MemoryOSProvenanceObject {
         MemoryOSProvenanceObject(id: row[0], sourceType: MemoryOSSourceType(rawValue: row[1]) ?? .manual, sourceID: nilIfEmpty(row[2]), title: row[3], content: row[4], contentHash: row[5], occurredAt: try date(row[6]), ingestedAt: try date(row[7]), sessionID: nilIfEmpty(row[8]), workObjectID: nilIfEmpty(row[9]), confidentiality: MemoryOSConfidentiality(rawValue: row[10]) ?? .personal, status: MemoryOSRecordStatus(rawValue: row[11]) ?? .active, metadata: try decode([String: String].self, row[12]))
+    }
+
+    private func decodeProvenanceSpan(_ row: [String]) throws -> MemoryOSProvenanceSpan {
+        MemoryOSProvenanceSpan(
+            id: row[0],
+            provenanceObjectID: row[1],
+            startOffset: row[2].isEmpty ? nil : Int(row[2]),
+            endOffset: row[3].isEmpty ? nil : Int(row[3]),
+            text: row[4],
+            metadata: try decode([String: String].self, row[5])
+        )
+    }
+
+    private func decodeCaptureEvent(_ row: [String]) throws -> MemoryOSCaptureEvent {
+        MemoryOSCaptureEvent(
+            id: row[0],
+            provenanceObjectID: row[1],
+            eventType: row[2],
+            occurredAt: try date(row[3]),
+            tokenEstimate: Int(row[4]) ?? 0,
+            processingState: MemoryOSQueueStatus(rawValue: row[5]) ?? .pending,
+            retrievalText: nilIfEmpty(row[6]),
+            normalizationStatus: MemoryOSIntentNormalizationStatus(rawValue: row[7]) ?? .notRequired,
+            metadata: try decode([String: String].self, row[8])
+        )
     }
 
     private func decodeQueueItem(_ row: [String]) throws -> MemoryOSQueueItem {

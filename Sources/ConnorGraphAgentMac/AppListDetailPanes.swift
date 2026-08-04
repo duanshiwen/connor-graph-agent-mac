@@ -508,6 +508,7 @@ struct CraftContactsListPane: View {
     @Bindable var model: ContactsFeatureModel
     var im: ImFeatureModel?
     var onOpenPeerChat: (Int64) -> Void
+    var addFriendRequestID: UUID? = nil
     @State private var isAddingConnorFriend = false
 
     var body: some View {
@@ -540,6 +541,11 @@ struct CraftContactsListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task(id: addFriendRequestID) {
+            if addFriendRequestID != nil {
+                isAddingConnorFriend = true
+            }
+        }
         .task {
             guard let im else { return }
             await im.refreshContacts()
@@ -849,22 +855,37 @@ struct CraftSessionListPane: View {
     let sessionActions: any ChatSessionCommanding
     let rowActions: ChatSessionListActions
     var imModel: ImFeatureModel? = nil
-    @State private var isCreationMenuPresented = false
+    var onAddFriend: () -> Void = {}
     @State private var isCreateGroupPresented = false
 
     var body: some View {
         let items = mixedConversationItems
         VStack(spacing: 0) {
             AppListPaneHeader(title: sessionListTitle) {
-                Button(action: { isCreationMenuPresented.toggle() }) {
+                Menu {
+                    Button("新建会话", systemImage: "square.and.pencil") {
+                        sessionActions.newChatSession()
+                    }
+                    if let imModel, imModel.isSignedIn {
+                        Button("新建群聊", systemImage: "person.3.fill") {
+                            isCreateGroupPresented = true
+                        }
+                        Button("添加好友", systemImage: "person.crop.circle.badge.plus") {
+                            onAddFriend()
+                        }
+                    }
+                    Button("新建或导入笔记", systemImage: "note.text.badge.plus") {
+                        sessionActions.newNoteSession()
+                    }
+                } label: {
                     Image(systemName: "plus")
                 }
-                .buttonStyle(.appIcon)
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .font(.system(size: AppButtonLayout.iconSize, weight: .semibold))
+                .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
                 .help("新建")
                 .accessibilityLabel("打开新建菜单")
-                .popover(isPresented: $isCreationMenuPresented, arrowEdge: .bottom) {
-                    sessionCreationMenu
-                }
             }
 
             ListSearchFilterBanner(query: model.sessions.searchQuery, sourceTitle: "对话历史") {
@@ -926,38 +947,6 @@ struct CraftSessionListPane: View {
                 onDelete: { Task { await imModel.deleteConversation(conversation.id) } }
             )
         }
-    }
-
-    private var sessionCreationMenu: some View {
-        VStack(spacing: AppShellLayout.spaceS) {
-            Button {
-                isCreationMenuPresented = false
-                sessionActions.newChatSession()
-            } label: {
-                SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil", minHeight: 32)
-            }
-            .buttonStyle(SidebarActionButtonStyle())
-
-            if let imModel, imModel.isSignedIn {
-                Button {
-                    isCreationMenuPresented = false
-                    isCreateGroupPresented = true
-                } label: {
-                    SidebarActionButtonLabel(title: "新建群聊", systemImage: "person.3.fill", minHeight: 32)
-                }
-                .buttonStyle(SidebarActionButtonStyle())
-            }
-
-            Button {
-                isCreationMenuPresented = false
-                sessionActions.newNoteSession()
-            } label: {
-                SidebarActionButtonLabel(title: "新建或导入笔记", systemImage: "note.text.badge.plus", minHeight: 32)
-            }
-            .buttonStyle(SidebarActionButtonStyle())
-        }
-        .padding(AppShellLayout.spaceM)
-        .frame(width: 224)
     }
 
     private func sessionRow(_ row: AgentChatSessionPresentation) -> some View {

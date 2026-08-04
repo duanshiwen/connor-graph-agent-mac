@@ -8,6 +8,7 @@ final class AppShellFeatureModel {
     var selection: SidebarItem? = .agentChat
     var selectedSettingsSection: ConnorSettingsSection = .app
     private(set) var focusTopSearchRequestID: UUID?
+    private(set) var addFriendRequestID: UUID?
     private(set) var settingsSectionMessageStore = SettingsSectionMessageStore()
     let routePerformanceTracker: AppRoutePerformanceTracker
 
@@ -39,6 +40,12 @@ final class AppShellFeatureModel {
 
     func requestTopSearchFocus() {
         focusTopSearchRequestID = UUID()
+    }
+
+    /// 从会话列表等入口请求“添加康纳好友”：切到人际关系页并打开添加好友区。
+    func requestAddFriend() {
+        addFriendRequestID = UUID()
+        _ = select(.contacts)
     }
 
     func settingsMessage(for section: ConnorSettingsSection) -> String? {

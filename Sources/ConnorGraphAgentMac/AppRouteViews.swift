@@ -6,6 +6,7 @@ struct ChatListRouteView: View {
     var sessionActions: any ChatSessionCommanding
     var rowActions: ChatSessionListActions
     var imModel: ImFeatureModel?
+    var onAddFriend: () -> Void = {}
 
     var body: some View {
         CraftSessionListPane(
@@ -13,7 +14,8 @@ struct ChatListRouteView: View {
             governanceModel: governanceModel,
             sessionActions: sessionActions,
             rowActions: rowActions,
-            imModel: imModel
+            imModel: imModel,
+            onAddFriend: onAddFriend
         )
         .onChange(of: model.sessions.selectedSessionID) { _, newValue in
             // Selecting an AI session dismisses the IM chat detail overlay.
