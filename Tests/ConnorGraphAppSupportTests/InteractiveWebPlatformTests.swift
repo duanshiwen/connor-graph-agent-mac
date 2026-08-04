@@ -111,7 +111,7 @@ struct InteractiveWebPlatformTests {
         let approved = try await runtime.createDraft(
             sessionID: "session-1",
             name: "Result",
-            html: "<h1>Approved</h1>",
+            html: "<h1>Approved</h1><script src=\"../sdk/v1.js\"></script>",
             css: nil,
             javascript: nil
         )
@@ -137,13 +137,13 @@ struct InteractiveWebPlatformTests {
         let created = try await runtime.createDraft(
             sessionID: "session-1",
             name: "Result",
-            html: "<h1>Hello</h1>",
+            html: "<h1>Hello</h1><script src=\"../sdk/v1.js\"></script>",
             css: "h1 { color: red; }",
             javascript: nil
         )
 
         let source = try await runtime.draftSource(projectID: created.projectID, fileName: "index.html")
-        #expect(source.content == "<h1>Hello</h1>")
+        #expect(source.content == "<h1>Hello</h1><script src=\"../sdk/v1.js\"></script>")
         #expect(source.manifestHash == created.manifestHash)
 
         let updated = try await runtime.updateDraft(
@@ -153,7 +153,7 @@ struct InteractiveWebPlatformTests {
             edits: ["index.html": [(oldText: "Hello", newText: "Finished")]]
         )
         #expect(updated.revision == 2)
-        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("index.html"), encoding: .utf8) == "<h1>Finished</h1>")
+        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("index.html"), encoding: .utf8) == "<h1>Finished</h1><script src=\"../sdk/v1.js\"></script>")
         #expect(try String(contentsOf: created.rootURL.appendingPathComponent("style.css"), encoding: .utf8) == "h1 { color: red; }")
 
         await #expect(throws: AgentToolError.self) {
@@ -173,7 +173,7 @@ struct InteractiveWebPlatformTests {
         let created = try await runtime.createDraft(
             sessionID: "session-1",
             name: "Result",
-            html: "<h1>Hello</h1>",
+            html: "<h1>Hello</h1><script src=\"../sdk/v1.js\"></script>",
             css: "h1 { color: red; }",
             javascript: nil
         )
@@ -186,7 +186,7 @@ struct InteractiveWebPlatformTests {
                 edits: ["index.html": [(oldText: "Missing", newText: "Finished")]]
             )
         }
-        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("index.html"), encoding: .utf8) == "<h1>Hello</h1>")
+        #expect(try String(contentsOf: created.rootURL.appendingPathComponent("index.html"), encoding: .utf8) == "<h1>Hello</h1><script src=\"../sdk/v1.js\"></script>")
         #expect(try String(contentsOf: created.rootURL.appendingPathComponent("style.css"), encoding: .utf8) == "h1 { color: red; }")
         let status = try await runtime.status(projectID: created.projectID)
         #expect(status.revision == 1)
@@ -200,7 +200,7 @@ struct InteractiveWebPlatformTests {
         let status = try await runtime.createDraft(
             sessionID: "session-1",
             name: "Result",
-            html: "<h1>Hello</h1>",
+            html: "<h1>Hello</h1><script src=\"../sdk/v1.js\"></script>",
             css: nil,
             javascript: nil
         )
@@ -234,7 +234,7 @@ struct InteractiveWebPlatformTests {
         let status = try await runtime.createDraft(
             sessionID: "session-1",
             name: "Result",
-            html: "<main><h1>Ready</h1></main>",
+            html: "<main><h1>Ready</h1></main><script src=\"../sdk/v1.js\"></script>",
             css: nil,
             javascript: nil
         )

@@ -30,6 +30,7 @@ public actor InteractiveWebToolRuntime {
 
     public func createDraft(sessionID: String, name: String, html: String, css: String?, javascript: String?, collections: [InteractiveWebCollectionDefinition] = []) async throws -> InteractiveWebProjectStatus {
         guard (1...120).contains(name.count) else { throw AgentToolError.invalidArguments("name must contain 1 to 120 characters") }
+        try validate(html, named: "index.html")
         let project = LocalInteractiveWebProject(
             accountID: accountID,
             name: name,
@@ -293,6 +294,9 @@ public actor InteractiveWebToolRuntime {
         guard Data(content.utf8).count <= 2 * 1_024 * 1_024 else {
             throw AgentToolError.invalidArguments("\(name) exceeds draft size limit")
         }
+        if name == "index.html", !content.contains("sdk/v1.js") {
+            throw AgentToolError.invalidArguments("index.html must load <script src=\"../sdk/v1.js\"></script> so the page can handle login gating, forms and data through window.platform")
+        }
     }
 
     private func applyingEdits(
@@ -390,7 +394,7 @@ public struct InteractiveWebAgentTool: AgentTool {
 		case .listProjects: "List the signed-in user's published interactive webpage projects."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
-		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas and submission rules when the page accepts registrations, feedback, votes, or other submissions. Generated pages must load ../sdk/v1.js and use window.platform instead of constructing API URLs. The tool writes files into the app-managed user-data sandbox and does not publish anything."
+		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas and submission rules when the page accepts registrations, feedback, votes, or other submissions. Generated pages must always load ../sdk/v1.js and use window.platform instead of constructing API URLs; drafts without the SDK script are rejected. The tool writes files into the app-managed user-data sandbox and does not publish anything."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash."
         case .updateDraft: "Atomically update an app-managed interactive webpage draft using exact text edits or full file replacements. Pass expectedManifestHash from interactive_web_get_draft to prevent overwriting a newer revision."
         case .getStatus: "Read the current local and published status of an interactive webpage project."
@@ -424,7 +428,7 @@ public struct InteractiveWebAgentTool: AgentTool {
                         "enum": .array(items: .string(description: "Allowed enum value"), description: "Allowed values for enum fields"),
                         "pattern": .string(description: "Optional RE2-compatible server-side validation pattern for string fields")
                     ], required: ["name", "type"]), description: "One to fifty validated fields"),
-                    "anonymousCreate": .boolean(description: "Allow an anonymous visitor to submit; false means the visitor must be logged into a Connor account"),
+                    "anonymousCreate": .boolean(description: "Allow an anonymous visitor to submit; false means the visitor must be logged into a Connor account. Registration, check-in, leaderboard and owner-attributed forms must set false (login required)"),
                     "anonymousRead": .boolean(description: "Allow an anonymous visitor to read records; false keeps records visible to the owner only"),
                     "submitLimit": .object(properties: [
                         "max": .integer(description: "Maximum number of submissions (1 through 10000); omit for unlimited"),
