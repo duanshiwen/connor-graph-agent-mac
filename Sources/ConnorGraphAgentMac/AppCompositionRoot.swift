@@ -46,6 +46,7 @@ final class AppCompositionRoot: ObservableObject {
         AppStartupPerformance.measure("StartupLightConstruction") {
             let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
             AppBackendConnectivity.shared.configure(baseURL: backendBaseURL)
+            AppUpdateCenter.shared.checkOnLaunch()
             let placeholder = AppRuntimeLifecycle.placeholder()
             let root = AppCompositionRoot(
                 runtime: placeholder,

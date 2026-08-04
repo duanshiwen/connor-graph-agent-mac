@@ -266,6 +266,8 @@ struct SettingsAppSection: View {
     @Bindable var inputModel: InputSettingsFeatureModel
     var openProjectHelp: () -> Void
 
+    @ObservedObject private var updateCenter = AppUpdateCenter.shared
+
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var messageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
 
@@ -274,6 +276,12 @@ struct SettingsAppSection: View {
         let shortVersion = (info["CFBundleShortVersionString"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let shortVersion, !shortVersion.isEmpty else { return "开发版本" }
         return shortVersion.hasPrefix("v") ? shortVersion : "v\(shortVersion)"
+    }
+
+    private var updateStatusText: String {
+        if updateCenter.isDownloading { return "正在下载更新…" }
+        if let message = updateCenter.statusMessage { return message }
+        return "当前版本 \(appVersionDisplay)，从康纳后端检查新版本。"
     }
 
     var body: some View {
@@ -361,6 +369,54 @@ struct SettingsAppSection: View {
                     Spacer()
                     Button("打开官网") { openProjectHelp() }
                         .buttonStyle(.bordered)
+                }
+            }
+            SettingsGroup(title: "软件更新") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("检查更新").font(SettingsListTypography.rowTitleSelected)
+                        Text(updateStatusText)
+                            .font(SettingsListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if updateCenter.isChecking {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button("检查更新") { Task { await updateCenter.checkNow() } }
+                        .buttonStyle(.bordered)
+                        .disabled(updateCenter.isChecking || updateCenter.isDownloading)
+                }
+                .frame(minHeight: SettingsListLayout.rowMinHeight)
+
+                if let update = updateCenter.availableUpdate {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("发现新版本 \(update.latestVersion)").font(SettingsListTypography.rowTitleSelected)
+                        if !update.notes.isEmpty {
+                            Text(update.notes)
+                                .font(SettingsListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: SettingsListLayout.spaceM) {
+                            Button("稍后") { updateCenter.dismissUpdate() }
+                                .buttonStyle(.bordered)
+                            Button("下载安装") { Task { await updateCenter.downloadAndOpen() } }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(updateCenter.isDownloading)
+                        }
+                        if updateCenter.isDownloading {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                    .padding(.vertical, SettingsListLayout.spaceS)
+                }
+
+                if let error = updateCenter.errorMessage {
+                    Divider()
+                    Text(error)
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.red)
                 }
             }
         }
