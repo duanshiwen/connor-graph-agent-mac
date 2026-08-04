@@ -135,7 +135,7 @@ public actor AppAccountDataSyncCoordinator {
         } while hasMore
 
         let projected = try projections()
-        let syncableKeys = Set(state.records.keys.filter { $0.hasPrefix("sessions|") || $0 == "settings|macos_runtime" || $0 == "settings|profile" })
+        let syncableKeys = Set(state.records.keys.filter { $0.hasPrefix("sessions|") || $0 == "settings|macos_runtime" })
         var mutations: [ConnorSyncChange] = []
         for (key, payload) in projected where state.records[key]?.hash != (try payloadHash(payload)) || state.records[key]?.deleted == true || state.records[key]?.encrypted != true {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
@@ -170,8 +170,10 @@ public actor AppAccountDataSyncCoordinator {
             values[recordKey("sessions", session.id)] = try jsonValue(ConnorPortableSession(session))
         }
         let runtimeSettings = try settings.loadOrCreateDefault()
-        values[recordKey("settings", "macos_runtime")] = try jsonValue(runtimeSettings)
-        values[recordKey("settings", "profile")] = try jsonValue(ConnorPortableProfile(memoryProfile: runtimeSettings.preferences.notes))
+        var syncedSettings = runtimeSettings
+        // 个人资料（preferences：displayName/notes 等）不加入账号同步，仅同步运行时设置。
+        syncedSettings.preferences = AgentRuntimePreferenceSettings()
+        values[recordKey("settings", "macos_runtime")] = try jsonValue(syncedSettings)
         return values
     }
 
@@ -190,12 +192,6 @@ public actor AppAccountDataSyncCoordinator {
             var synced: AgentRuntimeSettings = try decode(change.payload)
             synced.preferences = try settings.loadOrCreateDefault().preferences
             try settings.save(synced)
-            return .settings
-        case ("settings", "profile"):
-            var runtimeSettings = try settings.loadOrCreateDefault()
-            let profile = change.deleted ? ConnorPortableProfile(memoryProfile: "") : try decode(change.payload)
-            runtimeSettings.preferences.notes = profile.memoryProfile
-            try settings.save(runtimeSettings)
             return .settings
         default: return nil
         }
