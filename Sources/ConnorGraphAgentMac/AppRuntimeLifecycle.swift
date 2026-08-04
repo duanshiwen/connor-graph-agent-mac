@@ -640,7 +640,7 @@ final class AppRuntimeLifecycle {
             bookmarkStore: storagePaths.map { BrowserBookmarkStore(bookmarksURL: $0.browserBookmarksURL) },
             nativeSourceSearchBackend: nativeSourceSearchBackend
         )
-        let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "https://connor-agent.apecho.com/")!
+        let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
         AppBackendConnectivity.shared.configure(baseURL: backendBaseURL)
         let backendTransport = BackendConnectivityTrackingTransport()
         let accountCredentials = AppConnorAccountCredentialStore()
@@ -753,6 +753,10 @@ final class AppRuntimeLifecycle {
             } catch {
                 self.errorFeatureModel.message = "Memory OS 初始化失败：\(error)"
             }
+        }
+        if let store = self.memoryOSStore {
+            // L2/L3/L4 变更触发账号同步（与 sessions/settings 一致；apply 期间由 TaskLocal 抑制回环）。
+            store.onChange = { AppAccountSyncSignal.postLocalDataDidChange() }
         }
         self.imStore = injectedImStore
         if let injectedImStore {
@@ -3844,6 +3848,7 @@ extension AppRuntimeLifecycle {
         let coordinator = AppAccountDataSyncCoordinator(
             sessions: chatSessionRepository,
             settings: AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory),
+            memory: memoryOSStore,
             identity: identityStore
         )
         let result = try await Task.detached(priority: .utility) {

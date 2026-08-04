@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import ConnorGraphCore
+import ConnorGraphStore
 
 public enum AppAccountSyncSignal {
     @TaskLocal public static var suppressLocalChange = false
@@ -93,15 +94,21 @@ public actor AppAccountDataSyncCoordinator {
     private enum SyncCollection {
         static let sessions = "sessions"
         static let settings = "settings"
+        static let memoryL2 = "memory_l2"
+        static let memoryL3 = "memory_l3"
+        static let memoryL4Entities = "memory_l4_entities"
+        static let memoryL4Relations = "memory_l4_relations"
     }
 
     /// 记录级同步边界：sessions 全量同步；settings 仅同步运行时设置与人格
-    /// （人格只记录不上推）。个人资料 settings|profile 不进同步状态机，
-    /// 拉取时不记录、不应用，历史残留也不会再触发 tombstone。
+    /// （人格只记录不上推）；Memory OS L2/L3/L4 全量同步，L1 会话工作记忆只留本机。
+    /// 个人资料 settings|profile 不进同步状态机，拉取时不记录、不应用，
+    /// 历史残留也不会再触发 tombstone。
     private func isSyncableRecord(_ collection: String, _ recordId: String) -> Bool {
         switch collection {
         case SyncCollection.sessions: return true
         case SyncCollection.settings: return recordId == "macos_runtime" || recordId == "personality"
+        case "memory_l2", "memory_l3", "memory_l4_entities", "memory_l4_relations": return true
         default: return false
         }
     }
@@ -112,13 +119,14 @@ public actor AppAccountDataSyncCoordinator {
 
     private let sessions: AppChatSessionRepository
     private let settings: AppRuntimeSettingsRepository
+    private let memory: SQLiteMemoryOSStore?
     private let identity: AppUserIdentityStore
     private let defaults: UserDefaults
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, identity: AppUserIdentityStore, defaults: UserDefaults = .standard) {
-        self.sessions = sessions; self.settings = settings; self.identity = identity; self.defaults = defaults
+    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, memory: SQLiteMemoryOSStore?, identity: AppUserIdentityStore, defaults: UserDefaults = .standard) {
+        self.sessions = sessions; self.settings = settings; self.memory = memory; self.identity = identity; self.defaults = defaults
         encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
         decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
     }
@@ -145,7 +153,11 @@ public actor AppAccountDataSyncCoordinator {
         } while hasMore
 
         let projected = try projections()
-        let syncableKeys = Set(state.records.keys.filter { $0.hasPrefix("sessions|") || $0 == "settings|macos_runtime" })
+        let syncableKeys = Set(state.records.keys.filter { key in
+            key.hasPrefix("sessions|") || key == "settings|macos_runtime" ||
+                key.hasPrefix("memory_l2|") || key.hasPrefix("memory_l3|") ||
+                key.hasPrefix("memory_l4_entities|") || key.hasPrefix("memory_l4_relations|")
+        })
         var mutations: [ConnorSyncChange] = []
         for (key, payload) in projected where state.records[key]?.hash != (try payloadHash(payload)) || state.records[key]?.deleted == true || state.records[key]?.encrypted != true {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
@@ -190,6 +202,20 @@ public actor AppAccountDataSyncCoordinator {
         // 个人资料（preferences：displayName/notes 等）不加入账号同步，仅同步运行时设置。
         syncedSettings.preferences = AgentRuntimePreferenceSettings()
         values[recordKey("settings", "macos_runtime")] = try jsonValue(syncedSettings)
+        if let memory {
+            for statement in try memory.listAllStatements() {
+                values[recordKey(SyncCollection.memoryL2, statement.id)] = try jsonValue(SyncMemoryL2Statement(statement))
+            }
+            for belief in try memory.listAllBeliefs() {
+                values[recordKey(SyncCollection.memoryL3, belief.id)] = try jsonValue(SyncMemoryL3Belief(belief))
+            }
+            for entity in try memory.listAllEntities() {
+                values[recordKey(SyncCollection.memoryL4Entities, entity.id)] = try jsonValue(SyncMemoryL4Entity(entity))
+            }
+            for relation in try memory.listAllEntityStatements() {
+                values[recordKey(SyncCollection.memoryL4Relations, relation.id)] = try jsonValue(SyncMemoryL4Relation(relation))
+            }
+        }
         return values
     }
 
@@ -209,6 +235,42 @@ public actor AppAccountDataSyncCoordinator {
             synced.preferences = try settings.loadOrCreateDefault().preferences
             try settings.save(synced)
             return .settings
+        case ("memory_l2", let id):
+            guard let memory else { return nil }
+            if change.deleted {
+                try memory.deleteStatement(id: id)
+            } else {
+                let wire: SyncMemoryL2Statement = try decode(change.payload)
+                try memory.upsert(statement: wire.makeStatement())
+            }
+            return nil
+        case ("memory_l3", let id):
+            guard let memory else { return nil }
+            if change.deleted {
+                try memory.deleteBelief(id: id)
+            } else {
+                let wire: SyncMemoryL3Belief = try decode(change.payload)
+                try memory.upsert(belief: wire.makeBelief())
+            }
+            return nil
+        case ("memory_l4_entities", let id):
+            guard let memory else { return nil }
+            if change.deleted {
+                try memory.deleteEntity(id: id)
+            } else {
+                let wire: SyncMemoryL4Entity = try decode(change.payload)
+                try memory.upsert(entity: wire.makeEntity())
+            }
+            return nil
+        case ("memory_l4_relations", let id):
+            guard let memory else { return nil }
+            if change.deleted {
+                try memory.deleteEntityStatement(id: id)
+            } else {
+                let wire: SyncMemoryL4Relation = try decode(change.payload)
+                try memory.upsert(entityStatement: wire.makeEntityStatement())
+            }
+            return nil
         default: return nil
         }
     }

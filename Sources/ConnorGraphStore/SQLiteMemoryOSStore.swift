@@ -49,6 +49,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     ]
 
     public let databasePath: String
+    /// L2/L3/L4 数据变更钩子（账号同步触发用；由 App 层注入，避免 Store 依赖 AppSupport）。
+    public var onChange: (@Sendable () -> Void)?
     private var db: OpaquePointer?
     private let databaseLock = NSLock()
     private let encoder = JSONEncoder()
@@ -429,6 +431,23 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         if statement.metadata["person_role"] == "current_user" || statement.subjectID.contains("current-user") {
             MemoryOSQueryCache.shared.invalidateProfile()
         }
+        onChange?()
+    }
+
+    public func listAllStatements() throws -> [MemoryOSStatement] {
+        try query(sql: """
+        SELECT id, subject_id, predicate, object_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
+        FROM memory_l2_statements
+        ORDER BY committed_at ASC, id ASC
+        """).map(decodeStatement)
+    }
+
+    public func deleteStatement(id: String) throws {
+        try execute("DELETE FROM memory_l2_statements WHERE id = \(quote(id));")
+        try execute("DELETE FROM memory_l2_statements_fts WHERE statement_id = \(quote(id));")
+        try enqueueSearchIndexChange(layer: "L2", recordID: id)
+        MemoryOSQueryCache.shared.invalidateL2()
+        onChange?()
     }
 
     public func saveProjectionBatch(_ batch: MemoryOSProjectionBatch) throws {
@@ -467,6 +486,22 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("DELETE FROM memory_l3_beliefs_fts WHERE belief_id = \(quote(belief.id));")
         try execute("INSERT INTO memory_l3_beliefs_fts(belief_id, statement) VALUES (\(quote(belief.id)), \(quote(belief.statement)))")
         try enqueueSearchIndexChange(layer: "L3", recordID: belief.id)
+        onChange?()
+    }
+
+    public func listAllBeliefs() throws -> [MemoryOSBelief] {
+        try query(sql: """
+        SELECT id, statement, domain, related_object_names, created_at, updated_at
+        FROM memory_l3_beliefs
+        ORDER BY created_at ASC, id ASC
+        """).map(decodeBelief)
+    }
+
+    public func deleteBelief(id: String) throws {
+        try execute("DELETE FROM memory_l3_beliefs WHERE id = \(quote(id));")
+        try execute("DELETE FROM memory_l3_beliefs_fts WHERE belief_id = \(quote(id));")
+        try enqueueSearchIndexChange(layer: "L3", recordID: id)
+        onChange?()
     }
 
     public func listL3Domains() throws -> [MemoryOSL3DomainSummary] {
@@ -508,6 +543,24 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         if entity.metadata["person_role"] == "current_user" || entity.metadata["stable_key"] == "current_user" {
             MemoryOSQueryCache.shared.invalidateProfile()
         }
+        onChange?()
+    }
+
+    public func listAllEntities() throws -> [MemoryOSEntity] {
+        try query(sql: """
+        SELECT id, stable_key, entity_type, name, aliases_json, summary, confidence, created_at, updated_at, valid_from, metadata_json
+        FROM memory_l4_entities
+        ORDER BY created_at ASC, id ASC
+        """).map(decodeEntity)
+    }
+
+    public func deleteEntity(id: String) throws {
+        try execute("DELETE FROM memory_l4_entities WHERE id = \(quote(id));")
+        try execute("DELETE FROM memory_l4_entity_aliases WHERE entity_id = \(quote(id));")
+        try execute("DELETE FROM memory_l4_entities_fts WHERE entity_id = \(quote(id));")
+        try enqueueSearchIndexChange(layer: "L4", recordID: id)
+        MemoryOSQueryCache.shared.invalidateL4()
+        onChange?()
     }
 
     public func entity(id: String) throws -> MemoryOSEntity? {
@@ -537,6 +590,24 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         
         // Invalidate L4 cache
         MemoryOSQueryCache.shared.invalidateL4()
+        onChange?()
+    }
+
+    public func listAllEntityStatements() throws -> [MemoryOSEntityStatement] {
+        try query(sql: """
+        SELECT id, entity_id, predicate, object_entity_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
+        FROM memory_l4_entity_statements
+        ORDER BY committed_at ASC, id ASC
+        """).map(decodeEntityStatement)
+    }
+
+    public func deleteEntityStatement(id: String) throws {
+        try execute("DELETE FROM memory_l4_entity_statements WHERE id = \(quote(id));")
+        try execute("DELETE FROM memory_l4_entity_statement_evidence WHERE statement_id = \(quote(id));")
+        try execute("DELETE FROM memory_l4_statements_fts WHERE statement_id = \(quote(id));")
+        try enqueueSearchIndexChange(layer: "L4", recordID: id)
+        MemoryOSQueryCache.shared.invalidateL4()
+        onChange?()
     }
 
     public func entityStatements(entityID: String, limit: Int = 100) throws -> [MemoryOSEntityStatement] {
@@ -767,7 +838,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     }
 
     private func decodeEntityStatement(_ row: [String]) throws -> MemoryOSEntityStatement {
-        MemoryOSEntityStatement(
+        let committedAt = try date(row[8])
+        return MemoryOSEntityStatement(
             id: row[0],
             entityID: row[1],
             predicate: MemoryOSL4RelationPredicate(rawValue: row[2]) ?? .relatedTo,
@@ -775,11 +847,40 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
             text: row[4],
             assertionKind: MemoryOSAssertionKind(rawValue: row[5]) ?? .observed,
             confidence: Double(row[6]) ?? 0,
-            validAt: try date(row[7]),
-            committedAt: try date(row[8]),
+            validAt: (try optionalDate(row[7])) ?? committedAt,
+            committedAt: committedAt,
             evidenceSpanIDs: try decode([String].self, row[9]),
             sourceArtifactID: nilIfEmpty(row[10]),
             metadata: try decode([String: String].self, row[11])
+        )
+    }
+
+    private func decodeStatement(_ row: [String]) throws -> MemoryOSStatement {
+        let committedAt = try date(row[8])
+        return MemoryOSStatement(
+            id: row[0],
+            subjectID: row[1],
+            predicate: row[2],
+            objectID: nilIfEmpty(row[3]),
+            text: row[4],
+            assertionKind: MemoryOSAssertionKind(rawValue: row[5]) ?? .observed,
+            confidence: Double(row[6]) ?? 0,
+            validAt: (try optionalDate(row[7])) ?? committedAt,
+            committedAt: committedAt,
+            evidenceSpanIDs: try decode([String].self, row[9]),
+            sourceArtifactID: nilIfEmpty(row[10]),
+            metadata: try decode([String: String].self, row[11])
+        )
+    }
+
+    private func decodeBelief(_ row: [String]) throws -> MemoryOSBelief {
+        MemoryOSBelief(
+            id: row[0],
+            statement: row[1],
+            domain: row[2],
+            relatedObjectNames: row[3],
+            createdAt: try date(row[4]),
+            updatedAt: try date(row[5])
         )
     }
 

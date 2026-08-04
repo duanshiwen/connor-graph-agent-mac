@@ -188,7 +188,7 @@ public enum AppCloudKnowledgeCLIRouter {
             let clientRunID = optionValue("--client-run", in: args) ?? "cli-\(UUID().uuidString)"
             let backendURLString = optionValue("--backend-url", in: args)
                 ?? ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"]
-                ?? "https://connor-agent.apecho.com/"
+                ?? "http://localhost:8080"
             guard let backendURL = URL(string: backendURLString) else {
                 return try encode(["error": "invalid_backend_url", "value": backendURLString], encoder: encoder)
             }
