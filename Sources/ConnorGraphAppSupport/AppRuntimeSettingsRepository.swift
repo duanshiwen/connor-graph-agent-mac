@@ -410,6 +410,8 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
     public var defaultSearchEngine: DefaultSearchEngine
     public var connorPersonality: ConnorPersonalitySettings
     public var connorPersonalityRevision: Int
+    /// 人格“最后设置时间”（epoch 毫秒由 Date 承载）；同步按此判定新旧，不以跨端无意义的 revision 比较。
+    public var connorPersonalityUpdatedAt: Date
 
     public init(
         displayName: String = "",
@@ -422,7 +424,8 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         notes: String = "",
         defaultSearchEngine: DefaultSearchEngine = .default,
         connorPersonality: ConnorPersonalitySettings = .balancedDefault,
-        connorPersonalityRevision: Int = 0
+        connorPersonalityRevision: Int = 0,
+        connorPersonalityUpdatedAt: Date = Date(timeIntervalSince1970: 0)
     ) {
         self.displayName = displayName
         self.timezone = timezone
@@ -435,6 +438,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         self.defaultSearchEngine = defaultSearchEngine
         self.connorPersonality = connorPersonality
         self.connorPersonalityRevision = max(0, connorPersonalityRevision)
+        self.connorPersonalityUpdatedAt = connorPersonalityUpdatedAt
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -449,6 +453,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         case defaultSearchEngine
         case connorPersonality
         case connorPersonalityRevision
+        case connorPersonalityUpdatedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -464,6 +469,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         self.defaultSearchEngine = try container.decodeIfPresent(DefaultSearchEngine.self, forKey: .defaultSearchEngine) ?? .default
         self.connorPersonality = try container.decodeIfPresent(ConnorPersonalitySettings.self, forKey: .connorPersonality) ?? .balancedDefault
         self.connorPersonalityRevision = max(0, try container.decodeIfPresent(Int.self, forKey: .connorPersonalityRevision) ?? 0)
+        self.connorPersonalityUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .connorPersonalityUpdatedAt) ?? Date(timeIntervalSince1970: 0)
     }
 }
 
@@ -598,14 +604,37 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
     }
 
     public func save(_ settings: AgentRuntimeSettings) throws {
+        try persist(settings, stampPersonalitySetAt: true)
+    }
+
+    /// 合并同步专用：按远端载荷原样持久化（不刷新“最后设置时间”）。
+    public func saveSynced(_ settings: AgentRuntimeSettings) throws {
+        try persist(settings, stampPersonalitySetAt: false)
+    }
+
+    private func persist(_ settings: AgentRuntimeSettings, stampPersonalitySetAt: Bool) throws {
         try fileManager.createDirectory(at: configDirectory, withIntermediateDirectories: true)
         var updated = settings
         updated.updatedAt = Date()
+        if stampPersonalitySetAt,
+           let current = loadPersistedSettings(),
+           current.preferences.connorPersonality != updated.preferences.connorPersonality
+            || current.preferences.connorPersonalityRevision != updated.preferences.connorPersonalityRevision {
+            // 人格内容或版本发生变化（本地编辑/重置/审批），刷新“最后设置时间”。
+            updated.preferences.connorPersonalityUpdatedAt = Date()
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(updated).write(to: fileURL, options: .atomic)
         AppAccountSyncSignal.postLocalDataDidChange()
+    }
+
+    private func loadPersistedSettings() -> AgentRuntimeSettings? {
+        guard fileManager.fileExists(atPath: fileURL.path), let data = try? Data(contentsOf: fileURL) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(AgentRuntimeSettings.self, from: data)
     }
 
     /// Persists a personality change only if the on-disk revision still matches the
@@ -628,5 +657,21 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
             )
         }
         try save(settings)
+    }
+
+    /// 合并同步专用：应用远端人格。仅当远端 revision 不旧于本地时生效，
+    /// 并保留本地其他偏好字段（displayName/语言等不随人格同步）。
+    @discardableResult
+    public func applySyncedPersonality(_ personality: ConnorPersonalitySettings, revision: Int, updatedAtMillis: Int64) throws -> Bool {
+        let current = try loadOrCreateDefault()
+        let remoteSetAt = Date(timeIntervalSince1970: Double(updatedAtMillis) / 1_000)
+        // 以“最后设置时间”为准：远端不晚于本地则忽略，避免旧人格覆盖新人格。
+        guard remoteSetAt > current.preferences.connorPersonalityUpdatedAt else { return false }
+        var updated = current
+        updated.preferences.connorPersonality = personality
+        updated.preferences.connorPersonalityRevision = revision
+        updated.preferences.connorPersonalityUpdatedAt = remoteSetAt
+        try saveSynced(updated)
+        return true
     }
 }

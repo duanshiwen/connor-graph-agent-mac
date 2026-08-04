@@ -197,6 +197,7 @@ public actor AppAccountDataSyncCoordinator {
             values[recordKey("sessions", session.id)] = try jsonValue(ConnorPortableSession(session))
         }
         let runtimeSettings = try settings.loadOrCreateDefault()
+        values[recordKey("settings", "personality")] = try jsonValue(SyncPersonality(runtimeSettings))
         var syncedSettings = runtimeSettings
         // 个人资料（preferences：displayName/notes 等）不加入账号同步，仅同步运行时设置。
         syncedSettings.preferences = AgentRuntimePreferenceSettings()
@@ -232,6 +233,10 @@ public actor AppAccountDataSyncCoordinator {
             var synced: AgentRuntimeSettings = try decode(change.payload)
             synced.preferences = try settings.loadOrCreateDefault().preferences
             try settings.save(synced)
+            return .settings
+        case ("settings", "personality"):
+            let wire: SyncPersonality = try decode(change.payload)
+            try settings.applySyncedPersonality(wire.connorPersonality(), revision: wire.revision ?? 0, updatedAtMillis: wire.updatedAt ?? 0)
             return .settings
         case ("memory_l2", _):
             guard let memory else { return nil }

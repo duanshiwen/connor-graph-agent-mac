@@ -3,6 +3,60 @@ import ConnorGraphCore
 
 // MARK: - Memory OS L2/L3/L4 账号同步载荷（wire 与 Android Room 实体逐字段一致）
 
+// MARK: - 康纳同学的性格（settings|personality，与 Android PersonalityState 逐字段一致）
+
+struct SyncPersonality: Codable, Sendable {
+    struct Profile: Codable, Sendable {
+        var gender: String
+        var summary: String
+        var traits: [String]
+        var communicationStyle: String
+        var reasoningStyle: String
+        var initiativeStyle: String
+        var emotionalTone: String
+        var boundaries: [String]
+    }
+
+    var name: String?
+    var persona: String?
+    var profile: Profile?
+    var revision: Int?
+    /// 人格“最后设置时间”（epoch 毫秒）；旧载荷可能缺失，按 0（从未设置）处理。
+    var updatedAt: Int64?
+
+    init(_ settings: AgentRuntimeSettings) {
+        let p = settings.preferences.connorPersonality
+        name = "康纳同学"
+        persona = ""
+        profile = Profile(
+            gender: p.gender,
+            summary: p.summary,
+            traits: p.traits,
+            communicationStyle: p.communicationStyle,
+            reasoningStyle: p.reasoningStyle,
+            initiativeStyle: p.initiativeStyle,
+            emotionalTone: p.emotionalTone,
+            boundaries: p.boundaries
+        )
+        revision = settings.preferences.connorPersonalityRevision
+        updatedAt = Int64(settings.preferences.connorPersonalityUpdatedAt.timeIntervalSince1970 * 1_000)
+    }
+
+    func connorPersonality() -> ConnorPersonalitySettings {
+        let p = profile ?? Profile(gender: "", summary: "", traits: [], communicationStyle: "", reasoningStyle: "", initiativeStyle: "", emotionalTone: "", boundaries: [])
+        return ConnorPersonalitySettings(
+            gender: p.gender,
+            summary: p.summary,
+            traits: p.traits,
+            communicationStyle: p.communicationStyle,
+            reasoningStyle: p.reasoningStyle,
+            initiativeStyle: p.initiativeStyle,
+            emotionalTone: p.emotionalTone,
+            boundaries: p.boundaries
+        )
+    }
+}
+
 struct SyncMemoryL2Node: Codable, Sendable {
     var id: String
     var stableKey: String
