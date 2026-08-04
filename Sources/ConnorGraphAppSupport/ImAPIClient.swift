@@ -332,7 +332,6 @@ public struct ImMediaUploadDTO: Decodable, Sendable, Equatable {
         case expiresInSnake = "expires_in"
         case uploadUrlCamel = "uploadUrl"
         case downloadUrlCamel = "downloadUrl"
-        case expiresAt = "expiresAt"
     }
 
     public init(from decoder: Decoder) throws {
@@ -345,9 +344,11 @@ public struct ImMediaUploadDTO: Decodable, Sendable, Equatable {
         downloadURL = try values.decodeIfPresent(String.self, forKey: .downloadURL)
             ?? values.decodeIfPresent(String.self, forKey: .downloadURLSnake)
             ?? values.decodeIfPresent(String.self, forKey: .downloadUrlCamel) ?? ""
-        expiresIn = try values.decodeIfPresent(Int64.self, forKey: .expiresIn)
-            ?? values.decodeIfPresent(Int64.self, forKey: .expiresInSnake)
-            ?? values.decodeIfPresent(Int64.self, forKey: .expiresAt) ?? 0
+        // The backend sends expiresAt as an RFC3339 timestamp; the Mac upload flow
+        // does not use it, so tolerate it and never treat it as Int64 (which would
+        // throw and break every media upload response).
+        expiresIn = (try? values.decodeIfPresent(Int64.self, forKey: .expiresIn))
+            ?? (try? values.decodeIfPresent(Int64.self, forKey: .expiresInSnake)) ?? 0
     }
 }
 

@@ -40,6 +40,19 @@ struct ImAPIClientTests {
         #expect(request.httpMethod == "GET")
     }
 
+    @Test func mediaUploadDecodesBackendEnvelopeWithExpiresAtTimestamp() throws {
+        // Backend MediaUploadDTO serializes expiresAt as an RFC3339 string; decoding
+        // must tolerate it instead of throwing (regression: voice/media send failed).
+        let json = """
+        {"code":0,"data":{"objectName":"chat/audio/abc.m4a","uploadUrl":"https://cdn.example/upload","downloadUrl":"https://cdn.example/download","contentType":"audio/mp4","objectSize":12345,"expiresAt":"2026-08-04T12:00:00Z"}}
+        """
+        struct Envelope: Decodable { var data: ImMediaUploadDTO }
+        let envelope = try JSONDecoder().decode(Envelope.self, from: Data(json.utf8))
+        let upload = try #require(envelope.data)
+        #expect(upload.objectName == "chat/audio/abc.m4a")
+        #expect(upload.downloadURL == "https://cdn.example/download")
+    }
+
     @Test func chatHistoryDecodesSnakeCaseHasMoreAndBeforeIdQuery() async throws {
         let transport = StubTransport(json: """
             {"code":0,"data":{"messages":[
