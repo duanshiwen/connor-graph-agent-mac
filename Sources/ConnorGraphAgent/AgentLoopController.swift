@@ -21,6 +21,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var instructionAppendix: String
     public var budget: AgentBudgetConfiguration
     public var compaction: AgentLoopCompactionConfiguration
+    public var providerRetryCount: Int
+    public var providerRetryDelaySeconds: Double
 
     public init(
         maxToolIterations: Int = 12,
@@ -39,7 +41,9 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         permissionMode: AgentPermissionMode = .askToWrite,
         instructionAppendix: String = "",
         budget: AgentBudgetConfiguration = AgentBudgetConfiguration(),
-        compaction: AgentLoopCompactionConfiguration = AgentLoopCompactionConfiguration()
+        compaction: AgentLoopCompactionConfiguration = AgentLoopCompactionConfiguration(),
+        providerRetryCount: Int = 5,
+        providerRetryDelaySeconds: Double = 2.0
     ) {
         self.maxToolIterations = max(1, maxToolIterations)
         self.maxToolCallsPerIteration = max(1, maxToolCallsPerIteration)
@@ -60,6 +64,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.instructionAppendix = instructionAppendix
         self.budget = budget
         self.compaction = compaction
+        self.providerRetryCount = max(0, providerRetryCount)
+        self.providerRetryDelaySeconds = max(0.1, providerRetryDelaySeconds)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -80,6 +86,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         case instructionAppendix
         case budget
         case compaction
+        case providerRetryCount
+        case providerRetryDelaySeconds
     }
 
     public init(from decoder: Decoder) throws {
@@ -102,6 +110,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.instructionAppendix = try container.decodeIfPresent(String.self, forKey: .instructionAppendix) ?? ""
         self.budget = try container.decodeIfPresent(AgentBudgetConfiguration.self, forKey: .budget) ?? AgentBudgetConfiguration()
         self.compaction = try container.decodeIfPresent(AgentLoopCompactionConfiguration.self, forKey: .compaction) ?? AgentLoopCompactionConfiguration()
+        self.providerRetryCount = max(0, try container.decodeIfPresent(Int.self, forKey: .providerRetryCount) ?? 5)
+        self.providerRetryDelaySeconds = max(0.1, try container.decodeIfPresent(Double.self, forKey: .providerRetryDelaySeconds) ?? 2.0)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -123,6 +133,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         try container.encode(instructionAppendix, forKey: .instructionAppendix)
         try container.encode(budget, forKey: .budget)
         try container.encode(compaction, forKey: .compaction)
+        try container.encode(providerRetryCount, forKey: .providerRetryCount)
+        try container.encode(providerRetryDelaySeconds, forKey: .providerRetryDelaySeconds)
     }
 }
 
@@ -1250,7 +1262,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         publishesTextDeltas: Bool,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentModelResponse {
-        let maxTransientAttempts = 3
+        let maxTransientAttempts = 1 + configuration.providerRetryCount
         var attempt = 1
         while true {
             var didPublishTextDelta = false
@@ -1268,7 +1280,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                       !didPublishTextDelta,
                       Self.classifyProviderError(error) == .transient else { throw error }
                 logger.warning("Transient model provider error on attempt \(attempt)/\(maxTransientAttempts), retrying: \(String(describing: error))")
-                try await Task.sleep(for: .milliseconds(400 * (1 << (attempt - 1))))
+                try await Task.sleep(for: .seconds(configuration.providerRetryDelaySeconds))
                 attempt += 1
             }
         }
