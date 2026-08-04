@@ -84,6 +84,7 @@
 		A0000000000000000000004A /* Sources/ConnorGraphAgentMac/ProductOSControlFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000004B /* Sources/ConnorGraphAgentMac/ProductOSControlFeatureModel.swift */; };
 		A0000000000000000000004C /* Sources/ConnorGraphAgentMac/AppCompositionRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000004D /* Sources/ConnorGraphAgentMac/AppCompositionRoot.swift */; };
 		A0000000000000000000004E /* Sources/ConnorGraphAgentMac/AppFlowCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000004F /* Sources/ConnorGraphAgentMac/AppFlowCoordinator.swift */; };
+		D30000000000000000000001 /* Sources/ConnorGraphAgentMac/AppUpdateCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000002 /* Sources/ConnorGraphAgentMac/AppUpdateCenter.swift */; };
 		A00000000000000000000050 /* Sources/ConnorGraphAgentMac/AppLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000051 /* Sources/ConnorGraphAgentMac/AppLifecycle.swift */; };
 		A00000000000000000000052 /* Sources/ConnorGraphAgentMac/RSSFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000053 /* Sources/ConnorGraphAgentMac/RSSFeatureModel.swift */; };
 		A00000000000000000000054 /* Sources/ConnorGraphAgentMac/CalendarFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000055 /* Sources/ConnorGraphAgentMac/CalendarFeatureModel.swift */; };
@@ -274,6 +275,7 @@
 		A0000000000000000000004B /* Sources/ConnorGraphAgentMac/ProductOSControlFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ProductOSControlFeatureModel.swift; sourceTree = "<group>"; };
 		A0000000000000000000004D /* Sources/ConnorGraphAgentMac/AppCompositionRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppCompositionRoot.swift; sourceTree = "<group>"; };
 		A0000000000000000000004F /* Sources/ConnorGraphAgentMac/AppFlowCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppFlowCoordinator.swift; sourceTree = "<group>"; };
+		D30000000000000000000002 /* Sources/ConnorGraphAgentMac/AppUpdateCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppUpdateCenter.swift; sourceTree = "<group>"; };
 		A00000000000000000000051 /* Sources/ConnorGraphAgentMac/AppLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppLifecycle.swift; sourceTree = "<group>"; };
 		A00000000000000000000053 /* Sources/ConnorGraphAgentMac/RSSFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/RSSFeatureModel.swift; sourceTree = "<group>"; };
 		A00000000000000000000055 /* Sources/ConnorGraphAgentMac/CalendarFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/CalendarFeatureModel.swift; sourceTree = "<group>"; };
@@ -405,6 +407,7 @@
 				A0000000000000000000004B /* Sources/ConnorGraphAgentMac/ProductOSControlFeatureModel.swift */,
 				A0000000000000000000004D /* Sources/ConnorGraphAgentMac/AppCompositionRoot.swift */,
 				A0000000000000000000004F /* Sources/ConnorGraphAgentMac/AppFlowCoordinator.swift */,
+				D30000000000000000000002 /* Sources/ConnorGraphAgentMac/AppUpdateCenter.swift */,
 				A00000000000000000000051 /* Sources/ConnorGraphAgentMac/AppLifecycle.swift */,
 				A00000000000000000000053 /* Sources/ConnorGraphAgentMac/RSSFeatureModel.swift */,
 				A00000000000000000000055 /* Sources/ConnorGraphAgentMac/CalendarFeatureModel.swift */,
@@ -724,6 +727,7 @@
 				A0000000000000000000004A /* Sources/ConnorGraphAgentMac/ProductOSControlFeatureModel.swift in Sources */,
 				A0000000000000000000004C /* Sources/ConnorGraphAgentMac/AppCompositionRoot.swift in Sources */,
 				A0000000000000000000004E /* Sources/ConnorGraphAgentMac/AppFlowCoordinator.swift in Sources */,
+				D30000000000000000000001 /* Sources/ConnorGraphAgentMac/AppUpdateCenter.swift in Sources */,
 				A00000000000000000000050 /* Sources/ConnorGraphAgentMac/AppLifecycle.swift in Sources */,
 				A00000000000000000000052 /* Sources/ConnorGraphAgentMac/RSSFeatureModel.swift in Sources */,
 				A00000000000000000000054 /* Sources/ConnorGraphAgentMac/CalendarFeatureModel.swift in Sources */,
