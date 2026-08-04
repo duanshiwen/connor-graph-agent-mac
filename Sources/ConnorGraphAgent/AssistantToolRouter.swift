@@ -48,6 +48,7 @@ public struct AssistantToolDiscoveryResult: Sendable, Equatable {
 
 public struct AssistantToolRouter: Sendable, Equatable {
     public static let interactiveWebDirectToolNames: Set<String> = [
+        "interactive_web_sdk_usage",
         "interactive_web_create_draft",
         "interactive_web_get_draft",
         "interactive_web_update_draft",

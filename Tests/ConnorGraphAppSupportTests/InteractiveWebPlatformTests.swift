@@ -274,7 +274,7 @@ struct InteractiveWebPlatformTests {
             Issue.record("createDraft must reject index.html without the SDK")
         } catch let error as AgentToolError {
             let message = String(describing: error)
-            #expect(message.contains("../sdk/v1.js"))
+            #expect(message.contains("/api/v1/sdk/v1.js"))
             #expect(message.contains("Fix it step by step"))
             #expect(message.contains("window.platform.auth.login"))
         }
@@ -335,6 +335,28 @@ struct InteractiveWebPlatformTests {
             Issue.record("publish preflight must reject index.html without the SDK")
         } catch let error as AgentToolError {
             #expect(String(describing: error).contains("Fix it step by step"))
+        }
+    }
+
+    @Test func sdkUsageToolReturnsCompleteContract() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let tool = InteractiveWebAgentTool(operation: .sdkUsage, runtime: runtime)
+        let context = AgentToolExecutionContext(
+            runID: "run-1",
+            sessionID: "session-1",
+            groupID: "account",
+            userPrompt: "sdk usage",
+            toolCallID: "call-1",
+            policyEngine: AgentPolicyEngine(permissionMode: .askToWrite)
+        )
+        let result = try await tool.execute(
+            arguments: try AgentToolArguments(json: "{}"),
+            context: context
+        )
+        for expected in ["/api/v1/sdk/v1.js", "window.platform", "auth.login", "myRecords", "data-connor-collection", "connor:submit-error", "collection.rules"] {
+            #expect(result.contentText.contains(expected), "SDK contract is missing \(expected)")
         }
     }
 

@@ -3,14 +3,47 @@ import ConnorGraphAgent
 import ConnorGraphCore
 
 private let interactiveWebSDKRequiredHint = """
-index.html must load the interactive-web SDK. Without <script src="../sdk/v1.js"></script>, the published page cannot detect login state, gate forms, collect submissions, or let Connor analyze records; visitors only see static content.
+index.html must load the interactive-web SDK. Without <script src="/api/v1/sdk/v1.js"></script>, the published page cannot detect login state, gate forms, collect submissions, or let Connor analyze records; visitors only see static content.
 
 Fix it step by step:
-1. Add <script src="../sdk/v1.js"></script> inside <head>, before any other script.
+1. Add <script src="/api/v1/sdk/v1.js"></script> inside <head>, before any other script.
 2. For each submission form, set data-connor-collection="<collection>" and add a hidden _connor_honeypot input with autocomplete="off"; listen for connor:submit-success, connor:submit-error, connor:auth-required and connor:already-submitted to show clear submitting, success, failure, login-needed and already-submitted states.
 3. For login-required collections (registration, check-in, leaderboard, owner-attributed forms), check window.platform.auth.status() and offer a login button that calls window.platform.auth.login(), or let the SDK render its built-in login gate. Never draw a password input or a login form inside the page.
 4. Show a visitor's own records with window.platform.collection.myRecords(name), never data.list; use collection.ranking/stats for leaderboards and collection.capacity for remaining slots; edit or remove their records with window.platform.data.updateMine/deleteMine.
 5. After fixing the HTML, create or update the draft again (keep the exact manifestHash from interactive_web_get_draft), then publish.
+"""
+
+private let interactiveWebSDKUsageContract = """
+Interactive-web SDK v1 usage (window.platform):
+
+1. SDK script: add <script src="/api/v1/sdk/v1.js"></script> inside <head> before any other script. This is the backend-provided absolute path on the same domain as the published page; copy it exactly. Never construct apiBase, projectId, or endpoint URLs yourself, and do not rewrite it as a relative path.
+
+2. window.platform API surface:
+   - data.create(name, value), data.updateMine(name, recordId, value), data.deleteMine(name, recordId), data.list(name, query)
+   - forms.submit(name, formOrData)
+   - auth.status(), auth.login(), auth.logout(), auth.onAuthChange(handler), auth.require(name)
+   - collection.rules(name), collection.me(name), collection.myRecords(name, limit), collection.stats(name, query), collection.ranking(name, query), collection.capacity(name), collection.onChange(name, renderFn)
+
+3. Forms and events: set data-connor-collection="<name>" on submission forms and add a hidden _connor_honeypot input (autocomplete="off"); the SDK submits automatically and blocks duplicate submissions. Listen for connor:submit-success, connor:submit-error, connor:auth-required and connor:already-submitted to show clear submitting, success, failure, login-needed and already-submitted states.
+
+4. Login gating: for login-required collections (anonymousCreate=false), check window.platform.auth.status() and window.platform.collection.rules(name); offer a login button that calls window.platform.auth.login(), or let the SDK render its built-in login gate. Never draw a password input or a login form inside the page.
+
+5. Data reads: show a visitor's own records with window.platform.collection.myRecords(name), never data.list; use collection.ranking/stats for leaderboards and statistics, collection.capacity for remaining slots, and data.updateMine/deleteMine for edits.
+
+6. Minimal example:
+   <form data-connor-collection="registrations">
+     <input name="name" required>
+     <input name="_connor_honeypot" autocomplete="off" hidden>
+     <button type="submit">Submit</button>
+   </form>
+   <script>
+     window.platform.auth.status().then(s => {
+       if (!s.authenticated) { /* show a button that calls window.platform.auth.login() */ }
+     });
+     document.querySelector('form').addEventListener('connor:submit-success', () => {
+       window.platform.collection.myRecords('registrations').then(renderMyRecords);
+     });
+   </script>
 """
 
 public actor InteractiveWebToolRuntime {
@@ -374,6 +407,7 @@ public actor InteractiveWebToolRuntime {
 
 public struct InteractiveWebAgentTool: AgentTool {
     public enum Operation: String, Sendable, CaseIterable {
+		case sdkUsage = "interactive_web_sdk_usage"
 		case listProjects = "interactive_web_list_projects"
 		case getProject = "interactive_web_get_project"
 		case downloadProject = "interactive_web_download_project"
@@ -394,6 +428,7 @@ public struct InteractiveWebAgentTool: AgentTool {
     public var name: String { operation.rawValue }
     public var permission: AgentPermissionCapability {
         switch operation {
+		case .sdkUsage: .readSession
 		case .createDraft, .updateDraft, .downloadProject: .createInteractiveWebDraft
 		case .getDraft, .getStatus: .readSession
 		case .listProjects, .getProject, .recordsSummary: .externalNetwork
@@ -402,14 +437,15 @@ public struct InteractiveWebAgentTool: AgentTool {
     }
     public var description: String {
         switch operation {
+		case .sdkUsage: "Return the interactive-web SDK v1 contract: the backend-provided absolute script path (/api/v1/sdk/v1.js), the window.platform API surface, form and event conventions, login gating rules, data-access rules, and a minimal example. Call this before creating or editing a webpage draft whenever you need exact SDK usage."
 		case .listProjects: "List the signed-in user's published interactive webpage projects."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
-		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas and submission rules when the page accepts registrations, feedback, votes, or other submissions. Generated pages must always load ../sdk/v1.js and use window.platform instead of constructing API URLs; drafts without the SDK script are rejected with step-by-step fix guidance. The tool writes files into the app-managed user-data sandbox and does not publish anything."
+		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas and submission rules when the page accepts registrations, feedback, votes, or other submissions. Before generating the page, call interactive_web_sdk_usage to get the complete SDK contract and example. Every page must load the backend-provided absolute SDK path /api/v1/sdk/v1.js and use window.platform instead of constructing API URLs; drafts without the SDK script are rejected with step-by-step fix guidance. The tool writes files into the app-managed user-data sandbox and does not publish anything."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash."
-        case .updateDraft: "Atomically update an app-managed interactive webpage draft using exact text edits or full file replacements. Pass expectedManifestHash from interactive_web_get_draft to prevent overwriting a newer revision."
+        case .updateDraft: "Atomically update an app-managed interactive webpage draft using exact text edits or full file replacements. Pass expectedManifestHash from interactive_web_get_draft to prevent overwriting a newer revision. Edits to index.html must keep the SDK script tag (/api/v1/sdk/v1.js)."
         case .getStatus: "Read the current local and published status of an interactive webpage project."
-        case .publish: "Publish the exact current webpage revision to the internet and return its URL. Always requires native human approval; copy manifestHash exactly from create, update, or status output."
+        case .publish: "Publish the exact current webpage revision to the internet and return its URL. Always requires native human approval; copy manifestHash exactly from create, update, or status output. Publishing rejects drafts whose index.html omits the SDK script tag."
         case .rollback: "Rollback a published webpage to a specific deployment. Always requires native human approval."
         case .setAccess: "Change who can access a published webpage. Always requires native human approval."
         case .offline: "Take a published webpage offline. Always requires native human approval."
@@ -419,6 +455,8 @@ public struct InteractiveWebAgentTool: AgentTool {
     }
     public var inputSchema: AgentToolInputSchema {
         switch operation {
+		case .sdkUsage:
+			.closedObject(properties: [:], required: [])
 		case .listProjects:
 			.closedObject(properties: ["limit": .integer(description: "1 through 100")], required: [])
 		case .getProject, .downloadProject:
@@ -518,6 +556,10 @@ public struct InteractiveWebAgentTool: AgentTool {
         let text: String
         var json: String?
         switch operation {
+		case .sdkUsage:
+			status = nil
+			text = interactiveWebSDKUsageContract
+			json = nil
 		case .listProjects:
 			status = nil
 			let projects = try await runtime.remoteProjects(limit: min(max(arguments.int("limit") ?? 50, 1), 100))
