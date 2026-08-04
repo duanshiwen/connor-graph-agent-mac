@@ -53,6 +53,11 @@ struct SyncMemoryL2Statement: Codable, Sendable {
     var sourceArtifactId: String?
     var metadataJson: String
 
+    enum CodingKeys: String, CodingKey {
+        case id, subjectId, predicate, objectId, text, factType, assertionKind, confidence
+        case validAt, committedAt, evidenceSpanIdsJson, sourceArtifactId, metadataJson
+    }
+
     init(_ statement: MemoryOSStatement) {
         id = statement.id
         subjectId = statement.subjectID
@@ -85,6 +90,25 @@ struct SyncMemoryL2Statement: Codable, Sendable {
             sourceArtifactID: sourceArtifactId,
             metadata: syncJSONDictionary(metadataJson)
         )
+    }
+
+    /// JSONEncoder 默认会省略 nil 可选字段，导致安卓端把缺字段当成“必填缺失”报错。
+    /// 这里把可选字段显式编码为 null，保证两端 wire 载荷字段齐全。
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(subjectId, forKey: .subjectId)
+        try container.encode(predicate, forKey: .predicate)
+        try syncEncodeOptional(objectId, forKey: .objectId, in: &container)
+        try container.encode(text, forKey: .text)
+        try syncEncodeOptional(factType, forKey: .factType, in: &container)
+        try container.encode(assertionKind, forKey: .assertionKind)
+        try container.encode(confidence, forKey: .confidence)
+        try syncEncodeOptional(validAt, forKey: .validAt, in: &container)
+        try container.encode(committedAt, forKey: .committedAt)
+        try container.encode(evidenceSpanIdsJson, forKey: .evidenceSpanIdsJson)
+        try syncEncodeOptional(sourceArtifactId, forKey: .sourceArtifactId, in: &container)
+        try container.encode(metadataJson, forKey: .metadataJson)
     }
 }
 
@@ -180,6 +204,11 @@ struct SyncMemoryL4Relation: Codable, Sendable {
     var sourceArtifactId: String?
     var metadataJson: String
 
+    enum CodingKeys: String, CodingKey {
+        case id, subjectId, predicate, objectId, acceptance, confidence, createdAt
+        case text, assertionKind, validAt, committedAt, evidenceSpanIdsJson, sourceArtifactId, metadataJson
+    }
+
     init(_ relation: MemoryOSEntityStatement) {
         id = relation.id
         subjectId = relation.entityID
@@ -213,6 +242,37 @@ struct SyncMemoryL4Relation: Codable, Sendable {
             sourceArtifactID: sourceArtifactId,
             metadata: syncJSONDictionary(metadataJson)
         )
+    }
+
+    /// 同上：nil 可选字段显式编码为 null，避免安卓端缺字段报错。
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(subjectId, forKey: .subjectId)
+        try container.encode(predicate, forKey: .predicate)
+        try syncEncodeOptional(objectId, forKey: .objectId, in: &container)
+        try syncEncodeOptional(acceptance, forKey: .acceptance, in: &container)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(createdAt, forKey: .createdAt)
+        try syncEncodeOptional(text, forKey: .text, in: &container)
+        try syncEncodeOptional(assertionKind, forKey: .assertionKind, in: &container)
+        try syncEncodeOptional(validAt, forKey: .validAt, in: &container)
+        try syncEncodeOptional(committedAt, forKey: .committedAt, in: &container)
+        try syncEncodeOptional(evidenceSpanIdsJson, forKey: .evidenceSpanIdsJson, in: &container)
+        try syncEncodeOptional(sourceArtifactId, forKey: .sourceArtifactId, in: &container)
+        try container.encode(metadataJson, forKey: .metadataJson)
+    }
+}
+
+private func syncEncodeOptional<T: Encodable, Key: CodingKey>(
+    _ value: T?,
+    forKey key: Key,
+    in container: inout KeyedEncodingContainer<Key>
+) throws {
+    if let value {
+        try container.encode(value, forKey: key)
+    } else {
+        try container.encodeNil(forKey: key)
     }
 }
 
