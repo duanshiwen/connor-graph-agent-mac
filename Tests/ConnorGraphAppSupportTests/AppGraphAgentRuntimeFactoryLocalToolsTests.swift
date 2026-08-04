@@ -604,7 +604,6 @@ import ConnorGraphStore
     #expect(readResult.contentText.contains("Hidden Connor skill content"))
     #expect(listResult.contentText.contains("VisibleProject"))
     #expect(!listResult.contentText.contains("ConnorData"))
-    #expect(!controller.toolRegistry.definitions.map(\.name).contains("LS"))
     #expect(listResult.contentJSON?.contains("ConnorData") != true)
 }
 

@@ -568,20 +568,20 @@ private struct PhasedArtifactTool: AgentTool {
 
     #expect(finalText == "final")
     let requests = await provider.capturedRequests()
-    #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .memoryPreparation, .taskExecution, .finalSynthesis])
-    #expect(requests[0].messages.first?.content.contains("Strategy Research is the first model task") == true)
-    #expect(requests[0].messages.first?.content.contains("## Programming and Precision Work") == true)
-    #expect(requests[1].messages.first?.content.contains("## Programming and Precision Work") == true)
+    #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .taskExecution, .taskExecution, .finalSynthesis])
+    #expect(requests[0].messages.first?.content.contains("You are 康纳同学 (Connor), a personal assistant") == true)
+    #expect(requests[0].messages.first?.content.contains("## Priority") == true)
+    #expect(requests[1].messages.first?.content.contains("## Priority") == true)
     #expect(requests[0].messages[0].content.contains("Current Time:") == false)
     #expect(requests[0].messages[1].content.contains("Current Time:") == true)
     let initialPrompt = requests[0].messages.map(\.content).joined(separator: "\n")
-    #expect(initialPrompt.contains("The model-facing tool definitions are stable batch and phase-control entry points."))
-    #expect(initialPrompt.contains("The complete applicable Prompt Module set and native tool catalog are supplied in the initial prompt"))
+    #expect(initialPrompt.contains("## Tool Discovery"))
+    #expect(initialPrompt.contains("You are 康纳同学 (Connor)"))
     #expect(!initialPrompt.contains("phase-hidden"))
     #expect(!initialPrompt.contains("Available read-only external knowledge sources"))
     #expect(!initialPrompt.contains("Trusted Prompt Module Activation"))
-    #expect(requests[1].tools.map(\.name).contains(AgentPhaseToolContract.memoryQueryName))
-    #expect(requests[2].tools.map(\.name).contains(AgentPhaseToolContract.memoryQueryName))
+    #expect(requests[1].tools.map(\.name).contains(AgentPhaseToolContract.externalReadBatchName))
+    #expect(requests[2].tools.map(\.name).contains(AgentPhaseToolContract.externalSearchBatchName))
     let stableToolNames = requests[0].tools.map(\.name)
     #expect(requests.dropFirst().allSatisfy { $0.tools.map(\.name) == stableToolNames })
 }
@@ -665,7 +665,7 @@ private struct PhasedArtifactTool: AgentTool {
     for try await _ in loop.run(.init(sessionID: "missing-memory-backend", userMessage: "Give me a personalized answer")) {}
 
     let requests = await provider.capturedRequests()
-    #expect(requests[1].tools.map(\.name).contains(AgentPhaseToolContract.memoryQueryName))
+    #expect(requests[1].tools.map(\.name).contains(AgentPhaseToolContract.externalReadBatchName))
     let memoryResult = try #require(requests[2].messages.last { $0.toolCallID == "memory" })
     #expect(memoryResult.content.contains("Memory backend dependency is not configured"))
     #expect(requests[2].promptCacheContext?.phase == .taskExecution)
@@ -693,7 +693,7 @@ private struct PhasedArtifactTool: AgentTool {
     for try await _ in loop.run(.init(sessionID: "external-source", userMessage: "Implement cache support")) {}
 
     let requests = await provider.capturedRequests()
-    #expect(requests[0].messages[1].content.contains("enterprise [enterpriseKnowledge]"))
+    #expect(requests[0].messages[1].content.contains("Runtime Context (trusted, captured once for this user run)"))
     #expect(requests[0].tools.map(\.name).contains(AgentPhaseToolContract.externalSearchBatchName))
     #expect(requests[0].tools.map(\.name).contains(AgentPhaseToolContract.externalReadBatchName))
     let commitRequest = requests[2]
@@ -896,7 +896,7 @@ private struct PhasedArtifactTool: AgentTool {
     })
 }
 
-@Test func prepareFinalOutputPaginatesProfileInternallyBeforeOneFinalModelCall() async throws {
+@Test func prepareFinalOutputReliesOnDeterministicBootstrapProfile() async throws {
     let recorder = PhasedProfilePageRecorder()
     var registry = AgentToolRegistry()
     registry.register(PagedPhasedProfileTool(recorder: recorder))
@@ -917,10 +917,12 @@ private struct PhasedArtifactTool: AgentTool {
 
     for try await _ in loop.run(.init(sessionID: "profile-pages", userMessage: "Give me a personalized answer")) {}
 
-    #expect(await recorder.snapshot() == [1, 2])
+    #expect(await recorder.snapshot() == [1])
     let requests = await provider.capturedRequests()
     #expect(requests.count == 3)
     #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .taskExecution, .finalSynthesis])
+    #expect(requests[0].tools.map(\.name).contains(AgentPhaseToolContract.externalSearchBatchName))
+    #expect(requests[2].messages.contains { $0.toolCallID == "prepare" && $0.content.contains("deterministic bootstrap") })
 }
 
 @Test func finalSynthesisResearchReentersStrategyAndRequiresRecommit() async throws {

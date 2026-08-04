@@ -176,12 +176,20 @@ public struct InteractiveWebCollectionField: Codable, Sendable, Equatable {
     public init(name: String, type: String, required: Bool = false, maxLength: Int = 0, enum: [String] = [], pattern: String = "") { self.name = name; self.type = type; self.required = required; self.maxLength = maxLength; self.enum = `enum`; self.pattern = pattern }
 }
 
+public struct InteractiveWebSubmitLimit: Codable, Sendable, Equatable {
+    public var max: Int
+    public var window: String
+    public var scope: String
+    public init(max: Int, window: String, scope: String) { self.max = max; self.window = window; self.scope = scope }
+}
+
 public struct InteractiveWebCollectionDefinition: Codable, Sendable, Equatable {
     public var name: String
     public var fields: [InteractiveWebCollectionField]
     public var anonymousCreate: Bool
     public var anonymousRead: Bool
-    public init(name: String, fields: [InteractiveWebCollectionField], anonymousCreate: Bool = false, anonymousRead: Bool = false) { self.name = name; self.fields = fields; self.anonymousCreate = anonymousCreate; self.anonymousRead = anonymousRead }
+    public var submitLimit: InteractiveWebSubmitLimit?
+    public init(name: String, fields: [InteractiveWebCollectionField], anonymousCreate: Bool = false, anonymousRead: Bool = false, submitLimit: InteractiveWebSubmitLimit? = nil) { self.name = name; self.fields = fields; self.anonymousCreate = anonymousCreate; self.anonymousRead = anonymousRead; self.submitLimit = submitLimit }
 }
 
 public struct InteractiveWebManifest: Codable, Sendable, Equatable {
@@ -249,6 +257,9 @@ public struct InteractiveWebPackager: Sendable {
         }
         for collection in manifest.collections.sorted(by: { $0.name < $1.name }) {
             canonical += "collection\t\(collection.name)\t\(collection.anonymousCreate)\t\(collection.anonymousRead)\n"
+            if let limit = collection.submitLimit {
+                canonical += "submitLimit\t\(limit.max)\t\(limit.window)\t\(limit.scope)\n"
+            }
             for field in collection.fields.sorted(by: { $0.name < $1.name }) {
                 canonical += "\(field.name)\t\(field.type)\t\(field.required)\t\(field.maxLength)\t\(field.enum.joined(separator: ","))\t\(field.pattern ?? "")\n"
             }
@@ -269,6 +280,11 @@ public struct InteractiveWebPackager: Sendable {
         for collection in collections {
             guard validName(collection.name), (1...50).contains(collection.fields.count), Set(collection.fields.map(\.name)).count == collection.fields.count else {
                 throw CocoaError(.fileReadCorruptFile)
+            }
+            if let limit = collection.submitLimit {
+                guard limit.max > 0, limit.max <= 10000, ["lifetime", "day"].contains(limit.window), ["account", "ip"].contains(limit.scope), limit.scope != "account" || !collection.anonymousCreate else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
             }
             for field in collection.fields {
                 let pattern = field.pattern ?? ""

@@ -32,8 +32,8 @@ struct AppContentBootstrapActorTests {
         let skills = try #require(snapshot.skills.value)
 
         #expect(skills.definitions.map(\.slug) == ["review-skill"])
-        #expect(skills.presentation.cards.map(\.id) == ["review-skill"])
-        #expect(skills.presentation.summary.total == 1)
+        #expect(skills.presentation.cards.map(\.id) == ["review-skill", "web-quality-inspector"])
+        #expect(skills.presentation.summary.total == 2)
     }
 
     @Test func oneDomainFailureDoesNotCancelIndependentDomains() async throws {

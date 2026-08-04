@@ -126,12 +126,29 @@ import ConnorGraphCore
         event(kind: "toolFinished", title: "Tool finished: Glob", detail: "ok", severity: .success),
         event(kind: "toolFinished", title: "Tool finished: Bash", detail: "ok", severity: .success),
         event(kind: "toolFinished", title: "Tool finished: graph_search", detail: "ok", severity: .success),
-        event(kind: "toolFinished", title: "Tool finished: browser_tool", detail: "ok", severity: .success)
+        AgentEventPresentation(
+            kind: "toolFinished",
+            title: "Tool finished: browser_navigate",
+            detail: "ok",
+            severity: .success,
+            runID: "run",
+            sessionID: "session",
+            toolActivity: AgentToolActivityPresentation(
+                callID: "browser-1",
+                phase: .finished,
+                rawToolName: "browser_navigate",
+                semanticKind: .browser,
+                title: "Browser",
+                target: "browser_navigate",
+                icon: "safari",
+                severity: .success
+            )
+        )
     ]
 
     let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
 
-    #expect(summary.toolNames == ["查找文件", "执行终端命令", "搜索知识图谱", "执行网页操作"])
+    #expect(summary.toolNames == ["查找文件", "执行终端命令", "搜索知识图谱", "浏览网页"])
     #expect(summary.compactToolText == "查找文件、执行终端命令、搜索知识图谱等 4 项操作")
     #expect(summary.subtitle == "查找文件、执行终端命令、搜索知识图谱等 4 项操作")
 }
@@ -139,8 +156,42 @@ import ConnorGraphCore
 @Test func marksRunningTurnFromProcessState() {
     let process = makeProcess(state: .running, turnNumber: 10)
     let events: [AgentEventPresentation] = [
-        event(kind: "toolRequested", title: "Tool requested: browser_tool", detail: "Call 1", severity: .info),
-        event(kind: "toolStarted", title: "Tool running: browser_tool", detail: "Call 1", severity: .info)
+        AgentEventPresentation(
+            kind: "toolRequested",
+            title: "Tool requested: browser_navigate",
+            detail: "Call 1",
+            severity: .info,
+            runID: "run",
+            sessionID: "session",
+            toolActivity: AgentToolActivityPresentation(
+                callID: "browser-1",
+                phase: .requested,
+                rawToolName: "browser_navigate",
+                semanticKind: .browser,
+                title: "Browser",
+                target: "browser_navigate",
+                icon: "safari",
+                severity: .info
+            )
+        ),
+        AgentEventPresentation(
+            kind: "toolStarted",
+            title: "Tool running: browser_navigate",
+            detail: "Call 1",
+            severity: .info,
+            runID: "run",
+            sessionID: "session",
+            toolActivity: AgentToolActivityPresentation(
+                callID: "browser-1",
+                phase: .running,
+                rawToolName: "browser_navigate",
+                semanticKind: .browser,
+                title: "Browser",
+                target: "browser_navigate",
+                icon: "safari",
+                severity: .info
+            )
+        )
     ]
 
     let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
@@ -148,7 +199,7 @@ import ConnorGraphCore
     #expect(summary.state == .running)
     #expect(summary.statusText == "正在处理")
     #expect(summary.title == "第 10 轮 · 正在处理")
-    #expect(summary.subtitle == "正在执行：执行网页操作")
+    #expect(summary.subtitle == "正在执行：浏览网页")
 }
 
 @Test func marksTurnWaitingForPermissionWhenPermissionIsRequested() {

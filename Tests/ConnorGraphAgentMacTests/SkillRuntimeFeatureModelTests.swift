@@ -55,8 +55,8 @@ struct SkillRuntimeFeatureModelTests {
         model.reload()
 
         #expect(model.definitions.map(\.slug) == ["review-skill"])
-        #expect(model.presentation.cards.map(\.id) == ["review-skill"])
-        #expect(model.presentation.summary.total == 1)
+        #expect(model.presentation.cards.map(\.id) == ["review-skill", "web-quality-inspector"])
+        #expect(model.presentation.summary.total == 2)
         #expect(model.selectedCardID == nil)
     }
 
@@ -105,7 +105,7 @@ struct SkillRuntimeFeatureModelTests {
             sessionID: "session"
         )
         model.reloadIfNeeded(after: mutation)
-        #expect(model.presentation.cards.map(\.id) == [card.id])
+        #expect(model.presentation.cards.map(\.id) == [card.id, "web-quality-inspector"])
 
         model.requestDelete(card: card)
         model.confirmDelete()
@@ -158,7 +158,7 @@ struct SkillRuntimeFeatureModelTests {
         await model.submitSkillImport()
 
         #expect(FileManager.default.fileExists(atPath: fixture.paths.skillsDirectory.appendingPathComponent("external-review/SKILL.md").path))
-        #expect(model.presentation.cards.map(\.id) == ["external-review"])
+        #expect(model.presentation.cards.map(\.id) == ["external-review", "web-quality-inspector"])
         let importedCard = try #require(model.presentation.cards.first)
         #expect(importedCard.instructions == importedInstructions)
         #expect(SkillInstructionsPresentation(instructions: importedCard.instructions).isCollapsible)

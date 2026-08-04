@@ -390,7 +390,7 @@ public struct InteractiveWebAgentTool: AgentTool {
 		case .listProjects: "List the signed-in user's published interactive webpage projects."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
-		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas when the page accepts registrations, feedback, votes, or other submissions. Generated pages must load ../sdk/v1.js and use window.platform instead of constructing API URLs. The tool writes files into the app-managed user-data sandbox and does not publish anything."
+		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas and submission rules when the page accepts registrations, feedback, votes, or other submissions. Generated pages must load ../sdk/v1.js and use window.platform instead of constructing API URLs. The tool writes files into the app-managed user-data sandbox and does not publish anything."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash."
         case .updateDraft: "Atomically update an app-managed interactive webpage draft using exact text edits or full file replacements. Pass expectedManifestHash from interactive_web_get_draft to prevent overwriting a newer revision."
         case .getStatus: "Read the current local and published status of an interactive webpage project."
@@ -424,9 +424,14 @@ public struct InteractiveWebAgentTool: AgentTool {
                         "enum": .array(items: .string(description: "Allowed enum value"), description: "Allowed values for enum fields"),
                         "pattern": .string(description: "Optional RE2-compatible server-side validation pattern for string fields")
                     ], required: ["name", "type"]), description: "One to fifty validated fields"),
-                    "anonymousCreate": .boolean(description: "Allow a public visitor to submit"),
-                    "anonymousRead": .boolean(description: "Allow a public visitor to read records; normally false")
-                ], required: ["name", "fields", "anonymousCreate", "anonymousRead"]), description: "Persistent data schemas required by the page")
+                    "anonymousCreate": .boolean(description: "Allow an anonymous visitor to submit; false means the visitor must be logged into a Connor account"),
+                    "anonymousRead": .boolean(description: "Allow an anonymous visitor to read records; false keeps records visible to the owner only"),
+                    "submitLimit": .object(properties: [
+                        "max": .integer(description: "Maximum number of submissions (1 through 10000); omit for unlimited"),
+                        "window": .stringEnumeration(values: ["lifetime", "day"], description: "lifetime = once per identity overall; day = per calendar day"),
+                        "scope": .stringEnumeration(values: ["account", "ip"], description: "account counts per logged-in user (requires anonymousCreate=false); ip counts per anonymous visitor")
+                    ], required: ["max", "window", "scope"])
+                ], required: ["name", "fields", "anonymousCreate", "anonymousRead"]), description: "Persistent data schemas and submission rules required by the page")
             ], required: ["name", "html"])
         case .getDraft:
 			.closedObject(properties: ["projectID": .string(description: "Exact local project ID"), "fileName": .string(description: "Relative text source path")], required: ["projectID", "fileName"])
@@ -625,7 +630,16 @@ public struct InteractiveWebAgentTool: AgentTool {
                 let pattern = field["pattern"]?.stringValue ?? ""
                 return InteractiveWebCollectionField(name: fieldName, type: type, required: required, maxLength: maxLength, enum: enumValues, pattern: pattern)
             }
-            return InteractiveWebCollectionDefinition(name: name, fields: fields, anonymousCreate: anonymousCreate, anonymousRead: anonymousRead)
+            let submitLimit: InteractiveWebSubmitLimit?
+            if let limit = object["submitLimit"]?.objectValue,
+               case .int(let max)? = limit["max"],
+               case .string(let window)? = limit["window"],
+               case .string(let scope)? = limit["scope"] {
+                submitLimit = InteractiveWebSubmitLimit(max: max, window: window, scope: scope)
+            } else {
+                submitLimit = nil
+            }
+            return InteractiveWebCollectionDefinition(name: name, fields: fields, anonymousCreate: anonymousCreate, anonymousRead: anonymousRead, submitLimit: submitLimit)
         }
     }
     private func parseEdits(_ arguments: AgentToolArguments) throws -> [String: [(oldText: String, newText: String)]] {

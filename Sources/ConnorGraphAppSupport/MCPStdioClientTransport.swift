@@ -77,7 +77,13 @@ public final class MCPStdioClientTransport: MCPClientTransport, @unchecked Senda
     private func response(matching id: MCPJSONRPCID) async throws -> MCPJSONRPCMessage? {
         let timeout = max(0.1, requestTimeout)
         return try await withThrowingTaskGroup(of: MCPJSONRPCMessage?.self) { group in
-            group.addTask { try self.readResponse(matching: id) }
+            // The blocking pipe read runs in a detached task so the timeout can abandon
+            // it: awaiting a cancelled task handle returns immediately instead of waiting
+            // for the underlying blocking read to finish (e.g. a server that never replies).
+            let readTask = Task.detached(priority: .userInitiated) {
+                try self.readResponse(matching: id)
+            }
+            group.addTask { try await readTask.value }
             group.addTask {
                 try await Task.sleep(for: .seconds(timeout))
                 try await self.close()

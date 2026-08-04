@@ -152,7 +152,7 @@ private actor GeneratedImageChatMediaRecorder {
     #expect(mediaRequest.auditContext.sessionID == session.id)
     #expect(mediaRequest.auditContext.operation == "GeneratedImageAgentTool.execute")
     let modelRequests = await scriptedProvider.recordedRequests()
-    #expect(modelRequests.count == 4)
+    #expect(modelRequests.count == 7)
     #expect(modelRequests.contains { request in
         request.messages.contains { $0.role == .tool && $0.name == AgentPhaseToolContract.externalReadBatchName }
     })

@@ -46,6 +46,46 @@ struct InteractiveWebPlatformTests {
         #expect(manifest.files.map(\.path) == ["connor.web.json", "index.html"])
     }
 
+    @Test func packageCarriesSubmitLimitRulesAndFingerprint() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("<form></form>".utf8).write(to: root.appendingPathComponent("index.html"))
+        let loginOnly = InteractiveWebCollectionDefinition(
+            name: "registrations",
+            fields: [.init(name: "name", type: "string", required: true, maxLength: 80)],
+            anonymousCreate: false,
+            anonymousRead: false,
+            submitLimit: .init(max: 1, window: "lifetime", scope: "account")
+        )
+        try Data(InteractiveWebPackager.configurationJSON(collections: [loginOnly]).utf8)
+            .write(to: root.appendingPathComponent(InteractiveWebPackager.configurationFileName))
+
+        let manifest = try InteractiveWebPackager().package(rootURL: root)
+        #expect(manifest.collections.first?.submitLimit == .init(max: 1, window: "lifetime", scope: "account"))
+        let withoutLimit = InteractiveWebManifest(files: manifest.files, collections: [
+            .init(name: "registrations", fields: loginOnly.fields, anonymousCreate: false, anonymousRead: false)
+        ])
+        #expect(InteractiveWebPackager().fingerprint(manifest) != InteractiveWebPackager().fingerprint(withoutLimit))
+
+        let invalidRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: invalidRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: invalidRoot) }
+        try Data("<form></form>".utf8).write(to: invalidRoot.appendingPathComponent("index.html"))
+        let invalid = InteractiveWebCollectionDefinition(
+            name: "checkins",
+            fields: [.init(name: "note", type: "string", maxLength: 80)],
+            anonymousCreate: true,
+            anonymousRead: false,
+            submitLimit: .init(max: 1, window: "lifetime", scope: "account")
+        )
+        try Data(InteractiveWebPackager.configurationJSON(collections: [invalid]).utf8)
+            .write(to: invalidRoot.appendingPathComponent(InteractiveWebPackager.configurationFileName))
+        #expect(throws: CocoaError.self) {
+            _ = try InteractiveWebPackager().package(rootURL: invalidRoot)
+        }
+    }
+
     @Test func accessModesRemainProtocolStable() {
         #expect([
             InteractiveWebAccessMode.public.rawValue,
