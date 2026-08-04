@@ -70,6 +70,7 @@ public final class AppBackendConnectivity: ObservableObject {
     private var baseURL: URL?
     private var monitoringTask: Task<Void, Never>?
 
+    public var baseURLString: String? { baseURL?.absoluteString }
     public var isReachable: Bool { state != .unreachable }
 
     public func configure(baseURL: URL) {

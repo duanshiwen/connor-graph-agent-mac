@@ -411,10 +411,17 @@ struct ReloadingAvatarImage: View {
         }
     }
 
-    private var loadID: String { "\(urlString)|\(revision)" }
+    private var resolvedURLString: String {
+        if urlString.hasPrefix("http://") || urlString.hasPrefix("https://") { return urlString }
+        guard urlString.hasPrefix("/"), let base = AppBackendConnectivity.shared.baseURLString else { return urlString }
+        return base.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + urlString
+    }
+
+    private var loadID: String { "\(resolvedURLString)|\(revision)" }
 
     private func loadImage() async -> NSImage? {
-        guard let url = URL(string: urlString), !urlString.isEmpty else { return nil }
+        let resolved = resolvedURLString
+        guard let url = URL(string: resolved), !resolved.isEmpty else { return nil }
         if url.isFileURL { return NSImage(contentsOf: url) }
         guard let data = await AvatarImageDataLoader.shared.data(
             for: url,

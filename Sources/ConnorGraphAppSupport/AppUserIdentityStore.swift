@@ -1,5 +1,7 @@
 import Foundation
 import Combine
+import ImageIO
+import UniformTypeIdentifiers
 
 public struct ConnorRemoteUserIdentity: Codable, Sendable, Equatable, Identifiable {
     public var id: UInt
@@ -294,15 +296,16 @@ public struct ConnorBackendAPIClient: Sendable {
     }
 
     public func uploadAvatar(token: String, fileURL: URL) async throws {
-        let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+        let normalized = try Self.normalizedAvatarUpload(fileURL: fileURL)
+        let data = normalized.data
         guard !data.isEmpty, data.count <= 5 * 1024 * 1024 else {
             throw ConnorBackendAPIError.server(status: 400, message: "头像图片不能超过 5 MB。")
         }
         let boundary = "ConnorAvatar-\(UUID().uuidString)"
         var body = Data()
         body.append(Data("--\(boundary)\r\n".utf8))
-        body.append(Data("Content-Disposition: form-data; name=\"avatar\"; filename=\"\(fileURL.lastPathComponent)\"\r\n".utf8))
-        body.append(Data("Content-Type: \(Self.avatarMIMEType(for: fileURL))\r\n\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"avatar\"; filename=\"\(normalized.filename)\"\r\n".utf8))
+        body.append(Data("Content-Type: \(normalized.mimeType)\r\n\r\n".utf8))
         body.append(data)
         body.append(Data("\r\n--\(boundary)--\r\n".utf8))
         let _: AvatarUploadResponse = try await request(
@@ -386,12 +389,27 @@ public struct ConnorBackendAPIClient: Sendable {
         return try decoder.decode(APIEnvelope<T>.self, from: data).data
     }
 
-    private static func avatarMIMEType(for url: URL) -> String {
-        switch url.pathExtension.lowercased() {
-        case "png": return "image/png"
-        case "gif": return "image/gif"
-        case "webp": return "image/webp"
-        default: return "image/jpeg"
+    /// Normalizes the selected image before upload so the backend always stores a
+    /// decodable avatar: PNG/GIF/WebP pass through, everything else (including HEIC
+    /// from the macOS Photos picker) is re-encoded as JPEG.
+    private static func normalizedAvatarUpload(fileURL: URL) throws -> (data: Data, mimeType: String, filename: String) {
+        let `extension` = fileURL.pathExtension.lowercased()
+        switch `extension` {
+        case "png", "gif", "webp":
+            return (try Data(contentsOf: fileURL, options: .mappedIfSafe), "image/\(`extension`)", "avatar.\(`extension`)")
+        default:
+            guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else {
+                throw ConnorBackendAPIError.server(status: 400, message: "无法读取所选图片")
+            }
+            let output = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(output, UTType.jpeg.identifier as CFString, 1, nil) else {
+                throw ConnorBackendAPIError.server(status: 400, message: "无法转换所选图片")
+            }
+            CGImageDestinationAddImageFromSource(destination, source, 0, nil)
+            guard CGImageDestinationFinalize(destination) else {
+                throw ConnorBackendAPIError.server(status: 400, message: "无法转换所选图片")
+            }
+            return (output as Data, "image/jpeg", "avatar.jpg")
         }
     }
 }
