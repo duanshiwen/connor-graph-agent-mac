@@ -88,6 +88,14 @@ public struct AppAccountDataSyncResult: Sendable, Equatable {
 }
 
 public actor AppAccountDataSyncCoordinator {
+    /// 账号同步只承载这些集合；真人私聊/群聊及其消息由 IM 专用接口按需同步，
+    /// 不得进入账号同步流。拉取时先过滤，避免历史残留的 IM 集合污染同步状态。
+    private enum SyncCollection {
+        static let sessions = "sessions"
+        static let settings = "settings"
+        static let allowed: Set<String> = [sessions, settings]
+    }
+
     private enum AppliedChangeKind { case session(String), settings }
     private struct RecordState: Codable { var version: Int64; var hash: String; var deleted: Bool; var encrypted: Bool = false }
     private struct PersistedState: Codable { var cursor: Int64 = 0; var records: [String: RecordState] = [:] }
@@ -115,7 +123,7 @@ public actor AppAccountDataSyncCoordinator {
         var hasMore = false
         repeat {
             let page = try await identity.pullSyncChanges(cursor: state.cursor)
-            for change in page.changes {
+            for change in page.changes where SyncCollection.allowed.contains(change.collection) {
                 let clear = try decrypted(change, using: cipher)
                 if change.sourceDeviceId != deviceID, let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(clear.change) }) {
                     record(kind, in: &syncResult)
