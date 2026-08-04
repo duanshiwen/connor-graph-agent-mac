@@ -260,7 +260,7 @@ public struct ConnorSyncPullPage: Codable, Sendable, Equatable { public var chan
 public struct ConnorL1Lease: Codable, Sendable, Equatable { public var granted: Bool; public var token: String?; public var expiresAt: Date?; public var reason: String? }
 private struct SyncPushRequest: Encodable { var deviceId: String; var changes: [ConnorSyncChange] }
 private struct SyncPushResponse: Decodable, Sendable { var results: [SyncPushResult] }
-public struct SyncPushResult: Decodable, Sendable, Equatable { public var mutationId: String; public var applied: Bool; public var cursor: Int64?; public var conflict: ConnorSyncChange? }
+public struct SyncPushResult: Decodable, Sendable, Equatable { public var mutationId: String; public var applied: Bool; public var cursor: Int64? }
 
 public struct ConnorBackendAPIClient: Sendable {
     public var baseURL: URL

@@ -413,6 +413,23 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         if node.id.contains("current-user") || node.metadata["person_role"] == "current_user" {
             MemoryOSQueryCache.shared.invalidateProfile()
         }
+        onChange?()
+    }
+
+    public func listAllNodes() throws -> [MemoryOSNode] {
+        try query(sql: """
+        SELECT id, stable_key, node_type, name, summary, created_at, updated_at, metadata_json
+        FROM memory_l2_nodes
+        ORDER BY updated_at ASC, id ASC
+        """).map(decodeNode)
+    }
+
+    public func deleteNode(id: String) throws {
+        try execute("DELETE FROM memory_l2_nodes WHERE id = \(quote(id));")
+        try execute("DELETE FROM memory_l2_nodes_fts WHERE node_id = \(quote(id));")
+        try enqueueSearchIndexChange(layer: "L2", recordID: id)
+        MemoryOSQueryCache.shared.invalidateL2()
+        onChange?()
     }
 
     public func upsert(statement: MemoryOSStatement) throws {
@@ -870,6 +887,19 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
             evidenceSpanIDs: try decode([String].self, row[9]),
             sourceArtifactID: nilIfEmpty(row[10]),
             metadata: try decode([String: String].self, row[11])
+        )
+    }
+
+    private func decodeNode(_ row: [String]) throws -> MemoryOSNode {
+        MemoryOSNode(
+            id: row[0],
+            stableKey: row[1],
+            nodeType: row[2],
+            name: row[3],
+            summary: row[4],
+            createdAt: try date(row[5]),
+            updatedAt: try date(row[6]),
+            metadata: try decode([String: String].self, row[7])
         )
     }
 

@@ -95,6 +95,7 @@ public actor AppAccountDataSyncCoordinator {
         static let sessions = "sessions"
         static let settings = "settings"
         static let memoryL2 = "memory_l2"
+        static let memoryL2Nodes = "memory_l2_nodes"
         static let memoryL3 = "memory_l3"
         static let memoryL4Entities = "memory_l4_entities"
         static let memoryL4Relations = "memory_l4_relations"
@@ -108,7 +109,7 @@ public actor AppAccountDataSyncCoordinator {
         switch collection {
         case SyncCollection.sessions: return true
         case SyncCollection.settings: return recordId == "macos_runtime" || recordId == "personality"
-        case "memory_l2", "memory_l3", "memory_l4_entities", "memory_l4_relations": return true
+        case "memory_l2", "memory_l2_nodes", "memory_l3", "memory_l4_entities", "memory_l4_relations": return true
         default: return false
         }
     }
@@ -142,44 +143,31 @@ public actor AppAccountDataSyncCoordinator {
         repeat {
             let page = try await identity.pullSyncChanges(cursor: state.cursor)
             for change in page.changes where isSyncableRecord(change.collection, change.recordId) {
+                // 合并同步：tombstone 一律跳过，任何端都不会因同步删除记录。
+                guard !change.deleted else { continue }
                 let clear = try decrypted(change, using: cipher)
                 if change.sourceDeviceId != deviceID, let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(clear.change) }) {
                     record(kind, in: &syncResult)
                 }
-                state.records[recordKey(change.collection, change.recordId)] = RecordState(version: change.version ?? 0, hash: try payloadHash(clear.change.payload), deleted: change.deleted, encrypted: clear.encrypted)
+                state.records[recordKey(change.collection, change.recordId)] = RecordState(version: change.version ?? 0, hash: try payloadHash(clear.change.payload), deleted: false, encrypted: clear.encrypted)
             }
             state.cursor = page.nextCursor; hasMore = page.hasMore
             saveState(state, key: stateKey)
         } while hasMore
 
         let projected = try projections()
-        let syncableKeys = Set(state.records.keys.filter { key in
-            key.hasPrefix("sessions|") || key == "settings|macos_runtime" ||
-                key.hasPrefix("memory_l2|") || key.hasPrefix("memory_l3|") ||
-                key.hasPrefix("memory_l4_entities|") || key.hasPrefix("memory_l4_relations|")
-        })
         var mutations: [ConnorSyncChange] = []
-        for (key, payload) in projected where state.records[key]?.hash != (try payloadHash(payload)) || state.records[key]?.deleted == true || state.records[key]?.encrypted != true {
+        for (key, payload) in projected where state.records[key]?.hash != (try payloadHash(payload)) || state.records[key]?.encrypted != true {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
             mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: cipher.encrypt(payload, collection: parts[0], recordID: parts[1])))
-        }
-        for key in syncableKeys.subtracting(projected.keys) where state.records[key]?.deleted != true {
-            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
-            mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, deleted: true))
         }
 
         for batch in mutations.chunked(into: 200) {
             let results = try await identity.pushSyncChanges(batch)
-            for (pushResult, mutation) in zip(results, batch) {
-                if let conflict = pushResult.conflict {
-                    let clear = try decrypted(conflict, using: cipher)
-                    if let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(clear.change) }) { record(kind, in: &syncResult) }
-                    state.records[recordKey(conflict.collection, conflict.recordId)] = RecordState(version: conflict.version ?? 0, hash: try payloadHash(clear.change.payload), deleted: conflict.deleted, encrypted: clear.encrypted)
-                } else if pushResult.applied {
-                    let clear = try cipher.decrypt(mutation.payload, collection: mutation.collection, recordID: mutation.recordId)
-                    state.records[recordKey(mutation.collection, mutation.recordId)] = RecordState(version: (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(clear.payload), deleted: mutation.deleted, encrypted: !mutation.deleted)
-                    syncResult.pushedChangeCount += 1
-                }
+            for (pushResult, mutation) in zip(results, batch) where pushResult.applied {
+                let clear = try cipher.decrypt(mutation.payload, collection: mutation.collection, recordID: mutation.recordId)
+                state.records[recordKey(mutation.collection, mutation.recordId)] = RecordState(version: (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(clear.payload), deleted: false, encrypted: true)
+                syncResult.pushedChangeCount += 1
             }
         }
         // 清理历史残留（settings|profile 等不可同步记录），避免重新进入同步状态机。
@@ -206,6 +194,9 @@ public actor AppAccountDataSyncCoordinator {
             for statement in try memory.listAllStatements() {
                 values[recordKey(SyncCollection.memoryL2, statement.id)] = try jsonValue(SyncMemoryL2Statement(statement))
             }
+            for node in try memory.listAllNodes() {
+                values[recordKey(SyncCollection.memoryL2Nodes, node.id)] = try jsonValue(SyncMemoryL2Node(node))
+            }
             for belief in try memory.listAllBeliefs() {
                 values[recordKey(SyncCollection.memoryL3, belief.id)] = try jsonValue(SyncMemoryL3Belief(belief))
             }
@@ -221,55 +212,40 @@ public actor AppAccountDataSyncCoordinator {
 
     private func apply(_ change: ConnorSyncChange) throws -> AppliedChangeKind? {
         switch (change.collection, change.recordId) {
+        // 合并同步：任何端都不会因同步删除记录；远端变化一律合并落库。
         case ("sessions", let id):
-            if change.deleted {
-                guard try sessions.loadSession(id: id) != nil else { return nil }
-                try sessions.store.deleteSession(id: id)
-            } else {
-                let portable: ConnorPortableSession = try decode(change.payload)
-                _ = try sessions.saveSession(portable.merging(into: try sessions.loadSession(id: id)))
-            }
+            let portable: ConnorPortableSession = try decode(change.payload)
+            _ = try sessions.saveSession(portable.merging(into: try sessions.loadSession(id: id)))
             return .session(id)
         case ("settings", "macos_runtime") where !change.deleted:
             var synced: AgentRuntimeSettings = try decode(change.payload)
             synced.preferences = try settings.loadOrCreateDefault().preferences
             try settings.save(synced)
             return .settings
-        case ("memory_l2", let id):
+        case ("memory_l2", _):
             guard let memory else { return nil }
-            if change.deleted {
-                try memory.deleteStatement(id: id)
-            } else {
-                let wire: SyncMemoryL2Statement = try decode(change.payload)
-                try memory.upsert(statement: wire.makeStatement())
-            }
+            let wire: SyncMemoryL2Statement = try decode(change.payload)
+            try memory.upsert(statement: wire.makeStatement())
             return nil
-        case ("memory_l3", let id):
+        case ("memory_l2_nodes", _):
             guard let memory else { return nil }
-            if change.deleted {
-                try memory.deleteBelief(id: id)
-            } else {
-                let wire: SyncMemoryL3Belief = try decode(change.payload)
-                try memory.upsert(belief: wire.makeBelief())
-            }
+            let wire: SyncMemoryL2Node = try decode(change.payload)
+            try memory.upsert(node: wire.makeNode())
             return nil
-        case ("memory_l4_entities", let id):
+        case ("memory_l3", _):
             guard let memory else { return nil }
-            if change.deleted {
-                try memory.deleteEntity(id: id)
-            } else {
-                let wire: SyncMemoryL4Entity = try decode(change.payload)
-                try memory.upsert(entity: wire.makeEntity())
-            }
+            let wire: SyncMemoryL3Belief = try decode(change.payload)
+            try memory.upsert(belief: wire.makeBelief())
             return nil
-        case ("memory_l4_relations", let id):
+        case ("memory_l4_entities", _):
             guard let memory else { return nil }
-            if change.deleted {
-                try memory.deleteEntityStatement(id: id)
-            } else {
-                let wire: SyncMemoryL4Relation = try decode(change.payload)
-                try memory.upsert(entityStatement: wire.makeEntityStatement())
-            }
+            let wire: SyncMemoryL4Entity = try decode(change.payload)
+            try memory.upsert(entity: wire.makeEntity())
+            return nil
+        case ("memory_l4_relations", _):
+            guard let memory else { return nil }
+            let wire: SyncMemoryL4Relation = try decode(change.payload)
+            try memory.upsert(entityStatement: wire.makeEntityStatement())
             return nil
         default: return nil
         }

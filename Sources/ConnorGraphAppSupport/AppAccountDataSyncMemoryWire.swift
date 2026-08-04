@@ -3,6 +3,41 @@ import ConnorGraphCore
 
 // MARK: - Memory OS L2/L3/L4 账号同步载荷（wire 与 Android Room 实体逐字段一致）
 
+struct SyncMemoryL2Node: Codable, Sendable {
+    var id: String
+    var stableKey: String
+    var nodeType: String
+    var name: String
+    var summary: String
+    var createdAt: String
+    var updatedAt: String
+    var metadataJson: String
+
+    init(_ node: MemoryOSNode) {
+        id = node.id
+        stableKey = node.stableKey
+        nodeType = node.nodeType
+        name = node.name
+        summary = node.summary
+        createdAt = syncISOString(node.createdAt)
+        updatedAt = syncISOString(node.updatedAt)
+        metadataJson = syncJSONString(node.metadata)
+    }
+
+    func makeNode() -> MemoryOSNode {
+        MemoryOSNode(
+            id: id,
+            stableKey: stableKey,
+            nodeType: nodeType,
+            name: name,
+            summary: summary,
+            createdAt: syncDate(createdAt) ?? Date(),
+            updatedAt: syncDate(updatedAt) ?? Date(),
+            metadata: syncJSONDictionary(metadataJson)
+        )
+    }
+}
+
 struct SyncMemoryL2Statement: Codable, Sendable {
     var id: String
     var subjectId: String
@@ -97,6 +132,7 @@ struct SyncMemoryL4Entity: Codable, Sendable {
     var createdAt: String
     var updatedAt: String
     var metadataJson: String
+    var aliasesJson: String?
 
     init(_ entity: MemoryOSEntity) {
         id = entity.id
@@ -108,6 +144,7 @@ struct SyncMemoryL4Entity: Codable, Sendable {
         createdAt = syncISOString(entity.createdAt)
         updatedAt = syncISOString(entity.updatedAt)
         metadataJson = syncJSONString(entity.metadata)
+        aliasesJson = syncJSONString(entity.aliases)
     }
 
     func makeEntity() -> MemoryOSEntity {
@@ -116,7 +153,7 @@ struct SyncMemoryL4Entity: Codable, Sendable {
             stableKey: stableKey,
             entityType: type,
             name: name,
-            aliases: [],
+            aliases: syncJSONArray(aliasesJson ?? "[]"),
             summary: summary,
             confidence: confidence,
             createdAt: syncDate(createdAt) ?? Date(),
@@ -135,6 +172,12 @@ struct SyncMemoryL4Relation: Codable, Sendable {
     var acceptance: String?
     var confidence: Double
     var createdAt: String
+    var text: String?
+    var assertionKind: String?
+    var validAt: String?
+    var committedAt: String?
+    var evidenceSpanIdsJson: String?
+    var sourceArtifactId: String?
     var metadataJson: String
 
     init(_ relation: MemoryOSEntityStatement) {
@@ -145,44 +188,30 @@ struct SyncMemoryL4Relation: Codable, Sendable {
         acceptance = "strict"
         confidence = relation.confidence
         createdAt = syncISOString(relation.committedAt)
-        var metadata = relation.metadata
-        metadata["text"] = relation.text
-        metadata["assertion_kind"] = relation.assertionKind.rawValue
-        if !relation.evidenceSpanIDs.isEmpty {
-            metadata["evidence_span_ids"] = syncJSONString(relation.evidenceSpanIDs)
-        }
-        if let source = relation.sourceArtifactID {
-            metadata["source_artifact_id"] = source
-        }
-        metadata["valid_at"] = syncISOString(relation.validAt)
-        metadata["raw_predicate"] = relation.predicate.rawValue
-        metadata["acceptance"] = "strict"
-        metadataJson = syncJSONString(metadata)
+        text = relation.text
+        assertionKind = relation.assertionKind.rawValue
+        validAt = syncISOString(relation.validAt)
+        committedAt = syncISOString(relation.committedAt)
+        evidenceSpanIdsJson = syncJSONString(relation.evidenceSpanIDs)
+        sourceArtifactId = relation.sourceArtifactID
+        metadataJson = syncJSONString(relation.metadata)
     }
 
     func makeEntityStatement() -> MemoryOSEntityStatement {
-        var metadata = syncJSONDictionary(metadataJson)
-        let text = metadata.removeValue(forKey: "text") ?? ""
-        let assertionKind = MemoryOSAssertionKind(rawValue: metadata.removeValue(forKey: "assertion_kind") ?? "observed") ?? .observed
-        let evidenceSpanIDs = syncJSONArray(metadata.removeValue(forKey: "evidence_span_ids") ?? "[]")
-        let sourceArtifactID = metadata.removeValue(forKey: "source_artifact_id")
-        let validAtString = metadata.removeValue(forKey: "valid_at")
-        metadata.removeValue(forKey: "raw_predicate")
-        metadata.removeValue(forKey: "acceptance")
-        let committedAt = syncDate(createdAt) ?? Date()
+        let committedAt = syncDate(committedAt) ?? syncDate(createdAt) ?? Date()
         return MemoryOSEntityStatement(
             id: id,
             entityID: subjectId,
             predicate: MemoryOSL4RelationPredicate(rawValue: predicate) ?? .relatedTo,
             objectEntityID: objectId,
-            text: text,
-            assertionKind: assertionKind,
+            text: text ?? "",
+            assertionKind: MemoryOSAssertionKind(rawValue: assertionKind ?? "observed") ?? .observed,
             confidence: confidence,
-            validAt: syncDate(validAtString) ?? committedAt,
+            validAt: syncDate(validAt) ?? committedAt,
             committedAt: committedAt,
-            evidenceSpanIDs: evidenceSpanIDs,
-            sourceArtifactID: sourceArtifactID,
-            metadata: metadata
+            evidenceSpanIDs: syncJSONArray(evidenceSpanIdsJson ?? "[]"),
+            sourceArtifactID: sourceArtifactId,
+            metadata: syncJSONDictionary(metadataJson)
         )
     }
 }
