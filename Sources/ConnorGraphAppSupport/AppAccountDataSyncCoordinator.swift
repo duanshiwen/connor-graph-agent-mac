@@ -93,7 +93,17 @@ public actor AppAccountDataSyncCoordinator {
     private enum SyncCollection {
         static let sessions = "sessions"
         static let settings = "settings"
-        static let allowed: Set<String> = [sessions, settings]
+    }
+
+    /// 记录级同步边界：sessions 全量同步；settings 仅同步运行时设置与人格
+    /// （人格只记录不上推）。个人资料 settings|profile 不进同步状态机，
+    /// 拉取时不记录、不应用，历史残留也不会再触发 tombstone。
+    private func isSyncableRecord(_ collection: String, _ recordId: String) -> Bool {
+        switch collection {
+        case SyncCollection.sessions: return true
+        case SyncCollection.settings: return recordId == "macos_runtime" || recordId == "personality"
+        default: return false
+        }
     }
 
     private enum AppliedChangeKind { case session(String), settings }
@@ -123,7 +133,7 @@ public actor AppAccountDataSyncCoordinator {
         var hasMore = false
         repeat {
             let page = try await identity.pullSyncChanges(cursor: state.cursor)
-            for change in page.changes where SyncCollection.allowed.contains(change.collection) {
+            for change in page.changes where isSyncableRecord(change.collection, change.recordId) {
                 let clear = try decrypted(change, using: cipher)
                 if change.sourceDeviceId != deviceID, let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(clear.change) }) {
                     record(kind, in: &syncResult)
@@ -159,6 +169,12 @@ public actor AppAccountDataSyncCoordinator {
                     syncResult.pushedChangeCount += 1
                 }
             }
+        }
+        // 清理历史残留（settings|profile 等不可同步记录），避免重新进入同步状态机。
+        state.records = state.records.filter { entry in
+            let parts = entry.key.split(separator: "|", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { return false }
+            return isSyncableRecord(parts[0], parts[1])
         }
         saveState(state, key: stateKey)
         return syncResult
