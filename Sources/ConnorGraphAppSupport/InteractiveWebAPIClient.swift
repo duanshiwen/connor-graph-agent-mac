@@ -40,8 +40,8 @@ public struct InteractiveWebAPIClient: Sendable {
         return result
     }
 
-    public func projects(limit: Int = 50) async throws -> [InteractiveWebRemoteProject] {
-		try await get("api/v1/projects?limit=\(min(max(limit, 1), 100))")
+    public func projects(limit: Int = 50, page: Int = 1) async throws -> [InteractiveWebRemoteProject] {
+		try await get("api/v1/projects?limit=\(min(max(limit, 1), 100))&page=\(max(page, 1))")
 	}
 
 	public func project(id: String) async throws -> InteractiveWebRemoteProjectDetail {
@@ -67,9 +67,9 @@ public struct InteractiveWebAPIClient: Sendable {
         let _: RollbackResult = try await send("api/v1/projects/\(projectID)/rollback", method: "POST", body: Rollback(deploymentId: deploymentID))
     }
 
-    public func records(projectID: String, collection: String, limit: Int = 100) async throws -> InteractiveWebRecordPage {
+    public func records(projectID: String, collection: String, limit: Int = 100, page: Int = 1) async throws -> InteractiveWebRecordPage {
         guard collection.range(of: #"^[a-z_][a-z0-9_]{0,63}$"#, options: .regularExpression) != nil else { throw InteractiveWebAPIError.invalidResponse }
-        return try await get("api/v1/projects/\(projectID)/collections/\(collection)/records?limit=\(min(max(limit, 1), 1000))")
+        return try await get("api/v1/projects/\(projectID)/collections/\(collection)/records?limit=\(min(max(limit, 1), 1000))&page=\(max(page, 1))")
     }
 
     public func exportCSV(projectID: String, collection: String) async throws -> Data {
@@ -196,6 +196,9 @@ public struct InteractiveWebRecordMetadata: Codable, Sendable, Equatable {
 public struct InteractiveWebRecordPage: Codable, Sendable, Equatable {
 	public var items: [InteractiveWebRecordMetadata]
 	public var total: Int
+	public var page: Int?
+	public var pageSize: Int?
+	public var hasNextPage: Bool?
 }
 
 public struct InteractiveWebAuditEntry: Decodable, Sendable, Equatable {

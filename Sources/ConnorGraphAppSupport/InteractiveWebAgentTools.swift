@@ -22,13 +22,15 @@ Interactive-web SDK v1 usage (window.platform):
    - data.create(name, value), data.updateMine(name, recordId, value), data.deleteMine(name, recordId), data.list(name, query)
    - forms.submit(name, formOrData)
    - auth.status(), auth.login(), auth.logout(), auth.onAuthChange(handler), auth.require(name)
-   - collection.rules(name), collection.me(name), collection.myRecords(name, limit), collection.stats(name, query), collection.ranking(name, query), collection.capacity(name), collection.onChange(name, renderFn)
+   - collection.rules(name), collection.me(name), collection.myRecords(name, limit, page), collection.stats(name, query), collection.ranking(name, query), collection.capacity(name), collection.onChange(name, renderFn)
 
 3. Forms and events: set data-connor-collection="<name>" on submission forms and add a hidden _connor_honeypot input (autocomplete="off"); the SDK submits automatically and blocks duplicate submissions. Listen for connor:submit-success, connor:submit-error, connor:auth-required and connor:already-submitted to show clear submitting, success, failure, login-needed and already-submitted states.
 
 4. Login gating: for login-required collections (anonymousCreate=false), check window.platform.auth.status() and window.platform.collection.rules(name); offer a login button that calls window.platform.auth.login(), or let the SDK render its built-in login gate. Never draw a password input or a login form inside the page.
 
 5. Data reads: show a visitor's own records with window.platform.collection.myRecords(name), never data.list; use collection.ranking/stats for leaderboards and statistics, collection.capacity for remaining slots, and data.updateMine/deleteMine for edits.
+
+Pagination: records, myRecords and ranking return {items, total, page, pageSize, hasNextPage}; data.list accepts query {limit, page}. When complete coverage is required, continue with page + 1 until hasNextPage is false (or fewer than pageSize items are returned) and do not claim full coverage before then.
 
 6. Minimal example:
    <form data-connor-collection="registrations">
@@ -96,8 +98,8 @@ public actor InteractiveWebToolRuntime {
         return try status(project)
     }
 
-	public func remoteProjects(limit: Int) async throws -> [InteractiveWebRemoteProject] {
-		try await requireAPI().projects(limit: limit)
+	public func remoteProjects(limit: Int, page: Int = 1) async throws -> [InteractiveWebRemoteProject] {
+		try await requireAPI().projects(limit: limit, page: page)
 	}
 
 	public func remoteProject(id: String) async throws -> InteractiveWebRemoteProjectDetail {
@@ -256,10 +258,10 @@ public actor InteractiveWebToolRuntime {
         return try status(project)
     }
 
-    public func records(projectID: String, collection: String, limit: Int) async throws -> InteractiveWebRecordPage {
+    public func records(projectID: String, collection: String, limit: Int, page: Int = 1) async throws -> InteractiveWebRecordPage {
         let api = try requireAPI()
         let remoteProjectID = try await remoteProjectID(for: projectID)
-        return try await api.records(projectID: remoteProjectID, collection: collection, limit: limit)
+        return try await api.records(projectID: remoteProjectID, collection: collection, limit: limit, page: page)
     }
 
     public func exportRecords(projectID: String, collection: String) async throws -> InteractiveWebExportResult {
@@ -438,7 +440,7 @@ public struct InteractiveWebAgentTool: AgentTool {
     public var description: String {
         switch operation {
 		case .sdkUsage: "Return the interactive-web SDK v1 contract: the backend-provided absolute script path (/api/v1/sdk/v1.js), the window.platform API surface, form and event conventions, login gating rules, data-access rules, and a minimal example. Call this before creating or editing a webpage draft whenever you need exact SDK usage."
-		case .listProjects: "List the signed-in user's published interactive webpage projects."
+		case .listProjects: "List the signed-in user's published interactive webpage projects, one page at a time (default 50 per page, max 100). Continue with page until fewer than limit items are returned."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
 		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas and submission rules when the page accepts registrations, feedback, votes, or other submissions. Before generating the page, call interactive_web_sdk_usage to get the complete SDK contract and example. Every page must load the backend-provided absolute SDK path /api/v1/sdk/v1.js and use window.platform instead of constructing API URLs; drafts without the SDK script are rejected with step-by-step fix guidance. The tool writes files into the app-managed user-data sandbox and does not publish anything."
@@ -449,7 +451,7 @@ public struct InteractiveWebAgentTool: AgentTool {
         case .rollback: "Rollback a published webpage to a specific deployment. Always requires native human approval."
         case .setAccess: "Change who can access a published webpage. Always requires native human approval."
         case .offline: "Take a published webpage offline. Always requires native human approval."
-        case .recordsSummary: "Read recent records submitted through a published interactive webpage collection."
+        case .recordsSummary: "Read submitted records from a published interactive webpage collection, one page at a time (default 100 per page, max 1000). Continue with page until hasNextPage is false so all records are covered."
         case .exportRecords: "Export submitted webpage records to CSV. Always requires native human approval."
         }
     }
@@ -458,7 +460,7 @@ public struct InteractiveWebAgentTool: AgentTool {
 		case .sdkUsage:
 			.closedObject(properties: [:], required: [])
 		case .listProjects:
-			.closedObject(properties: ["limit": .integer(description: "1 through 100")], required: [])
+			.closedObject(properties: ["limit": .integer(description: "1 through 100"), "page": .integer(description: "1-based page number; default 1")], required: [])
 		case .getProject, .downloadProject:
 			.closedObject(properties: ["remoteProjectID": .string(description: "Exact online project ID")], required: ["remoteProjectID"])
         case .createDraft:
@@ -511,7 +513,7 @@ public struct InteractiveWebAgentTool: AgentTool {
         case .setAccess:
             .object(properties: ["projectID": .string(description: "Exact local project ID"), "accessMode": .stringEnumeration(values: ["public", "password", "private"], description: "Who can access the site"), "password": .string(description: "Required only for password access")], required: ["projectID", "accessMode"])
         case .recordsSummary:
-            .object(properties: ["projectID": .string(description: "Exact local project ID, or the online project ID from interactive_web_list_projects"), "collection": .string(description: "Collection name"), "limit": .integer(description: "1 through 1000")], required: ["projectID", "collection"])
+            .object(properties: ["projectID": .string(description: "Exact local project ID, or the online project ID from interactive_web_list_projects"), "collection": .string(description: "Collection name"), "limit": .integer(description: "1 through 1000"), "page": .integer(description: "1-based page number; default 1")], required: ["projectID", "collection"])
         case .exportRecords:
             .closedObject(properties: ["projectID": .string(description: "Exact local project ID, or the online project ID from interactive_web_list_projects"), "collection": .string(description: "Collection name")], required: ["projectID", "collection"])
         }
@@ -562,7 +564,7 @@ public struct InteractiveWebAgentTool: AgentTool {
 			json = nil
 		case .listProjects:
 			status = nil
-			let projects = try await runtime.remoteProjects(limit: min(max(arguments.int("limit") ?? 50, 1), 100))
+			let projects = try await runtime.remoteProjects(limit: min(max(arguments.int("limit") ?? 50, 1), 100), page: max(arguments.int("page") ?? 1, 1))
 			json = try encode(projects); text = "Online interactive webpage projects loaded."
 		case .getProject:
 			status = nil
@@ -612,14 +614,15 @@ public struct InteractiveWebAgentTool: AgentTool {
         case .recordsSummary:
             status = nil
             let collection = try requiredString("collection", arguments)
-            let page = try await runtime.records(projectID: requiredString("projectID", arguments), collection: collection, limit: min(max(arguments.int("limit") ?? 100, 1), 1000))
+            let page = try await runtime.records(projectID: requiredString("projectID", arguments), collection: collection, limit: min(max(arguments.int("limit") ?? 100, 1), 1000), page: max(arguments.int("page") ?? 1, 1))
             json = try encode(page)
             let visible = page.items.prefix(50)
             let lines = visible.map { record in
                 "id=\(record.id), status=\(record.status), createdAt=\(Self.isoDate(record.createdAt)), data=\(Self.compactJSON(record.data))"
             }
+            let pageNote = page.hasNextPage == true ? " (hasNextPage; continue with page \(max((page.page ?? 1), 1) + 1))" : ""
             let truncated = page.items.count > visible.count ? "\n[showing first \(visible.count) of \(page.total) records]" : ""
-            text = "Loaded \(page.items.count) of \(page.total) interactive webpage records for \(collection):\n" + lines.joined(separator: "\n") + truncated
+            text = "Loaded \(page.items.count) of \(page.total) interactive webpage records for \(collection) (page \(page.page ?? 1))\(pageNote):\n" + lines.joined(separator: "\n") + truncated
         case .exportRecords:
             try requireExternalApproval(context)
             status = nil
