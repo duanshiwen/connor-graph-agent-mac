@@ -1,5 +1,10 @@
 import Foundation
 
+// Legacy phased-loop preflight/attention policies. The current Runtime-assisted
+// loop preloads Memory, profile, and Note candidates and performs final
+// Attention itself, so these correction messages do not apply to that mode and
+// must not be injected alongside the Runtime-assisted protocol.
+
 /// Classifies evidence already gathered for answer-quality checks.
 public struct AgentEvidenceValidationPolicy: Sendable, Equatable {
     public static let webEvidenceTools = ["web_search", "web_fetch"]

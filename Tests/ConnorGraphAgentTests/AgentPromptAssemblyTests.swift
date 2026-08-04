@@ -373,7 +373,8 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptConditionallyUsesMemoryAndWebSearch() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("On every user run, startup continuity includes every available"))
+    #expect(prompt.contains("In the phased loop (no deterministic context preload), startup continuity includes every available"))
+    #expect(prompt.contains("In the Runtime-assisted loop, the Runtime already preloads Memory, profile, and Note candidates; do not repeat those generic startup reads"))
     #expect(prompt.contains("give the two context tools only compact topic keywords, entity names, or subject phrases tied to the actual user request"))
     #expect(prompt.contains("Use `web_search` when the user asks to search, research, look up, verify, or consult external sources"))
     #expect(prompt.contains("strongly prefer checking current authoritative guidance and established external best practices"))

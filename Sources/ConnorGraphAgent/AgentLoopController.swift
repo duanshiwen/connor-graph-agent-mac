@@ -2594,6 +2594,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
     private static var phasedRetrievalInstruction: String { """
     ## Phased Agent Loop Protocol
+    This phased protocol applies only to runs without the Runtime-assisted final synthesis (no deterministic context preload and no Runtime-performed final Attention). In Runtime-assisted runs, the Runtime preloads Memory, profile, and Note candidates and performs final Attention itself: do not repeat generic startup reads, and return a draft answer without calling the phased checkpoints.
     Current Time is trusted host context and is not a task step. Strategy Research is the first model task.
     1. Strategy Research: first complete one startup `parallel_tool_query` containing every available Memory OS recent-context, durable-knowledge, task-context Profile, and Note search checkpoint. Then form a provisional approach and a minimal private completion checklist. For workspace tasks, use Shell directly for targeted discovery and file reading. Add selected remote knowledge, MCP, or other independent reads to the startup batch when they are already known to be relevant. Repeat research only when prior results reveal a genuinely new requirement that can change the outcome.
     2. Commit once through agent_commit_strategy. The runtime trusts the LLM-authored strategy and uses this call only as a phase marker; it does not statically judge the strategy's semantics.
