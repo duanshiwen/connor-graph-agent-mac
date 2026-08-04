@@ -807,6 +807,19 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         }
     }
 
+    /// 合并同步专用：执行期间临时关闭外键约束。
+    /// 同步数据可能引用尚未到达（或本机不存在）的父记录——例如安卓端 L2
+    /// statement 的 subject 可能是自由文本/实体 id，而本表要求 subject 存在于
+    /// memory_l2_nodes；REPLACE 重写已存在实体时也会先删除被引用的旧行。
+    /// 这些都会触发 FOREIGN KEY constraint failed，导致同步中断。合并同步
+    /// 的数据完整性由两端投影保证，外键约束只对本地管线有增量价值，故同步写入
+    /// 期间放开。
+    public func withForeignKeysDisabled<T>(_ body: () throws -> T) rethrows -> T {
+        try withDatabaseLock { try executeUnlocked("PRAGMA foreign_keys = OFF;") }
+        defer { try? withDatabaseLock { try executeUnlocked("PRAGMA foreign_keys = ON;") } }
+        return try body()
+    }
+
     public func query(sql: String) throws -> [[String]] {
         try withDatabaseLock {
             var statement: OpaquePointer?

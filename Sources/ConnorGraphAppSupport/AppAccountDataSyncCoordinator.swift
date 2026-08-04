@@ -140,6 +140,7 @@ public actor AppAccountDataSyncCoordinator {
         let stateKey = "ConnorAccountSyncState.\(userID)"
         var state = loadState(key: stateKey)
         var hasMore = false
+        var appliedKeys: [String] = []
         repeat {
             let page = try await identity.pullSyncChanges(cursor: state.cursor)
             for change in page.changes where isSyncableRecord(change.collection, change.recordId) {
@@ -149,13 +150,23 @@ public actor AppAccountDataSyncCoordinator {
                 if change.sourceDeviceId != deviceID, let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(clear.change) }) {
                     record(kind, in: &syncResult)
                 }
-                state.records[recordKey(change.collection, change.recordId)] = RecordState(version: change.version ?? 0, hash: try payloadHash(clear.change.payload), deleted: false, encrypted: clear.encrypted)
+                let key = recordKey(change.collection, change.recordId)
+                state.records[key] = RecordState(version: change.version ?? 0, hash: "", deleted: false, encrypted: clear.encrypted)
+                appliedKeys.append(key)
             }
             state.cursor = page.nextCursor; hasMore = page.hasMore
             saveState(state, key: stateKey)
         } while hasMore
 
         let projected = try projections()
+        // 状态哈希回填为“本地重新编码后的投影”哈希，而不是远端载荷哈希：
+        // 两端编码（键序/日期格式/可选字段）不同，若保存远端载荷哈希，下一次投影
+        // 比较必然不相等，会把刚收到的记录又推回去，形成两端无限互推。
+        for key in appliedKeys {
+            guard var record = state.records[key], let payload = projected[key] else { continue }
+            record.hash = try payloadHash(payload)
+            state.records[key] = record
+        }
         var mutations: [ConnorSyncChange] = []
         for (key, payload) in projected where state.records[key]?.hash != (try payloadHash(payload)) || state.records[key]?.encrypted != true {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
@@ -225,27 +236,27 @@ public actor AppAccountDataSyncCoordinator {
         case ("memory_l2", _):
             guard let memory else { return nil }
             let wire: SyncMemoryL2Statement = try decode(change.payload)
-            try memory.upsert(statement: wire.makeStatement())
+            try memory.withForeignKeysDisabled { try memory.upsert(statement: wire.makeStatement()) }
             return nil
         case ("memory_l2_nodes", _):
             guard let memory else { return nil }
             let wire: SyncMemoryL2Node = try decode(change.payload)
-            try memory.upsert(node: wire.makeNode())
+            try memory.withForeignKeysDisabled { try memory.upsert(node: wire.makeNode()) }
             return nil
         case ("memory_l3", _):
             guard let memory else { return nil }
             let wire: SyncMemoryL3Belief = try decode(change.payload)
-            try memory.upsert(belief: wire.makeBelief())
+            try memory.withForeignKeysDisabled { try memory.upsert(belief: wire.makeBelief()) }
             return nil
         case ("memory_l4_entities", _):
             guard let memory else { return nil }
             let wire: SyncMemoryL4Entity = try decode(change.payload)
-            try memory.upsert(entity: wire.makeEntity())
+            try memory.withForeignKeysDisabled { try memory.upsert(entity: wire.makeEntity()) }
             return nil
         case ("memory_l4_relations", _):
             guard let memory else { return nil }
             let wire: SyncMemoryL4Relation = try decode(change.payload)
-            try memory.upsert(entityStatement: wire.makeEntityStatement())
+            try memory.withForeignKeysDisabled { try memory.upsert(entityStatement: wire.makeEntityStatement()) }
             return nil
         default: return nil
         }
