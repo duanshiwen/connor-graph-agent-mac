@@ -2,6 +2,17 @@ import Foundation
 import ConnorGraphAgent
 import ConnorGraphCore
 
+private let interactiveWebSDKRequiredHint = """
+index.html must load the interactive-web SDK. Without <script src="../sdk/v1.js"></script>, the published page cannot detect login state, gate forms, collect submissions, or let Connor analyze records; visitors only see static content.
+
+Fix it step by step:
+1. Add <script src="../sdk/v1.js"></script> inside <head>, before any other script.
+2. For each submission form, set data-connor-collection="<collection>" and add a hidden _connor_honeypot input with autocomplete="off"; listen for connor:submit-success, connor:submit-error, connor:auth-required and connor:already-submitted to show clear submitting, success, failure, login-needed and already-submitted states.
+3. For login-required collections (registration, check-in, leaderboard, owner-attributed forms), check window.platform.auth.status() and offer a login button that calls window.platform.auth.login(), or let the SDK render its built-in login gate. Never draw a password input or a login form inside the page.
+4. Show a visitor's own records with window.platform.collection.myRecords(name), never data.list; use collection.ranking/stats for leaderboards and collection.capacity for remaining slots; edit or remove their records with window.platform.data.updateMine/deleteMine.
+5. After fixing the HTML, create or update the draft again (keep the exact manifestHash from interactive_web_get_draft), then publish.
+"""
+
 public actor InteractiveWebToolRuntime {
     private let projectsRoot: URL
     private let exportsRoot: URL
@@ -295,7 +306,7 @@ public actor InteractiveWebToolRuntime {
             throw AgentToolError.invalidArguments("\(name) exceeds draft size limit")
         }
         if name == "index.html", !content.contains("sdk/v1.js") {
-            throw AgentToolError.invalidArguments("index.html must load <script src=\"../sdk/v1.js\"></script> so the page can handle login gating, forms and data through window.platform")
+            throw AgentToolError.invalidArguments(interactiveWebSDKRequiredHint)
         }
     }
 
@@ -394,7 +405,7 @@ public struct InteractiveWebAgentTool: AgentTool {
 		case .listProjects: "List the signed-in user's published interactive webpage projects."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
-		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas and submission rules when the page accepts registrations, feedback, votes, or other submissions. Generated pages must always load ../sdk/v1.js and use window.platform instead of constructing API URLs; drafts without the SDK script are rejected. The tool writes files into the app-managed user-data sandbox and does not publish anything."
+		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas and submission rules when the page accepts registrations, feedback, votes, or other submissions. Generated pages must always load ../sdk/v1.js and use window.platform instead of constructing API URLs; drafts without the SDK script are rejected with step-by-step fix guidance. The tool writes files into the app-managed user-data sandbox and does not publish anything."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash."
         case .updateDraft: "Atomically update an app-managed interactive webpage draft using exact text edits or full file replacements. Pass expectedManifestHash from interactive_web_get_draft to prevent overwriting a newer revision."
         case .getStatus: "Read the current local and published status of an interactive webpage project."
@@ -477,6 +488,8 @@ public struct InteractiveWebAgentTool: AgentTool {
         let expectedHash = try requiredString("manifestHash", arguments)
         let status = try await runtime.status(projectID: projectID)
         guard status.manifestHash == expectedHash else { throw AgentToolError.invalidArguments("manifestHash does not match the current draft") }
+        let indexSource = try await runtime.draftSource(projectID: projectID, fileName: "index.html")
+        guard indexSource.content.contains("sdk/v1.js") else { throw AgentToolError.invalidArguments(interactiveWebSDKRequiredHint) }
     }
 
     public func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {

@@ -265,6 +265,79 @@ struct InteractiveWebPlatformTests {
         }
     }
 
+    @Test func createDraftRejectsHtmlWithoutSDKWithGuidance() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        do {
+            _ = try await runtime.createDraft(sessionID: "session-1", name: "Result", html: "<h1>No SDK</h1>", css: nil, javascript: nil)
+            Issue.record("createDraft must reject index.html without the SDK")
+        } catch let error as AgentToolError {
+            let message = String(describing: error)
+            #expect(message.contains("../sdk/v1.js"))
+            #expect(message.contains("Fix it step by step"))
+            #expect(message.contains("window.platform.auth.login"))
+        }
+    }
+
+    @Test func updateDraftRejectsRemovingSDKWithGuidance() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let created = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<h1>Hello</h1><script src=\"../sdk/v1.js\"></script>",
+            css: nil,
+            javascript: nil
+        )
+        do {
+            _ = try await runtime.updateDraft(
+                projectID: created.projectID,
+                expectedManifestHash: created.manifestHash,
+                replacements: ["index.html": "<h1>No SDK</h1>"],
+                edits: [:]
+            )
+            Issue.record("updateDraft must reject index.html without the SDK")
+        } catch let error as AgentToolError {
+            #expect(String(describing: error).contains("Fix it step by step"))
+        }
+    }
+
+    @Test func publishPreflightRejectsDraftWithoutSDKWithGuidance() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let created = try await runtime.createDraft(
+            sessionID: "session-1",
+            name: "Result",
+            html: "<h1>Ready</h1><script src=\"../sdk/v1.js\"></script>",
+            css: nil,
+            javascript: nil
+        )
+        try Data("<h1>No SDK</h1>".utf8).write(to: created.rootURL.appendingPathComponent("index.html"), options: .atomic)
+        let current = try await runtime.status(projectID: created.projectID)
+        let tool = InteractiveWebAgentTool(operation: .publish, runtime: runtime)
+        let call = AgentToolCall(
+            name: tool.name,
+            argumentsJSON: "{\"projectID\":\"\(created.projectID)\",\"manifestHash\":\"\(current.manifestHash)\",\"accessMode\":\"private\"}"
+        )
+        let context = AgentToolExecutionContext(
+            runID: "run-1",
+            sessionID: "session-1",
+            groupID: "account",
+            userPrompt: "publish",
+            toolCallID: "call-1",
+            policyEngine: AgentPolicyEngine(permissionMode: .askToWrite)
+        )
+        do {
+            try await tool.preflight(call: call, context: context)
+            Issue.record("publish preflight must reject index.html without the SDK")
+        } catch let error as AgentToolError {
+            #expect(String(describing: error).contains("Fix it step by step"))
+        }
+    }
+
     private func makeRuntimeFixture() throws -> (paths: AppStoragePaths, root: URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ConnorInteractiveWebRuntime-", isDirectory: true)
