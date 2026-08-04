@@ -92,8 +92,8 @@ public struct InteractiveWebAPIClient: Sendable {
         try await get("api/v1/projects/\(projectID)/analytics")
     }
 
-    public func auditLogs(projectID: String, limit: Int = 100) async throws -> [InteractiveWebAuditEntry] {
-        try await get("api/v1/projects/\(projectID)/audit-logs?limit=\(min(max(limit, 1), 200))")
+    public func auditLogs(projectID: String, limit: Int = 100, page: Int = 1) async throws -> [InteractiveWebAuditEntry] {
+        try await get("api/v1/projects/\(projectID)/audit-logs?limit=\(min(max(limit, 1), 200))&page=\(max(page, 1))")
     }
 
     private func createProject(name: String) async throws -> RemoteProject {
