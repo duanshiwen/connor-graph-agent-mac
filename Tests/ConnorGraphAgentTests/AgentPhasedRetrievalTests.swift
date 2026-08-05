@@ -696,12 +696,36 @@ private struct PhasedArtifactTool: AgentTool {
     #expect(requests[0].messages[1].content.contains("Runtime Context (trusted, captured once for this user run)"))
     #expect(requests[0].tools.map(\.name).contains(AgentPhaseToolContract.externalSearchBatchName))
     #expect(requests[0].tools.map(\.name).contains(AgentPhaseToolContract.externalReadBatchName))
+    assertToolResultsImmediatelyFollowAssistantToolCalls(in: requests)
     let commitRequest = requests[2]
     #expect(commitRequest.messages.contains { $0.role == .tool && $0.toolCallID == "search" && $0.content.contains("Compressed research evidence") })
     #expect(commitRequest.messages.contains {
         $0.role == .tool && $0.toolCallID == "read"
             && $0.content.contains("selectedContent") && $0.content.contains("original")
     })
+}
+
+@Test func phasedLoopEmbedsRuntimeNotesInsideToolResultsAndKeepsProtocolOrder() async throws {
+    let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(id: "strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"coding","memoryDecision":{"action":"skip","reason":"historyIndependentMechanicalOrCodingTask"}}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
+        .init(text: "done")
+    ])
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: .init(toolExposureMode: .all),
+        memoryQueryProvider: PhasedTestMemoryProvider()
+    )
+    for try await _ in loop.run(.init(sessionID: "runtime-notes", userMessage: "Implement the change")) {}
+
+    let requests = await provider.capturedRequests()
+    assertToolResultsImmediatelyFollowAssistantToolCalls(in: requests)
+
+    let strategyResult = try #require(requests[1].messages.last { $0.toolCallID == "strategy" })
+    #expect(strategyResult.role == .tool)
+    #expect(strategyResult.content.contains("[TRUSTED RUNTIME NOTE] Current phase: taskExecution."))
+    #expect(!requests.flatMap(\.messages).contains { $0.role == .system && $0.content.contains("Trusted phase transition") })
 }
 
 @Test func phasedMemoryOpaqueCursorContinuesOnlyUnfinishedPartition() async throws {
@@ -741,6 +765,31 @@ private struct PhasedArtifactTool: AgentTool {
     #expect(recovered.messages.contains { $0.role == .system && $0.content.contains("phase: taskExecution") })
     #expect(recovered.messages.contains { $0.role == .system && $0.content.contains("recovered approach") })
     #expect(recovered.messages.contains { $0.role == .system && $0.content.contains("Current Time:") })
+}
+
+private func assertToolResultsImmediatelyFollowAssistantToolCalls(in requests: [AgentModelRequest]) {
+    for (requestIndex, request) in requests.enumerated() {
+        for (messageIndex, message) in request.messages.enumerated() {
+            guard message.role == .assistant,
+                  let toolCalls = message.toolCalls,
+                  !toolCalls.isEmpty else { continue }
+            var missing = Set(toolCalls.map(\.id))
+            for next in request.messages.dropFirst(messageIndex + 1) {
+                if let id = next.toolCallID, missing.contains(id) {
+                    missing.remove(id)
+                    if missing.isEmpty { break }
+                    continue
+                }
+                if !missing.isEmpty {
+                    Issue.record("Request \(requestIndex): \(next.role) message appeared before tool results completed; missing \(missing.sorted())")
+                    return
+                }
+            }
+            if !missing.isEmpty {
+                Issue.record("Request \(requestIndex): tool results missing for \(missing.sorted())")
+            }
+        }
+    }
 }
 
 @Test func phasedTaskExecutionRunsIndependentReadOnlyToolsInParallelByDefault() async throws {
@@ -952,5 +1001,6 @@ private struct PhasedArtifactTool: AgentTool {
         .strategyResearch, .strategyResearch, .strategyResearch, .taskExecution,
         .finalSynthesis, .strategyResearch, .strategyResearch, .taskExecution, .finalSynthesis
     ])
-    #expect(requests[5].messages.contains { $0.role == .system && $0.content.contains("call agent_commit_strategy again") })
+    assertToolResultsImmediatelyFollowAssistantToolCalls(in: requests)
+    #expect(requests[5].messages.contains { $0.role == .tool && $0.content.contains("call agent_commit_strategy again") })
 }

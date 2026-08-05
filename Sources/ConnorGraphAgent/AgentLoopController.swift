@@ -1000,7 +1000,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                         conflicts: [],
                                         unresolvedQuestions: plan.unresolvedQuestions
                                     ))
-                                    messages.append(AgentModelMessage(role: .system, content: "Trusted phase transition: strategy accepted. Current phase: \(phasedState.phase.rawValue). The deterministic bootstrap already completed Memory and Note preparation; execute the committed plan without repeating generic startup retrieval."))
                                 case AgentPhaseToolContract.memoryQueryName:
                                     if phasedState.phase == .finalSynthesis { phasedState.resumeMemoryPreparation() }
                                     phasedState.completeMemoryPreparation()
@@ -1042,6 +1041,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                         for (batchIndex, batchResult) in batchResults.enumerated() {
                             let selectedNames = Self.selectedNativeToolNames(in: [batchResult.call])
+                            var runtimeToolResultNote: String?
+                            if batchResult.result.error == nil,
+                               batchResult.call.name == AgentPhaseToolContract.commitStrategyName {
+                                runtimeToolResultNote = "Current phase: \(phasedState.phase.rawValue)."
+                            }
                             if selectedNames.contains("memory_os_update_current_user_profile"),
                                batchResult.result.error == nil {
                                 isFinalResponseProfileComplete = false
@@ -1074,11 +1078,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     producedNewEvidence: added > 0
                                 )
                                 if added == 0 {
-                                    messages.append(AgentModelMessage(role: .system, content: "This research batch added no new evidence. Do not repeat or paraphrase it; refine the research target or commit the strategy."))
+                                    runtimeToolResultNote = "This research batch added no new evidence. Do not repeat or paraphrase it; refine the research target or commit the strategy."
                                 }
                                 if phasedState.phase == .finalSynthesis {
                                     phasedState.resumeResearch()
-                                    messages.append(AgentModelMessage(role: .system, content: "Final preferences triggered renewed Strategy Research. Reassess the approach and call agent_commit_strategy again before further task execution."))
+                                    let renewedResearchNote = "Final preferences triggered renewed Strategy Research. Reassess the approach and call agent_commit_strategy again before further task execution."
+                                    runtimeToolResultNote = runtimeToolResultNote.map { "\($0)\n\(renewedResearchNote)" } ?? renewedResearchNote
                                 }
                             }
                             if batchResult.result.error == nil {
@@ -1111,6 +1116,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             let maximumVisibleToolResultTokens = batchResult.result.toolName == "note_get"
                                 ? allocatedTokens
                                 : min(allocatedTokens, AssistantRunBudget().maximumVisibleToolResultTokens)
+                            let runtimeNotePrefix = runtimeToolResultNote.map { "[TRUSTED RUNTIME NOTE] \($0)\n\n" } ?? ""
                             let modelVisibleToolContent = toolResultGate.gatedContent(
                                 for: batchResult.result,
                                 maximumEstimatedTokens: maximumVisibleToolResultTokens,
@@ -1119,7 +1125,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             remainingToolContentDemand = max(0, remainingToolContentDemand - currentDemand)
                             messages.append(AgentModelMessage(
                                 role: .tool,
-                                content: modelVisibleToolContent,
+                                content: runtimeNotePrefix + modelVisibleToolContent,
                                 toolCallID: batchResult.call.id,
                                 name: batchResult.call.name
                             ))
