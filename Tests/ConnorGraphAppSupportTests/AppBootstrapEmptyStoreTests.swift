@@ -42,12 +42,10 @@ import ConnorGraphStore
     #expect(FileManager.default.fileExists(atPath: paths.memoryOSDatabaseURL.path))
 
     let memoryStore = try SQLiteMemoryOSStore(path: paths.memoryOSDatabaseURL.path)
-    let builtin = try memoryStore.builtinDataset(id: FoundationKGMemoryOSMapper.builtinDatasetID)
     let l4Entities = try memoryStore.query(sql: "SELECT COUNT(*) FROM memory_l4_entities;").first?.first.flatMap(Int.init) ?? -1
 
     let currentUser = try memoryStore.entity(id: MemoryOSPersonIdentityConstants.currentUserEntityID)
 
-    #expect(builtin == nil)
     #expect(l4Entities == 1)
     #expect(currentUser?.stableKey == MemoryOSPersonIdentityConstants.currentUserStableKey)
     #expect(currentUser?.metadata["person_role"] == MemoryOSPersonIdentityConstants.currentUserPersonRole)
@@ -67,4 +65,3 @@ private final class EmptyBootstrapCredentialStore: CredentialStore, @unchecked S
     func readSecret(service: String, account: String) throws -> String? { secrets[service + ":" + account] }
     func deleteSecret(service: String, account: String) throws { secrets.removeValue(forKey: service + ":" + account) }
 }
-

@@ -57,8 +57,7 @@ let package = Package(
             resources: [
                 .process("Assets.xcassets"),
                 .process("zh-Hans.lproj"),
-                .process("Resources/ThirdPartyNotices"),
-                .copy("Resources/FoundationKG")
+                .process("Resources/ThirdPartyNotices")
             ],
             linkerSettings: [
                 .linkedFramework("WebKit"),
@@ -78,10 +77,6 @@ let package = Package(
         .executableTarget(
             name: "ConnorCLI",
             dependencies: ["ConnorGraphAppSupport", "ConnorGraphCore"]
-        ),
-        .executableTarget(
-            name: "ConnorFoundationKGSeedBuilder",
-            dependencies: ["ConnorGraphAppSupport", "ConnorGraphStore", "ConnorGraphCore"]
         ),
         .testTarget(name: "ConnorGraphCoreTests", dependencies: ["ConnorGraphCore"]),
         .testTarget(name: "ConnorGraphMemoryTests", dependencies: ["ConnorGraphMemory", "ConnorGraphStore"]),

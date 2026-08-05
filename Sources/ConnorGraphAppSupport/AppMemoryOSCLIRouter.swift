@@ -87,8 +87,6 @@ public enum AppMemoryOSCLIRouter {
             return try encode(try inspector.runs(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
         case "run":
             return try routeRun(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
-        case "debug-reset-foundation-kg":
-            return try encode(try debugResetFoundationKG(), encoder: encoder)
         case "pipeline":
             return try routePipeline(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
         default:
@@ -319,37 +317,6 @@ public enum AppMemoryOSCLIRouter {
             storagePaths: paths
         )
         return factory.makeAgentModelProvider()
-    }
-
-    private static func debugResetFoundationKG() throws -> [String: String] {
-        guard let builtinURL = builtinFoundationKGDatabaseURLFromEnvironment() else {
-            return ["error": "missing_builtin_foundation_kg", "usage": "Set CONNOR_BUILTIN_FOUNDATION_KG_SQLITE=/path/to/FoundationKG-Builtin-L4.sqlite"]
-        }
-        let paths = try AppStoragePaths.live()
-        try paths.ensureDirectoryHierarchy()
-        try FoundationKGBuiltinBootstrapper.resetToBuiltinDatabase(memoryOSDatabaseURL: paths.memoryOSDatabaseURL, builtinDatabaseURL: builtinURL)
-        let store = try SQLiteMemoryOSStore(path: paths.memoryOSDatabaseURL.path)
-        try store.migrate()
-        let entityCount = try store.query(sql: "SELECT COUNT(*) FROM memory_l4_entities;").first?.first ?? "0"
-        let statementCount = try store.query(sql: "SELECT COUNT(*) FROM memory_l4_entity_statements;").first?.first ?? "0"
-        return [
-            "status": "reset",
-            "database_path": paths.memoryOSDatabaseURL.path,
-            "builtin_path": builtinURL.path,
-            "l4_entities": entityCount,
-            "l4_statements": statementCount
-        ]
-    }
-
-    private static func builtinFoundationKGDatabaseURLFromEnvironment() -> URL? {
-        if let path = ProcessInfo.processInfo.environment["CONNOR_BUILTIN_FOUNDATION_KG_SQLITE"], !path.isEmpty {
-            return URL(fileURLWithPath: path)
-        }
-        if let bundled = FoundationKGBuiltinBootstrapper.builtinDatabaseURL() { return bundled }
-        let developmentResource = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("Sources/ConnorGraphAgentMac/Resources/FoundationKG/FoundationKG-Builtin-L4.sqlite")
-        if FileManager.default.fileExists(atPath: developmentResource.path) { return developmentResource }
-        return nil
     }
 
     private static func encode<T: Encodable>(_ value: T, encoder: JSONEncoder) throws -> String {

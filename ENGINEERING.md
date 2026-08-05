@@ -70,7 +70,6 @@ Libraries:
 Executables:
 - connor-graph-agent-mac          SwiftUI macOS shell
 - connor                          本地 CLI
-- ConnorFoundationKGSeedBuilder   Foundation Knowledge Graph seed tool
 ```
 
 主要 targets：
@@ -84,7 +83,6 @@ Sources/ConnorGraphAgent                Agent loop、工具、模型提供方和
 Sources/ConnorGraphAppSupport           App services、repositories、原生 runtime bridge、MCP
 Sources/ConnorGraphAgentMac             SwiftUI/AppKit macOS shell、浏览器工作区、chat viewport
 Sources/ConnorCLI                       本地 CLI 控制面
-Sources/ConnorFoundationKGSeedBuilder   Foundation KG seed data builder
 ```
 
 测试：7 个 test target，覆盖核心库模块和 app shell。
@@ -117,7 +115,6 @@ Target 职责：
 - **ConnorGraphAppSupport**：Session Capsule 持久化、LLM 设置、MCP runtime、附件服务、原生 Mail/RSS/人际关系/Calendar 适配器、浏览器上下文、技能和任务。
 - **ConnorGraphAgentMac**：原生 app shell、chat viewport、composer、审批、浏览器工作区、附件、设置和原生数据源界面。
 - **ConnorCLI**：本地可编程控制面；必须尊重 Connor 自有 repository 和策略边界。
-- **ConnorFoundationKGSeedBuilder**：从结构化来源构建 Foundation Knowledge Graph seed databases。
 
 Memory OS 不应被设计成普通用户可见的导航主界面。App 可以触发摄取、调度和工具执行，但不应该暴露 Memory OS dashboard 或直接图谱编辑器。
 
