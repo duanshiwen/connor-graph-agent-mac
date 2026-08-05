@@ -866,7 +866,7 @@ struct CraftSessionListPane: View {
                     Button("新建会话", systemImage: "square.and.pencil") {
                         sessionActions.newChatSession()
                     }
-                    if let imModel, imModel.isSignedIn {
+                    if imModel != nil {
                         Button("新建群聊", systemImage: "person.3.fill") {
                             isCreateGroupPresented = true
                         }

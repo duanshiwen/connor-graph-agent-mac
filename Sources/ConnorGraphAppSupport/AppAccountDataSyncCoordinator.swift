@@ -47,7 +47,7 @@ public struct ConnorPortableSession: Codable, Sendable, Equatable {
         governance.status = AgentSessionStatus(rawValue: status) ?? .todo
         governance.isArchived = archived
         governance.labels = labels.map(AgentSessionLabel.init(id:))
-        return AgentSession(
+        let remote = AgentSession(
             id: id, title: title,
             messages: messages.compactMap { message in
                 guard let role = AgentRole(rawValue: message.role) else { return nil }
@@ -58,6 +58,23 @@ public struct ConnorPortableSession: Codable, Sendable, Equatable {
             governance: governance,
             readState: existing?.readState ?? .initial(updatedAt: Date(timeIntervalSince1970: Double(updatedAt) / 1_000))
         )
+        guard let existing else { return remote }
+        // 合并同步按“最后更新者生效”（与 Android mergeSyncedSession 对齐）：
+        // updatedAt 更新的记录决定标题、状态、归档与标签；消息是追加式数据，
+        // 两端按 id 去重后按时间排序合并，远端旧投影不会覆盖本机尚未上传的消息。
+        let localIsNewer = existing.updatedAt > remote.updatedAt
+        let preferred = localIsNewer ? existing : remote
+        let secondary = localIsNewer ? remote : existing
+        var merged = preferred
+        var messagesByID: [String: AgentMessage] = [:]
+        for message in preferred.messages + secondary.messages where messagesByID[message.id] == nil {
+            messagesByID[message.id] = message
+        }
+        merged.messages = messagesByID.values.sorted {
+            if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+            return $0.id < $1.id
+        }
+        return merged
     }
 }
 
