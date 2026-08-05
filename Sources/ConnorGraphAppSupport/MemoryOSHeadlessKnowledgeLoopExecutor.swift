@@ -10,14 +10,16 @@ public struct MemoryOSBackgroundToolLoopConfiguration: Codable, Sendable, Equata
     public var maxToolResultBytes: Int
     public var maxTotalTokens: Int
     public var retainedDetailedMessageCount: Int
+    public var maxConsecutiveToolErrors: Int
 
     public init(
         maxToolIterations: Int = 24,
         maxToolCallsPerIteration: Int = 8,
         maxRunDurationSeconds: Int = 1800,
         maxToolResultBytes: Int = 16 * 1024,
-        maxTotalTokens: Int = 300_000,
-        retainedDetailedMessageCount: Int = 8
+        maxTotalTokens: Int = 2_000_000,
+        retainedDetailedMessageCount: Int = 8,
+        maxConsecutiveToolErrors: Int = 5
     ) {
         self.maxToolIterations = maxToolIterations
         self.maxToolCallsPerIteration = maxToolCallsPerIteration
@@ -25,6 +27,7 @@ public struct MemoryOSBackgroundToolLoopConfiguration: Codable, Sendable, Equata
         self.maxToolResultBytes = maxToolResultBytes
         self.maxTotalTokens = max(1, maxTotalTokens)
         self.retainedDetailedMessageCount = max(2, retainedDetailedMessageCount)
+        self.maxConsecutiveToolErrors = max(1, maxConsecutiveToolErrors)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -34,6 +37,7 @@ public struct MemoryOSBackgroundToolLoopConfiguration: Codable, Sendable, Equata
         case maxToolResultBytes
         case maxTotalTokens
         case retainedDetailedMessageCount
+        case maxConsecutiveToolErrors
     }
 
     public init(from decoder: Decoder) throws {
@@ -43,8 +47,9 @@ public struct MemoryOSBackgroundToolLoopConfiguration: Codable, Sendable, Equata
             maxToolCallsPerIteration: try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 8,
             maxRunDurationSeconds: try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1_800,
             maxToolResultBytes: try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 16 * 1_024,
-            maxTotalTokens: try container.decodeIfPresent(Int.self, forKey: .maxTotalTokens) ?? 300_000,
-            retainedDetailedMessageCount: try container.decodeIfPresent(Int.self, forKey: .retainedDetailedMessageCount) ?? 8
+            maxTotalTokens: try container.decodeIfPresent(Int.self, forKey: .maxTotalTokens) ?? 2_000_000,
+            retainedDetailedMessageCount: try container.decodeIfPresent(Int.self, forKey: .retainedDetailedMessageCount) ?? 8,
+            maxConsecutiveToolErrors: try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolErrors) ?? 5
         )
     }
 }
@@ -102,12 +107,14 @@ public enum MemoryOSHeadlessKnowledgeLoopError: Error, Sendable, Equatable, Cust
     case exceededMaxIterations(Int)
     case exceededMaxRunDuration(Int)
     case exceededTokenBudget(Int)
+    case exceededMaxConsecutiveToolErrors(Int)
 
     public var description: String {
         switch self {
         case .exceededMaxIterations(let value): "exceededMaxIterations: \(value)"
         case .exceededMaxRunDuration(let value): "exceededMaxRunDuration: \(value)"
         case .exceededTokenBudget(let value): "exceededTokenBudget: \(value)"
+        case .exceededMaxConsecutiveToolErrors(let value): "exceededMaxConsecutiveToolErrors: \(value)"
         }
     }
 }
@@ -172,6 +179,7 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
         var sequence = messages.count
         var toolCallCount = 0
         var totalTokens = 0
+        var consecutiveToolErrors = 0
 
         do {
             for iteration in 1...configuration.maxToolIterations {
@@ -226,6 +234,10 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                         log("  → \(call.name)(\(truncateJSON(call.argumentsJSON, max: 200)))")
                         let replayedResult = try replayableToolResult(for: call, runID: runID)
                         let result = try replayedResult ?? toolExecutor.execute(call, context: MemoryOSBackgroundToolExecutionContext(runID: runID, iteration: iteration))
+                        consecutiveToolErrors = result.error == nil ? 0 : consecutiveToolErrors + 1
+                        if consecutiveToolErrors > configuration.maxConsecutiveToolErrors {
+                            throw MemoryOSHeadlessKnowledgeLoopError.exceededMaxConsecutiveToolErrors(configuration.maxConsecutiveToolErrors)
+                        }
                         let resultJSON = capped(result.contentJSON)
                         try store.save(backgroundToolCall: MemoryOSBackgroundToolCallRecord(id: call.id, runID: runID, iteration: iteration, toolName: call.name, argumentsJSON: call.argumentsJSON, resultJSON: resultJSON, status: result.error == nil ? .succeeded : .failed, startedAt: toolStartedAt, finishedAt: now(), errorMessage: result.error, metadata: [
                             "citations": result.citations.joined(separator: ","),

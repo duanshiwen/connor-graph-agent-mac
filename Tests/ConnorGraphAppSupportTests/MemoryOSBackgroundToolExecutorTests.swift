@@ -13,12 +13,12 @@ struct MemoryOSBackgroundToolExecutorTests {
         try store.migrate()
         let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
 
-        #expect(throws: MemoryOSBackgroundToolExecutionError.self) {
-            try executor.execute(
-                MemoryOSBackgroundToolCall(id: "call-1", name: "shell", argumentsJSON: "{}"),
-                context: MemoryOSBackgroundToolExecutionContext(runID: "run-1", iteration: 1)
-            )
-        }
+        let rejected = try executor.execute(
+            MemoryOSBackgroundToolCall(id: "call-1", name: "shell", argumentsJSON: "{}"),
+            context: MemoryOSBackgroundToolExecutionContext(runID: "run-1", iteration: 1)
+        )
+        #expect(rejected.error != nil)
+        #expect(rejected.error?.contains("toolNotAllowed") == true)
     }
 
     @Test func readsProvenanceThroughReadonlyBackgroundTool() throws {
@@ -155,9 +155,9 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(recent.citations.contains("status"))
         #expect(recentResponse.hasNextPage == false)
         #expect(recentResponse.nextPage == nil)
-        #expect(throws: MemoryOSBackgroundToolExecutionError.self) {
-            try executor.execute(MemoryOSBackgroundToolCall(id: "legacy", name: "memory_os_context", argumentsJSON: #"{"query":"Context Split"}"#), context: context)
-        }
+        let legacy = try executor.execute(MemoryOSBackgroundToolCall(id: "legacy", name: "memory_os_context", argumentsJSON: #"{"query":"Context Split"}"#), context: context)
+        #expect(legacy.error != nil)
+        #expect(legacy.error?.contains("toolNotAllowed") == true)
     }
 
     @Test func contextPaginationReturnsSequentialStructuredRecords() throws {

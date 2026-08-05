@@ -314,9 +314,13 @@ public actor AppAccountDataSyncCoordinator {
             try memory.withForeignKeysDisabled {
                 if change.deleted {
                     try memory.deleteCaptureEvent(id: id)
-                } else {
-                    let wire: SyncL1Capture = try decode(change.payload)
+                } else if let wire: SyncL1Capture = try? decode(change.payload) {
                     try memory.upsert(captureEvent: wire.makeCaptureEvent())
+                } else {
+                    // 历史后端曾把 tombstone 的 deleted 恒置 false，载荷只剩 updatedAt，
+                    // 无法按 SyncL1Capture 解码。L1 是可重建的临时工作记忆（L0 永久保留），
+                    // 这里按删除意图处理，避免同步卡死在“必填字段缺失”。
+                    try memory.deleteCaptureEvent(id: id)
                 }
             }
             return nil

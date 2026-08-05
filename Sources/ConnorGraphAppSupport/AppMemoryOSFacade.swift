@@ -71,6 +71,7 @@ public struct AppMemoryOSOperationalSummary: Sendable, Equatable, Codable {
     public var l1PendingQueueCount: Int
     public var l1DeadLetterCount: Int
     public var l1RetryScheduledCount: Int
+    public var l1PausedCount: Int
     public var l1ExpiredLeaseCount: Int
     public var l2StatementCount: Int
     public var l2DiagnosticCount: Int
@@ -87,6 +88,7 @@ public struct AppMemoryOSOperationalSummary: Sendable, Equatable, Codable {
         l1PendingQueueCount: Int = 0,
         l1DeadLetterCount: Int = 0,
         l1RetryScheduledCount: Int = 0,
+        l1PausedCount: Int = 0,
         l1ExpiredLeaseCount: Int = 0,
         l2StatementCount: Int = 0,
         l2DiagnosticCount: Int = 0,
@@ -102,6 +104,7 @@ public struct AppMemoryOSOperationalSummary: Sendable, Equatable, Codable {
         self.l1PendingQueueCount = l1PendingQueueCount
         self.l1DeadLetterCount = l1DeadLetterCount
         self.l1RetryScheduledCount = l1RetryScheduledCount
+        self.l1PausedCount = l1PausedCount
         self.l1ExpiredLeaseCount = l1ExpiredLeaseCount
         self.l2StatementCount = l2StatementCount
         self.l2DiagnosticCount = l2DiagnosticCount
@@ -248,6 +251,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             l1PendingQueueCount: l1PendingQueueCount,
             l1DeadLetterCount: queueSnapshot.deadLetter,
             l1RetryScheduledCount: queueSnapshot.retryScheduled,
+            l1PausedCount: try countPausedBackgroundJobs(now: now),
             l1ExpiredLeaseCount: queueSnapshot.expiredLeases,
             l2StatementCount: try count("memory_l2_statements"),
             l2DiagnosticCount: 0,
@@ -699,13 +703,29 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 }
             } catch {
                 let classification = MemoryOSBackgroundFailureClassifier().classify(error)
+                if classification.strategy == .downscale {
+                    do {
+                        let downscaled = try replanDownscaledBackgroundJob(
+                            leased,
+                            errorCode: classification.errorCode,
+                            errorMessage: String(describing: error),
+                            now: now
+                        )
+                        summaries.append(downscaled)
+                        continue
+                    } catch {
+                        // Re-planning itself failed (e.g. a store error): fall through to the
+                        // normal failure recording so the batch is never lost.
+                    }
+                }
                 let failed = try recordQueueFailure(
                     leased,
                     errorCode: classification.errorCode,
                     errorMessage: String(describing: error),
                     now: now,
                     retryable: classification.retryable,
-                    retryDelay: classification.retryDelay
+                    retryDelay: classification.retryDelay,
+                    strategy: classification.strategy
                 )
                 try saveBackgroundJobAudit(eventType: "memory_os.background_job.model_failed", subjectID: leased.id, payload: ["error_code": failed.errorCode ?? "background_ai_job_failed", "status": failed.status.rawValue], now: now)
                 if failed.status == .deadLetter {
@@ -738,14 +758,23 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         errorMessage: String,
         now: Date = Date(),
         retryable: Bool = true,
-        retryDelay: TimeInterval? = nil
+        retryDelay: TimeInterval? = nil,
+        strategy: MemoryOSBackgroundFailureStrategy = .retry
     ) throws -> MemoryOSQueueItem {
         let isDurableBackgroundJob = MemoryOSBackgroundJobKind.isL1KnowledgeKind(item.kind)
         var failureItem = item
         if isDurableBackgroundJob {
             failureItem.maxAttempts = .max
         }
-        let effectiveRetryDelay = retryDelay ?? (isDurableBackgroundJob && !retryable ? 3_600 : nil)
+        let effectiveRetryDelay: TimeInterval?
+        switch strategy {
+        case .pause:
+            // User must fix credentials/billing/configuration first: probe on a long cadence
+            // instead of spinning on a short timer.
+            effectiveRetryDelay = MemoryOSBackgroundFailureClassifier.pauseProbeInterval
+        case .retry, .downscale:
+            effectiveRetryDelay = retryDelay ?? (isDurableBackgroundJob && !retryable ? 3_600 : nil)
+        }
         let transitioned = MemoryOSQueueTransitionService().markFailed(
             failureItem,
             errorCode: errorCode,
@@ -761,6 +790,150 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         }
         try store.save(audit: MemoryOSAuditEvent(eventType: "memory_os.queue.failure", subjectID: item.id, payload: ["status": transitioned.status.rawValue, "error_code": errorCode], createdAt: now))
         return transitioned
+    }
+
+    /// Deterministic batch-scope failure (token budget, iteration cap, duration cap, context
+    /// length, repeated tool errors): split the batch into smaller jobs and retry instead of
+    /// re-running the same oversized payload. A single remaining event is isolated so it can
+    /// never block the rest of the pipeline.
+    public func replanDownscaledBackgroundJob(
+        _ item: MemoryOSQueueItem,
+        errorCode: String,
+        errorMessage: String,
+        now: Date = Date()
+    ) throws -> MemoryOSProjectionRunSummary {
+        let draft = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, item.payloadJSON)
+        let events = try store.captureEvents(ids: draft.captureEventIDs)
+        let originalContentByProvenanceID = try Dictionary(uniqueKeysWithValues: events.map { event in
+            guard let object = try store.provenanceObject(id: event.provenanceObjectID) else {
+                throw SQLiteMemoryOSStoreError.missingRecord("Missing L0 provenance object: \(event.provenanceObjectID)")
+            }
+            return (event.provenanceObjectID, object.content)
+        })
+
+        guard events.count > 1 else {
+            // Last downscale level: isolate the single poison event so it cannot block others.
+            var isolated = item
+            isolated.status = .cancelled
+            isolated.errorCode = "background_ai_single_event_isolated"
+            isolated.errorMessage = errorMessage
+            isolated.nextRunAt = now
+            isolated.lockedAt = nil
+            isolated.lockedBy = nil
+            isolated.leaseExpiresAt = nil
+            isolated.updatedAt = now
+            try store.enqueue(isolated)
+            try store.saveDeadLetter(queueItem: isolated, now: now, metadata: [
+                "reason": "downscale_isolation",
+                "original_error_code": errorCode
+            ])
+            try store.saveQueueAttempt(queueItemID: item.id, attemptNumber: item.attemptCount + 1, status: .cancelled, startedAt: item.lockedAt ?? now, finishedAt: now, errorCode: "background_ai_single_event_isolated", errorMessage: errorMessage)
+            for event in events {
+                var dead = event
+                dead.processingState = .deadLetter
+                try store.upsert(captureEvent: dead)
+            }
+            try saveBackgroundJobAudit(eventType: "memory_os.background_job.single_event_isolated", subjectID: item.id, payload: [
+                "event_count": String(events.count),
+                "event_id": events.first?.id ?? "",
+                "error_code": errorCode
+            ], now: now)
+            return MemoryOSProjectionRunSummary(artifactID: item.id, accepted: false, issues: [MemoryOSValidationIssue(code: "background_ai_single_event_isolated", message: "Event isolated after repeated batch failures: \(errorCode)")])
+        }
+
+        let level = Int(draft.metadata["downscale_level"] ?? "") ?? 0
+        let targetSize = max(1, (events.count + 1) / 2)
+        let policy = MemoryOSL1ProcessingTriggerPolicy(
+            minPendingCount: 1,
+            maxEventsPerBlock: targetSize,
+            maxTokensPerBlock: Int.max,
+            maxPendingAge: nil
+        )
+        let subDrafts = MemoryOSL1UnifiedProjectionJobPlanner(policy: policy)
+            .planJobs(from: events, originalContentByProvenanceID: originalContentByProvenanceID, now: now)
+        let enriched = subDrafts.enumerated().map { index, subDraft in
+            var sub = subDraft
+            sub.kind = item.kind
+            sub.schemaName = draft.schemaName
+            sub.metadata["downscale_level"] = String(level + 1)
+            sub.metadata["parent_queue_item_id"] = item.id
+            sub.metadata["downscale_reason"] = errorCode
+            return sub
+        }
+
+        var inserted: [MemoryOSQueueItem] = []
+        for (index, sub) in enriched.enumerated() {
+            var queueItem = MemoryOSQueueItem(
+                kind: sub.kind,
+                priority: 10,
+                payloadJSON: store.json(sub),
+                maxAttempts: .max,
+                nextRunAt: now,
+                idempotencyKey: "\(sub.kind):\(sub.captureEventIDs.joined(separator: ","))",
+                payloadHash: String(sub.prompt.hashValue),
+                createdAt: now,
+                updatedAt: now
+            )
+            if index == 0 {
+                // Replace the failed parent in place (upsert by id) so no duplicate exists.
+                queueItem.id = item.id
+                try store.enqueue(queueItem)
+                inserted.append(queueItem)
+            } else {
+                switch try store.enqueueIfAbsent(queueItem) {
+                case .inserted(let insertedItem):
+                    inserted.append(insertedItem)
+                case .existing:
+                    break
+                }
+            }
+        }
+
+        try store.saveQueueAttempt(queueItemID: item.id, attemptNumber: item.attemptCount + 1, status: .failed, startedAt: item.lockedAt ?? now, finishedAt: now, errorCode: errorCode, errorMessage: errorMessage)
+        try saveBackgroundJobAudit(eventType: "memory_os.background_job.downscaled", subjectID: item.id, payload: [
+            "event_count": String(draft.captureEventIDs.count),
+            "chunk_count": String(inserted.count),
+            "downscale_level": String(level + 1),
+            "error_code": errorCode
+        ], now: now)
+        return MemoryOSProjectionRunSummary(
+            artifactID: item.id,
+            accepted: false,
+            issues: [MemoryOSValidationIssue(
+                code: "background_ai_batch_downscaled",
+                message: "Batch downscaled from \(draft.captureEventIDs.count) to \(targetSize) events per job after \(errorCode)"
+            )]
+        )
+    }
+
+    public func countPausedBackgroundJobs(now: Date = Date()) throws -> Int {
+        try store.queueItems(
+            kinds: MemoryOSBackgroundJobKind.executableRawValues,
+            statuses: [.pending, .retryScheduled],
+            errorCodes: Array(MemoryOSBackgroundFailureClassifier.userActionErrorCodes)
+        ).count
+    }
+
+    /// Bring paused (user-action) jobs back to runnable now. Called on the daily sweep so a
+    /// paused batch is probed periodically instead of spinning or being abandoned.
+    public func resumePausedBackgroundJobs(now: Date = Date()) throws -> Int {
+        let paused = try store.queueItems(
+            kinds: MemoryOSBackgroundJobKind.executableRawValues,
+            statuses: [.pending, .retryScheduled],
+            errorCodes: Array(MemoryOSBackgroundFailureClassifier.userActionErrorCodes)
+        )
+        var resumed = 0
+        for item in paused where item.nextRunAt > now {
+            var updated = item
+            updated.nextRunAt = now
+            updated.updatedAt = now
+            try store.enqueue(updated)
+            resumed += 1
+        }
+        if resumed > 0 {
+            try saveBackgroundJobAudit(eventType: "memory_os.background_job.paused_resumed", subjectID: "memory-os", payload: ["count": String(resumed)], now: now)
+        }
+        return resumed
     }
 
     public func recoverExpiredBackgroundQueueLeases(now: Date = Date(), limit: Int = 100) throws -> Int {

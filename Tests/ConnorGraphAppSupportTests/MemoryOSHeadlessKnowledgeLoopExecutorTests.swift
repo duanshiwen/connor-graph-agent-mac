@@ -45,7 +45,50 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
         let messages = try store.backgroundMessages(runID: "run-1")
         #expect(messages.first?.content == "Preset prompt + current L1 batch only")
         #expect(messages.contains { $0.role == .tool && $0.toolName == "memory_os_search" })
-        #expect(try store.backgroundToolCalls(runID: "run-1").count == 1)
+    #expect(try store.backgroundToolCalls(runID: "run-1").count == 1)
+    }
+
+    @Test func defaultLoopConfigurationBudgetAccommodatesBackgroundBatch() {
+        let configuration = MemoryOSBackgroundToolLoopConfiguration()
+
+        #expect(configuration.maxTotalTokens == 2_000_000)
+        #expect(configuration.maxConsecutiveToolErrors == 5)
+    }
+
+    @Test func repeatedToolErrorsExceedCapAndDownscale() async throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryHeadlessLoopDatabaseURL().path)
+        try store.migrate()
+        let model = ScriptedLoopModel(script: (1...6).map { _ in
+            MemoryOSBackgroundLoopModelResponse(
+                toolCalls: [
+                    MemoryOSBackgroundToolCall(
+                        id: "bad-tool-\(UUID().uuidString)",
+                        name: "memory_os_recent_context",
+                        argumentsJSON: #"{"unsupported":true}"#
+                    )
+                ]
+            )
+        })
+        let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
+            model: model,
+            toolExecutor: MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store)),
+            store: store
+        )
+        let request = MemoryOSBackgroundModelRequest(
+            jobID: "job-tool-errors",
+            kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
+            schemaName: "MemoryOSL1UnifiedProjectionOutput",
+            artifactType: "memory_os_l1_unified_projection",
+            prompt: "Process the batch.",
+            metadata: ["background_run_id": "run-tool-errors"]
+        )
+
+        do {
+            _ = try await executor.execute(request)
+            Issue.record("Expected the consecutive tool error cap to abort the run")
+        } catch let error as MemoryOSHeadlessKnowledgeLoopError {
+            #expect(error == .exceededMaxConsecutiveToolErrors(5))
+        }
     }
 
     @Test func facadeQueueRunnerInjectsQueueMetadataIntoHeadlessRun() async throws {

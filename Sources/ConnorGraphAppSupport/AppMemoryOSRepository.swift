@@ -81,9 +81,12 @@ public struct AppMemoryOSBackgroundJobRunner: Sendable {
         }
 
         let summary = try facade.operationalSummary(now: now)
+        let pausedCount = try facade.countPausedBackgroundJobs(now: now)
         let attentionMessage: String?
         if summary.l1DeadLetterCount > 0 {
             attentionMessage = "Memory OS 有 \(summary.l1DeadLetterCount) 个后台任务需要处理，请检查 LLM 连接、余额或模型配置。"
+        } else if pausedCount > 0 {
+            attentionMessage = "Memory OS 有 \(pausedCount) 个后台任务因 LLM 凭据、余额或配置问题暂停，请检查 LLM 连接设置。"
         } else if summary.l1RetryScheduledCount > 0 {
             attentionMessage = "Memory OS 有 \(summary.l1RetryScheduledCount) 个后台任务正在等待自动重试。"
         } else if aiExecutorProvider == nil && summary.l1PendingQueueCount > 0 {

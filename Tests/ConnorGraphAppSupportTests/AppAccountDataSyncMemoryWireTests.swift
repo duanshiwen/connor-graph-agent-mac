@@ -49,4 +49,53 @@ struct AppAccountDataSyncMemoryWireTests {
         #expect(wire.sourceArtifactId == nil)
         #expect(wire.makeStatement().text == "hello")
     }
+
+    @Test func l1CaptureWireAlwaysEmitsRetrievalTextAsNull() throws {
+        let event = MemoryOSCaptureEvent(
+            id: "c1",
+            provenanceObjectID: "p1",
+            eventType: "user",
+            occurredAt: Date(timeIntervalSince1970: 0),
+            retrievalText: nil
+        )
+        let wire = SyncL1Capture(event: event)
+        let data = try JSONEncoder().encode(wire)
+        let json = try #require(String(data: data, encoding: .utf8))
+        #expect(json.contains("\"retrievalText\":null"))
+    }
+
+    @Test func l0ProvenanceWireAlwaysEmitsRequiredFields() throws {
+        let provenance = MemoryOSProvenanceObject(
+            id: "p1",
+            sourceType: .manual,
+            sourceID: nil,
+            title: "t",
+            content: "c",
+            contentHash: "h",
+            occurredAt: Date(timeIntervalSince1970: 0),
+            sessionID: nil,
+            workObjectID: nil
+        )
+        let wire = SyncL0Provenance(provenance: provenance)
+        let data = try JSONEncoder().encode(wire)
+        let json = try #require(String(data: data, encoding: .utf8))
+        #expect(json.contains("\"sourceId\":\"\""))
+        #expect(json.contains("\"sessionId\":null"))
+        #expect(json.contains("\"workObjectId\":null"))
+    }
+
+    @Test func l0SpanWireAlwaysEmitsOffsetFields() throws {
+        let span = MemoryOSProvenanceSpan(
+            id: "sp1",
+            provenanceObjectID: "p1",
+            startOffset: nil,
+            endOffset: nil,
+            text: "hello"
+        )
+        let wire = SyncL0Span(span: span)
+        let data = try JSONEncoder().encode(wire)
+        let json = try #require(String(data: data, encoding: .utf8))
+        #expect(json.contains("\"startOffset\":0"))
+        #expect(json.contains("\"endOffset\":0"))
+    }
 }

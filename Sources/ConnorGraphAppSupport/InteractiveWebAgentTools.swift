@@ -7,9 +7,9 @@ index.html must load the interactive-web SDK. Without <script src="/api/v1/sdk/v
 
 Fix it step by step:
 1. Add <script src="/api/v1/sdk/v1.js"></script> inside <head>, before any other script.
-2. For each submission form, set data-connor-collection="<collection>" and add a hidden _connor_honeypot input with autocomplete="off"; listen for connor:submit-success, connor:submit-error, connor:auth-required and connor:already-submitted to show clear submitting, success, failure, login-needed and already-submitted states.
+2. For each submission form, set data-connor-collection="<collection>" and add a hidden _connor_honeypot input with autocomplete="off"; listen for connor:submit-start, connor:submit-success, connor:submit-error, connor:auth-required and connor:already-submitted to show prominent, polished submitting, success, failure, login-needed and already-submitted states. Once the visitor has submitted or can no longer submit (already submitted, daily/lifetime limit, or capacity full), hide or remove the fillable form and show an explicit message instead of merely disabling the submit button.
 3. For login-required collections (registration, check-in, leaderboard, owner-attributed forms), check window.platform.auth.status() and offer a login button that calls window.platform.auth.login(), or let the SDK render its built-in login gate. Never draw a password input or a login form inside the page.
-4. Show a visitor's own records with window.platform.collection.myRecords(name), never data.list; use collection.ranking/stats for leaderboards and collection.capacity for remaining slots; edit or remove their records with window.platform.data.updateMine/deleteMine.
+4. Show a visitor's own records with window.platform.collection.myRecords(name), never data.list; use collection.ranking/stats for leaderboards and collection.capacity for remaining slots; edit or remove their records with window.platform.data.updateMine/deleteMine. Note: collection.stats/capacity are aggregate data (totals, trends, group counts, numeric aggregates) and never expose raw records or identity; if the page must show aggregate statistics to visitors, set the collection's readStats to "public" or "login" (raw records stay private per readAuth).
 5. After fixing the HTML, create or update the draft again (keep the exact manifestHash from interactive_web_get_draft), then publish.
 """
 
@@ -18,7 +18,7 @@ index.html must not contain inline <script> blocks. Content pages are served wit
 """
 
 private let interactiveWebSDKUsageContract = """
-Interactive-web SDK v1 usage (window.platform):
+Interactive-web guide — SDK v1 usage (window.platform):
 
 1. SDK script: add <script src="/api/v1/sdk/v1.js"></script> inside <head> before any other script. This is the backend-provided absolute path on the same domain as the published page; copy it exactly. Never construct apiBase, projectId, or endpoint URLs yourself, and do not rewrite it as a relative path.
 
@@ -28,13 +28,17 @@ Interactive-web SDK v1 usage (window.platform):
    - auth.status(), auth.login(), auth.logout(), auth.onAuthChange(handler), auth.require(name)
    - collection.rules(name), collection.me(name), collection.myRecords(name, limit, page), collection.stats(name, query), collection.ranking(name, query), collection.capacity(name), collection.onChange(name, renderFn)
 
-3. Forms and events: set data-connor-collection="<name>" on submission forms and add a hidden _connor_honeypot input (autocomplete="off"); the SDK submits automatically and blocks duplicate submissions. Listen for connor:submit-success, connor:submit-error, connor:auth-required and connor:already-submitted to show clear submitting, success, failure, login-needed and already-submitted states.
+3. Forms and events: set data-connor-collection="<name>" on submission forms and add a hidden _connor_honeypot input (autocomplete="off"); the SDK submits automatically and blocks duplicate submissions. Listen for connor:submit-start, connor:submit-success, connor:submit-error, connor:auth-required and connor:already-submitted to show clear submitting, success, failure, login-needed and already-submitted states.
+
+   Submission feedback must be prominent and polished: show a visible submitting state (disabled button with "Submitting…"), a clear success banner (highlighted block, icon, and confirmation text), and an explicit failure message with the reason and retry guidance; style feedback consistently with the rest of the page and never rely on console output or silent changes. When the visitor has already submitted or can no longer submit (already-submitted event, daily/lifetime submit limit, or capacity full — detect via connor:already-submitted, collection.me or collection.myRecords), show a clear message in place of the form ("You've already submitted", "Come back tomorrow", "No slots left") and hide or remove the fillable form instead of merely disabling its submit button.
 
 4. Login gating: for login-required collections (anonymousCreate=false), mark the submission form or a container with data-connor-auth-required="<name>"; the SDK hides that content and shows a login guide when anonymous, then restores it when authenticated, re-evaluating on load and on auth change. You may also check window.platform.auth.status() and window.platform.collection.rules(name) yourself, or rely on the SDK's built-in gate. Never draw a password input or a login form inside the page, and never toggle content visibility from a login-button click handler.
 
 CSP: content pages forbid inline scripts (script-src 'self'). Put all page JavaScript in the external app.js file (pass it as the javascript parameter of interactive_web_create_draft) and reference <script src="app.js"></script>; never write inline <script> blocks or inline event handlers - they are blocked and will silently not run.
 
-5. Data reads: show a visitor's own records with window.platform.collection.myRecords(name), never data.list; use collection.ranking/stats for leaderboards and statistics, collection.capacity for remaining slots, and data.updateMine/deleteMine for edits.
+5. Data reads: show a visitor's own records with window.platform.collection.myRecords(name), never data.list; use collection.ranking/stats for leaderboards and statistics, collection.capacity for remaining slots, and data.updateMine/deleteMine for edits. data.list may only be used to display all records when the collection itself is publicly readable (readAuth=public); never call it on non-public collections.
+
+   Aggregate statistics scope: collection.stats / collection.capacity are aggregate data (totals, time series, group counts, numeric sum/avg/min/max, remaining slots) meant only for page-level totals, trends, group breakdowns, and remaining capacity. Do not use them to check whether a specific person submitted (use collection.me / collection.myRecords), do not reconstruct or infer individual records, do not group by identifying free-text fields such as names or phone numbers (the backend rejects such grouping when records are non-public), and do not aggressively paginate or scrape. When the page must show aggregate stats to visitors, set the collection's readStats to "public" or "login"; raw records still stay private per readAuth.
 
 Pagination: records, myRecords and ranking return {items, total, page, pageSize, hasNextPage}; data.list accepts query {limit, page}. When complete coverage is required, continue with page + 1 until hasNextPage is false (or fewer than pageSize items are returned) and do not claim full coverage before then.
 
@@ -462,7 +466,7 @@ public struct InteractiveWebAgentTool: AgentTool {
     }
     public var description: String {
         switch operation {
-		case .sdkUsage: "Return the interactive-web SDK v1 contract: the backend-provided absolute script path (/api/v1/sdk/v1.js), the window.platform API surface, form and event conventions, login gating rules, data-access rules, and a minimal example. Call this before creating or editing a webpage draft whenever you need exact SDK usage."
+		case .sdkUsage: "Request the interactive-web guide: the complete SDK v1 specification — backend-provided script path (/api/v1/sdk/v1.js), window.platform API surface, form and event conventions, submission feedback and already-submitted states, login gating rules, data-access rules, aggregate statistics scope, and a minimal example. You MUST call this before using any interactive-web functionality; generate or edit webpage drafts strictly per the returned specification and never reconstruct page interactions from memory."
 		case .listProjects: "List the signed-in user's published interactive webpage projects, one page at a time (default 50 per page, max 100). Continue with page until fewer than limit items are returned."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
@@ -504,6 +508,7 @@ public struct InteractiveWebAgentTool: AgentTool {
                     ], required: ["name", "type"]), description: "One to fifty validated fields"),
                     "anonymousCreate": .boolean(description: "Allow an anonymous visitor to submit; false means the visitor must be logged into a Connor account. Registration, check-in, leaderboard and owner-attributed forms must set false (login required)"),
                     "anonymousRead": .boolean(description: "Allow an anonymous visitor to read records; false keeps records visible to the owner only"),
+                    "readStats": .stringEnumeration(values: ["public", "login", "owner"], description: "Aggregate statistics visibility for this collection: public = any visitor can see totals/trends/group counts/numeric aggregates; login = only logged-in visitors; owner = site owner only. Defaults to readAuth. Statistics never expose raw records or identity; only set public when the page must show aggregate stats to anonymous visitors"),
                     "submitLimit": .object(properties: [
                         "max": .integer(description: "Maximum number of submissions (1 through 10000); omit for unlimited"),
                         "window": .stringEnumeration(values: ["lifetime", "day"], description: "lifetime = once per identity overall; day = per calendar day"),
@@ -724,7 +729,8 @@ public struct InteractiveWebAgentTool: AgentTool {
             } else {
                 submitLimit = nil
             }
-            return InteractiveWebCollectionDefinition(name: name, fields: fields, anonymousCreate: anonymousCreate, anonymousRead: anonymousRead, submitLimit: submitLimit)
+            let readStats = object["readStats"]?.stringValue
+            return InteractiveWebCollectionDefinition(name: name, fields: fields, anonymousCreate: anonymousCreate, anonymousRead: anonymousRead, submitLimit: submitLimit, readStats: readStats)
         }
     }
     private func parseEdits(_ arguments: AgentToolArguments) throws -> [String: [(oldText: String, newText: String)]] {

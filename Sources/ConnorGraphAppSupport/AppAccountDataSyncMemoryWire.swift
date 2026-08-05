@@ -98,6 +98,11 @@ public struct SyncL0Provenance: Codable, Sendable {
     var status: String
     var metadataJson: String
 
+    enum CodingKeys: String, CodingKey {
+        case id, sourceType, sourceId, title, content, contentHash
+        case occurredAt, ingestedAt, sessionId, workObjectId, confidentiality, status, metadataJson
+    }
+
     init(provenance: MemoryOSProvenanceObject) {
         id = provenance.id
         sourceType = provenance.sourceType.rawValue
@@ -131,6 +136,26 @@ public struct SyncL0Provenance: Codable, Sendable {
             metadata: syncJSONDictionary(metadataJson)
         )
     }
+
+    /// 安卓端 L0ProvenanceEntity 把 sourceId 定义为必填非空字符串、sessionId/workObjectId 定义为
+    /// 必填可空字段；JSONEncoder 默认省略 nil 可选字段会让安卓端报“必填字段缺失”。
+    /// 这里把所有字段都显式编码：sourceId 缺省写空串，sessionId/workObjectId 缺省写 null。
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(sourceType, forKey: .sourceType)
+        try container.encode(sourceId ?? "", forKey: .sourceId)
+        try container.encode(title, forKey: .title)
+        try container.encode(content, forKey: .content)
+        try container.encode(contentHash, forKey: .contentHash)
+        try container.encode(occurredAt, forKey: .occurredAt)
+        try container.encode(ingestedAt, forKey: .ingestedAt)
+        try syncEncodeOptional(sessionId, forKey: .sessionId, in: &container)
+        try syncEncodeOptional(workObjectId, forKey: .workObjectId, in: &container)
+        try container.encode(confidentiality, forKey: .confidentiality)
+        try container.encode(status, forKey: .status)
+        try container.encode(metadataJson, forKey: .metadataJson)
+    }
 }
 
 public struct SyncL0Span: Codable, Sendable {
@@ -139,6 +164,10 @@ public struct SyncL0Span: Codable, Sendable {
     var startOffset: Int?
     var endOffset: Int?
     var text: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, provenanceId, startOffset, endOffset, text
+    }
 
     init(span: MemoryOSProvenanceSpan) {
         id = span.id
@@ -157,6 +186,17 @@ public struct SyncL0Span: Codable, Sendable {
             text: text
         )
     }
+
+    /// 安卓端 L0SpanEntity 的 startOffset/endOffset 是必填 Int；Mac 允许 nil，
+    /// JSONEncoder 省略后安卓端会报“必填字段缺失”，这里统一显式编码（nil 写 0）。
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(provenanceId, forKey: .provenanceId)
+        try container.encode(startOffset ?? 0, forKey: .startOffset)
+        try container.encode(endOffset ?? 0, forKey: .endOffset)
+        try container.encode(text, forKey: .text)
+    }
 }
 
 public struct SyncL1Capture: Codable, Sendable {
@@ -168,6 +208,11 @@ public struct SyncL1Capture: Codable, Sendable {
     var occurredAt: String
     var capturedAt: String
     var metadataJson: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, provenanceId, role, retrievalText, normalizationStatus
+        case occurredAt, capturedAt, metadataJson
+    }
 
     init(event: MemoryOSCaptureEvent) {
         id = event.id
@@ -196,6 +241,21 @@ public struct SyncL1Capture: Codable, Sendable {
             normalizationStatus: MemoryOSIntentNormalizationStatus(rawValue: normalizationStatus) ?? .notRequired,
             metadata: metadata
         )
+    }
+
+    /// 安卓端 L1CaptureEventEntity.retrievalText 是必填可空字段（fail-closed：规范化失败为 null），
+    /// JSONEncoder 默认会省略 nil 可选字段，导致安卓端报“Field 'retrievalText' is required … but it was missing”。
+    /// 这里显式编码为 null，与 SyncMemoryL2Statement 的处理保持一致。
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(provenanceId, forKey: .provenanceId)
+        try container.encode(role, forKey: .role)
+        try syncEncodeOptional(retrievalText, forKey: .retrievalText, in: &container)
+        try container.encode(normalizationStatus, forKey: .normalizationStatus)
+        try container.encode(occurredAt, forKey: .occurredAt)
+        try container.encode(capturedAt, forKey: .capturedAt)
+        try container.encode(metadataJson, forKey: .metadataJson)
     }
 }
 

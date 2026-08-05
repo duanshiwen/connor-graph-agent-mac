@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import ConnorGraphCore
+import ConnorGraphAgent
 import ConnorGraphAppSupport
 import ConnorGraphMemory
 import ConnorGraphStore
@@ -49,6 +50,7 @@ private func temporaryAppMemoryOSHardeningDatabaseURL(_ name: String = UUID().uu
     #expect(classification.errorCode == "llm_billing_or_quota_exhausted")
     #expect(!classification.retryable)
     #expect(classification.requiresUserAction)
+    #expect(classification.strategy == .pause)
 }
 
 @Test func networkFailureUsesARecoverableDelay() throws {
@@ -57,6 +59,54 @@ private func temporaryAppMemoryOSHardeningDatabaseURL(_ name: String = UUID().uu
     #expect(classification.errorCode == "llm_network_unavailable")
     #expect(classification.retryable)
     #expect(classification.retryDelay == 30)
+}
+
+@Test func tokenBudgetExceededIsNotHotRetried() throws {
+    let classification = MemoryOSBackgroundFailureClassifier().classify(
+        MemoryOSHeadlessKnowledgeLoopError.exceededTokenBudget(2_000_000)
+    )
+
+    #expect(classification.errorCode == "background_ai_token_budget_exceeded")
+    #expect(!classification.retryable)
+    #expect(classification.strategy == .downscale)
+}
+
+@Test func maxIterationsExceededIsNotHotRetried() throws {
+    let classification = MemoryOSBackgroundFailureClassifier().classify(
+        MemoryOSHeadlessKnowledgeLoopError.exceededMaxIterations(24)
+    )
+
+    #expect(classification.errorCode == "background_ai_max_iterations_exceeded")
+    #expect(!classification.retryable)
+    #expect(classification.strategy == .downscale)
+}
+
+@Test func runDurationExceededDownscales() throws {
+    let classification = MemoryOSBackgroundFailureClassifier().classify(
+        MemoryOSHeadlessKnowledgeLoopError.exceededMaxRunDuration(1_800)
+    )
+
+    #expect(classification.errorCode == "background_ai_run_duration_exceeded")
+    #expect(!classification.retryable)
+    #expect(classification.strategy == .downscale)
+}
+
+@Test func repeatedToolErrorsDownscale() throws {
+    let classification = MemoryOSBackgroundFailureClassifier().classify(
+        MemoryOSHeadlessKnowledgeLoopError.exceededMaxConsecutiveToolErrors(5)
+    )
+
+    #expect(classification.errorCode == "background_ai_repeated_tool_errors")
+    #expect(classification.strategy == .downscale)
+}
+
+@Test func contextLengthRejectionDownscales() throws {
+    let classification = MemoryOSBackgroundFailureClassifier().classify(
+        OpenAICompatibleProviderError.httpStatus(400, message: "This model's maximum context length is 200000 tokens. You requested 250000 tokens; please reduce the prompt size.")
+    )
+
+    #expect(classification.errorCode == "background_ai_context_length_exceeded")
+    #expect(classification.strategy == .downscale)
 }
 
 @Test func l1UserActionFailureStillRetriesInsteadOfDeadLettering() throws {
@@ -79,6 +129,36 @@ private func temporaryAppMemoryOSHardeningDatabaseURL(_ name: String = UUID().uu
         item,
         errorCode: "llm_billing_or_quota_exhausted",
         errorMessage: "Credit balance exhausted",
+        now: now,
+        retryable: false
+    )
+
+    #expect(transitioned.status == .retryScheduled)
+    #expect(transitioned.maxAttempts == .max)
+    #expect(transitioned.nextRunAt == now.addingTimeInterval(3_600))
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_dead_letter_queue;").first?.first == "0")
+}
+
+@Test func l1TokenBudgetExceededRetriesOnLongBackoffInsteadOfHotLoop() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSHardeningDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let now = Date(timeIntervalSince1970: 1_800)
+    let item = MemoryOSQueueItem(
+        id: "l1-budget-exceeded",
+        kind: MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue,
+        status: .processing,
+        attemptCount: 2,
+        maxAttempts: 3,
+        nextRunAt: now,
+        idempotencyKey: "l1-budget-exceeded"
+    )
+    try store.enqueue(item)
+
+    let transitioned = try facade.recordQueueFailure(
+        item,
+        errorCode: "background_ai_token_budget_exceeded",
+        errorMessage: "exceededTokenBudget: 2000000",
         now: now,
         retryable: false
     )

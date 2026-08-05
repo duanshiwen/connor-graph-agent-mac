@@ -24,6 +24,10 @@ public struct AppMemoryOSPipelineTriggerCoordinator: @unchecked Sendable {
 
     public func runDailySweep(now: Date = Date()) throws -> [MemoryOSQueueItem] {
         guard facade.canRunL1Extraction(now) else { return [] }
-        return try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1AgePolicy, now: now)
+        let enqueued = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1AgePolicy, now: now)
+        // Daily probe: bring user-action-paused batches back so they resume as soon as the
+        // credentials/billing/configuration issue is resolved.
+        _ = try facade.resumePausedBackgroundJobs(now: now)
+        return enqueued
     }
 }

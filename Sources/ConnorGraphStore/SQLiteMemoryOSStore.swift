@@ -306,6 +306,18 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """).map(decodeCaptureEvent)
     }
 
+    public func captureEvents(ids: [String]) throws -> [MemoryOSCaptureEvent] {
+        guard !ids.isEmpty else { return [] }
+        let quoted = ids.map(quote).joined(separator: ",")
+        let rows = try query(sql: """
+        SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, retrieval_text, normalization_status, metadata_json
+        FROM memory_l1_capture_events
+        WHERE id IN (\(quoted))
+        """).map(decodeCaptureEvent)
+        let order = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($1, $0) })
+        return rows.sorted { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
+    }
+
     public func deleteCaptureEvent(id: String) throws {
         try execute("DELETE FROM memory_l1_capture_events WHERE id = \(quote(id));")
         try execute("DELETE FROM memory_l1_retrieval_fts WHERE capture_event_id = \(quote(id));")
@@ -438,6 +450,27 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         item.updatedAt = now
         try enqueue(item)
         return item
+    }
+
+    public func queueItems(kinds: [String] = [], statuses: [MemoryOSQueueStatus] = [], errorCodes: [String] = [], limit: Int = 1_000) throws -> [MemoryOSQueueItem] {
+        var conditions: [String] = []
+        if !kinds.isEmpty {
+            conditions.append("kind IN (\(kinds.map(quote).joined(separator: ",")))")
+        }
+        if !statuses.isEmpty {
+            conditions.append("status IN (\(statuses.map { quote($0.rawValue) }.joined(separator: ",")))")
+        }
+        if !errorCodes.isEmpty {
+            conditions.append("error_code IN (\(errorCodes.map(quote).joined(separator: ",")))")
+        }
+        let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
+        return try query(sql: """
+        SELECT id, kind, status, priority, payload_json, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, idempotency_key, payload_hash, created_at, updated_at, error_code, error_message
+        FROM memory_l1_processing_queue
+        \(whereClause)
+        ORDER BY next_run_at ASC, id ASC
+        LIMIT \(limit)
+        """).map(decodeQueueItem)
     }
 
     // MARK: - L2

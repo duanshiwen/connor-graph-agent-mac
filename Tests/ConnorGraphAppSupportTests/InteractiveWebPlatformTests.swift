@@ -81,8 +81,59 @@ struct InteractiveWebPlatformTests {
         )
         try Data(InteractiveWebPackager.configurationJSON(collections: [invalid]).utf8)
             .write(to: invalidRoot.appendingPathComponent(InteractiveWebPackager.configurationFileName))
-        #expect(throws: CocoaError.self) {
+        #expect(throws: InteractiveWebConfigurationError.self) {
             _ = try InteractiveWebPackager().package(rootURL: invalidRoot)
+        }
+    }
+
+    @Test func packageAcceptsSubmitLimitAndReadStatsConfiguration() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("<form></form>".utf8).write(to: root.appendingPathComponent("index.html"))
+        let configured = InteractiveWebCollectionDefinition(
+            name: "registrations",
+            fields: [
+                .init(name: "name", type: "string", required: true, maxLength: 40),
+                .init(name: "guests", type: "number", required: false, maxLength: 0),
+                .init(name: "message", type: "string", required: false, maxLength: 500),
+            ],
+            anonymousCreate: false,
+            anonymousRead: false,
+            submitLimit: .init(max: 1, window: "lifetime", scope: "account"),
+            readStats: "owner"
+        )
+        try Data(InteractiveWebPackager.configurationJSON(collections: [configured]).utf8)
+            .write(to: root.appendingPathComponent(InteractiveWebPackager.configurationFileName))
+
+        let manifest = try InteractiveWebPackager().package(rootURL: root)
+        #expect(manifest.collections.first?.readStats == "owner")
+        #expect(manifest.collections.first?.submitLimit == .init(max: 1, window: "lifetime", scope: "account"))
+    }
+
+    @Test func packageReportsInvalidReadStatsWithActionableMessage() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("<form></form>".utf8).write(to: root.appendingPathComponent("index.html"))
+        let invalid = InteractiveWebCollectionDefinition(
+            name: "registrations",
+            fields: [.init(name: "name", type: "string", required: true, maxLength: 40)],
+            anonymousCreate: false,
+            anonymousRead: false,
+            readStats: "private"
+        )
+        try Data(InteractiveWebPackager.configurationJSON(collections: [invalid]).utf8)
+            .write(to: root.appendingPathComponent(InteractiveWebPackager.configurationFileName))
+
+        do {
+            _ = try InteractiveWebPackager().package(rootURL: root)
+            Issue.record("expected invalid readStats to be rejected")
+        } catch let error as InteractiveWebConfigurationError {
+            #expect(error.message.contains("readStats"))
+            #expect(error.message.contains("owner"))
+        } catch {
+            Issue.record("expected InteractiveWebConfigurationError, got \(error)")
         }
     }
 
@@ -355,7 +406,7 @@ struct InteractiveWebPlatformTests {
             arguments: try AgentToolArguments(json: "{}"),
             context: context
         )
-        for expected in ["/api/v1/sdk/v1.js", "window.platform", "auth.login", "myRecords", "data-connor-collection", "connor:submit-error", "collection.rules", "data-connor-auth-required", "app.js", "script-src 'self'"] {
+        for expected in ["/api/v1/sdk/v1.js", "window.platform", "auth.login", "myRecords", "data-connor-collection", "connor:submit-error", "collection.rules", "data-connor-auth-required", "app.js", "script-src 'self'", "readStats", "Aggregate statistics scope", "Submission feedback must be prominent and polished", "hide or remove the fillable form", "Interactive-web guide"] {
             #expect(result.contentText.contains(expected), "SDK contract is missing \(expected)")
         }
     }

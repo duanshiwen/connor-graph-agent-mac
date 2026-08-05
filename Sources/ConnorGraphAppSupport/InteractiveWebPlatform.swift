@@ -189,7 +189,8 @@ public struct InteractiveWebCollectionDefinition: Codable, Sendable, Equatable {
     public var anonymousCreate: Bool
     public var anonymousRead: Bool
     public var submitLimit: InteractiveWebSubmitLimit?
-    public init(name: String, fields: [InteractiveWebCollectionField], anonymousCreate: Bool = false, anonymousRead: Bool = false, submitLimit: InteractiveWebSubmitLimit? = nil) { self.name = name; self.fields = fields; self.anonymousCreate = anonymousCreate; self.anonymousRead = anonymousRead; self.submitLimit = submitLimit }
+    public var readStats: String?
+    public init(name: String, fields: [InteractiveWebCollectionField], anonymousCreate: Bool = false, anonymousRead: Bool = false, submitLimit: InteractiveWebSubmitLimit? = nil, readStats: String? = nil) { self.name = name; self.fields = fields; self.anonymousCreate = anonymousCreate; self.anonymousRead = anonymousRead; self.submitLimit = submitLimit; self.readStats = readStats }
 }
 
 public struct InteractiveWebManifest: Codable, Sendable, Equatable {
@@ -203,6 +204,16 @@ public struct InteractiveWebManifest: Codable, Sendable, Equatable {
 private struct InteractiveWebProjectConfiguration: Codable {
     var formatVersion = 1
     var collections: [InteractiveWebCollectionDefinition]
+}
+
+/// 互动网页项目配置校验失败时抛出的错误。
+/// 之前这里混用了 CocoaError(.fileReadCorruptFile)，会把"submitLimit/readStats 配置值不合法"
+/// 包装成"文件读取异常/文件损坏"，让人误以为是磁盘或后端读取问题；这里改为带明确字段说明的配置错误。
+public struct InteractiveWebConfigurationError: Error, LocalizedError, CustomStringConvertible, Sendable {
+    public var message: String
+    public init(_ message: String) { self.message = message }
+    public var errorDescription: String? { message }
+    public var description: String { message }
 }
 
 public struct InteractiveWebPackager: Sendable {
@@ -234,7 +245,9 @@ public struct InteractiveWebPackager: Sendable {
             files.append(.init(path: path, sha256: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(), mediaType: Self.mediaType(ext), sizeBytes: size))
         }
         files.sort { $0.path < $1.path }
-        guard files.contains(where: { $0.path == "index.html" }), files.count <= 500, files.reduce(0, { $0 + $1.sizeBytes }) <= 100 * 1_024 * 1_024 else { throw CocoaError(.fileReadCorruptFile) }
+        guard files.contains(where: { $0.path == "index.html" }) else { throw InteractiveWebConfigurationError("project package is missing index.html") }
+        guard files.count <= 500 else { throw InteractiveWebConfigurationError("project package exceeds the 500-file limit") }
+        guard files.reduce(0, { $0 + $1.sizeBytes }) <= 100 * 1_024 * 1_024 else { throw InteractiveWebConfigurationError("project package exceeds the 100 MB total-size limit") }
         let configurationURL = root.appendingPathComponent(Self.configurationFileName)
         let collections: [InteractiveWebCollectionDefinition]
         if fileManager.fileExists(atPath: configurationURL.path) {
@@ -256,7 +269,7 @@ public struct InteractiveWebPackager: Sendable {
             canonical += "\(file.path)\t\(file.sha256)\t\(file.mediaType)\t\(file.sizeBytes)\n"
         }
         for collection in manifest.collections.sorted(by: { $0.name < $1.name }) {
-            canonical += "collection\t\(collection.name)\t\(collection.anonymousCreate)\t\(collection.anonymousRead)\n"
+            canonical += "collection\t\(collection.name)\t\(collection.anonymousCreate)\t\(collection.anonymousRead)\t\(collection.readStats ?? "")\n"
             if let limit = collection.submitLimit {
                 canonical += "submitLimit\t\(limit.max)\t\(limit.window)\t\(limit.scope)\n"
             }
@@ -272,24 +285,61 @@ public struct InteractiveWebPackager: Sendable {
     }
 
     private func validate(collections: [InteractiveWebCollectionDefinition]) throws {
-        guard Set(collections.map(\.name)).count == collections.count else { throw CocoaError(.fileReadCorruptFile) }
+        guard Set(collections.map(\.name)).count == collections.count else {
+            throw InteractiveWebConfigurationError("collection names must be unique")
+        }
         let namePattern = try NSRegularExpression(pattern: "^[a-z][a-z0-9_]{0,63}$")
         func validName(_ value: String) -> Bool {
             namePattern.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)) != nil
         }
         for collection in collections {
-            guard validName(collection.name), (1...50).contains(collection.fields.count), Set(collection.fields.map(\.name)).count == collection.fields.count else {
-                throw CocoaError(.fileReadCorruptFile)
+            guard validName(collection.name) else {
+                throw InteractiveWebConfigurationError("collection '\(collection.name)': name must match ^[a-z][a-z0-9_]{0,63}$")
+            }
+            guard (1...50).contains(collection.fields.count) else {
+                throw InteractiveWebConfigurationError("collection '\(collection.name)': fields must contain 1 to 50 entries")
+            }
+            guard Set(collection.fields.map(\.name)).count == collection.fields.count else {
+                throw InteractiveWebConfigurationError("collection '\(collection.name)': field names must be unique")
+            }
+            if let readStats = collection.readStats {
+                guard ["public", "login", "owner"].contains(readStats) else {
+                    throw InteractiveWebConfigurationError("collection '\(collection.name)': readStats must be one of public, login, or owner (got '\(readStats)')")
+                }
             }
             if let limit = collection.submitLimit {
-                guard limit.max > 0, limit.max <= 10000, ["lifetime", "day"].contains(limit.window), ["account", "ip"].contains(limit.scope), limit.scope != "account" || !collection.anonymousCreate else {
-                    throw CocoaError(.fileReadCorruptFile)
+                guard limit.max > 0, limit.max <= 10000 else {
+                    throw InteractiveWebConfigurationError("collection '\(collection.name)': submitLimit.max must be between 1 and 10000")
+                }
+                guard ["lifetime", "day"].contains(limit.window) else {
+                    throw InteractiveWebConfigurationError("collection '\(collection.name)': submitLimit.window must be lifetime or day (got '\(limit.window)')")
+                }
+                guard ["account", "ip"].contains(limit.scope) else {
+                    throw InteractiveWebConfigurationError("collection '\(collection.name)': submitLimit.scope must be account or ip (got '\(limit.scope)')")
+                }
+                guard limit.scope != "account" || !collection.anonymousCreate else {
+                    throw InteractiveWebConfigurationError("collection '\(collection.name)': submitLimit with scope=account requires anonymousCreate=false (per-account counting needs login)")
                 }
             }
             for field in collection.fields {
                 let pattern = field.pattern ?? ""
-                guard validName(field.name), ["string", "number", "boolean", "enum"].contains(field.type), (0...5000).contains(field.maxLength), pattern.count <= 256, field.type != "enum" || !field.enum.isEmpty, pattern.isEmpty || field.type == "string" else {
-                    throw CocoaError(.fileReadCorruptFile)
+                guard validName(field.name) else {
+                    throw InteractiveWebConfigurationError("collection '\(collection.name)': field name '\(field.name)' must match ^[a-z][a-z0-9_]{0,63}$")
+                }
+                guard ["string", "number", "boolean", "enum"].contains(field.type) else {
+                    throw InteractiveWebConfigurationError("collection '\(collection.name)': field '\(field.name)' type must be string, number, boolean, or enum (got '\(field.type)')")
+                }
+                guard (0...5000).contains(field.maxLength) else {
+                    throw InteractiveWebConfigurationError("collection '\(collection.name)': field '\(field.name)' maxLength must be between 0 and 5000")
+                }
+                guard pattern.count <= 256 else {
+                    throw InteractiveWebConfigurationError("collection '\(collection.name)': field '\(field.name)' pattern must be at most 256 characters")
+                }
+                guard field.type != "enum" || !field.enum.isEmpty else {
+                    throw InteractiveWebConfigurationError("collection '\(collection.name)': enum field '\(field.name)' requires at least one allowed value")
+                }
+                guard pattern.isEmpty || field.type == "string" else {
+                    throw InteractiveWebConfigurationError("collection '\(collection.name)': pattern is only supported for string field '\(field.name)'")
                 }
                 if !pattern.isEmpty { _ = try NSRegularExpression(pattern: pattern) }
             }

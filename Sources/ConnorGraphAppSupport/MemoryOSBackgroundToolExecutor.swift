@@ -64,6 +64,23 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
     }
 
     public func execute(_ call: MemoryOSBackgroundToolCall, context: MemoryOSBackgroundToolExecutionContext) throws -> MemoryOSBackgroundToolResult {
+        do {
+            return try executeThrowing(call, context: context)
+        } catch let error as MemoryOSBackgroundToolExecutionError {
+            // Deterministic tool-call defects (invalid arguments, disallowed tool, missing
+            // environment snapshot) are fed back to the model as tool errors so it can
+            // self-correct in the next iteration instead of aborting the whole batch.
+            return MemoryOSBackgroundToolResult(
+                callID: call.id,
+                name: call.name,
+                contentJSON: "{}",
+                contentText: "Tool execution failed: \(error.description)",
+                error: error.description
+            )
+        }
+    }
+
+    private func executeThrowing(_ call: MemoryOSBackgroundToolCall, context: MemoryOSBackgroundToolExecutionContext) throws -> MemoryOSBackgroundToolResult {
         guard context.allowedToolNames.contains(call.name) else {
             throw MemoryOSBackgroundToolExecutionError.toolNotAllowed(call.name)
         }
