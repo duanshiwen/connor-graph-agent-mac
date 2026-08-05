@@ -5,9 +5,16 @@ import ConnorGraphAppSupport
 enum GlobalSearchOverlayLayout {
     static let width: CGFloat = 640
     static let maximumHeight: CGFloat = 640
+    static let minimumHeight: CGFloat = 160
+    static let bottomInset: CGFloat = 24
 
-    static func shouldScroll(contentHeight: CGFloat) -> Bool {
-        contentHeight > maximumHeight
+    /// 根据弹框可用的实际高度计算最大高度：
+    /// - 常规情况取 640；
+    /// - 屏幕/窗口高度不足时按可用高度收缩，并预留底部留白；
+    /// - 极端小窗口时最多与可用高度等宽，避免超出屏幕。
+    static func maximumHeight(availableHeight: CGFloat) -> CGFloat {
+        let preferred = max(minimumHeight, availableHeight - bottomInset)
+        return min(maximumHeight, preferred, availableHeight)
     }
 }
 
@@ -15,29 +22,38 @@ struct AppGlobalSearchOverlayView: View {
     @Bindable var model: GlobalSearchFeatureModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var browserHistoryPage: Int = 0
-    @State private var contentHeight: CGFloat = 0
 
     private let browserHistoryPageSize = 3
     private var state: GlobalSearchPreviewState { model.previewState }
     private var query: String { model.query.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var shouldScroll: Bool { GlobalSearchOverlayLayout.shouldScroll(contentHeight: contentHeight) }
 
     var body: some View {
-        Group {
-            if shouldScroll {
-                ScrollView(.vertical) {
-                    overlayContent
-                }
-                .scrollIndicators(.visible)
-                .frame(
-                    width: GlobalSearchOverlayLayout.width,
-                    height: GlobalSearchOverlayLayout.maximumHeight,
-                    alignment: .topLeading
+        GeometryReader { proxy in
+            overlay(
+                maximumHeight: GlobalSearchOverlayLayout.maximumHeight(
+                    availableHeight: proxy.size.height
                 )
-            } else {
+            )
+        }
+        .onChange(of: state.query) { _, _ in
+            browserHistoryPage = 0
+        }
+    }
+
+    private func overlay(maximumHeight: CGFloat) -> some View {
+        ViewThatFits(in: .vertical) {
+            overlayContent
+                .frame(width: GlobalSearchOverlayLayout.width, alignment: .topLeading)
+
+            ScrollView(.vertical) {
                 overlayContent
-                    .frame(width: GlobalSearchOverlayLayout.width, alignment: .topLeading)
             }
+            .scrollIndicators(.visible)
+            .frame(
+                width: GlobalSearchOverlayLayout.width,
+                height: maximumHeight,
+                alignment: .topLeading
+            )
         }
         .background(.regularMaterial, in: overlayShape)
         .overlay(glassEdgeHighlight)
@@ -48,12 +64,6 @@ struct AppGlobalSearchOverlayView: View {
             x: 0,
             y: GlobalSearchOverlayGlassStyle.outerShadowY
         )
-        .onPreferenceChange(GlobalSearchOverlayContentHeightKey.self) { height in
-            contentHeight = height
-        }
-        .onChange(of: state.query) { _, _ in
-            browserHistoryPage = 0
-        }
     }
 
     private var overlayShape: RoundedRectangle {
@@ -107,11 +117,6 @@ struct AppGlobalSearchOverlayView: View {
         }
         .padding(AppShellLayout.spaceS)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(key: GlobalSearchOverlayContentHeightKey.self, value: proxy.size.height)
-            }
-        )
     }
 
     private var recentSearchesSection: some View {
@@ -828,13 +833,5 @@ private struct GlobalSearchResultRow: View {
         case .mail: .blue
         case .browserHistory: .teal
         }
-    }
-}
-
-private struct GlobalSearchOverlayContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
