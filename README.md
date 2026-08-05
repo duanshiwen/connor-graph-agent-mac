@@ -24,7 +24,7 @@
 
 ### 1. 安装应用
 
-康纳同学支持 macOS 14 及以上版本。请前往[官网](https://duanshiwen.github.io/connor-graph-agent-mac/)下载最新安装包（当前版本 1.0.64），并根据 Mac 的处理器选择文件：
+康纳同学支持 macOS 14 及以上版本。请前往[官网](https://duanshiwen.github.io/connor-graph-agent-mac/)下载最新安装包（当前版本 1.0.66），并根据 Mac 的处理器选择文件：
 
 - Apple M 系列芯片：选择文件名包含 `arm64` 的 DMG。
 - Intel 芯片：选择文件名包含 `x86_64` 的 DMG。
