@@ -364,7 +364,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
     private func makeToolCallingRequest(_ request: AgentModelRequest, stream: Bool = false) throws -> AgentHTTPRequest {
         try validateVisionSendAllowed(request)
         let endpoint = config.baseURL.appendingPathComponent("chat/completions")
-        let messages = request.messages.enumerated().map { index, message in
+        let messages = AgentModelMessageProtocolRepair.repairing(request.messages).enumerated().map { index, message in
             let role = projectedRole(for: message, index: index, instructionPlacement: request.instructionPlacement)
             return OpenAIChatMessage(
                 role: role,

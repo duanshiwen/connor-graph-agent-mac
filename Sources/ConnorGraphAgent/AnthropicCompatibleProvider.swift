@@ -336,7 +336,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         var body: [String: Any] = [
             "model": config.requestModel,
             "max_tokens": config.maxTokens,
-            "messages": anthropicMessages(for: request.messages)
+            "messages": anthropicMessages(for: AgentModelMessageProtocolRepair.repairing(request.messages))
         ]
         if stream { body["stream"] = true }
         if let thinking = config.featureOptions.thinking {

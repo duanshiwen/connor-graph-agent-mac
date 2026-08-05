@@ -295,6 +295,41 @@ private struct PhasedBatchExecutionTool: AgentTool {
     }
 }
 
+private struct PhasedAttachmentContextTool: AgentTool {
+    let name = "load_attachment_context"
+    let permission: AgentPermissionCapability = .readSession
+    let description = "load attachment context with model content parts"
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "loaded attachment",
+            modelContentParts: [.text("attachment body")]
+        )
+    }
+}
+
+private struct PhasedParallelReadTool: AgentTool {
+    let name = "phased_note_read"
+    let permission: AgentPermissionCapability = .readWorkspaceFile
+    let description = "read a note in parallel"
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "note body"
+        )
+    }
+}
+
 private struct PhasedArtifactTool: AgentTool {
     let name = "interactive_web_create_draft"
     let permission: AgentPermissionCapability = .createInteractiveWebDraft
@@ -726,6 +761,39 @@ private struct PhasedArtifactTool: AgentTool {
     #expect(strategyResult.role == .tool)
     #expect(strategyResult.content.contains("[TRUSTED RUNTIME NOTE] Current phase: taskExecution."))
     #expect(!requests.flatMap(\.messages).contains { $0.role == .system && $0.content.contains("Trusted phase transition") })
+}
+
+@Test func parallelBatchDefersAttachmentContextUserMessageUntilAllToolResults() async throws {
+    var registry = AgentToolRegistry()
+    registry.register(PhasedAttachmentContextTool())
+    registry.register(PhasedParallelReadTool())
+    let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(id: "strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"general","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"}}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [
+            .init(id: "attach", name: "load_attachment_context", argumentsJSON: "{}"),
+            .init(id: "read_note", name: "phased_note_read", argumentsJSON: "{}")
+        ], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
+        .init(text: "done")
+    ])
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: .init(toolExposureMode: .all)
+    )
+    for try await _ in loop.run(.init(sessionID: "parallel-attachment", userMessage: "Implement the change")) {}
+
+    let requests = await provider.capturedRequests()
+    assertToolResultsImmediatelyFollowAssistantToolCalls(in: requests)
+
+    let batchRequest = requests[2]
+    let attachIndex = try #require(batchRequest.messages.firstIndex { $0.role == .tool && $0.toolCallID == "attach" })
+    let readIndex = try #require(batchRequest.messages.firstIndex { $0.role == .tool && $0.toolCallID == "read_note" })
+    let attachmentUserIndex = try #require(batchRequest.messages.firstIndex {
+        $0.role == .user && $0.content.contains("Requested attachment context loaded")
+    })
+    #expect(abs(attachIndex - readIndex) == 1)
+    #expect(attachmentUserIndex > max(attachIndex, readIndex))
 }
 
 @Test func phasedMemoryOpaqueCursorContinuesOnlyUnfinishedPartition() async throws {

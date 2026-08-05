@@ -302,7 +302,7 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
     }
 
     private func inputItems(for request: AgentModelRequest) -> [[String: Any]] {
-        request.messages.enumerated().flatMap { index, message -> [[String: Any]] in
+        AgentModelMessageProtocolRepair.repairing(request.messages).enumerated().flatMap { index, message -> [[String: Any]] in
             let role = projectedRole(for: message, index: index, instructionPlacement: request.instructionPlacement)
             switch message.role {
             case .tool:

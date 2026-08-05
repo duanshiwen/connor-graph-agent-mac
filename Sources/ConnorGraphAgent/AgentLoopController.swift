@@ -1038,6 +1038,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
                         var remainingToolContentDemand = gatedBatchTokenDemands.reduce(0, +)
                         var remainingModelContentPartDemand = modelContentPartTokenDemands.reduce(0, +)
+                        var deferredAttachmentContextMessages: [AgentModelMessage] = []
 
                         for (batchIndex, batchResult) in batchResults.enumerated() {
                             let selectedNames = Self.selectedNativeToolNames(in: [batchResult.call])
@@ -1135,7 +1136,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 didPublishUserFacingMessage = true
                             }
                             if let parts = batchResult.result.modelContentParts, !parts.isEmpty {
-                                messages.append(AgentModelMessage(
+                                deferredAttachmentContextMessages.append(AgentModelMessage(
                                     role: .user,
                                     content: "Requested attachment context loaded for this run.",
                                     contentParts: [.text("Requested attachment context loaded for this run.")] + parts
@@ -1146,6 +1147,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 remainingModelContentPartDemand - modelContentPartTokenDemands[batchIndex]
                             )
                         }
+                        // Tool messages for every tool_call_id in the preceding assistant
+                        // message must be contiguous; append attachment context only after
+                        // the whole batch of tool results so user messages never interleave
+                        // between tool messages of a parallel tool batch.
+                        messages.append(contentsOf: deferredAttachmentContextMessages)
 
                         if calls.contains(where: {
                                $0.name == AgentPhaseToolContract.externalSearchBatchName
@@ -1299,14 +1305,18 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         didPublishTextDelta: inout Bool,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentModelResponse {
+        let protocolSafeRequest = Self.protocolSafeRequest(request)
+        if protocolSafeRequest.messages != request.messages {
+            logger.warning("Provider message protocol repair applied before send: dangling or interleaved tool results were repaired.")
+        }
         guard modelProvider.capabilities.supportsStreaming,
               let streamCompleteHandler else {
-            return try await modelProvider.complete(request)
+            return try await modelProvider.complete(protocolSafeRequest)
         }
         var completedResponse: AgentModelResponse?
         var streamedText = ""
         var sawToolInputDelta = false
-        for try await event in streamCompleteHandler(modelProvider, request) {
+        for try await event in streamCompleteHandler(modelProvider, protocolSafeRequest) {
             try Task.checkCancellation()
             switch event {
             case .textDelta(let text):
@@ -1330,7 +1340,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         if !streamedText.isEmpty, !sawToolInputDelta {
             return AgentModelResponse(text: streamedText, toolCalls: [], finishReason: .stop)
         }
-        return try await modelProvider.complete(request)
+        return try await modelProvider.complete(protocolSafeRequest)
+    }
+
+    private static func protocolSafeRequest(_ request: AgentModelRequest) -> AgentModelRequest {
+        let repairedMessages = AgentModelMessageProtocolRepair.repairing(request.messages)
+        guard repairedMessages != request.messages else { return request }
+        var protocolSafe = request
+        protocolSafe.messages = repairedMessages
+        return protocolSafe
     }
 
     private func contextRecoveredModelRequest(
