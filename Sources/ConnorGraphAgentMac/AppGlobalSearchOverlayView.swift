@@ -34,6 +34,7 @@ struct AppGlobalSearchOverlayView: View {
                     availableHeight: proxy.size.height
                 )
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .onChange(of: state.query) { _, _ in
             browserHistoryPage = 0
