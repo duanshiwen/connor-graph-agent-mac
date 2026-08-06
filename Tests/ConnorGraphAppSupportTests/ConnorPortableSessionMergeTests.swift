@@ -77,4 +77,31 @@ struct ConnorPortableSessionMergeTests {
         #expect(merged.governance.labels.map(\.id) == ["priority"])
         #expect(merged.messages.map(\.id) == ["remote", "local"])
     }
+
+    @Test func labelsMergeAsUnionAcrossSides() {
+        let local = AgentSession(
+            id: "session",
+            updatedAt: Date(timeIntervalSince1970: 20),
+            governance: AgentSessionGovernanceMetadata(
+                status: .inProgress,
+                labels: [AgentSessionLabel(id: "important")],
+                isArchived: false
+            )
+        )
+        let staleRemote = ConnorPortableSession(AgentSession(
+            id: "session",
+            updatedAt: Date(timeIntervalSince1970: 10),
+            governance: AgentSessionGovernanceMetadata(
+                status: .done,
+                labels: [AgentSessionLabel(id: "priority"), AgentSessionLabel(id: "important")],
+                isArchived: false
+            )
+        ))
+
+        let merged = staleRemote.merging(into: local)
+
+        // 本地更新：状态保留本地；标签取两端并集（去重、保持顺序稳定）。
+        #expect(merged.governance.status == .inProgress)
+        #expect(merged.governance.labels.map(\.id) == ["important", "priority"])
+    }
 }

@@ -57,6 +57,42 @@ struct SyncPersonality: Codable, Sendable {
     }
 }
 
+// MARK: - 用户偏好（settings|user_preferences，与 Android UserPreferences 逐字段一致）
+
+/// 用户主动维护的基本信息；以“最后设置时间”为准进行跨端合并。
+/// 只同步两端共有的字段（Mac 的 city/country/defaultSearchEngine 等保持本机）。
+struct SyncUserPreferences: Codable, Sendable, Equatable {
+    var displayName: String
+    var timezone: String
+    var preferredLanguage: String
+    var genderIdentity: String
+    var birthDate: String
+    var notes: String
+    /// 偏好“最后设置时间”（epoch 毫秒）；旧载荷可能缺失，按 0（从未设置）处理。
+    var updatedAt: Int64
+
+    init(_ preferences: AgentRuntimePreferenceSettings, updatedAtMillis: Int64) {
+        displayName = preferences.displayName
+        timezone = preferences.timezone
+        preferredLanguage = preferences.preferredLanguage
+        genderIdentity = preferences.genderIdentity
+        birthDate = preferences.birthDate
+        notes = preferences.notes
+        updatedAt = updatedAtMillis
+    }
+
+    func applying(to preferences: AgentRuntimePreferenceSettings) -> AgentRuntimePreferenceSettings {
+        var updated = preferences
+        updated.displayName = displayName
+        updated.timezone = timezone
+        updated.preferredLanguage = preferredLanguage
+        updated.genderIdentity = genderIdentity
+        updated.birthDate = birthDate
+        updated.notes = notes
+        return updated
+    }
+}
+
 // MARK: - 技能包同步（skills；仅用户级技能包，内置技能不参与）
 
 public struct SyncSkillPack: Codable, Sendable {

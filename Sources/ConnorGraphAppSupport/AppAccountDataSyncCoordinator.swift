@@ -60,7 +60,7 @@ public struct ConnorPortableSession: Codable, Sendable, Equatable {
         )
         guard let existing else { return remote }
         // 合并同步按“最后更新者生效”（与 Android mergeSyncedSession 对齐）：
-        // updatedAt 更新的记录决定标题、状态、归档与标签；消息是追加式数据，
+        // updatedAt 更新的记录决定标题、状态与归档；消息是追加式数据，
         // 两端按 id 去重后按时间排序合并，远端旧投影不会覆盖本机尚未上传的消息。
         let localIsNewer = existing.updatedAt > remote.updatedAt
         let preferred = localIsNewer ? existing : remote
@@ -74,6 +74,15 @@ public struct ConnorPortableSession: Codable, Sendable, Equatable {
             if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
             return $0.id < $1.id
         }
+        // 标签按“两端并集”合并：一方没有的标签直接补上（与 Android mergeSyncedSession 对齐），
+        // 去重且保持顺序稳定；状态等冲突字段仍由最后更新者决定。
+        var unionedLabels: [AgentSessionLabel] = []
+        var seenLabelIDs = Set<String>()
+        for label in preferred.governance.labels + secondary.governance.labels where !seenLabelIDs.contains(label.id) {
+            seenLabelIDs.insert(label.id)
+            unionedLabels.append(label)
+        }
+        merged.governance.labels = unionedLabels
         return merged
     }
 }
@@ -122,14 +131,14 @@ public actor AppAccountDataSyncCoordinator {
         static let skills = "skills"
     }
 
-    /// 记录级同步边界：sessions 全量同步；settings 仅同步运行时设置与人格
-    /// （人格只记录不上推）；Memory OS L2/L3/L4 全量同步，L1 会话工作记忆只留本机。
+    /// 记录级同步边界：sessions 全量同步；settings 同步运行时设置、人格与用户偏好；
+    /// Memory OS L2/L3/L4 全量同步，L1 会话工作记忆只留本机。
     /// 个人资料 settings|profile 不进同步状态机，拉取时不记录、不应用，
     /// 历史残留也不会再触发 tombstone。
     private func isSyncableRecord(_ collection: String, _ recordId: String) -> Bool {
         switch collection {
         case SyncCollection.sessions: return true
-        case SyncCollection.settings: return recordId == "macos_runtime" || recordId == "personality"
+        case SyncCollection.settings: return recordId == "macos_runtime" || recordId == "personality" || recordId == "user_preferences"
         case SyncCollection.memoryL0, SyncCollection.memoryL0Spans, SyncCollection.memoryL1: return true
         case "memory_l2", "memory_l2_nodes", "memory_l3", "memory_l4_entities", "memory_l4_relations": return true
         case SyncCollection.skills: return true
@@ -250,6 +259,12 @@ public actor AppAccountDataSyncCoordinator {
         }
         let runtimeSettings = try settings.loadOrCreateDefault()
         values[recordKey("settings", "personality")] = try jsonValue(SyncPersonality(runtimeSettings))
+        values[recordKey("settings", "user_preferences")] = try jsonValue(
+            SyncUserPreferences(
+                runtimeSettings.preferences,
+                updatedAtMillis: Int64(runtimeSettings.updatedAt.timeIntervalSince1970 * 1_000)
+            )
+        )
         var syncedSettings = runtimeSettings
         // 个人资料（preferences：displayName/notes 等）不加入账号同步，仅同步运行时设置。
         syncedSettings.preferences = AgentRuntimePreferenceSettings()
@@ -303,6 +318,19 @@ public actor AppAccountDataSyncCoordinator {
         case ("settings", "personality"):
             let wire: SyncPersonality = try decode(change.payload)
             try settings.applySyncedPersonality(wire.connorPersonality(), revision: wire.revision ?? 0, updatedAtMillis: wire.updatedAt ?? 0)
+            return .settings
+        case ("settings", "user_preferences") where !change.deleted:
+            // 用户偏好按“最后设置时间”生效：远端不晚于本机设置时间则忽略；
+            // 应用时只覆盖两端共有字段，保留本机独有字段。
+            let wire: SyncUserPreferences = try decode(change.payload)
+            let local = try settings.loadOrCreateDefault()
+            let remoteMillis = wire.updatedAt
+            let localMillis = Int64(local.updatedAt.timeIntervalSince1970 * 1_000)
+            if remoteMillis > localMillis {
+                var synced = local
+                synced.preferences = wire.applying(to: local.preferences)
+                try settings.saveSynced(synced)
+            }
             return .settings
         case ("memory_l0", let id):
             guard let memory else { return nil }
