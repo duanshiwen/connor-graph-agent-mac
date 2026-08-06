@@ -32,14 +32,8 @@ actor AppBootstrapActor {
         let productOSRegistry = try AppProductOSRegistryRepository(storagePaths: paths).loadOrCreateDefault()
         let automationConfig = try AppProductOSAutomationRepository(storagePaths: paths).loadOrCreateDefault(governanceConfig: governanceConfig)
 
-        var graphSnapshot = try repository.loadSnapshot()
-        if graphSnapshot.entities.isEmpty {
-            let demo = AppDemoGraphSnapshotFactory.make()
-            for entity in demo.entities { try repository.store.upsert(entity: entity) }
-            for statement in demo.statements { try repository.store.upsert(statement: statement) }
-            for episode in demo.episodes { try repository.store.upsert(episode: episode) }
-            graphSnapshot = try repository.loadSnapshot()
-        }
+        // 不再注入预制演示知识：首次启动保持空图库，知识全部来自真实使用与导入。
+        let graphSnapshot = try repository.loadSnapshot()
 
         let contactsDatabaseURL = paths.applicationSupportDirectory
             .appendingPathComponent("contacts", isDirectory: true)

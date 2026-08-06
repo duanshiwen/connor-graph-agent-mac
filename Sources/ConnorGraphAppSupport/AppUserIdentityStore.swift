@@ -807,6 +807,9 @@ public final class AppUserIdentityStore: ObservableObject {
         } catch ConnorBackendAPIError.unauthorized, ConnorBackendAPIError.missingRefreshToken {
             clearLocalSession(state: .expired)
         } catch {
+            // 后端不可达：无法校验会话/申请租约，按“联系不上后端”处理，本机自行提取，
+            // 后端恢复后由 startL1Coordination 重新走租约流程并清除回退模式。
+            L1ExtractionEligibility.shared.enableLocalFallback()
             authenticationState = .signedOut
             errorMessage = error.localizedDescription
         }
@@ -905,6 +908,9 @@ public final class AppUserIdentityStore: ObservableObject {
     private func clearLocalSession(state: ConnorAuthenticationState) {
         stopDeviceSync()
         stopL1Coordination()
+        // 未登录（退出登录/会话失效/冷启动无会话）按“后端联系不上”处理：
+        // 本机继续自行提取，重新登录并成功拿到租约后自动恢复后端分配逻辑。
+        L1ExtractionEligibility.shared.enableLocalFallback()
         stopEventSocket()
         try? credentials.clearTokens()
         authenticationState = state
@@ -922,6 +928,8 @@ public final class AppUserIdentityStore: ObservableObject {
         } else {
             stopDeviceSync()
             stopL1Coordination()
+            // 后端失联（网络断开或服务不可达）：本机自行提取，直到后端恢复。
+            L1ExtractionEligibility.shared.enableLocalFallback()
             deviceSyncStatus = .offline
         }
     }
@@ -954,7 +962,8 @@ public final class AppUserIdentityStore: ObservableObject {
                     let lease = try await session.acquireL1Lease(deviceID: deviceID)
                     L1ExtractionEligibility.shared.update(granted: lease.granted, expiresAt: lease.expiresAt)
                 } catch {
-                    L1ExtractionEligibility.shared.update(granted: false, expiresAt: nil)
+                    // 后端失联：交还本机自行提取；下一次循环成功拿到租约后自动恢复原逻辑。
+                    L1ExtractionEligibility.shared.enableLocalFallback()
                     if isDeviceSyncEnabled && (!networkIsAvailable() || !serverIsReachable()) {
                         deviceSyncStatus = .offline
                     }
@@ -974,7 +983,6 @@ public final class AppUserIdentityStore: ObservableObject {
 
     private func stopL1Coordination() {
         l1CoordinationTask?.cancel(); l1CoordinationTask = nil
-        L1ExtractionEligibility.shared.update(granted: false, expiresAt: nil)
     }
 
     private func stopEventSocket() {

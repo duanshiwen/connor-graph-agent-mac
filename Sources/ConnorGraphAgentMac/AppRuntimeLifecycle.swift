@@ -3655,16 +3655,16 @@ extension AppRuntimeLifecycle {
         )
     }
 
-    static func demo(fallbackError: Error) -> AppRuntimeLifecycle {
-        let demo = AppDemoGraphSnapshotFactory.make()
+    /// 核心数据加载失败时的回退运行时：不注入任何预制知识，仅保留错误提示。
+    static func fallback(fallbackError: Error) -> AppRuntimeLifecycle {
         let runtime = AppRuntimeLifecycle(
-            entities: demo.entities,
-            statements: demo.statements,
-            episodes: demo.episodes,
-            observeLogEntries: demo.observeLogEntries,
+            entities: [],
+            statements: [],
+            episodes: [],
+            observeLogEntries: [],
             startupMode: .deferred
         )
-        runtime.errorMessage = "已回退到演示数据：\(fallbackError)"
+        runtime.errorMessage = "核心数据加载失败，已进入空数据模式：\(fallbackError)"
         return runtime
     }
 

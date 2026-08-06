@@ -121,7 +121,7 @@ final class AppCompositionRoot: ObservableObject {
                     runtime = AppRuntimeLifecycle.live(core: snapshot)
                 case .fallback(let error):
                     interactiveSnapshot = nil
-                    runtime = AppRuntimeLifecycle.demo(fallbackError: error)
+                    runtime = AppRuntimeLifecycle.fallback(fallbackError: error)
                 }
                 self.bindCommandRouting(to: runtime)
                 runtime.prepareInteractive(snapshot: interactiveSnapshot)

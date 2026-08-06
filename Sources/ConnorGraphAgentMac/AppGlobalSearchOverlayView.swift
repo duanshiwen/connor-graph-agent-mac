@@ -8,6 +8,11 @@ enum GlobalSearchOverlayLayout {
     static let minimumHeight: CGFloat = 160
     static let bottomInset: CGFloat = 24
 
+    /// 内容高度超过最大高度时才需要滚动（对应 ViewThatFits 的滚动边界）。
+    static func shouldScroll(contentHeight: CGFloat) -> Bool {
+        contentHeight > maximumHeight
+    }
+
     /// 根据弹框可用的实际高度计算最大高度：
     /// - 常规情况取 640；
     /// - 屏幕/窗口高度不足时按可用高度收缩，并预留底部留白；
