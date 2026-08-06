@@ -97,21 +97,64 @@ public struct ConnorPortableProfile: Codable, Sendable, Equatable {
     }
 }
 
+/// RSS 订阅源跨端共享线格式：只含 id/feedURL/displayName/createdAt/updatedAt，
+/// 分组、阅读状态、健康度等本机状态不参与账号同步。
+public struct SyncRSSSubscription: Codable, Sendable, Equatable {
+    public var id: String
+    public var feedURL: String
+    public var title: String
+    public var createdAt: Int64
+    public var updatedAt: Int64
+
+    public init(_ source: RSSSource) {
+        id = source.id.rawValue
+        feedURL = source.feedURL.absoluteString
+        title = source.displayName
+        createdAt = Int64(source.createdAt.timeIntervalSince1970 * 1_000)
+        updatedAt = Int64(source.updatedAt.timeIntervalSince1970 * 1_000)
+    }
+
+    /// 合并回 RSSSource：优先保留本机源的分组/阅读状态等字段，只覆盖共享字段。
+    static func makeSource(_ wire: SyncRSSSubscription, local: RSSSource?) -> RSSSource {
+        if var source = local {
+            if let url = URL(string: wire.feedURL) { source.feedURL = url }
+            source.displayName = wire.title.isEmpty ? (source.feedURL.host ?? source.feedURL.absoluteString) : wire.title
+            source.createdAt = Date(timeIntervalSince1970: Double(wire.createdAt) / 1_000)
+            source.updatedAt = Date(timeIntervalSince1970: Double(wire.updatedAt) / 1_000)
+            return source
+        }
+        let url = URL(string: wire.feedURL) ?? URL(string: "https://invalid.local")!
+        return RSSSource(
+            id: RSSSourceID(rawValue: wire.id),
+            feedURL: url,
+            displayName: wire.title.isEmpty ? (url.host ?? url.absoluteString) : wire.title,
+            createdAt: Date(timeIntervalSince1970: Double(wire.createdAt) / 1_000),
+            updatedAt: Date(timeIntervalSince1970: Double(wire.updatedAt) / 1_000)
+        )
+    }
+}
+
 public struct AppAccountDataSyncResult: Sendable, Equatable {
     public var appliedSessionChangeCount: Int
     public var appliedSettingsChangeCount: Int
+    public var appliedGovernanceLabelChangeCount: Int
+    public var appliedRSSChangeCount: Int
     public var pushedChangeCount: Int
     public var appliedSessionIDs: Set<String>
 
-    public init(appliedSessionChangeCount: Int = 0, appliedSettingsChangeCount: Int = 0, pushedChangeCount: Int = 0, appliedSessionIDs: Set<String> = []) {
+    public init(appliedSessionChangeCount: Int = 0, appliedSettingsChangeCount: Int = 0, appliedGovernanceLabelChangeCount: Int = 0, appliedRSSChangeCount: Int = 0, pushedChangeCount: Int = 0, appliedSessionIDs: Set<String> = []) {
         self.appliedSessionChangeCount = appliedSessionChangeCount
         self.appliedSettingsChangeCount = appliedSettingsChangeCount
+        self.appliedGovernanceLabelChangeCount = appliedGovernanceLabelChangeCount
+        self.appliedRSSChangeCount = appliedRSSChangeCount
         self.pushedChangeCount = pushedChangeCount
         self.appliedSessionIDs = appliedSessionIDs
     }
 
     public var sessionsChanged: Bool { appliedSessionChangeCount > 0 || !appliedSessionIDs.isEmpty }
     public var settingsChanged: Bool { appliedSettingsChangeCount > 0 }
+    public var governanceLabelsChanged: Bool { appliedGovernanceLabelChangeCount > 0 }
+    public var rssChanged: Bool { appliedRSSChangeCount > 0 }
 }
 
 public actor AppAccountDataSyncCoordinator {
@@ -129,16 +172,21 @@ public actor AppAccountDataSyncCoordinator {
         static let memoryL4Entities = "memory_l4_entities"
         static let memoryL4Relations = "memory_l4_relations"
         static let skills = "skills"
+        static let governanceLabels = "governance_labels"
+        static let rssSubscriptions = "rss_subscriptions"
     }
 
     /// 记录级同步边界：sessions 全量同步；settings 同步运行时设置、人格与用户偏好；
-    /// Memory OS L2/L3/L4 全量同步，L1 会话工作记忆只留本机。
+    /// governance_labels 同步会话标签定义（名称/颜色/图标）；Memory OS L2/L3/L4 全量同步，L1 会话工作记忆只留本机。
+    /// rss_subscriptions 同步 RSS 订阅源（id/feedURL/displayName/createdAt/updatedAt），删除同样传播。
     /// 个人资料 settings|profile 不进同步状态机，拉取时不记录、不应用，
     /// 历史残留也不会再触发 tombstone。
     private func isSyncableRecord(_ collection: String, _ recordId: String) -> Bool {
         switch collection {
         case SyncCollection.sessions: return true
         case SyncCollection.settings: return recordId == "macos_runtime" || recordId == "personality" || recordId == "user_preferences"
+        case SyncCollection.governanceLabels: return true
+        case SyncCollection.rssSubscriptions: return true
         case SyncCollection.memoryL0, SyncCollection.memoryL0Spans, SyncCollection.memoryL1: return true
         case "memory_l2", "memory_l2_nodes", "memory_l3", "memory_l4_entities", "memory_l4_relations": return true
         case SyncCollection.skills: return true
@@ -146,21 +194,23 @@ public actor AppAccountDataSyncCoordinator {
         }
     }
 
-    private enum AppliedChangeKind { case session(String), settings }
+    private enum AppliedChangeKind { case session(String), settings, governanceLabels, rssSubscriptions }
     private struct RecordState: Codable { var version: Int64; var hash: String; var deleted: Bool; var encrypted: Bool = false }
     private struct PersistedState: Codable { var cursor: Int64 = 0; var records: [String: RecordState] = [:] }
 
     private let sessions: AppChatSessionRepository
     private let settings: AppRuntimeSettingsRepository
+    private let governance: AppSessionGovernanceConfigRepository?
     private let memory: SQLiteMemoryOSStore?
     private let skillStore: SkillSyncStore?
+    private let rss: (any RSSSourceRepository)?
     private let identity: AppUserIdentityStore
     private let defaults: UserDefaults
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, memory: SQLiteMemoryOSStore?, skillStore: SkillSyncStore? = nil, identity: AppUserIdentityStore, defaults: UserDefaults = .standard) {
-        self.sessions = sessions; self.settings = settings; self.memory = memory; self.skillStore = skillStore; self.identity = identity; self.defaults = defaults
+    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, governance: AppSessionGovernanceConfigRepository? = nil, memory: SQLiteMemoryOSStore?, skillStore: SkillSyncStore? = nil, rss: (any RSSSourceRepository)? = nil, identity: AppUserIdentityStore, defaults: UserDefaults = .standard) {
+        self.sessions = sessions; self.settings = settings; self.governance = governance; self.memory = memory; self.skillStore = skillStore; self.rss = rss; self.identity = identity; self.defaults = defaults
         encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
         decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
     }
@@ -178,11 +228,13 @@ public actor AppAccountDataSyncCoordinator {
             let page = try await identity.pullSyncChanges(cursor: state.cursor)
             for change in page.changes where isSyncableRecord(change.collection, change.recordId) {
                 // 合并同步：除技能包与 L0/L1 记忆层（按“最新操作优先”应用删除）外，
-                // tombstone 一律跳过；其它记忆/会话等记录不会被同步删除。
+                // 标签定义也按“最新操作优先”应用删除；其它记忆/会话等记录不会被同步删除。
                 let isTombstoneCollection = change.collection == SyncCollection.skills
                     || change.collection == SyncCollection.memoryL0
                     || change.collection == SyncCollection.memoryL0Spans
                     || change.collection == SyncCollection.memoryL1
+                    || change.collection == SyncCollection.governanceLabels
+                    || change.collection == SyncCollection.rssSubscriptions
                 guard !change.deleted || isTombstoneCollection else { continue }
                 let clear: (change: ConnorSyncChange, encrypted: Bool)
                 if change.deleted && isTombstoneCollection {
@@ -193,7 +245,7 @@ public actor AppAccountDataSyncCoordinator {
                 } else {
                     clear = try decrypted(change, using: cipher)
                 }
-                if change.sourceDeviceId != deviceID, let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(clear.change) }) {
+                if change.sourceDeviceId != deviceID, let kind = try await AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try await apply(clear.change) }) {
                     record(kind, in: &syncResult)
                 }
                 let key = recordKey(change.collection, change.recordId)
@@ -204,7 +256,7 @@ public actor AppAccountDataSyncCoordinator {
             saveState(state, key: stateKey)
         } while hasMore
 
-        let projected = try projections()
+        let projected = try await projections()
         // 状态哈希回填为“本地重新编码后的投影”哈希，而不是远端载荷哈希：
         // 两端编码（键序/日期格式/可选字段）不同，若保存远端载荷哈希，下一次投影
         // 比较必然不相等，会把刚收到的记录又推回去，形成两端无限互推。
@@ -220,7 +272,7 @@ public actor AppAccountDataSyncCoordinator {
         }
         // 技能包与 L0/L1 按“最新操作优先”：本地已删除且此前同步过的记录回推 tombstone（载荷带删除时间）。
         let nowMillis = Int64(Date().timeIntervalSince1970 * 1_000)
-        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|"]
+        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|", "rss_subscriptions|"]
         for key in state.records.keys where tombstonePrefixes.contains(where: { key.hasPrefix($0) }) {
             guard state.records[key]?.deleted != true, projected[key] == nil else { continue }
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
@@ -252,7 +304,7 @@ public actor AppAccountDataSyncCoordinator {
         return syncResult
     }
 
-    private func projections() throws -> [String: ConnorJSONValue] {
+    private func projections() async throws -> [String: ConnorJSONValue] {
         var values: [String: ConnorJSONValue] = [:]
         for session in try sessions.loadSessions(filter: .all) {
             values[recordKey("sessions", session.id)] = try jsonValue(ConnorPortableSession(session))
@@ -300,10 +352,24 @@ public actor AppAccountDataSyncCoordinator {
                 values[recordKey(SyncCollection.skills, pack.id)] = try jsonValue(pack)
             }
         }
+        // 会话标签定义（名称/颜色/图标）随账号同步：以最近编辑时间合并，删除同样传播。
+        if let governance {
+            let config = try governance.loadOrCreateDefault()
+            for label in config.labels {
+                values[recordKey(SyncCollection.governanceLabels, label.id)] = try jsonValue(label)
+            }
+        }
+        // RSS 订阅源：只同步跨端共享字段（id/feedURL/displayName/createdAt/updatedAt），
+        // 分组/阅读状态/健康度等本机状态不参与账号同步。
+        if let rss {
+            for source in try await rss.listSources() {
+                values[recordKey(SyncCollection.rssSubscriptions, source.id.rawValue)] = try jsonValue(SyncRSSSubscription(source))
+            }
+        }
         return values
     }
 
-    private func apply(_ change: ConnorSyncChange) throws -> AppliedChangeKind? {
+    private func apply(_ change: ConnorSyncChange) async throws -> AppliedChangeKind? {
         switch (change.collection, change.recordId) {
         // 合并同步：任何端都不会因同步删除记录；远端变化一律合并落库。
         case ("sessions", let id):
@@ -410,6 +476,62 @@ public actor AppAccountDataSyncCoordinator {
                 }
             }
             return nil
+        case ("governance_labels", let id):
+            guard let governance else { return nil }
+            var config = try governance.loadOrCreateDefault()
+            if change.deleted {
+                // 删除按“最新操作优先”：远端删除时间比本地编辑时间新才删除。
+                let tombstone: SyncTombstone = try decode(change.payload)
+                let local = config.labels.first { $0.id == id }
+                if tombstone.updatedAt > (local?.updatedAt ?? 0) {
+                    config.labels.removeAll { $0.id == id }
+                    try governance.save(config)
+                    return .governanceLabels
+                }
+            } else {
+                let wire: AgentSessionLabelDefinition = try decode(change.payload)
+                let local = config.labels.first { $0.id == id }
+                if local == nil || wire.updatedAt > local!.updatedAt {
+                    if let index = config.labels.firstIndex(where: { $0.id == id }) {
+                        config.labels[index] = wire
+                    } else {
+                        config.labels.append(wire)
+                    }
+                    try governance.save(config)
+                    return .governanceLabels
+                }
+            }
+            return nil
+        case ("rss_subscriptions", let id):
+            guard let rss else { return nil }
+            let sourceID = RSSSourceID(rawValue: id)
+            if change.deleted {
+                // 删除按“最新操作优先”：远端删除时间比本地编辑时间新才删除。
+                let tombstone: SyncTombstone = try decode(change.payload)
+                let local = try await rss.source(id: sourceID)
+                if tombstone.updatedAt > Int64((local?.updatedAt ?? .distantPast).timeIntervalSince1970 * 1_000) {
+                    try await rss.deleteSource(id: sourceID)
+                    return .rssSubscriptions
+                }
+            } else {
+                let wire: SyncRSSSubscription = try decode(change.payload)
+                // URL 去重：同 URL 已存在不同 id（历史版本）时按“后更新者胜”，
+                // 采用胜者 id，避免跨端出现重复订阅。
+                let sources = try await rss.listSources()
+                if let byURL = sources.first(where: { $0.feedURL.absoluteString == wire.feedURL && $0.id.rawValue != id }) {
+                    if wire.updatedAt > Int64(byURL.updatedAt.timeIntervalSince1970 * 1_000) {
+                        try await rss.deleteSource(id: byURL.id)
+                        try await rss.saveSource(SyncRSSSubscription.makeSource(wire, local: nil))
+                    }
+                    return .rssSubscriptions
+                }
+                let local = try await rss.source(id: sourceID)
+                if wire.updatedAt > Int64((local?.updatedAt ?? .distantPast).timeIntervalSince1970 * 1_000) {
+                    try await rss.saveSource(SyncRSSSubscription.makeSource(wire, local: local))
+                    return .rssSubscriptions
+                }
+            }
+            return nil
         default: return nil
         }
     }
@@ -420,6 +542,8 @@ public actor AppAccountDataSyncCoordinator {
             result.appliedSessionChangeCount += 1
             result.appliedSessionIDs.insert(id)
         case .settings: result.appliedSettingsChangeCount += 1
+        case .governanceLabels: result.appliedGovernanceLabelChangeCount += 1
+        case .rssSubscriptions: result.appliedRSSChangeCount += 1
         }
     }
 

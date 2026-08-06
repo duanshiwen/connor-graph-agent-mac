@@ -75,7 +75,9 @@ public struct AppSessionGovernanceConfig: Codable, Sendable, Equatable {
         let normalizedLabels = labels.map { definition in
             guard let builtIn = labelDefaults[definition.id] else { return definition }
             var copy = definition
-            if copy.name != builtIn.name {
+            // 内置标签只有在“从未编辑过”（updatedAt == 0）时才回填默认显示名；
+            // 用户显式改过文字后保留自定义名，避免同步后又被规范化覆盖。
+            if copy.updatedAt == 0, copy.name != builtIn.name {
                 copy.name = builtIn.name
             }
             if copy.systemImage == "tag", builtIn.systemImage != "tag" {
@@ -120,5 +122,7 @@ public struct AppSessionGovernanceConfigRepository: Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(config)
         try data.write(to: configURL, options: .atomic)
+        // 标签定义属于账号同步的 governance_labels 集合，保存后通知同步协调器。
+        AppAccountSyncSignal.postLocalDataDidChange()
     }
 }

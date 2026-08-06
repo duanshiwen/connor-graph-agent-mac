@@ -7,7 +7,7 @@ import ConnorGraphAgent
     let document = AgentPromptModuleCatalog.document(from: prompt)
 
     #expect(AgentPromptModuleCatalog.unclassifiedHeadings(in: prompt).isEmpty)
-    #expect(AgentPromptModuleCatalog.specifications.count == 42)
+    #expect(AgentPromptModuleCatalog.specifications.count == 43)
     #expect(document.modules.count == AgentPromptModuleCatalog.specifications.count + 1)
     #expect(Set(document.moduleIDs).count == document.moduleIDs.count)
     #expect(Set(AgentPromptModuleCatalog.specifications.map(\.title)).count == AgentPromptModuleCatalog.specifications.count)

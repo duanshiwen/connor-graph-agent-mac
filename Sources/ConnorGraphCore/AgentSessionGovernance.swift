@@ -68,12 +68,16 @@ public struct AgentSessionLabelDefinition: Codable, Sendable, Equatable, Identif
     public var name: String
     public var colorName: String
     public var systemImage: String
+    /// 最近一次编辑时间（epoch ms）；0 表示从未被编辑（内置默认标签）。
+    /// 用于跨端合并：拉取/删除时以“较新的操作”为准。
+    public var updatedAt: Int64
 
     public init(id: String, name: String, colorName: String = "blue") {
         self.id = id
         self.name = name
         self.colorName = colorName
         self.systemImage = "tag"
+        self.updatedAt = 0
     }
 
     public init(id: String, name: String, colorName: String, systemImage: String) {
@@ -81,6 +85,7 @@ public struct AgentSessionLabelDefinition: Codable, Sendable, Equatable, Identif
         self.name = name
         self.colorName = colorName
         self.systemImage = systemImage
+        self.updatedAt = 0
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -88,6 +93,7 @@ public struct AgentSessionLabelDefinition: Codable, Sendable, Equatable, Identif
         case name
         case colorName
         case systemImage
+        case updatedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -96,6 +102,7 @@ public struct AgentSessionLabelDefinition: Codable, Sendable, Equatable, Identif
         name = try container.decode(String.self, forKey: .name)
         colorName = try container.decodeIfPresent(String.self, forKey: .colorName) ?? "blue"
         systemImage = try container.decodeIfPresent(String.self, forKey: .systemImage) ?? "tag"
+        updatedAt = try container.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? 0
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -104,6 +111,7 @@ public struct AgentSessionLabelDefinition: Codable, Sendable, Equatable, Identif
         try container.encode(name, forKey: .name)
         try container.encode(colorName, forKey: .colorName)
         try container.encode(systemImage, forKey: .systemImage)
+        try container.encode(updatedAt, forKey: .updatedAt)
     }
 
     public static let defaults: [AgentSessionLabelDefinition] = [

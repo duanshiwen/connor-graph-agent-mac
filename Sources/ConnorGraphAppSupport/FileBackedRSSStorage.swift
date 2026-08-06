@@ -38,11 +38,14 @@ public actor FileBackedRSSSourceRepository: RSSSourceRepository {
             sources.append(source)
         }
         try saveSources(sources)
+        // 订阅源增改后通知账号同步（本地编辑触发 reconcile，删除同样传播）。
+        AppAccountSyncSignal.postLocalDataDidChange()
     }
 
     public func deleteSource(id: RSSSourceID) async throws {
         let sources = try loadSources().filter { $0.id != id }
         try saveSources(sources)
+        AppAccountSyncSignal.postLocalDataDidChange()
     }
 
     private func loadSources() throws -> [RSSSource] {

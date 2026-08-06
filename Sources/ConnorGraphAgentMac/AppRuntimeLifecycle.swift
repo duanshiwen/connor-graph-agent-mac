@@ -3848,14 +3848,23 @@ extension AppRuntimeLifecycle {
         let coordinator = AppAccountDataSyncCoordinator(
             sessions: chatSessionRepository,
             settings: AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory),
+            governance: AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory),
             memory: memoryOSStore,
             skillStore: SkillSyncStore(storagePaths: storagePaths),
+            rss: rssFeatureModel.agentRuntime.repository,
             identity: identityStore
         )
         let result = try await Task.detached(priority: .utility) {
             try await coordinator.reconcile()
         }.value
         if result.settingsChanged { loadRuntimeSettings() }
+        if result.governanceLabelsChanged,
+           let config = try? AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory).loadOrCreateDefault() {
+            governanceModel.apply(config)
+        }
+        if result.rssChanged {
+            await rssFeatureModel.reload()
+        }
         if result.sessionsChanged {
             scheduleChatSessionListRefresh(reason: "account-sync")
             chatSessionCoordinator.refreshSelectedSessionIfChanged(sessionIDs: result.appliedSessionIDs)

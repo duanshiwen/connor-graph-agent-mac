@@ -147,6 +147,13 @@ public enum AgentPromptModuleCatalog {
         .init(id: "memory_retrieval", title: "Memory Retrieval Rules", requirement: .allOf([.memory]), dependencies: ["memory_architecture"], toolFamilies: ["memory"]),
         .init(id: "calendar_retrieval", title: "Calendar Retrieval Rules", requirement: .allOf([.calendar]), toolFamilies: ["calendar"]),
         .init(id: "mail_retrieval", title: "Mail Retrieval Rules", requirement: .allOf([.mail]), toolFamilies: ["mail"]),
+        .init(
+            id: "proactive_reminder_judgment",
+            title: "Proactive Reminder Judgment",
+            requirement: .anyOf([.calendar, .mail]),
+            dependencies: ["calendar_retrieval", "mail_retrieval"],
+            toolFamilies: ["calendar", "mail"]
+        ),
         .init(id: "skill_discovery", title: "Skill Discovery Rules", requirement: .allOf([.skills]), toolFamilies: ["skills"]),
         .init(id: "note_retrieval", title: "Note Retrieval Rules", requirement: .allOf([.note]), toolFamilies: ["note"]),
         .init(id: "cloud_knowledge_retrieval", title: "Cloud Knowledge Retrieval Rules", requirement: .allOf([.cloudKnowledge]), toolFamilies: ["external-research"]),

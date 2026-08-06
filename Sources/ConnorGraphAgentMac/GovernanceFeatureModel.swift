@@ -79,9 +79,11 @@ final class GovernanceFeatureModel {
     func upsertLabel(_ definition: AgentSessionLabelDefinition) {
         var next = config
         let trimmedID = definition.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nowMillis = Int64(Date().timeIntervalSince1970 * 1_000)
         if !trimmedID.isEmpty, let index = next.labels.firstIndex(where: { $0.id == trimmedID }) {
             var updated = definition
             updated.id = trimmedID
+            updated.updatedAt = nowMillis
             next.labels[index] = updated
         } else {
             var created = definition
@@ -90,6 +92,7 @@ final class GovernanceFeatureModel {
                 prefix: "label",
                 preferredName: definition.name
             )
+            created.updatedAt = nowMillis
             next.labels.append(created)
         }
         save(next, successMessage: "标签定义已保存。", section: .labels)
