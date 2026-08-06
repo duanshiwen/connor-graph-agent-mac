@@ -248,7 +248,8 @@ public struct ContactCommitDraftTool: AgentTool {
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let draftID = arguments.string("draftID") else { throw AgentToolError.invalidArguments("draftID is required") }
-        let draft = try await runtime.commitDraft(id: draftID, approved: arguments.bool("approved") ?? false)
+        let approved = context.approvedCapabilities.contains(.mutateContacts) || (arguments.bool("approved") ?? false)
+        let draft = try await runtime.commitDraft(id: draftID, approved: approved)
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Committed approved contact draft \(draftID)", contentJSON: try ContactJSON.encodeDraft(draft))
     }
 }
@@ -390,7 +391,11 @@ public struct ContactsWriteTool: AgentTool {
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let operation = arguments.string("operation") ?? ""
-        let approved = arguments.bool("approved") ?? false
+        // The app's permission flow is authoritative: after the human approves
+        // .mutateContacts, the capability lands in the execution context and every
+        // write operation proceeds even if the model omits the legacy approved flag.
+        // Keep the legacy argument as a fallback for direct/detached invocations.
+        let approved = context.approvedCapabilities.contains(.mutateContacts) || (arguments.bool("approved") ?? false)
         switch operation {
         case "create_person":
             let name = arguments.string("name") ?? arguments.string("displayName")

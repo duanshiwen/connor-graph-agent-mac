@@ -156,8 +156,8 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
 
     let migrated = try repository.loadOrCreateDefault()
 
-    #expect(migrated.schemaVersion == 7)
-    #expect(migrated.loop.maxToolIterations == 12)
+    #expect(migrated.schemaVersion == 8)
+    #expect(migrated.loop.maxToolIterations == 256)
     #expect(migrated.loop.maxToolResultBytes == 8 * 1_024)
     #expect(migrated.loop.promptMaxEstimatedTokens == 64_000)
     #expect(migrated.loop.budget.maxTotalTokens == 80_000)
@@ -183,7 +183,7 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
 
     let migrated = try repository.loadOrCreateDefault()
 
-    #expect(migrated.schemaVersion == 7)
+    #expect(migrated.schemaVersion == 8)
     #expect(migrated.loop.maxToolIterations == 512)
     #expect(migrated.loop.maxToolResultBytes == 456_789)
     #expect(migrated.loop.promptMaxEstimatedTokens == 345_678)

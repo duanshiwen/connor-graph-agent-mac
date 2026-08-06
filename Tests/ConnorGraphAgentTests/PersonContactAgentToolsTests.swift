@@ -166,6 +166,29 @@ struct PersonContactAgentToolsTests {
         #expect(afterDelete.contentText.contains("Found 0 people"))
     }
 
+    @Test func contactsWriteUpdateHonorsCapabilityApprovalWithoutLLMApprovedFlag() async throws {
+        let runtime = InMemoryAgentContactRuntime(people: [
+            PersonProfile(id: ContactID(rawValue: "person-a"), displayName: "小王", aliases: ["王同学"])
+        ])
+        let writeTool = ContactsWriteTool(runtime: runtime)
+        let context = AgentToolExecutionContext(
+            runID: "run-person-contacts",
+            sessionID: "session-person-contacts",
+            groupID: "group-person-contacts",
+            userPrompt: "test",
+            toolCallID: "call-update-person-capability-approved",
+            policyEngine: AgentPolicyEngine(permissionMode: .askToWrite, auditLog: InMemoryAgentAuditLog()),
+            approvedCapabilities: [.mutateContacts]
+        )
+
+        let updated = try await writeTool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"update_person\",\"personID\":\"person-a\",\"organization\":\"Connor Labs\"}"),
+            context: context
+        )
+
+        #expect(updated.contentJSON?.contains("Connor Labs") == true)
+    }
+
     @Test func contactsWriteSchemaDocumentsOptionalPersonImages() throws {
         let tool = ContactsWriteTool(runtime: InMemoryAgentContactRuntime())
         let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])

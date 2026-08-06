@@ -333,7 +333,7 @@ import ConnorGraphStore
     #expect(enabled.contains("call `interactive_web_publish` with the exact projectID and manifestHash"))
     #expect(enabled.contains("interactive_web_update_draft"))
     #expect(enabled.contains("interactive_web_get_draft"))
-    #expect(enabled.contains("../sdk/v1.js"))
+    #expect(enabled.contains("/api/v1/sdk/v1.js"))
     #expect(enabled.contains("registrations"))
     #expect(enabled.contains("interactive_web_get_project"))
     #expect(enabled.contains("Never reconstruct an existing draft from conversation memory"))

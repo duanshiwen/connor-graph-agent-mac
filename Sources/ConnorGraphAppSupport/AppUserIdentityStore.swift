@@ -155,7 +155,7 @@ private struct RegisterRequest: Encodable { var username: String; var email: Str
 private struct RefreshRequest: Encodable { var refreshToken: String }
 private struct LogoutRequest: Encodable { var refreshToken: String }
 private struct AvatarUploadResponse: Decodable { var objectName: String }
-private struct SyncHeartbeatRequest: Encodable { var deviceId: String; var platform: String; var name: String; var appVersion: String }
+private struct SyncHeartbeatRequest: Encodable { var deviceId: String; var platform: String; var name: String; var appVersion: String; var syncEnabled: Bool }
 private struct L1LeaseRequest: Encodable { var deviceId: String }
 
 public struct ConnorSyncDevice: Codable, Sendable, Equatable {
@@ -334,8 +334,8 @@ public struct ConnorBackendAPIClient: Sendable {
         )
     }
 
-    public func syncHeartbeat(token: String, deviceID: String, name: String, appVersion: String) async throws -> ConnorSyncDevice {
-        try await request("sync/devices/heartbeat", method: "POST", token: token, body: SyncHeartbeatRequest(deviceId: deviceID, platform: "macos", name: name, appVersion: appVersion))
+    public func syncHeartbeat(token: String, deviceID: String, name: String, appVersion: String, syncEnabled: Bool) async throws -> ConnorSyncDevice {
+        try await request("sync/devices/heartbeat", method: "POST", token: token, body: SyncHeartbeatRequest(deviceId: deviceID, platform: "macos", name: name, appVersion: appVersion, syncEnabled: syncEnabled))
     }
 
     public func pushSyncChanges(token: String, deviceID: String, changes: [ConnorSyncChange]) async throws -> [SyncPushResult] {
@@ -506,8 +506,8 @@ public actor ConnorBackendAuthenticatedSession {
         try await authenticated { try await api.subscriptions(token: $0) }
     }
 
-    public func syncHeartbeat(deviceID: String, name: String, appVersion: String) async throws -> ConnorSyncDevice {
-        try await authenticated { try await api.syncHeartbeat(token: $0, deviceID: deviceID, name: name, appVersion: appVersion) }
+    public func syncHeartbeat(deviceID: String, name: String, appVersion: String, syncEnabled: Bool) async throws -> ConnorSyncDevice {
+        try await authenticated { try await api.syncHeartbeat(token: $0, deviceID: deviceID, name: name, appVersion: appVersion, syncEnabled: syncEnabled) }
     }
 
     public func pushSyncChanges(deviceID: String, changes: [ConnorSyncChange]) async throws -> [SyncPushResult] {
@@ -715,11 +715,16 @@ public final class AppUserIdentityStore: ObservableObject {
         self.networkIsAvailable = networkIsAvailable
         self.serverIsReachable = serverIsReachable
         self.syncDefaults = syncDefaults
-        self.isDeviceSyncEnabled = syncDefaults.bool(forKey: "ConnorDeviceSyncEnabled")
-        self.deviceSyncStatus = syncDefaults.bool(forKey: "ConnorDeviceSyncEnabled") ? .waitingForLogin : .disabled
+        let syncInitiallyEnabled = syncDefaults.bool(forKey: "ConnorDeviceSyncEnabled")
+        self.isDeviceSyncEnabled = syncInitiallyEnabled
+        self.deviceSyncStatus = syncInitiallyEnabled ? .waitingForLogin : .disabled
         let storedDeviceID = syncDefaults.string(forKey: "ConnorSyncDeviceID")
         self.deviceID = storedDeviceID ?? UUID().uuidString
         if storedDeviceID == nil { syncDefaults.set(self.deviceID, forKey: "ConnorSyncDeviceID") }
+        if !syncInitiallyEnabled {
+            // 同步关闭：本机独立提取（不参与后端 L1 租约竞争），始终保有提取资格。
+            L1ExtractionEligibility.shared.enableStandalone()
+        }
         localChangeObserver = NotificationCenter.default.addObserver(
             forName: AppAccountSyncSignal.localDataDidChange,
             object: nil,
@@ -757,6 +762,9 @@ public final class AppUserIdentityStore: ObservableObject {
             startDeviceSync()
         } else {
             stopDeviceSync()
+            // 同步关闭：本机始终自行提取；L1 协调循环保持心跳（syncEnabled=false），
+            // 让后端知道本机不参与租约竞争，避免本机设备记录阻塞其他开启同步的设备。
+            L1ExtractionEligibility.shared.enableStandalone()
             deviceSyncStatus = .disabled
         }
     }
@@ -958,9 +966,19 @@ public final class AppUserIdentityStore: ObservableObject {
         l1CoordinationTask = Task {
             while !Task.isCancelled {
                 do {
-                    _ = try await session.syncHeartbeat(deviceID: deviceID, name: Host.current().localizedName ?? "Mac", appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
-                    let lease = try await session.acquireL1Lease(deviceID: deviceID)
-                    L1ExtractionEligibility.shared.update(granted: lease.granted, expiresAt: lease.expiresAt)
+                    _ = try await session.syncHeartbeat(
+                        deviceID: deviceID,
+                        name: Host.current().localizedName ?? "Mac",
+                        appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+                        syncEnabled: isDeviceSyncEnabled
+                    )
+                    if isDeviceSyncEnabled {
+                        let lease = try await session.acquireL1Lease(deviceID: deviceID)
+                        L1ExtractionEligibility.shared.update(granted: lease.granted, expiresAt: lease.expiresAt)
+                    } else {
+                        // 同步关闭：不申请租约，本机始终自行提取。
+                        L1ExtractionEligibility.shared.enableStandalone()
+                    }
                 } catch {
                     // 后端失联：交还本机自行提取；下一次循环成功拿到租约后自动恢复原逻辑。
                     L1ExtractionEligibility.shared.enableLocalFallback()

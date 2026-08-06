@@ -47,6 +47,37 @@ struct DeviceSyncPolicyTests {
         #expect(!L1ExtractionEligibility.shared.canRun())
     }
 
+    @Test func l1EligibilityStandaloneModeRunsLocallyWhileSyncDisabled() {
+        let now = Date()
+        // 同步关闭：不参与租约竞争，无论后端在线与否本机都自行提取。
+        L1ExtractionEligibility.shared.enableStandalone()
+        #expect(L1ExtractionEligibility.shared.canRun(now: now))
+        #expect(L1ExtractionEligibility.shared.canRun(now: now.addingTimeInterval(10 * 60)))
+        // 重新开启同步并收到租约结论后，独立模式让位于租约语义。
+        L1ExtractionEligibility.shared.update(granted: true, expiresAt: now.addingTimeInterval(10))
+        #expect(L1ExtractionEligibility.shared.canRun(now: now))
+        #expect(!L1ExtractionEligibility.shared.canRun(now: now.addingTimeInterval(11)))
+        L1ExtractionEligibility.shared.update(granted: false, expiresAt: nil)
+    }
+
+    @Test func l1EligibilityStandaloneModeEndsOnLeaseVerdict() {
+        // 后端把租约判给其他设备时，开启同步的本机不再自行提取（保持多设备互斥语义）。
+        L1ExtractionEligibility.shared.enableStandalone()
+        #expect(L1ExtractionEligibility.shared.canRun())
+        L1ExtractionEligibility.shared.update(granted: false, expiresAt: nil)
+        #expect(!L1ExtractionEligibility.shared.canRun())
+    }
+
+    @Test func l1EligibilityStandaloneAndFallbackAreMutuallyExclusive() {
+        L1ExtractionEligibility.shared.enableLocalFallback()
+        L1ExtractionEligibility.shared.enableStandalone()
+        #expect(L1ExtractionEligibility.shared.canRun())
+        L1ExtractionEligibility.shared.enableLocalFallback()
+        #expect(L1ExtractionEligibility.shared.canRun())
+        L1ExtractionEligibility.shared.disable()
+        #expect(!L1ExtractionEligibility.shared.canRun())
+    }
+
     @Test func syncResultOnlyRefreshesChangedSurfaces() {
         let uploadOnly = AppAccountDataSyncResult(pushedChangeCount: 3)
         #expect(!uploadOnly.sessionsChanged)
