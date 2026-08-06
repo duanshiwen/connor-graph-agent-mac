@@ -488,6 +488,47 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(completeText == "Hello")
 }
 
+private struct InterruptedStreamProvider: StreamingAgentModelProvider {
+    let modelID = "interrupted-stream"
+    let capabilities = AgentModelCapabilities(supportsStreaming: true, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        throw OpenAICompatibleProviderError.httpStatus(503, message: "temporary upstream failure")
+    }
+
+    func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
+    }
+}
+
+@Test func agentLoopReportsInterruptedStreamAsProviderSideIssue() async throws {
+    let provider = InterruptedStreamProvider()
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(providerRetryCount: 0),
+        streamComplete: { provider, request in provider.streamComplete(request) }
+    )
+
+    var failureMessage: String?
+    var thrownDescription: String?
+    do {
+        for try await event in loop.run(AgentChatRequest(runID: "run-interrupted-stream", sessionID: "session-interrupted-stream", userMessage: "Hello")) {
+            if case let .runFailed(failure) = event {
+                failureMessage = failure.message
+            }
+        }
+    } catch {
+        thrownDescription = String(describing: error)
+    }
+
+    #expect(failureMessage?.contains("模型服务商返回的流式响应未正常结束") == true)
+    #expect(failureMessage?.contains("不是康纳应用的问题") == true)
+    #expect(thrownDescription?.contains("模型服务商返回的流式响应未正常结束") == true)
+}
+
 @Test func progressUpdateToolEmitsAssistantMessageAndContinuesRun() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(

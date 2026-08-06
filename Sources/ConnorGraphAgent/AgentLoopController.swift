@@ -1316,22 +1316,30 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         var completedResponse: AgentModelResponse?
         var streamedText = ""
         var sawToolInputDelta = false
-        for try await event in streamCompleteHandler(modelProvider, protocolSafeRequest) {
-            try Task.checkCancellation()
-            switch event {
-            case .textDelta(let text):
-                guard !text.isEmpty else { continue }
-                streamedText += text
-                guard publishesTextDeltas else { continue }
-                didPublishTextDelta = true
-                yield(.textDelta(AgentTextDeltaEvent(runID: run.id, sessionID: run.sessionID, text: text)), to: continuation, recorder: eventRecorder)
-            case .toolInputDelta:
-                sawToolInputDelta = true
-            case .thinkingDelta, .rawProviderEvent:
-                continue
-            case .completed(let response):
-                completedResponse = response
+        do {
+            for try await event in streamCompleteHandler(modelProvider, protocolSafeRequest) {
+                try Task.checkCancellation()
+                switch event {
+                case .textDelta(let text):
+                    guard !text.isEmpty else { continue }
+                    streamedText += text
+                    guard publishesTextDeltas else { continue }
+                    didPublishTextDelta = true
+                    yield(.textDelta(AgentTextDeltaEvent(runID: run.id, sessionID: run.sessionID, text: text)), to: continuation, recorder: eventRecorder)
+                case .toolInputDelta:
+                    sawToolInputDelta = true
+                case .thinkingDelta, .rawProviderEvent:
+                    continue
+                case .completed(let response):
+                    completedResponse = response
+                }
             }
+        } catch let error as CancellationError {
+            throw error
+        } catch {
+            // 流式响应在拿到完成信封前中断（连接断开、超时或提供方异常）。
+            // 这是模型服务端的问题，用面向用户的文案包装后抛出，避免用户误以为是本应用故障。
+            throw AgentModelStreamInterruptedError(underlying: error)
         }
         if let completedResponse { return completedResponse }
         // The stream ended cleanly without a completed envelope. Prefer the text the
@@ -1340,7 +1348,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         if !streamedText.isEmpty, !sawToolInputDelta {
             return AgentModelResponse(text: streamedText, toolCalls: [], finishReason: .stop)
         }
-        return try await modelProvider.complete(protocolSafeRequest)
+        do {
+            return try await modelProvider.complete(protocolSafeRequest)
+        } catch let error as CancellationError {
+            throw error
+        } catch {
+            // 流已结束但未给出完成信封，改用非流式请求兜底；兜底失败同样是模型服务端问题。
+            throw AgentModelStreamInterruptedError(underlying: error)
+        }
     }
 
     private static func protocolSafeRequest(_ request: AgentModelRequest) -> AgentModelRequest {
@@ -2659,6 +2674,38 @@ public enum AgentLoopError: Error, Sendable, Equatable {
     case budgetExceeded
     case runDurationExceeded(Int)
     case cancelled
+}
+
+/// 模型服务商流式响应未正常结束（连接中断、超时或未收到完成信封），
+/// 且恢复请求也失败时的用户可见错误。错误信息明确说明这是模型服务端的问题，
+/// 不是康纳应用自身的问题。
+private struct AgentModelStreamInterruptedError: Error, CustomStringConvertible, AgentModelProviderErrorClassifying, Sendable {
+    let underlying: Error
+
+    var description: String {
+        """
+        模型服务商返回的流式响应未正常结束（连接中断、超时或未收到完整响应），本次请求无法完成（\(Self.summarize(underlying))）。这是模型服务端的问题，不是康纳应用的问题；请稍后重试，或检查模型接口配置后重试。
+        """
+    }
+
+    var providerErrorClass: AgentModelProviderErrorClass {
+        if let classifying = underlying as? any AgentModelProviderErrorClassifying {
+            return classifying.providerErrorClass
+        }
+        if let urlError = underlying as? URLError {
+            return urlError.code == .cancelled ? .permanent : .transient
+        }
+        if AgentProviderErrorHeuristics.isContextOverflowMessage(String(describing: underlying)) {
+            return .contextOverflow
+        }
+        return .permanent
+    }
+
+    private static func summarize(_ error: Error) -> String {
+        let trimmed = String(describing: error).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 160 else { return trimmed.isEmpty ? "未知错误" : trimmed }
+        return String(trimmed.prefix(160)) + "…"
+    }
 }
 
 private struct AgentToolExecutionTimeoutError: Error, CustomStringConvertible, Sendable {
