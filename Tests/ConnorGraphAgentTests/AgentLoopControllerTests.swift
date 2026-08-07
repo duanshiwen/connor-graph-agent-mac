@@ -367,7 +367,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(configuration.toolExposureMode == .contextual)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
     #expect(configuration.promptMaxEstimatedTokens == 64_000)
-    #expect(configuration.maxToolResultBytes == 8 * 1_024)
+    #expect(configuration.maxToolResultBytes == 32 * 1_024)
     #expect(configuration.toolExecutionTimeoutSeconds == 300)
     #expect(configuration.budget.maxTotalTokens == 80_000)
 }
@@ -1078,19 +1078,6 @@ private struct PaginatedCurrentUserProfileTool: AgentTool {
             contentJSON: json,
             citations: ["profile-\(page)"]
         )
-    }
-}
-
-private struct MemoryClaimEvidenceTool: AgentTool {
-    let name: String
-    let contentJSON: String
-    let citations: [String]
-    let description = "Return claim-validation memory evidence"
-    let permission = AgentPermissionCapability.readSession
-    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
-
-    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: contentJSON, contentJSON: contentJSON, citations: citations)
     }
 }
 
@@ -2656,39 +2643,6 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(completed?.text.contains("选择工作目录") == true)
 }
 
-@Test func memoryClaimValidatorClassifiesUnsupportedIndirectAndConflictedClaims() {
-    let validator = AgentMemoryClaimValidator()
-    #expect(validator.validate(answer: "My budget was 100.", evidencePayloads: [], citations: []).status == .unsupported)
-    #expect(validator.validate(answer: "A directly causes B.", evidencePayloads: [#"{"depth":2,"status":"active"}"#], citations: ["edge-2"]).status == .inferred)
-    #expect(validator.validate(answer: "当前是方案 A，确定。", evidencePayloads: [#"{"depth":0,"status":"conflicted"}"#], citations: ["record-a"]).status == .conflicted)
-    #expect(validator.validate(answer: "Memory suggests an indirect relationship.", evidencePayloads: [#"{"depth":2,"status":"active"}"#], citations: ["edge-2"]).status == .supported)
-}
-
-@Test func agentLoopCorrectsConflictedMemoryClaimOnce() async throws {
-    let names = AgentContinuityPreflightPolicy.requiredToolNames
-    let calls = names.enumerated().map { AgentToolCall(id: "memory-\($0.offset)", name: $0.element, argumentsJSON: "{}") }
-    let provider = ScriptedModelProvider(responses: [
-        AgentModelResponse(text: nil, toolCalls: calls, finishReason: .toolCalls),
-        AgentModelResponse(text: "当前是方案 A，确定。"),
-        AgentModelResponse(text: "记忆记录对当前方案存在冲突：一条支持 A，另一条支持 B，无法消解。")
-    ])
-    var registry = AgentToolRegistry()
-    for name in names {
-        let status = name == "memory_os_knowledge_context" ? "conflicted" : "active"
-        registry.register(MemoryClaimEvidenceTool(name: name, contentJSON: "{\"status\":\"\(status)\",\"depth\":0}", citations: ["record-\(name)"]))
-    }
-    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
-
-    var completed: AgentTextCompleteEvent?
-    for try await event in loop.run(AgentChatRequest(sessionID: "claim-conflict", userMessage: "请根据记忆回忆我们之前的方案")) {
-        if case .textComplete(let payload) = event { completed = payload }
-    }
-
-    #expect(await provider.requests.count == 3)
-    #expect(completed?.text.contains("存在冲突") == true)
-    #expect(completed?.citations.count == names.count)
-}
-
 @Test func modelReliabilityRegistryKeysOverridesByExactModelID() {
     let registry = AgentModelReliabilityRegistry(toolResultReliabilityByModelID: ["gpt-exact-1": .verified])
     #expect(registry.toolResultReliability(for: "gpt-exact-1") == .verified)
@@ -3320,7 +3274,7 @@ func agentLoopUsesContextualRetrievalPlanInsideStrategyPhase() async throws {
     #expect(events.last?.kind == .runCompleted)
 }
 
-@Test func agentLoopDefersExcessToolCallsWithoutPreservingStaleProviderMetadata() async throws {
+@Test func agentLoopDefersExcessToolCallsWhilePreservingProviderThinkingMetadata() async throws {
     let calls = (1...3).map {
         AgentToolCall(id: "limited-call-\($0)", name: "echo_args", argumentsJSON: "{\"value\":\"\($0)\"}")
     }
@@ -3349,7 +3303,8 @@ func agentLoopUsesContextualRetrievalPlanInsideStrategyPhase() async throws {
         $0.role == .assistant && $0.toolCalls?.contains(where: { $0.id == "limited-call-1" }) == true
     })
     #expect(assistant.toolCalls?.map(\.id) == ["limited-call-1", "limited-call-2"])
-    #expect(assistant.providerMetadata == nil)
+    #expect(assistant.providerMetadata?.providerID == "openai-responses")
+    #expect(assistant.providerMetadata?.rawOutputItemsJSON?.contains("limited-call-3") == true)
     #expect(followUp.messages.contains {
         $0.role == .system && $0.content.contains("deferred 1 calls")
     })

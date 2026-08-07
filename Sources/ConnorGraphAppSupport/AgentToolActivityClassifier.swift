@@ -166,6 +166,14 @@ public struct AgentToolActivityClassifier: Sendable {
                 subtitle: countSubtitle(result["operations"], noun: "operations"),
                 icon: "doc.badge.gearshape"
             )
+        case "interactive_web_edit_draft":
+            return ToolDescriptor(
+                semanticKind: .editFile,
+                title: "Edit Interactive Web Draft",
+                target: basename(string(arguments["fileName"]) ?? string(result["fileName"])),
+                subtitle: nil,
+                icon: "pencil"
+            )
         case "calendar_write":
             let operation = string(arguments["operation"])
             let title: String

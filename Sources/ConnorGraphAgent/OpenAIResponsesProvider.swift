@@ -349,7 +349,38 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
               let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
               !items.isEmpty
         else { return nil }
-        return items
+        // When there is no executed call list, the raw output items are already the
+        // authoritative content (for example a text-only final turn).
+        guard let selectedCalls = message.toolCalls, !selectedCalls.isEmpty else { return items }
+        let selectedByID = Dictionary(selectedCalls.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var reconciled: [[String: Any]] = []
+        var appendedCallIDs = Set<String>()
+        for item in items {
+            guard item["type"] as? String == "function_call",
+                  let callID = (item["call_id"] as? String) ?? (item["id"] as? String) else {
+                // Keep reasoning, message, and other items so the encrypted reasoning
+                // content required for continuation is passed back unchanged.
+                reconciled.append(item)
+                continue
+            }
+            guard let call = selectedByID[callID] else { continue } // deferred/unexecuted call
+            reconciled.append([
+                "type": "function_call",
+                "call_id": call.id,
+                "name": call.name,
+                "arguments": call.argumentsJSON
+            ])
+            appendedCallIDs.insert(callID)
+        }
+        for call in selectedCalls where !appendedCallIDs.contains(call.id) {
+            reconciled.append([
+                "type": "function_call",
+                "call_id": call.id,
+                "name": call.name,
+                "arguments": call.argumentsJSON
+            ])
+        }
+        return reconciled.isEmpty ? nil : reconciled
     }
 
     private func responsesContentParts(for message: AgentModelMessage) -> [[String: Any]]? {

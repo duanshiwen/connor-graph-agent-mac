@@ -66,6 +66,7 @@ public enum AgentToolDisplayNameResolver {
         "cloud_kb_expand_entity": "展开知识库实体", "cloud_kb_l2_update_entities": "更新知识库近期信息", "cloud_kb_l3_update_knowledge": "更新知识库知识",
         "cloud_kb_l4_update_entities": "更新知识库实体", "cloud_kb_update_relations": "更新知识库关系", "cloud_kb_retract_knowledge": "撤回知识库内容",
         "cloud_kb_validate_publication": "检查知识库发布内容",
+        "interactive_web_edit_draft": "编辑互动网页草稿",
         "science_compute": "执行科学计算", "science_units": "换算科学单位", "science_stats": "执行统计分析",
         "science_linalg": "执行线性代数计算", "science_symbolic": "执行符号计算", "science_optimize": "执行数值优化", "science_table_compute": "计算表格数据"
     ]

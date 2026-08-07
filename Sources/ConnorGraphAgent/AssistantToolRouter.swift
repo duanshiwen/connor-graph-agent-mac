@@ -50,10 +50,12 @@ public struct AssistantToolRouter: Sendable, Equatable {
     public static let interactiveWebDirectToolNames: Set<String> = [
         "interactive_web_sdk_usage",
         "interactive_web_create_draft",
+        "interactive_web_edit_draft",
         "interactive_web_get_draft",
-        "interactive_web_update_draft",
         "interactive_web_get_status",
-        "interactive_web_publish"
+        "interactive_web_publish",
+        "interactive_web_records_summary",
+        "interactive_web_export_records"
     ]
     public static let directToolNames = Set<String>(["Shell", "ApplyPatch"])
         .union(interactiveWebDirectToolNames)

@@ -29,7 +29,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         maxToolCallsPerIteration: Int = 4,
         maxRunDurationSeconds: Int = 1800,
         toolExecutionTimeoutSeconds: Int = 300,
-        maxToolResultBytes: Int = 8 * 1_024,
+        maxToolResultBytes: Int = 32 * 1_024,
         maxConsecutiveToolResultErrors: Int = 3,
         stopAfterTurnWhenBudgetExceeded: Bool = false,
         preflightMode: AgentPreflightMode = .contextual,
@@ -96,7 +96,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.maxToolCallsPerIteration = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 4)
         self.maxRunDurationSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800)
         self.toolExecutionTimeoutSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .toolExecutionTimeoutSeconds) ?? 300)
-        self.maxToolResultBytes = max(0, try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 8 * 1_024)
+        self.maxToolResultBytes = max(0, try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1_024)
         self.maxConsecutiveToolResultErrors = max(0, try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 3)
         _ = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded)
         self.stopAfterTurnWhenBudgetExceeded = false
@@ -359,9 +359,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 let evidencePolicy = AgentEvidenceValidationPolicy()
                 var memoryCitations: [String] = []
                 let isPureMemoryTask = evidencePolicy.isPureMemoryTask(request.userMessage)
-                var memoryEvidencePayloads: [String] = []
                 var webEvidenceCitations: [String] = []
-                var didRequestClaimCorrection = false
                 var didRequestResearchCorrection = false
                 var promotedSkillIdentifiers = Set<String>()
                 let continuityPreflightPolicy = AgentContinuityPreflightPolicy()
@@ -750,17 +748,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(role: .user, content: correction))
                                 continue
                             }
-                            let claimValidation = AgentMemoryClaimValidator().validate(
-                                answer: modelResponse.text ?? "",
-                                evidencePayloads: memoryEvidencePayloads,
-                                citations: memoryCitations
-                            )
-                            if isPureMemoryTask, let correction = claimValidation.correctionInstruction, !didRequestClaimCorrection {
-                                didRequestClaimCorrection = true
-                                messages.append(Self.assistantHistoryMessage(from: modelResponse))
-                                messages.append(AgentModelMessage(role: .user, content: "Memory claim-evidence check (\(claimValidation.status.rawValue)): \(correction) Correct once, then answer conservatively."))
-                                continue
-                            }
                             let finalText = modelResponse.text
                             if let text = finalText {
                                 let webCitationsUsed = webEvidenceCitations.filter(text.contains)
@@ -947,17 +934,18 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             sanitized.argumentsJSON = #"{"message":""}"#
                             return sanitized
                         }
-                        let preservesProviderToolCalls = modelHistoryCalls.count == modelResponse.toolCalls.count
-                            && zip(modelHistoryCalls, modelResponse.toolCalls).allSatisfy { projected, original in
-                                projected.id == original.id
-                                    && projected.name == original.name
-                                    && projected.argumentsJSON == original.argumentsJSON
-                            }
                         messages.append(AgentModelMessage(
                             role: .assistant,
                             content: "",
                             toolCalls: modelHistoryCalls,
-                            providerMetadata: preservesProviderToolCalls ? modelResponse.providerMetadata : nil
+                            // Preserve provider metadata (raw assistant content with
+                            // thinking blocks, reasoning items, signatures) even when
+                            // calls were sanitized or deferred. Providers that require
+                            // thinking/reasoning to be passed back reject the follow-up
+                            // request when it is dropped; each provider serializer is
+                            // responsible for reconciling raw tool_use/function_call
+                            // blocks against the executed toolCalls.
+                            providerMetadata: modelResponse.providerMetadata
                         ))
 
                         var repeatedToolCallDetected = false
@@ -1058,7 +1046,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }
                             if !selectedNames.isDisjoint(with: Set(AgentEvidenceValidationPolicy.memoryEvidenceTools)),
                                batchResult.result.error == nil {
-                                memoryEvidencePayloads.append(batchResult.result.contentJSON ?? batchResult.result.contentText)
                                 for citation in batchResult.result.citations where !memoryCitations.contains(citation) {
                                     memoryCitations.append(citation)
                                 }

@@ -65,6 +65,7 @@ final class MailFeatureModel {
     @ObservationIgnored private let store: FileBackedMailSourceStore?
     @ObservationIgnored private let preferencesStore: (any MailPreferencesStore)?
     @ObservationIgnored private let credentialStore: AppMailCredentialStore
+    @ObservationIgnored private let draftStore: (any MailDraftRepository)?
     @ObservationIgnored private let syncServiceFactory: SyncServiceFactory
     @ObservationIgnored private var cacheObserver: NSObjectProtocol?
     @ObservationIgnored private var reloadGeneration: UInt64 = 0
@@ -84,12 +85,14 @@ final class MailFeatureModel {
         store: FileBackedMailSourceStore?,
         preferencesStore: (any MailPreferencesStore)?,
         credentialStore: AppMailCredentialStore = AppMailCredentialStore(),
+        draftStore: (any MailDraftRepository)? = nil,
         syncServiceFactory: @escaping SyncServiceFactory = { MailIMAPInitialSyncService(messageLimit: 0) },
         notificationCenter: NotificationCenter = .default
     ) {
         self.store = store
         self.preferencesStore = preferencesStore
         self.credentialStore = credentialStore
+        self.draftStore = draftStore
         self.syncServiceFactory = syncServiceFactory
         cacheObserver = notificationCenter.addObserver(forName: .connorMailCacheDidChange, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in await self?.reload() }
@@ -98,7 +101,7 @@ final class MailFeatureModel {
 
     var agentRuntime: MailRuntime? {
         guard let store else { return nil }
-        return MailRuntime(repository: store, cache: store, credentialStore: credentialStore, preferencesStore: preferencesStore)
+        return MailRuntime(repository: store, cache: store, draftStore: draftStore ?? MailDraftStore(), credentialStore: credentialStore, preferencesStore: preferencesStore)
     }
     var sourceRepository: (any MailSourceRepository)? { store }
     var sharedStoreForTests: FileBackedMailSourceStore? { store }

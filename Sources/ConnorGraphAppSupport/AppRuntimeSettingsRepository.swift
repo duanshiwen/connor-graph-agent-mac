@@ -582,9 +582,6 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
         guard settings.schemaVersion < 8 else { return settings }
         var migrated = settings
         if migrated.schemaVersion < 7 {
-            if [32 * 1_024, 1_000_000].contains(migrated.loop.maxToolResultBytes) {
-                migrated.loop.maxToolResultBytes = 8 * 1_024
-            }
             if [160_000, 200_000, 1_000_000].contains(migrated.loop.promptMaxEstimatedTokens) {
                 migrated.loop.promptMaxEstimatedTokens = 64_000
             }

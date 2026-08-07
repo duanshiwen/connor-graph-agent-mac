@@ -128,8 +128,9 @@ private func environmentFixture() -> AgentEnvironmentSnapshot {
     #expect(systemText.contains("Current Environment Snapshot"))
     #expect(systemText.contains("Hangzhou"))
     #expect(systemText.contains("Open-Meteo"))
-    #expect(systemText.contains("weather.updatedAt is the actual provider query time"))
-    #expect(systemText.contains("Do not give umbrella"))
+    // 环境证据策略（weather.updatedAt/capturedAt/历史快照规则等）现在只保留在
+    // AppGraphAgentRuntimeFactory 注入的 <connor-environment-evidence-policy> 一段，
+    // 快照渲染器只输出 JSON，避免两段重复文案。
     #expect(!AgentEnvironmentPromptRenderer.render(environmentFixture()).localizedCaseInsensitiveContains("calendar"))
 }
 

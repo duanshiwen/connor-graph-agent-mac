@@ -92,6 +92,8 @@ struct WorkspaceRootRow: View {
                 HStack(spacing: 8) {
                     Text(root.displayName.isEmpty ? URL(fileURLWithPath: root.path).lastPathComponent : root.displayName)
                         .font(SettingsListTypography.rowTitleSelected)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     Text(root.role)
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)

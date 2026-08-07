@@ -147,6 +147,15 @@ public struct AppStoragePaths: Sendable, Equatable {
         searchDirectory.appendingPathComponent("global-search-history.json")
     }
 
+    /// Local, app-owned mail drafts file. Drafts are persisted here on this machine
+    /// instead of being appended to a remote Drafts mailbox, so saving a draft never
+    /// depends on the external mail system being reachable.
+    public var mailDraftsURL: URL {
+        applicationSupportDirectory
+            .appendingPathComponent("mail", isDirectory: true)
+            .appendingPathComponent("mail-drafts.json")
+    }
+
     public func sessionArtifactDirectories(sessionID: String) -> AgentSessionArtifactDirectories {
         AgentSessionArtifactDirectories(root: sessionsDirectory.appendingPathComponent(sessionID, isDirectory: true))
     }

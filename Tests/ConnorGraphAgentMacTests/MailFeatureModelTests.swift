@@ -38,6 +38,45 @@ struct MailFeatureModelTests {
         #expect(f.model.preferences.defaultSendAccountID == data.account.id)
     }
 
+    @Test func agentRuntimeUsesFileBackedDraftRepositoryWhenProvided() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mail-feature-drafts-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = FileBackedMailSourceStore(storeURL: root.appendingPathComponent("mail.json"))
+        let draftRepository = FileBackedMailDraftRepository(storeURL: root.appendingPathComponent("mail-drafts.json"))
+        let accountID = MailAccountID(rawValue: "account-1")
+        let identity = MailIdentity(id: MailIdentityID(rawValue: "identity-1"), displayName: "Mail", address: MailAddress(name: "Mail", email: "mail@example.com"))
+        try await store.saveAccount(MailAccount(
+            id: accountID,
+            provider: .genericIMAPSMTP,
+            displayName: "Mail",
+            identities: [identity],
+            outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp)
+        ))
+        let model = MailFeatureModel(
+            store: store,
+            preferencesStore: nil,
+            credentialStore: AppMailCredentialStore(credentialStore: MailFeatureMemoryCredentialStore()),
+            draftStore: draftRepository
+        )
+
+        let runtime = try #require(model.agentRuntime)
+        let draft = try await runtime.createDraft(
+            accountID: accountID,
+            identityID: identity.id,
+            to: [MailAddress(email: "alice@example.com")],
+            subject: "Local draft",
+            body: "Saved on this machine."
+        )
+
+        // A fresh repository reading the same file must find the draft, proving the
+        // UI runtime persists drafts locally instead of keeping them in memory only.
+        let reader = FileBackedMailDraftRepository(storeURL: root.appendingPathComponent("mail-drafts.json"))
+        let reloaded = try #require(try await reader.draft(id: draft.id))
+        #expect(reloaded.subject == "Local draft")
+        #expect(reloaded.body == "Saved on this machine.")
+    }
+
     @Test func listProjectionLoadsAllMessagesThroughDatabasePages() async throws {
         let f = try fixture(); defer { f.cleanup() }
         let data = mailFixture(id: "message-template")

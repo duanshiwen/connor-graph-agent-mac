@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ConnorGraphAgent
 import ConnorGraphCore
 
@@ -10,7 +11,7 @@ Fix it step by step:
 2. For each submission form, set data-connor-collection="<collection>" and add a hidden _connor_honeypot input with autocomplete="off"; listen for connor:submit-start, connor:submit-success, connor:submit-error, connor:auth-required and connor:already-submitted to show prominent, polished submitting, success, failure, login-needed and already-submitted states. Once the visitor has submitted or can no longer submit (already submitted, daily/lifetime limit, or capacity full), hide or remove the fillable form and show an explicit message instead of merely disabling the submit button.
 3. For login-required collections (registration, check-in, leaderboard, owner-attributed forms), check window.platform.auth.status() and offer a login button that calls window.platform.auth.login(), or let the SDK render its built-in login gate. Never draw a password input or a login form inside the page.
 4. Show a visitor's own records with window.platform.collection.myRecords(name), never data.list; use collection.ranking/stats for leaderboards and collection.capacity for remaining slots; edit or remove their records with window.platform.data.updateMine/deleteMine. Note: collection.stats/capacity are aggregate data (totals, trends, group counts, numeric aggregates) and never expose raw records or identity; if the page must show aggregate statistics to visitors, set the collection's readStats to "public" or "login" (raw records stay private per readAuth).
-5. After fixing the HTML, create or update the draft again (keep the exact manifestHash from interactive_web_get_draft), then publish.
+5. After fixing the HTML, create the draft again with the corrected page (interactive_web_create_draft), then publish.
 """
 
 private let interactiveWebInlineScriptHint = """
@@ -19,6 +20,15 @@ index.html must not contain inline <script> blocks. Content pages are served wit
 
 private let interactiveWebSDKUsageContract = """
 Interactive-web guide — SDK v1 usage (window.platform):
+
+0. Create and update use ONE tool — interactive_web_create_draft:
+   - Before any create or update, you MUST have obtained this guide in the current session via interactive_web_sdk_usage — updates often happen in a separate session, so never skip the guide and never reconstruct the workflow from memory.
+   - Create: omit projectID and pass the complete name, html (required), css, javascript, and collections.
+   - Update: first read EVERY current file with interactive_web_get_draft (large files are paginated: continue with offset=nextOffset until the whole file is read).
+   - Targeted edit: call interactive_web_edit_draft on the same projectID with fileName and either oldText+newText (exact text replacement; an empty newText deletes the text) or content (whole-file replacement). For very large files, write content in chunks with offset (start at 0, continue with offset=nextOffset from each result) and set final=true on the last chunk. The result reports the changed file with a plain-text unified diff, before/after hashes, offset/nextOffset, and the new manifestHash — verify the diff matches the request before publishing.
+   - Full rewrite: alternatively call interactive_web_create_draft with the SAME projectID and the full edited files; files you do not pass (for example css) stay unchanged.
+   - Publish the same projectID afterwards: the URL and collected data stay with the project. Never recreate a project merely to change it, and never rewrite an existing page from memory.
+   - Per-file size limit is 20 MB (20480 KB). Files larger than that are rejected.
 
 1. SDK script: add <script src="/api/v1/sdk/v1.js"></script> inside <head> before any other script. This is the backend-provided absolute path on the same domain as the published page; copy it exactly. Never construct apiBase, projectId, or endpoint URLs yourself, and do not rewrite it as a relative path.
 
@@ -84,28 +94,154 @@ public actor InteractiveWebToolRuntime {
         self.fileManager = fileManager
     }
 
-    public func createDraft(sessionID: String, name: String, html: String, css: String?, javascript: String?, collections: [InteractiveWebCollectionDefinition] = []) async throws -> InteractiveWebProjectStatus {
-        guard (1...120).contains(name.count) else { throw AgentToolError.invalidArguments("name must contain 1 to 120 characters") }
+    /// 统一的「下载全部文件 → 修改 → 传回」入口：
+    /// - projectID 为空：新建项目（原来行为）
+    /// - projectID 非空：把传入的完整文件写回同一项目（更新），未传入的 css/js 保持不变
+    /// 返回状态 + 本次实际变更的文本 diff，供模型核对。
+    public func createDraft(
+        sessionID: String,
+        name: String,
+        html: String,
+        css: String?,
+        javascript: String?,
+        collections: [InteractiveWebCollectionDefinition] = [],
+        projectID: String? = nil
+    ) async throws -> InteractiveWebDraftSaveResult {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         try validate(html, named: "index.html")
-        let project = LocalInteractiveWebProject(
-            accountID: accountID,
-            name: name,
-            rootURL: projectsRoot.appendingPathComponent(UUID().uuidString, isDirectory: true),
-            conversationID: sessionID
-        )
-        try fileManager.createDirectory(at: project.rootURL, withIntermediateDirectories: true)
-        try write(html, named: "index.html", in: project.rootURL)
-        if let css { try write(css, named: "style.css", in: project.rootURL) }
-        if let javascript { try write(javascript, named: "app.js", in: project.rootURL) }
-        if !collections.isEmpty {
-            try write(
-                InteractiveWebPackager.configurationJSON(collections: collections),
-                named: InteractiveWebPackager.configurationFileName,
-                in: project.rootURL
+
+        var project: LocalInteractiveWebProject
+        if let projectID {
+            project = try await requireProject(projectID)
+            if !trimmedName.isEmpty, project.name != trimmedName { project.name = trimmedName }
+        } else {
+            guard (1...120).contains(trimmedName.count) else { throw AgentToolError.invalidArguments("name must contain 1 to 120 characters") }
+            project = LocalInteractiveWebProject(
+                accountID: accountID,
+                name: trimmedName,
+                rootURL: projectsRoot.appendingPathComponent(UUID().uuidString, isDirectory: true),
+                conversationID: sessionID
             )
+            try fileManager.createDirectory(at: project.rootURL, withIntermediateDirectories: true)
+        }
+
+        let root = project.rootURL
+        var changes: [InteractiveWebDraftFileChange] = []
+        changes.append(contentsOf: try saveFile(named: "index.html", content: html, in: root))
+        if let css {
+            changes.append(contentsOf: try saveFile(named: "style.css", content: css, in: root))
+        }
+        if let javascript {
+            changes.append(contentsOf: try saveFile(named: "app.js", content: javascript, in: root))
+        }
+        if !collections.isEmpty {
+            changes.append(contentsOf: try saveFile(
+                named: InteractiveWebPackager.configurationFileName,
+                content: InteractiveWebPackager.configurationJSON(collections: collections),
+                in: root
+            ))
+        }
+        if projectID != nil {
+            project.revision = (project.revision ?? 1) + 1
         }
         try await store.save(project: project)
-        return try status(project)
+        return InteractiveWebDraftSaveResult(status: try status(project), changes: changes)
+    }
+
+    /// 草稿编辑：支持两种模式（二选一）——
+    /// - 精确文本替换：oldText + newText（newText 传空 = 删除）
+    /// - 整文件替换：content（可带游标分块写入，offset 为 0 起始字符位置，final 标记最后一块并截断旧尾部）
+    /// 不整页重建、不创建新项目；返回文本 diff 与新的 manifestHash 供模型核对。
+    public func editDraft(
+        projectID: String,
+        fileName: String,
+        oldText: String?,
+        newText: String?,
+        content: String?,
+        offset: Int = 0,
+        final: Bool = false
+    ) async throws -> InteractiveWebDraftEditResult {
+        var project = try await requireProject(projectID)
+        let name = try validatedDraftFileName(fileName)
+        let currentStatus = try status(project)
+        let target = project.rootURL.appendingPathComponent(name)
+        guard fileManager.fileExists(atPath: target.path) else {
+            throw AgentToolError.invalidArguments("\(name) does not exist in this draft. Available files: \(currentStatus.fileNames.joined(separator: ", "))")
+        }
+        let before = try String(contentsOf: target, encoding: .utf8)
+        let after: String
+        let appliedOffset: Int
+        let nextOffset: Int?
+        if let content {
+            let start = max(offset, 0)
+            let startIndex = before.index(before.startIndex, offsetBy: min(start, before.count))
+            let replacedEnd = before.index(startIndex, offsetBy: min(content.count, before.count - min(start, before.count)))
+            var replaced = before.replacingCharacters(in: startIndex..<replacedEnd, with: content)
+            if final {
+                let keep = min(start + content.count, replaced.count)
+                replaced = String(replaced.prefix(keep))
+            }
+            after = replaced
+            appliedOffset = start
+            nextOffset = start + content.count
+            if final {
+                try validate(after, named: name)
+            }
+        } else if let oldText {
+            guard !oldText.isEmpty else { throw AgentToolError.invalidArguments("oldText must not be empty") }
+            let matches = before.ranges(of: oldText)
+            guard matches.count == 1, let range = matches.first else {
+                throw AgentToolError.invalidArguments("oldText must occur exactly once in \(name); found \(matches.count). Read the current file with interactive_web_get_draft and retry with the exact text.")
+            }
+            after = before.replacingCharacters(in: range, with: newText ?? "")
+            appliedOffset = 0
+            nextOffset = nil
+            try validate(after, named: name)
+        } else {
+            throw AgentToolError.invalidArguments("edit requires either oldText+newText (targeted edit) or content (full-file replacement)")
+        }
+        let changed = after != before
+        if !changed {
+            if content != nil {
+                // 分块写入的中间块可能恰好与现有内容相同：视为无变化，不写盘、不升版本，继续返回游标。
+                let unchangedStatus = try status(project)
+                return InteractiveWebDraftEditResult(
+                    status: unchangedStatus,
+                    fileName: name,
+                    beforeHash: Self.sha256(before),
+                    afterHash: Self.sha256(before),
+                    beforeSizeBytes: before.utf8.count,
+                    afterSizeBytes: before.utf8.count,
+                    diff: "",
+                    offset: appliedOffset,
+                    nextOffset: nextOffset,
+                    resultTotalCharacters: before.count
+                )
+            }
+            throw AgentToolError.invalidArguments("newText is identical to oldText; nothing changed")
+        }
+        let originalData = try Data(contentsOf: target)
+        do {
+            try Data(after.utf8).write(to: target, options: .atomic)
+        } catch {
+            try? originalData.write(to: target, options: .atomic)
+            throw error
+        }
+        project.revision = (project.revision ?? 1) + 1
+        try await store.save(project: project)
+        let afterStatus = try status(project)
+        return InteractiveWebDraftEditResult(
+            status: afterStatus,
+            fileName: name,
+            beforeHash: Self.sha256(before),
+            afterHash: Self.sha256(after),
+            beforeSizeBytes: before.utf8.count,
+            afterSizeBytes: after.utf8.count,
+            diff: Self.unifiedDiff(before: before, after: after, filePath: name),
+            offset: appliedOffset,
+            nextOffset: nextOffset,
+            resultTotalCharacters: after.count
+        )
     }
 
 	public func remoteProjects(limit: Int, page: Int = 1) async throws -> [InteractiveWebRemoteProject] {
@@ -120,7 +256,7 @@ public actor InteractiveWebToolRuntime {
 		let api = try requireAPI()
 		let remote = try await api.project(id: remoteProjectID)
 		guard remote.currentDeploymentId != nil, !remote.files.isEmpty else {
-			throw AgentToolError.invalidArguments("remote project has no published files")
+			throw AgentToolError.invalidArguments("remote project \(remoteProjectID) has no published files. Only published webpages can be downloaded; use interactive_web_create_draft to build a new local draft, or publish this project first.")
 		}
 		let localID = UUID().uuidString
 		let root = projectsRoot.appendingPathComponent(localID, isDirectory: true)
@@ -158,66 +294,46 @@ public actor InteractiveWebToolRuntime {
 		}
 	}
 
-    public func draftSource(projectID: String, fileName: String) async throws -> InteractiveWebDraftSource {
+    public func draftSource(projectID: String, fileName: String, offset: Int = 0, limit: Int? = nil) async throws -> InteractiveWebDraftSource {
         let project = try await requireProject(projectID)
         let name = try validatedDraftFileName(fileName)
         let currentStatus = try status(project)
         let target = project.rootURL.appendingPathComponent(name)
         guard fileManager.fileExists(atPath: target.path) else {
-            throw AgentToolError.invalidArguments("\(name) does not exist in this draft")
+            throw AgentToolError.invalidArguments("\(name) does not exist in this draft. Available files in this draft: \(currentStatus.fileNames.joined(separator: ", "))")
         }
         let data = try Data(contentsOf: target)
-        guard data.count <= 2 * 1_024 * 1_024 else {
+        guard data.count <= 20 * 1_024 * 1_024 else {
             throw AgentToolError.invalidArguments("\(name) exceeds draft read limit")
         }
         guard let content = String(data: data, encoding: .utf8) else {
             throw AgentToolError.invalidArguments("\(name) is not valid UTF-8 text")
         }
+        let totalCharacters = content.count
+        let windowOffset = max(offset, 0)
+        let windowLimit = min(max(limit ?? 100_000, 0), 1_000_000)
+        let start = min(windowOffset, totalCharacters)
+        let end = min(start + windowLimit, totalCharacters)
+        let slice = String(content[content.index(content.startIndex, offsetBy: start)..<content.index(content.startIndex, offsetBy: end)])
+        let remainingCharacters = max(0, totalCharacters - end)
+        let estimatedRemainingCalls = remainingCharacters == 0
+            ? 0
+            : max(1, Int((Double(remainingCharacters) / Double(max(windowLimit, 1))).rounded(.up)))
         return InteractiveWebDraftSource(
             projectID: project.id,
             revision: currentStatus.revision,
             manifestHash: currentStatus.manifestHash,
             fileName: name,
-            content: content
+            content: slice,
+            availableFiles: currentStatus.fileNames,
+            offset: start,
+            limit: windowLimit,
+            totalCharacters: totalCharacters,
+            truncated: end < totalCharacters,
+            nextOffset: end < totalCharacters ? end : nil,
+            remainingCharacters: remainingCharacters,
+            estimatedRemainingCalls: estimatedRemainingCalls
         )
-    }
-
-    public func updateDraft(
-        projectID: String,
-        expectedManifestHash: String,
-        replacements: [String: String],
-        edits: [String: [(oldText: String, newText: String)]]
-    ) async throws -> InteractiveWebProjectStatus {
-        var project = try await requireProject(projectID)
-        let currentStatus = try status(project)
-        guard currentStatus.manifestHash == expectedManifestHash else {
-            throw AgentToolError.invalidArguments("expectedManifestHash does not match the current draft; read the draft again before editing")
-        }
-        let touchedNames = Set(replacements.keys).union(edits.keys)
-        guard !touchedNames.isEmpty else { throw AgentToolError.invalidArguments("at least one draft change is required") }
-
-        var projected: [String: String] = [:]
-        for rawName in touchedNames {
-            let name = try validatedDraftFileName(rawName)
-            if let replacement = replacements[rawName] {
-                projected[name] = replacement
-            } else {
-                let target = project.rootURL.appendingPathComponent(name)
-                guard fileManager.fileExists(atPath: target.path) else {
-                    throw AgentToolError.invalidArguments("\(name) does not exist; use a full replacement to create it")
-                }
-                projected[name] = try String(contentsOf: target, encoding: .utf8)
-            }
-            if let fileEdits = edits[rawName] {
-                projected[name] = try applyingEdits(fileEdits, to: projected[name] ?? "", fileName: name)
-            }
-        }
-        for (name, content) in projected { try validate(content, named: name) }
-        try validateProjectedDraft(project: project, projected: projected)
-        try commit(projected: projected, root: project.rootURL)
-        project.revision = (project.revision ?? 1) + 1
-        try await store.save(project: project)
-        return try status(project)
     }
 
     public func status(projectID: String) async throws -> InteractiveWebProjectStatus {
@@ -228,8 +344,9 @@ public actor InteractiveWebToolRuntime {
     public func publish(projectID: String, expectedManifestHash: String, accessMode: InteractiveWebAccessMode, password: String?) async throws -> InteractiveWebProjectStatus {
         let project = try await requireProject(projectID)
         let manifest = try packager.package(rootURL: project.rootURL)
-        guard packager.fingerprint(manifest) == expectedManifestHash else {
-            throw AgentToolError.invalidArguments("approved manifestHash no longer matches the current draft")
+        let currentManifestHash = packager.fingerprint(manifest)
+        guard currentManifestHash == expectedManifestHash else {
+            throw AgentToolError.invalidArguments("approved manifestHash no longer matches the current draft; read the draft again before editing. Current manifestHash=\(currentManifestHash)")
         }
         let api = try requireAPI()
         let published = try await api.publish(project: project, manifest: manifest)
@@ -295,7 +412,15 @@ public actor InteractiveWebToolRuntime {
     }
 
     private func requireProject(_ id: String) async throws -> LocalInteractiveWebProject {
-        guard let project = try await store.project(id: id) else { throw AgentToolError.invalidArguments("interactive webpage project not found") }
+        let project: LocalInteractiveWebProject?
+        if let local = try await store.project(id: id) {
+            project = local
+        } else {
+            project = try await store.project(remoteProjectID: id)
+        }
+        guard let project else {
+            throw AgentToolError.invalidArguments("interactive webpage project not found for projectID '\(id)'. If this is an online project ID returned by interactive_web_list_projects or interactive_web_get_project and no local draft exists on this device, first download it with interactive_web_download_project(remoteProjectID: \"\(id)\"), then retry with the returned local projectID.")
+        }
         let root = project.rootURL.resolvingSymlinksInPath().standardizedFileURL
         let allowed = projectsRoot.resolvingSymlinksInPath().standardizedFileURL
         guard root.path.hasPrefix(allowed.path + "/") else { throw AgentToolError.permissionDenied("project root escapes interactive webpage sandbox") }
@@ -312,6 +437,7 @@ public actor InteractiveWebToolRuntime {
             manifestHash: packager.fingerprint(manifest),
             fileCount: manifest.files.count,
             totalBytes: manifest.files.reduce(0) { $0 + $1.sizeBytes },
+            fileNames: manifest.files.map(\.path),
             remoteProjectID: project.remoteProjectID,
             remoteSiteID: project.remoteSiteID,
             latestDeploymentID: project.latestDeploymentID,
@@ -325,6 +451,22 @@ public actor InteractiveWebToolRuntime {
         let target = root.appendingPathComponent(name).standardizedFileURL
         guard target.deletingLastPathComponent() == root.standardizedFileURL else { throw AgentToolError.invalidArguments("invalid draft path") }
         try data.write(to: target, options: .atomic)
+    }
+
+    private func saveFile(named name: String, content: String, in root: URL) throws -> [InteractiveWebDraftFileChange] {
+        let target = root.appendingPathComponent(name).standardizedFileURL
+        let exists = fileManager.fileExists(atPath: target.path)
+        let before = exists ? (try? String(contentsOf: target, encoding: .utf8)) ?? "" : ""
+        try write(content, named: name, in: root)
+        return [InteractiveWebDraftFileChange(
+            fileName: name,
+            operation: exists ? "updated" : "created",
+            beforeHash: exists ? Self.sha256(before) : "",
+            afterHash: Self.sha256(content),
+            beforeSizeBytes: exists ? before.utf8.count : 0,
+            afterSizeBytes: content.utf8.count,
+            diff: exists ? Self.unifiedDiff(before: before, after: content, filePath: name) : ""
+        )]
     }
 
     private func validatedDraftFileName(_ name: String) throws -> String {
@@ -347,7 +489,7 @@ public actor InteractiveWebToolRuntime {
 	}
 
     private func validate(_ content: String, named name: String) throws {
-        guard Data(content.utf8).count <= 2 * 1_024 * 1_024 else {
+        guard Data(content.utf8).count <= 20 * 1_024 * 1_024 else {
             throw AgentToolError.invalidArguments("\(name) exceeds draft size limit")
         }
         if name == "index.html" {
@@ -372,59 +514,47 @@ public actor InteractiveWebToolRuntime {
         return false
     }
 
-    private func applyingEdits(
-        _ edits: [(oldText: String, newText: String)],
-        to original: String,
-        fileName: String
-    ) throws -> String {
-        var updated = original
-        for (index, edit) in edits.enumerated() {
-            guard !edit.oldText.isEmpty else {
-                throw AgentToolError.invalidArguments("edit \(index) for \(fileName) has empty oldText")
-            }
-            let matches = updated.ranges(of: edit.oldText)
-            guard matches.count == 1, let range = matches.first else {
-                throw AgentToolError.invalidArguments("edit \(index) for \(fileName) requires oldText to occur exactly once; found \(matches.count)")
-            }
-            updated.replaceSubrange(range, with: edit.newText)
-        }
-        return updated
+    private static func sha256(_ text: String) -> String {
+        let digest = SHA256.hash(data: Data(text.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    private func validateProjectedDraft(project: LocalInteractiveWebProject, projected: [String: String]) throws {
-        let validationRoot = fileManager.temporaryDirectory
-            .appendingPathComponent("ConnorInteractiveWebValidation-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fileManager.removeItem(at: validationRoot) }
-        try fileManager.copyItem(at: project.rootURL, to: validationRoot)
-        for (name, content) in projected {
-            try Data(content.utf8).write(to: validationRoot.appendingPathComponent(name), options: .atomic)
-        }
-        _ = try packager.package(rootURL: validationRoot)
-    }
+    /// 单文件统一 diff：只输出首尾公共行之外的变更段，便于任何模型用文本核对。
+    private static func unifiedDiff(before: String, after: String, filePath: String, maxLines: Int = 400) -> String {
+        let beforeLines = before.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let afterLines = after.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard beforeLines != afterLines else { return "" }
 
-    private func commit(projected: [String: String], root: URL) throws {
-        let orderedNames = projected.keys.sorted()
-        let originals = try Dictionary(uniqueKeysWithValues: orderedNames.map { name in
-            let target = root.appendingPathComponent(name)
-            return (name, fileManager.fileExists(atPath: target.path) ? try Data(contentsOf: target) : nil)
-        })
-        var committed: [String] = []
-        do {
-            for name in orderedNames {
-                try Data((projected[name] ?? "").utf8).write(to: root.appendingPathComponent(name), options: .atomic)
-                committed.append(name)
-            }
-        } catch {
-            for name in committed.reversed() {
-                let target = root.appendingPathComponent(name)
-                if let original = originals[name] ?? nil {
-                    try? original.write(to: target, options: .atomic)
-                } else {
-                    try? fileManager.removeItem(at: target)
-                }
-            }
-            throw error
+        var prefix = 0
+        let commonCount = min(beforeLines.count, afterLines.count)
+        while prefix < commonCount, beforeLines[prefix] == afterLines[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < commonCount - prefix,
+              beforeLines[beforeLines.count - 1 - suffix] == afterLines[afterLines.count - 1 - suffix] {
+            suffix += 1
         }
+        let removed = beforeLines[prefix..<(beforeLines.count - suffix)]
+        let added = afterLines[prefix..<(afterLines.count - suffix)]
+
+        var lines: [String] = [
+            "--- a/\(filePath)",
+            "+++ b/\(filePath)",
+            "@@ -\(prefix + 1),\(removed.count) +\(prefix + 1),\(added.count) @@"
+        ]
+        var emitted = 0
+        var truncated = false
+        for line in removed {
+            if emitted >= maxLines { truncated = true; break }
+            lines.append("-\(line)")
+            emitted += 1
+        }
+        for line in added {
+            if emitted >= maxLines { truncated = true; break }
+            lines.append("+\(line)")
+            emitted += 1
+        }
+        if truncated { lines.append("... (diff truncated; use get_draft to read the full file)") }
+        return lines.joined(separator: "\n")
     }
 
     private func requireAPI() throws -> InteractiveWebAPIClient {
@@ -438,11 +568,11 @@ public struct InteractiveWebAgentTool: AgentTool {
     public enum Operation: String, Sendable, CaseIterable {
 		case sdkUsage = "interactive_web_sdk_usage"
 		case listProjects = "interactive_web_list_projects"
-		case getProject = "interactive_web_get_project"
-		case downloadProject = "interactive_web_download_project"
+        case getProject = "interactive_web_get_project"
+        case downloadProject = "interactive_web_download_project"
         case createDraft = "interactive_web_create_draft"
+        case editDraft = "interactive_web_edit_draft"
         case getDraft = "interactive_web_get_draft"
-        case updateDraft = "interactive_web_update_draft"
         case getStatus = "interactive_web_get_status"
         case publish = "interactive_web_publish"
         case rollback = "interactive_web_rollback"
@@ -458,7 +588,7 @@ public struct InteractiveWebAgentTool: AgentTool {
     public var permission: AgentPermissionCapability {
         switch operation {
 		case .sdkUsage: .readSession
-		case .createDraft, .updateDraft, .downloadProject: .createInteractiveWebDraft
+		case .createDraft, .editDraft, .downloadProject: .createInteractiveWebDraft
 		case .getDraft, .getStatus: .readSession
 		case .listProjects, .getProject, .recordsSummary: .externalNetwork
         case .publish, .rollback, .setAccess, .offline, .exportRecords: .publishInteractiveWeb
@@ -470,11 +600,11 @@ public struct InteractiveWebAgentTool: AgentTool {
 		case .listProjects: "List the signed-in user's published interactive webpage projects, one page at a time (default 50 per page, max 100). Continue with page until fewer than limit items are returned."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
-		case .createDraft: "Create a local interactive webpage draft, including persistent data collection schemas and submission rules when the page accepts registrations, feedback, votes, or other submissions. Before generating the page, call interactive_web_sdk_usage to get the complete SDK contract and example. Every page must load the backend-provided absolute SDK path /api/v1/sdk/v1.js and use window.platform instead of constructing API URLs; put all page JavaScript in the javascript parameter (app.js) and never write inline <script> blocks (CSP blocks them); drafts without the SDK script or with inline scripts are rejected with step-by-step fix guidance. The tool writes files into the app-managed user-data sandbox and does not publish anything."
-        case .getDraft: "Read one source file from an app-managed interactive webpage draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash."
-        case .updateDraft: "Atomically update an app-managed interactive webpage draft using exact text edits or full file replacements. Pass expectedManifestHash from interactive_web_get_draft to prevent overwriting a newer revision. Edits to index.html must keep the SDK script tag (/api/v1/sdk/v1.js)."
-        case .getStatus: "Read the current local and published status of an interactive webpage project."
-        case .publish: "Publish the exact current webpage revision to the internet and return its URL. Always requires native human approval; copy manifestHash exactly from create, update, or status output. Publishing rejects drafts whose index.html omits the SDK script tag."
+        case .createDraft: "Create a new local interactive webpage draft, or update an existing one. Create: omit projectID and pass the complete name/html/css/javascript/collections. Update: first read every file with interactive_web_get_draft, edit the contents, then call this same tool with the SAME projectID and the full edited files — the files are written back to the existing draft (files you do not pass, such as css, stay unchanged), revision increments, and the result includes per-file unified diffs so you can verify the exact change in plain text. Before any interactive-web use (creating or updating), call interactive_web_sdk_usage in this session to get the complete SDK contract and example; updates often happen in a separate session, so never skip the guide. Every page must load the backend-provided absolute SDK path /api/v1/sdk/v1.js and use window.platform instead of constructing API URLs; put all page JavaScript in the javascript parameter (app.js) and never write inline <script> blocks (CSP blocks them); drafts without the SDK script or with inline scripts are rejected with step-by-step fix guidance. The tool writes files into the app-managed user-data sandbox and does not publish anything."
+        case .editDraft: "Edit one source file of an app-managed interactive webpage draft. Two modes (choose one): targeted edit — pass the exact oldText (must occur exactly once in the current file; read it first with interactive_web_get_draft) and newText (empty string deletes the oldText); or full-file replacement — pass content with the complete new file. For very large files, write content in chunks: start with offset=0 and content=first chunk, continue with offset=nextOffset from each result, and set final=true on the last chunk (the tool then truncates the old tail and validates the complete file). The tool applies each change atomically and returns the new revision, manifestHash, file hashes, the applied offset/nextOffset, and a plain-text unified diff. Edits to index.html must keep the SDK script tag (/api/v1/sdk/v1.js)."
+        case .getDraft: "Read one source file from an app-managed interactive webpage draft; the result includes availableFiles so you can see which files exist in the draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash. Large files are paginated by character offset: the result reports totalCharacters and, when truncated, nextOffset — continue with offset=nextOffset to read the rest."
+        case .getStatus: "Read the current local and published status of an interactive webpage project, including the list of draft files."
+        case .publish: "Publish the exact current webpage revision to the internet and return its URL. Always requires native human approval; copy manifestHash exactly from interactive_web_create_draft (create or update) or interactive_web_get_status output. Publishing rejects drafts whose index.html omits the SDK script tag."
         case .rollback: "Rollback a published webpage to a specific deployment. Always requires native human approval."
         case .setAccess: "Change who can access a published webpage. Always requires native human approval."
         case .offline: "Take a published webpage offline. Always requires native human approval."
@@ -492,8 +622,9 @@ public struct InteractiveWebAgentTool: AgentTool {
 			.closedObject(properties: ["remoteProjectID": .string(description: "Exact online project ID")], required: ["remoteProjectID"])
         case .createDraft:
             .object(properties: [
-                "name": .string(description: "Webpage name"),
-                "html": .string(description: "Complete index.html"),
+                "projectID": .string(description: "Optional existing projectID to UPDATE instead of creating a new draft. Omit to create a new project."),
+                "name": .string(description: "Webpage name; required when creating a new draft, optional when updating with projectID (the existing name is kept)"),
+                "html": .string(description: "Complete index.html (edited for updates)"),
                 "css": .string(description: "Optional stylesheet"),
                 "javascript": .string(description: "Optional script"),
                 "collections": .array(items: .object(properties: [
@@ -515,31 +646,32 @@ public struct InteractiveWebAgentTool: AgentTool {
                         "scope": .stringEnumeration(values: ["account", "ip"], description: "account counts per logged-in user (requires anonymousCreate=false); ip counts per anonymous visitor")
                     ], required: ["max", "window", "scope"])
                 ], required: ["name", "fields", "anonymousCreate", "anonymousRead"]), description: "Persistent data schemas and submission rules required by the page")
-            ], required: ["name", "html"])
+            ], required: ["html"])
+        case .editDraft:
+            .closedObject(properties: [
+                "projectID": .string(description: Self.localProjectIDDescription),
+                "fileName": .string(description: "Relative text source path; see availableFiles in a get_draft or get_status result"),
+                "content": .string(description: "Optional complete replacement content for the whole file (use instead of oldText/newText)"),
+                "offset": .integer(description: "Optional 0-based character position where content should be written. Used to write large files in chunks; default 0. Continue with offset=nextOffset from the previous result."),
+                "final": .boolean(description: "Optional; set true on the last content chunk so the tool truncates the old tail and validates the complete file."),
+                "oldText": .string(description: "Optional exact text to replace; must occur exactly once in the current file. Use together with newText."),
+                "newText": .string(description: "Optional replacement text; empty string deletes the oldText.")
+            ], required: ["projectID", "fileName"])
         case .getDraft:
-			.closedObject(properties: ["projectID": .string(description: "Exact local project ID"), "fileName": .string(description: "Relative text source path")], required: ["projectID", "fileName"])
-        case .updateDraft:
-            .object(properties: [
-                "projectID": .string(description: "Exact local project ID"),
-                "expectedManifestHash": .string(description: "Exact manifestHash from the latest interactive_web_get_draft result"),
-                "replacements": .array(items: .closedObject(properties: [
-					"fileName": .string(description: "Relative text source path"),
-                    "content": .string(description: "Complete replacement content")
-                ], required: ["fileName", "content"]), description: "Optional complete file replacements"),
-                "edits": .array(items: .closedObject(properties: [
-					"fileName": .string(description: "Relative text source path"),
-                    "oldText": .string(description: "Exact text that must occur once"),
-                    "newText": .string(description: "Replacement text")
-                ], required: ["fileName", "oldText", "newText"]), description: "Optional ordered exact text replacements")
-            ], required: ["projectID", "expectedManifestHash"])
+			.closedObject(properties: [
+				"projectID": .string(description: Self.localProjectIDDescription),
+				"fileName": .string(description: "Relative text source path; see availableFiles in a get_draft or get_status result"),
+				"offset": .integer(description: "Optional 0-based character offset to start reading from. Defaults to 0; when the result is truncated, continue with offset=nextOffset."),
+				"limit": .integer(description: "Optional maximum number of characters to return. Defaults to 100000; maximum 1000000.")
+			], required: ["projectID", "fileName"])
         case .getStatus, .offline:
-            .closedObject(properties: ["projectID": .string(description: "Exact local project ID")], required: ["projectID"])
+            .closedObject(properties: ["projectID": .string(description: Self.localProjectIDDescription)], required: ["projectID"])
         case .publish:
-            .object(properties: ["projectID": .string(description: "Exact local project ID"), "manifestHash": .string(description: "Exact 64-character hash from the latest local status"), "accessMode": .stringEnumeration(values: ["public", "password", "private"], description: "Who can access the site"), "password": .string(description: "Required only for password access")], required: ["projectID", "manifestHash", "accessMode"])
+            .object(properties: ["projectID": .string(description: Self.localProjectIDDescription), "manifestHash": .string(description: "Exact 64-character hash from the latest local status"), "accessMode": .stringEnumeration(values: ["public", "password", "private"], description: "Who can access the site"), "password": .string(description: "Required only for password access")], required: ["projectID", "manifestHash", "accessMode"])
         case .rollback:
-            .closedObject(properties: ["projectID": .string(description: "Exact local project ID"), "deploymentID": .string(description: "Target deployment ID")], required: ["projectID", "deploymentID"])
+            .closedObject(properties: ["projectID": .string(description: Self.localProjectIDDescription), "deploymentID": .string(description: "Target deployment ID")], required: ["projectID", "deploymentID"])
         case .setAccess:
-            .object(properties: ["projectID": .string(description: "Exact local project ID"), "accessMode": .stringEnumeration(values: ["public", "password", "private"], description: "Who can access the site"), "password": .string(description: "Required only for password access")], required: ["projectID", "accessMode"])
+            .object(properties: ["projectID": .string(description: Self.localProjectIDDescription), "accessMode": .stringEnumeration(values: ["public", "password", "private"], description: "Who can access the site"), "password": .string(description: "Required only for password access")], required: ["projectID", "accessMode"])
         case .recordsSummary:
             .object(properties: ["projectID": .string(description: "Exact local project ID, or the online project ID from interactive_web_list_projects"), "collection": .string(description: "Collection name"), "limit": .integer(description: "1 through 1000"), "page": .integer(description: "1-based page number; default 1")], required: ["projectID", "collection"])
         case .exportRecords:
@@ -548,6 +680,8 @@ public struct InteractiveWebAgentTool: AgentTool {
     }
 
     public init(operation: Operation, runtime: InteractiveWebToolRuntime) { self.operation = operation; self.runtime = runtime }
+
+    private static let localProjectIDDescription = "Exact local draft project ID from interactive_web_create_draft, interactive_web_download_project, or interactive_web_get_status. An online project ID returned by interactive_web_list_projects or interactive_web_get_project resolves to the matching current local draft when it exists on this device; otherwise download it first with interactive_web_download_project."
 
     public func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws {
         guard operation == .publish else { return }
@@ -602,23 +736,52 @@ public struct InteractiveWebAgentTool: AgentTool {
 			status = try await runtime.downloadRemoteProject(sessionID: context.sessionID, remoteProjectID: requiredString("remoteProjectID", arguments))
 			text = "Online webpage downloaded to Connor's user data directory."
         case .createDraft:
-            status = try await runtime.createDraft(sessionID: context.sessionID, name: requiredString("name", arguments), html: requiredString("html", arguments), css: optionalString("css", arguments), javascript: optionalString("javascript", arguments), collections: try parseCollections(arguments))
-            text = "Local webpage draft created."
+            let save = try await runtime.createDraft(
+                sessionID: context.sessionID,
+                name: arguments.string("name") ?? "",
+                html: requiredString("html", arguments),
+                css: optionalString("css", arguments),
+                javascript: optionalString("javascript", arguments),
+                collections: try parseCollections(arguments),
+                projectID: arguments.string("projectID")
+            )
+            status = save.status
+            json = try encode(save)
+            let changeLines = save.changes.map { change in
+                "\(change.fileName): \(change.operation) (\(change.beforeSizeBytes) -> \(change.afterSizeBytes) bytes)\n\(change.diff)"
+            }.joined(separator: "\n")
+            text = "Local webpage draft \(arguments.string("projectID") == nil ? "created" : "updated").\n" + changeLines
+        case .editDraft:
+            let rawOldText = arguments.string("oldText")
+            let rawNewText = arguments.string("newText") ?? ""
+            guard arguments.string("content") != nil || rawOldText != nil else {
+                throw AgentToolError.invalidArguments("edit requires either oldText+newText (targeted edit) or content (full-file replacement)")
+            }
+            let edit = try await runtime.editDraft(
+                projectID: requiredString("projectID", arguments),
+                fileName: requiredString("fileName", arguments),
+                oldText: rawOldText,
+                newText: rawNewText,
+                content: arguments.string("content"),
+                offset: arguments.int("offset") ?? 0,
+                final: arguments.bool("final") ?? false
+            )
+            status = edit.status
+            json = try encode(edit)
+            text = "Local webpage draft edited: \(edit.fileName) (\(edit.beforeSizeBytes) -> \(edit.afterSizeBytes) bytes).\n\(edit.diff)"
         case .getDraft:
             status = nil
-            let source = try await runtime.draftSource(projectID: requiredString("projectID", arguments), fileName: requiredString("fileName", arguments))
-            json = try encode(source)
-            text = "Loaded \(source.fileName) from draft projectID=\(source.projectID), revision=\(source.revision), manifestHash=\(source.manifestHash)."
-        case .updateDraft:
-            let replacements = try parseReplacements(arguments)
-            let edits = try parseEdits(arguments)
-            status = try await runtime.updateDraft(
+            let source = try await runtime.draftSource(
                 projectID: requiredString("projectID", arguments),
-                expectedManifestHash: requiredString("expectedManifestHash", arguments),
-                replacements: replacements,
-                edits: edits
+                fileName: requiredString("fileName", arguments),
+                offset: arguments.int("offset") ?? 0,
+                limit: arguments.int("limit")
             )
-            text = "Local webpage draft updated."
+            json = try encode(source)
+            let windowEnd = source.offset + source.content.count
+            let remainingNote = source.truncated ? "; remaining \(source.remainingCharacters) chars (~\(source.estimatedRemainingCalls) calls)" : ""
+            let continuation = source.truncated ? "; continue with offset=\(source.nextOffset ?? windowEnd)" : ""
+            text = "Loaded \(source.fileName) from draft projectID=\(source.projectID), revision=\(source.revision), manifestHash=\(source.manifestHash) (characters \(source.offset)-\(windowEnd) of \(source.totalCharacters)\(remainingNote)\(continuation))."
         case .getStatus:
             status = try await runtime.status(projectID: requiredString("projectID", arguments)); text = "Interactive webpage status loaded."
         case .publish:
@@ -657,7 +820,7 @@ public struct InteractiveWebAgentTool: AgentTool {
             let result = try await runtime.exportRecords(projectID: requiredString("projectID", arguments), collection: requiredString("collection", arguments))
             json = try encode(result); text = "Interactive webpage records exported to \(result.fileURL.path)."
         }
-        if let status { json = try encode(status) }
+        if let status, json == nil { json = try encode(status) }
         let suffix = status.map { " projectID=\($0.projectID), revision=\($0.revision), manifestHash=\($0.manifestHash)" + ($0.publishedURL.map { ", publishedURL=[Open published webpage](\($0.absoluteString))" } ?? "") } ?? ""
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: text + suffix, contentJSON: json)
     }
@@ -675,19 +838,6 @@ public struct InteractiveWebAgentTool: AgentTool {
     }
     private func requireExternalApproval(_ context: AgentToolExecutionContext) throws {
         guard context.approvedCapabilities.contains(.publishInteractiveWeb) else { throw AgentToolError.permissionDenied("interactive webpage external write requires native approval") }
-    }
-    private func parseReplacements(_ arguments: AgentToolArguments) throws -> [String: String] {
-        var replacements: [String: String] = [:]
-        for value in arguments.array("replacements") ?? [] {
-            guard let object = value.objectValue,
-                  let fileName = object["fileName"]?.stringValue,
-                  let content = object["content"]?.stringValue else {
-                throw AgentToolError.invalidArguments("each replacement requires fileName and content")
-            }
-            guard replacements[fileName] == nil else { throw AgentToolError.invalidArguments("duplicate replacement for \(fileName)") }
-            replacements[fileName] = content
-        }
-        return replacements
     }
     private func parseCollections(_ arguments: AgentToolArguments) throws -> [InteractiveWebCollectionDefinition] {
         try (arguments.array("collections") ?? []).map { value in
@@ -732,19 +882,6 @@ public struct InteractiveWebAgentTool: AgentTool {
             let readStats = object["readStats"]?.stringValue
             return InteractiveWebCollectionDefinition(name: name, fields: fields, anonymousCreate: anonymousCreate, anonymousRead: anonymousRead, submitLimit: submitLimit, readStats: readStats)
         }
-    }
-    private func parseEdits(_ arguments: AgentToolArguments) throws -> [String: [(oldText: String, newText: String)]] {
-        var edits: [String: [(oldText: String, newText: String)]] = [:]
-        for value in arguments.array("edits") ?? [] {
-            guard let object = value.objectValue,
-                  let fileName = object["fileName"]?.stringValue,
-                  let oldText = object["oldText"]?.stringValue,
-                  let newText = object["newText"]?.stringValue else {
-                throw AgentToolError.invalidArguments("each edit requires fileName, oldText, and newText")
-            }
-            edits[fileName, default: []].append((oldText, newText))
-        }
-        return edits
     }
     private func encode<T: Encodable>(_ value: T) throws -> String {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]

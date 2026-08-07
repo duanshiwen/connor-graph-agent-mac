@@ -634,7 +634,8 @@ final class AppRuntimeLifecycle {
         }()
         let resolvedMailStore = injectedMailStore ?? (startupMode == .immediate ? storagePaths.map { FileBackedMailSourceStore(storagePaths: $0, searchService: nativeSourceSearchBackend) } : nil)
         let resolvedMailPreferencesStore = injectedMailPreferencesStore ?? storagePaths.map { FileBackedMailPreferencesStore(storagePaths: $0) }
-        self.mailFeatureModel = MailFeatureModel(store: resolvedMailStore, preferencesStore: resolvedMailPreferencesStore, credentialStore: mailCredentialStore)
+        let resolvedMailDraftStore = storagePaths.map { FileBackedMailDraftRepository(storeURL: $0.mailDraftsURL) }
+        self.mailFeatureModel = MailFeatureModel(store: resolvedMailStore, preferencesStore: resolvedMailPreferencesStore, credentialStore: mailCredentialStore, draftStore: resolvedMailDraftStore)
         self.browserFeatureModel = BrowserFeatureModel(
             historyStore: storagePaths.map { BrowserHistoryStore(historyURL: $0.browserHistoryURL) },
             bookmarkStore: storagePaths.map { BrowserBookmarkStore(bookmarksURL: $0.browserBookmarksURL) },

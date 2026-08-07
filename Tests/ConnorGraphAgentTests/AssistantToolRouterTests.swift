@@ -18,11 +18,14 @@ import Testing
 
 @Test func toolRouterExposesCoreInteractiveWebWorkflowWithoutDiscovery() {
     let definitions = [
+        "interactive_web_sdk_usage",
         "interactive_web_create_draft",
+        "interactive_web_edit_draft",
         "interactive_web_get_draft",
-        "interactive_web_update_draft",
         "interactive_web_get_status",
         "interactive_web_publish",
+        "interactive_web_records_summary",
+        "interactive_web_export_records",
         "interactive_web_offline"
     ].map {
         AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))

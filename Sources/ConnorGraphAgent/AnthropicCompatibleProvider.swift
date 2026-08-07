@@ -506,20 +506,35 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         if message.providerMetadata?.providerID == "anthropic-compatible",
            let raw = message.providerMetadata?.rawAssistantContentJSON,
            let data = raw.data(using: .utf8),
-           var blocks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-            blocks.removeAll { Self.isStreamingEnvelope($0) }
-            if let selectedCalls = message.toolCalls {
-                let selectedIDs = Set(selectedCalls.map(\.id))
-                blocks.removeAll { block in
-                    block["type"] as? String == "tool_use"
-                        && !((block["id"] as? String).map { selectedIDs.contains($0) } ?? false)
-                }
-                let existingIDs = Set(blocks.compactMap { block in
-                    block["type"] as? String == "tool_use" ? block["id"] as? String : nil
-                })
-                blocks.append(contentsOf: selectedCalls.filter { !existingIDs.contains($0.id) }.map(toolUseBlock))
+           let blocks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            let cleanedBlocks = blocks.filter { !Self.isStreamingEnvelope($0) }
+            // When there is no executed call list (for example a text-only final
+            // turn), the raw blocks are already the authoritative content.
+            guard let selectedCalls = message.toolCalls, !selectedCalls.isEmpty else {
+                return cleanedBlocks
             }
-            return blocks
+            let selectedByID = Dictionary(selectedCalls.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            var reconciled: [[String: Any]] = []
+            var appendedToolUseIDs = Set<String>()
+            for block in cleanedBlocks {
+                guard block["type"] as? String == "tool_use",
+                      let toolUseID = block["id"] as? String else {
+                    // Keep text, thinking, and redacted_thinking blocks exactly so the
+                    // provider can validate the assistant turn: thinking mode requires
+                    // the original thinking block with its signature to be passed back.
+                    reconciled.append(block)
+                    continue
+                }
+                guard let call = selectedByID[toolUseID] else { continue }
+                // The runtime's executed call is authoritative; replace the raw block so
+                // sanitized or filtered calls replay exactly while thinking stays intact.
+                reconciled.append(toolUseBlock(for: call))
+                appendedToolUseIDs.insert(toolUseID)
+            }
+            for call in selectedCalls where !appendedToolUseIDs.contains(call.id) {
+                reconciled.append(toolUseBlock(for: call))
+            }
+            return reconciled
         }
         var content: [[String: Any]] = []
         let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)

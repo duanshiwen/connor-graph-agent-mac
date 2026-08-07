@@ -24,7 +24,25 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     #expect(result.contentText.contains("2: two"))
     #expect(result.contentText.contains("3: three"))
     #expect(!result.contentText.contains("1: one"))
-    #expect(result.contentJSON?.contains("truncated") == true)
+    #expect(result.contentJSON?.contains(#""truncated":true"#) == true)
+    #expect(result.contentJSON?.contains(#""nextOffset":4"#) == true)
+}
+
+@Test func readToolReportsNextOffsetWhenMoreLinesRemain() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("README.md")
+    try "one\ntwo\nthree\nfour\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"filePath":"README.md","offset":1,"limit":2}"#),
+        context: .localToolTestContext(toolCallID: "read-cursor")
+    )
+
+    #expect(result.contentText.contains("1: one"))
+    #expect(result.contentText.contains("2: two"))
+    #expect(result.contentJSON?.contains(#""truncated":true"#) == true)
+    #expect(result.contentJSON?.contains(#""nextOffset":3"#) == true)
 }
 
 @Test func listDirectoryToolReturnsSortedEntries() async throws {
@@ -46,6 +64,32 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     #expect(result.contentText.contains("Sources/"))
 }
 
+@Test func listDirectoryToolPaginatesWithOffsetAndLimit() async throws {
+    let workspace = try makeToolTempWorkspace()
+    try "a".write(to: workspace.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+    try "b".write(to: workspace.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+    try "c".write(to: workspace.appendingPathComponent("c.txt"), atomically: true, encoding: .utf8)
+    let tool = LocalListDirectoryTool(policy: LocalWorkspacePolicy(workingDirectory: workspace, maxSearchResults: 2))
+
+    let first = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"path":"."}"#),
+        context: .localToolTestContext(toolCallID: "ls-cursor-1")
+    )
+    #expect(first.contentText.contains("a.txt"))
+    #expect(first.contentText.contains("b.txt"))
+    #expect(!first.contentText.contains("c.txt"))
+    #expect(first.contentJSON?.contains(#""truncated":true"#) == true)
+    #expect(first.contentJSON?.contains(#""nextOffset":2"#) == true)
+
+    let second = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"path":".","offset":2,"limit":2}"#),
+        context: .localToolTestContext(toolCallID: "ls-cursor-2")
+    )
+    #expect(second.contentText.contains("c.txt"))
+    #expect(!second.contentText.contains("a.txt"))
+    #expect(second.contentJSON?.contains(#""truncated":false"#) == true)
+}
+
 @Test func globToolFindsMatchingFilesInsideWorkspace() async throws {
     let workspace = try makeToolTempWorkspace()
     let sources = workspace.appendingPathComponent("Sources")
@@ -64,6 +108,33 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     #expect(!result.contentText.contains("README.md"))
 }
 
+@Test func globToolPaginatesWithOffsetAndLimit() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let sources = workspace.appendingPathComponent("Sources")
+    try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+    try "1".write(to: sources.appendingPathComponent("A.swift"), atomically: true, encoding: .utf8)
+    try "2".write(to: sources.appendingPathComponent("B.swift"), atomically: true, encoding: .utf8)
+    try "3".write(to: sources.appendingPathComponent("C.swift"), atomically: true, encoding: .utf8)
+    let tool = LocalGlobTool(policy: LocalWorkspacePolicy(workingDirectory: workspace, maxSearchResults: 2))
+
+    let first = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"pattern":"**/*.swift","path":"."}"#),
+        context: .localToolTestContext(toolCallID: "glob-cursor-1")
+    )
+    #expect(first.contentText.contains("A.swift"))
+    #expect(first.contentText.contains("B.swift"))
+    #expect(!first.contentText.contains("C.swift"))
+    #expect(first.contentJSON?.contains(#""nextOffset":2"#) == true)
+
+    let second = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"pattern":"**/*.swift","path":".","offset":2,"limit":2}"#),
+        context: .localToolTestContext(toolCallID: "glob-cursor-2")
+    )
+    #expect(second.contentText.contains("C.swift"))
+    #expect(!second.contentText.contains("A.swift"))
+    #expect(second.contentJSON?.contains(#""truncated":false"#) == true)
+}
+
 @Test func grepToolSupportsLiteralContextAndTruncationMetadata() async throws {
     let workspace = try makeToolTempWorkspace()
     let file = workspace.appendingPathComponent("notes.txt")
@@ -80,6 +151,30 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     #expect(result.contentText.contains("notes.txt:2: beta needle"))
     #expect(result.contentText.contains("notes.txt:1- alpha"))
     #expect(result.contentJSON?.contains(#""truncated":true"#) == true)
+}
+
+@Test func grepToolPaginatesMatchesWithOffsetAndLimit() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("notes.txt")
+    try "alpha needle\ndelta needle\ngamma needle\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalGrepTool(policy: LocalWorkspacePolicy(workingDirectory: workspace, maxSearchResults: 1))
+
+    let middle = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"pattern":"needle","path":".","literal":true,"offset":1,"limit":1}"#),
+        context: .localToolTestContext(toolCallID: "grep-cursor-1")
+    )
+    #expect(middle.contentText.contains("notes.txt:2: delta needle"))
+    #expect(!middle.contentText.contains("gamma needle"))
+    #expect(middle.contentJSON?.contains(#""offset":1"#) == true)
+    #expect(middle.contentJSON?.contains(#""truncated":true"#) == true)
+    #expect(middle.contentJSON?.contains(#""nextOffset":2"#) == true)
+
+    let tail = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"pattern":"needle","path":".","literal":true,"offset":2,"limit":1}"#),
+        context: .localToolTestContext(toolCallID: "grep-cursor-2")
+    )
+    #expect(tail.contentText.contains("notes.txt:3: gamma needle"))
+    #expect(tail.contentJSON?.contains(#""truncated":false"#) == true)
 }
 
 @Test func writeToolCreatesWorkspaceFile() async throws {
@@ -181,6 +276,22 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     #expect(result.contentText.contains("2: two"))
     #expect(result.contentText.contains("3: three"))
     #expect(!result.contentText.contains("1: one"))
+}
+
+@Test func readManyToolReportsNextOffsetForTruncatedWindows() async throws {
+    let workspace = try makeToolTempWorkspace()
+    try "one\ntwo\nthree\nfour\n".write(to: workspace.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+    let tool = LocalReadManyTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"requests":[{"filePath":"b.txt","offset":1,"limit":2}]}"#),
+        context: .localToolTestContext(toolCallID: "readmany-cursor")
+    )
+
+    #expect(result.contentText.contains("1: one"))
+    #expect(result.contentText.contains("2: two"))
+    #expect(result.contentText.contains(#""truncated":true"#))
+    #expect(result.contentText.contains(#""nextOffset":3"#))
 }
 
 @Test func readManyToolReportsPerFileErrorWithoutFailingBatch() async throws {

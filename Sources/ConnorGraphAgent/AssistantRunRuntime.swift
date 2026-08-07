@@ -71,7 +71,10 @@ public struct AssistantRunBudget: Codable, Sendable, Equatable {
         maximumModelTurns: Int = 8,
         maximumToolCalls: Int = 24,
         maximumContextPackTokens: Int = 4_000,
-        maximumVisibleToolResultTokens: Int = 2_000
+        // ≈32KB of mostly-ASCII tool JSON at ~3.8 non-CJK chars/token, so the
+        // 32KB byte cap remains the binding limit for typical JSON payloads
+        // while CJK-heavy content is still bounded by a token budget.
+        maximumVisibleToolResultTokens: Int = 8_624
     ) {
         self.maximumModelTurns = max(1, maximumModelTurns)
         self.maximumToolCalls = max(1, maximumToolCalls)

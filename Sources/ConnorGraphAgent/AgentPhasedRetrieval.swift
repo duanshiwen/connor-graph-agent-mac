@@ -410,7 +410,6 @@ public enum AgentProductionToolClassifier {
             || normalized.hasPrefix("connor_skill_create")
             || normalized.hasPrefix("connor_skill_update")
             || normalized.hasPrefix("interactive_web_create_draft")
-            || normalized.hasPrefix("interactive_web_update_draft")
         {
             return true
         }

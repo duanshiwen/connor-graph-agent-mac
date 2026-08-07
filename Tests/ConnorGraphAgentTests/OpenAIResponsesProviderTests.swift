@@ -299,6 +299,40 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     #expect(output["output"] as? String == "{\"result\":\"found\"}")
 }
 
+@Test func openAIResponsesProviderDropsDeferredFunctionCallsWhileKeepingReasoning() async throws {
+    let body = #"{"id":"resp_2","output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}]}"#.data(using: .utf8)!
+    let client = ResponsesCapturingHTTPClient(responseBody: body, statusCode: 200)
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(
+            role: .assistant,
+            content: "",
+            toolCalls: [AgentToolCall(id: "call_1", name: "graph_search", argumentsJSON: "{\"query\":\"memory\"}")],
+            providerMetadata: AgentModelProviderMetadata(
+                providerID: "openai-responses",
+                rawOutputItemsJSON: #"[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"graph_search","arguments":"{\"query\":\"memory\"}","status":"completed"},{"id":"fc_2","type":"function_call","call_id":"call_2","name":"task_write","arguments":"{}","status":"completed"}]"#,
+                reasoningEncryptedContentPresent: true
+            )
+        ),
+        AgentModelMessage(role: .tool, content: "{\"result\":\"found\"}", toolCallID: "call_1", name: "graph_search")
+    ]))
+
+    let requestBody = try #require(client.captured?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+    let input = try #require(object["input"] as? [[String: Any]])
+    let reasoning = try #require(input.first { $0["type"] as? String == "reasoning" })
+    #expect(reasoning["encrypted_content"] as? String == "opaque")
+    let functionCalls = input.filter { $0["type"] as? String == "function_call" }
+    #expect(functionCalls.map { $0["call_id"] as? String } == ["call_1"])
+    #expect(!input.contains { $0["type"] as? String == "function_call" && $0["call_id"] as? String == "call_2" })
+    let output = try #require(input.first { $0["type"] as? String == "function_call_output" })
+    #expect(output["call_id"] as? String == "call_1")
+}
+
 @Test func openAIResponsesProviderSerializesImageDataURLContentParts() async throws {
     let body = #"{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"I can see it."}]}]}"#.data(using: .utf8)!
     let client = ResponsesCapturingHTTPClient(responseBody: body, statusCode: 200)

@@ -104,6 +104,7 @@ public struct InteractiveWebProjectStatus: Codable, Sendable, Equatable {
     public var manifestHash: String
     public var fileCount: Int
     public var totalBytes: Int64
+    public var fileNames: [String]
     public var remoteProjectID: String?
     public var remoteSiteID: String?
     public var latestDeploymentID: String?
@@ -117,6 +118,7 @@ public struct InteractiveWebProjectStatus: Codable, Sendable, Equatable {
         manifestHash: String,
         fileCount: Int,
         totalBytes: Int64,
+        fileNames: [String] = [],
         remoteProjectID: String? = nil,
         remoteSiteID: String? = nil,
         latestDeploymentID: String? = nil,
@@ -129,6 +131,7 @@ public struct InteractiveWebProjectStatus: Codable, Sendable, Equatable {
         self.manifestHash = manifestHash
         self.fileCount = fileCount
         self.totalBytes = totalBytes
+        self.fileNames = fileNames
         self.remoteProjectID = remoteProjectID
         self.remoteSiteID = remoteSiteID
         self.latestDeploymentID = latestDeploymentID
@@ -142,13 +145,122 @@ public struct InteractiveWebDraftSource: Codable, Sendable, Equatable {
     public var manifestHash: String
     public var fileName: String
     public var content: String
+    public var availableFiles: [String]
+    public var offset: Int
+    public var limit: Int
+    public var totalCharacters: Int
+    public var truncated: Bool
+    public var nextOffset: Int?
+    public var remainingCharacters: Int
+    public var estimatedRemainingCalls: Int
 
-    public init(projectID: String, revision: Int, manifestHash: String, fileName: String, content: String) {
+    public init(
+        projectID: String,
+        revision: Int,
+        manifestHash: String,
+        fileName: String,
+        content: String,
+        availableFiles: [String] = [],
+        offset: Int = 0,
+        limit: Int = 0,
+        totalCharacters: Int = 0,
+        truncated: Bool = false,
+        nextOffset: Int? = nil,
+        remainingCharacters: Int = 0,
+        estimatedRemainingCalls: Int = 0
+    ) {
         self.projectID = projectID
         self.revision = revision
         self.manifestHash = manifestHash
         self.fileName = fileName
         self.content = content
+        self.availableFiles = availableFiles
+        self.offset = offset
+        self.limit = limit
+        self.totalCharacters = totalCharacters
+        self.truncated = truncated
+        self.nextOffset = nextOffset
+        self.remainingCharacters = remainingCharacters
+        self.estimatedRemainingCalls = estimatedRemainingCalls
+    }
+}
+
+/// 单个文件在保存前后的变更摘要（纯文本，供任何模型核对，不依赖截图/图片识别）。
+public struct InteractiveWebDraftFileChange: Codable, Sendable, Equatable {
+    public var fileName: String
+    public var operation: String
+    public var beforeHash: String
+    public var afterHash: String
+    public var beforeSizeBytes: Int
+    public var afterSizeBytes: Int
+    public var diff: String
+
+    public init(
+        fileName: String,
+        operation: String,
+        beforeHash: String,
+        afterHash: String,
+        beforeSizeBytes: Int,
+        afterSizeBytes: Int,
+        diff: String
+    ) {
+        self.fileName = fileName
+        self.operation = operation
+        self.beforeHash = beforeHash
+        self.afterHash = afterHash
+        self.beforeSizeBytes = beforeSizeBytes
+        self.afterSizeBytes = afterSizeBytes
+        self.diff = diff
+    }
+}
+
+/// create_draft 的统一结果：新建或更新后的状态 + 本次实际变更的文件清单。
+/// 更新 = 传同一个 projectID 与完整编辑后的文件，与新建共用同一个工具与方法。
+public struct InteractiveWebDraftSaveResult: Codable, Sendable, Equatable {
+    public var status: InteractiveWebProjectStatus
+    public var changes: [InteractiveWebDraftFileChange]
+
+    public init(status: InteractiveWebProjectStatus, changes: [InteractiveWebDraftFileChange]) {
+        self.status = status
+        self.changes = changes
+    }
+}
+
+/// 极简定向编辑结果：一次精确文本替换后的状态、文件指纹与统一 diff。
+public struct InteractiveWebDraftEditResult: Codable, Sendable, Equatable {
+    public var status: InteractiveWebProjectStatus
+    public var fileName: String
+    public var beforeHash: String
+    public var afterHash: String
+    public var beforeSizeBytes: Int
+    public var afterSizeBytes: Int
+    public var diff: String
+    public var offset: Int
+    public var nextOffset: Int?
+    public var resultTotalCharacters: Int
+
+    public init(
+        status: InteractiveWebProjectStatus,
+        fileName: String,
+        beforeHash: String,
+        afterHash: String,
+        beforeSizeBytes: Int,
+        afterSizeBytes: Int,
+        diff: String,
+        offset: Int = 0,
+        nextOffset: Int? = nil,
+        resultTotalCharacters: Int = 0
+    ) {
+        self.status = status
+        self.fileName = fileName
+        self.beforeHash = beforeHash
+        self.afterHash = afterHash
+        self.beforeSizeBytes = beforeSizeBytes
+        self.afterSizeBytes = afterSizeBytes
+        self.diff = diff
+        self.offset = offset
+        self.nextOffset = nextOffset
+        self.resultTotalCharacters = resultTotalCharacters
     }
 }
 
@@ -164,6 +276,12 @@ public struct InteractiveWebManifestFile: Codable, Sendable, Equatable {
     public var sha256: String
     public var mediaType: String
     public var sizeBytes: Int64
+    public init(path: String, sha256: String, mediaType: String, sizeBytes: Int64) {
+        self.path = path
+        self.sha256 = sha256
+        self.mediaType = mediaType
+        self.sizeBytes = sizeBytes
+    }
 }
 
 public struct InteractiveWebCollectionField: Codable, Sendable, Equatable {
@@ -260,7 +378,7 @@ public struct InteractiveWebPackager: Sendable {
             collections = []
         }
         try validate(collections: collections)
-        return InteractiveWebManifest(files: files, collections: collections)
+        return InteractiveWebManifest(files: files, collections: collections.map(Self.backendCompatible))
     }
 
     public func fingerprint(_ manifest: InteractiveWebManifest) -> String {
@@ -278,6 +396,47 @@ public struct InteractiveWebPackager: Sendable {
             }
         }
         return SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The backend compiles collection field patterns with Go's regexp (RE2), which does
+    /// not accept ICU/Java-style `\uXXXX` escapes even though the local draft validator
+    /// (NSRegularExpression) does. Normalize the manifest at the packager boundary so the
+    /// same RE2-compatible pattern is used for the manifest hash and for the publish
+    /// finalize request, without requiring any backend change.
+    private static func backendCompatible(_ collection: InteractiveWebCollectionDefinition) -> InteractiveWebCollectionDefinition {
+        var normalized = collection
+        normalized.fields = collection.fields.map { field in
+            guard let pattern = field.pattern, !pattern.isEmpty else { return field }
+            var copy = field
+            copy.pattern = re2CompatiblePattern(pattern)
+            return copy
+        }
+        return normalized
+    }
+
+    private static func re2CompatiblePattern(_ pattern: String) -> String {
+        let characters = Array(pattern)
+        var output = ""
+        var index = 0
+        while index < characters.count {
+            if characters[index] == "\\",
+               index + 2 < characters.count,
+               characters[index + 1] == "u" || characters[index + 1] == "U" {
+                let digitCount = characters[index + 1] == "u" ? 4 : 8
+                let digitsStart = index + 2
+                if digitsStart + digitCount <= characters.count {
+                    let hexDigits = String(characters[digitsStart..<(digitsStart + digitCount)])
+                    if hexDigits.allSatisfy(\.isHexDigit) {
+                        output += "\\x{\(hexDigits)}"
+                        index = digitsStart + digitCount
+                        continue
+                    }
+                }
+            }
+            output.append(characters[index])
+            index += 1
+        }
+        return output
     }
 
     private static func mediaType(_ ext: String) -> String {
@@ -341,9 +500,72 @@ public struct InteractiveWebPackager: Sendable {
                 guard pattern.isEmpty || field.type == "string" else {
                     throw InteractiveWebConfigurationError("collection '\(collection.name)': pattern is only supported for string field '\(field.name)'")
                 }
-                if !pattern.isEmpty { _ = try NSRegularExpression(pattern: pattern) }
+                if !pattern.isEmpty {
+                    if let unsupported = Self.re2UnsupportedFeature(in: pattern) {
+                        throw InteractiveWebConfigurationError("collection '\(collection.name)': field '\(field.name)' pattern 使用了后端 RE2 不支持的特性：\(unsupported)。请改写成不依赖该特性的正则后重新生成草稿。")
+                    }
+                    _ = try NSRegularExpression(pattern: pattern)
+                }
             }
         }
+    }
+
+    /// Go's regexp (RE2) intentionally omits several ICU/Java features. Reject those
+    /// constructs at draft time so publishing never fails with an opaque backend 422;
+    /// the agent rewrites the pattern into RE2-compatible syntax before publishing.
+    private static func re2UnsupportedFeature(in pattern: String) -> String? {
+        let characters = Array(pattern)
+        var index = 0
+        var inClass = false
+        var classFirst = false
+        while index < characters.count {
+            let char = characters[index]
+            if char == "\\" {
+                if !inClass, index + 1 < characters.count {
+                    switch characters[index + 1] {
+                    case "1"..."9": return "反向引用 \\\(characters[index + 1])"
+                    case "k": return "命名反向引用 \\k"
+                    case "G": return "Java 专属锚点 \\G"
+                    default: break
+                    }
+                }
+                index += 2
+                continue
+            }
+            if inClass {
+                if char == "]" && !classFirst {
+                    inClass = false
+                } else if char == "]" {
+                    classFirst = false
+                } else if classFirst, char != "^" {
+                    classFirst = false
+                }
+                index += 1
+                continue
+            }
+            if char == "[" {
+                inClass = true
+                classFirst = true
+                index += 1
+                continue
+            }
+            if char == "(", index + 2 < characters.count, characters[index + 1] == "?" {
+                switch characters[index + 2] {
+                case "=": return "正向环视 (?=...)"
+                case "!": return "负向环视 (?!...)"
+                case ">": return "原子组 (?>...)"
+                case "(": return "条件组 (?(...)...)"
+                case "<" where index + 3 < characters.count && (characters[index + 3] == "=" || characters[index + 3] == "!"):
+                    return characters[index + 3] == "=" ? "逆序环视 (?<=...)" : "负向逆序环视 (?<!...)"
+                default: break
+                }
+            }
+            if "*+?}".contains(char), index + 1 < characters.count, characters[index + 1] == "+" {
+                return "占有量词（possessive quantifier）"
+            }
+            index += 1
+        }
+        return nil
     }
 }
 
@@ -358,6 +580,7 @@ public actor InteractiveWebLocalStore {
     public func save(project: LocalInteractiveWebProject) throws { var state = try read(); state.projects.removeAll { $0.id == project.id }; state.projects.append(project); try write(state) }
     public func projects(accountID: String) throws -> [LocalInteractiveWebProject] { try read().projects.filter { $0.accountID == accountID } }
     public func project(id: String) throws -> LocalInteractiveWebProject? { try read().projects.first { $0.id == id } }
+    public func project(remoteProjectID: String) throws -> LocalInteractiveWebProject? { try read().projects.first { $0.remoteProjectID == remoteProjectID } }
     public func save(choice: InteractiveWebChoiceRequest) throws { var state = try read(); state.choices.removeAll { $0.choiceRequestID == choice.choiceRequestID }; state.choices.append(choice); try write(state) }
     public func pendingChoices(accountID: String, conversationID: String) throws -> [InteractiveWebChoiceRequest] { try read().choices.filter { $0.accountID == accountID && $0.conversationID == conversationID && $0.state == "awaiting_user_choice" } }
     public func complete(_ response: InteractiveWebChoiceResponse, contextRevision: Int) throws -> Bool {

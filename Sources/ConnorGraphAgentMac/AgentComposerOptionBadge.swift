@@ -7,6 +7,10 @@ import ConnorGraphSearch
 import ConnorGraphAppSupport
 
 struct AgentComposerOptionBadge: View {
+    /// 标题文本最大宽度。长文件名/长标题（例如工作目录）会在此处中间截断，
+    /// 避免把输入框操作栏或弹层撑出窗口。
+    private static let maximumTitleWidth: CGFloat = 200
+
     enum Style {
         case compact
         case prominent
@@ -48,6 +52,8 @@ struct AgentComposerOptionBadge: View {
             Text(title)
                 .font(style.textFont)
                 .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: Self.maximumTitleWidth, alignment: .leading)
             if showsChevron {
                 Image(systemName: "chevron.down")
                     .font(.system(size: style.chevronSize, weight: .semibold))

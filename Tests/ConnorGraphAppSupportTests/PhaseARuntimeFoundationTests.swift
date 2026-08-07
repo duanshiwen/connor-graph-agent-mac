@@ -148,7 +148,7 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
 
     var legacy = AgentRuntimeSettings(schemaVersion: 4)
     legacy.loop.maxToolIterations = 256
-    legacy.loop.maxToolResultBytes = 32_768
+    legacy.loop.maxToolResultBytes = 1_000_000
     legacy.loop.promptMaxEstimatedTokens = 160_000
     legacy.loop.budget.maxTotalTokens = 120_000
     legacy.loop.maxToolCallsPerIteration = 17
@@ -158,7 +158,7 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
 
     #expect(migrated.schemaVersion == 8)
     #expect(migrated.loop.maxToolIterations == 256)
-    #expect(migrated.loop.maxToolResultBytes == 8 * 1_024)
+    #expect(migrated.loop.maxToolResultBytes == 1_000_000)
     #expect(migrated.loop.promptMaxEstimatedTokens == 64_000)
     #expect(migrated.loop.budget.maxTotalTokens == 80_000)
     #expect(migrated.loop.maxConsecutiveToolResultErrors == 3)

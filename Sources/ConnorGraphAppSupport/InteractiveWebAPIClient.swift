@@ -28,8 +28,10 @@ public struct InteractiveWebAPIClient: Sendable {
         for file in manifest.files {
             guard let uploadURL = session.uploadUrls[file.path] else { throw InteractiveWebAPIError.invalidResponse }
             var request = URLRequest(url: uploadURL); request.httpMethod = "PUT"; request.httpBody = try Data(contentsOf: project.rootURL.appendingPathComponent(file.path)); request.setValue(file.mediaType, forHTTPHeaderField: "Content-Type")
-            let (_, response) = try await transport.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw InteractiveWebAPIError.uploadFailed }
+            let (data, response) = try await transport.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw uploadFailure(statusCode: (response as? HTTPURLResponse)?.statusCode, data: data)
+            }
         }
         let _: Deployment = try await send("api/v1/deployments/\(deployment.id)/finalize", method: "POST", body: manifest)
         var result = project
@@ -57,7 +59,9 @@ public struct InteractiveWebAPIClient: Sendable {
 		var request = URLRequest(url: url)
 		request.setValue("Bearer \(try await credentials.accessToken())", forHTTPHeaderField: "Authorization")
 		let (data, response) = try await transport.data(for: request)
-		guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw InteractiveWebAPIError.server }
+		guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+			throw httpFailure(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+		}
 		return data
 	}
 
@@ -77,7 +81,10 @@ public struct InteractiveWebAPIClient: Sendable {
         let url = baseURL.appendingPathComponent("api/v1/projects/\(projectID)/collections/\(collection)/export")
         var request = URLRequest(url: url); request.setValue("Bearer \(try await credentials.accessToken())", forHTTPHeaderField: "Authorization")
         let (data, response) = try await transport.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw InteractiveWebAPIError.server }; return data
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw httpFailure(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        }
+        return data
     }
 
     public func updateAccessPolicy(siteID: String, mode: InteractiveWebAccessMode, password: String? = nil, expiresAt: Date? = nil) async throws {
@@ -85,7 +92,7 @@ public struct InteractiveWebAPIClient: Sendable {
     }
 
     public func offline(siteID: String) async throws {
-        try await sendNoContent("api/v1/sites/\(siteID)/offline", method: "POST")
+		try await sendNoContent("api/v1/sites/\(siteID)/offline", method: "POST")
     }
 
     public func analytics(projectID: String) async throws -> InteractiveWebAnalytics {
@@ -104,7 +111,9 @@ public struct InteractiveWebAPIClient: Sendable {
         let url = baseURL.appendingPathComponent(path); var request = URLRequest(url: url); request.httpMethod = method; request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.setValue("Bearer \(try await credentials.accessToken())", forHTTPHeaderField: "Authorization")
         let (data, response) = try await transport.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw InteractiveWebAPIError.server }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw httpFailure(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        }
         guard let value = try? decoder.decode(Envelope<T>.self, from: data).data else { throw InteractiveWebAPIError.invalidResponse }; return value
     }
 
@@ -112,16 +121,35 @@ public struct InteractiveWebAPIClient: Sendable {
         guard let url = URL(string: path, relativeTo: baseURL.appendingPathComponent("/"))?.absoluteURL else { throw InteractiveWebAPIError.invalidResponse }
         var request = URLRequest(url: url); request.setValue("Bearer \(try await credentials.accessToken())", forHTTPHeaderField: "Authorization")
         let (data, response) = try await transport.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let value = try? decoder.decode(Envelope<T>.self, from: data).data else { throw InteractiveWebAPIError.server }; return value
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw httpFailure(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        }
+        guard let value = try? decoder.decode(Envelope<T>.self, from: data).data else { throw InteractiveWebAPIError.invalidResponse }
+        return value
     }
 
     private func sendNoContent(_ path: String, method: String) async throws {
         let url = baseURL.appendingPathComponent(path); var request = URLRequest(url: url); request.httpMethod = method; request.setValue("Bearer \(try await credentials.accessToken())", forHTTPHeaderField: "Authorization")
-        let (_, response) = try await transport.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw InteractiveWebAPIError.server }
+        let (data, response) = try await transport.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw httpFailure(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        }
+    }
+
+    private func httpFailure(statusCode: Int, data: Data) -> InteractiveWebAPIError {
+        let envelope = try? decoder.decode(BackendErrorEnvelope.self, from: data)
+        let message = envelope?.msg ?? envelope?.error ?? envelope?.code ?? ""
+        return .server(statusCode: statusCode, message: message)
+    }
+
+    private func uploadFailure(statusCode: Int?, data: Data) -> InteractiveWebAPIError {
+        let envelope = try? decoder.decode(BackendErrorEnvelope.self, from: data)
+        let message = envelope?.msg ?? envelope?.error ?? envelope?.code ?? ""
+        return .uploadFailed(statusCode: statusCode, message: message)
     }
 
     private struct Envelope<T: Decodable>: Decodable { var data: T }
+    private struct BackendErrorEnvelope: Decodable { var code: String?; var msg: String?; var error: String? }
     private struct Empty: Encodable {}
     private struct CreateProject: Encodable { var name: String }
     private struct UploadPaths: Encodable { var paths: [String] }
@@ -210,4 +238,28 @@ public struct InteractiveWebAuditEntry: Decodable, Sendable, Equatable {
     public var createdAt: Date
 }
 
-public enum InteractiveWebAPIError: Error { case server, invalidResponse, uploadFailed }
+public enum InteractiveWebAPIError: Error, LocalizedError, CustomStringConvertible, Sendable {
+    case server(statusCode: Int, message: String)
+    case invalidResponse
+    case uploadFailed(statusCode: Int?, message: String)
+
+    public var description: String { message }
+    public var errorDescription: String? { message }
+
+    private var message: String {
+        switch self {
+        case .server(let statusCode, let message):
+            return Self.trimmed(message) ?? "服务器错误（HTTP \(statusCode)）"
+        case .invalidResponse:
+            return "互动网页服务返回了无法解析的响应"
+        case .uploadFailed(let statusCode, let message):
+            let detail = Self.trimmed(message) ?? statusCode.map { "HTTP \($0)" } ?? "未知错误"
+            return "互动网页文件上传失败：\(detail)"
+        }
+    }
+
+    private static func trimmed(_ message: String) -> String? {
+        let value = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+}

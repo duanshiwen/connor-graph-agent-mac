@@ -500,6 +500,38 @@ private enum AnthropicFixtures {
     #expect(content.first?["type"] as? String == "thinking")
 }
 
+@Test func anthropicAssistantContentReplacesToolUseArgumentsWithExecutedCall() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+    let rawContent = #"[{"type":"thinking","thinking":"Reason","signature":"sig"},{"type":"tool_use","id":"toolu_keep","name":"memory_read","input":{"original":true}}]"#
+
+    _ = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(role: .user, content: "Read memory"),
+        AgentModelMessage(
+            role: .assistant,
+            content: "",
+            toolCalls: [AgentToolCall(id: "toolu_keep", name: "memory_read", argumentsJSON: #"{"sanitized":true}"#)],
+            providerMetadata: AgentModelProviderMetadata(providerID: "anthropic-compatible", rawAssistantContentJSON: rawContent, stopReason: "tool_use")
+        ),
+        AgentModelMessage(role: .tool, content: "{}", toolCallID: "toolu_keep", name: "memory_read")
+    ]))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    let assistant = try #require(messages.first { $0["role"] as? String == "assistant" })
+    let content = try #require(assistant["content"] as? [[String: Any]])
+    #expect(content.first?["type"] as? String == "thinking")
+    let toolUse = try #require(content.first { $0["type"] as? String == "tool_use" })
+    #expect(toolUse["id"] as? String == "toolu_keep")
+    let input = try #require(toolUse["input"] as? [String: Any])
+    #expect(input["sanitized"] as? Bool == true)
+    #expect(input["original"] == nil)
+}
+
 @Test func anthropicMessagesDropEmptyTurnsAndMergeAdjacentRoles() async throws {
     let client = AnthropicCapturingHTTPClient()
     let provider = AnthropicCompatibleProvider(

@@ -27,3 +27,45 @@ private final class FactoryMailCredentialStore: CredentialStore, @unchecked Send
     let fallback = FileBackedMailSourceStore(storagePaths: paths)
     #expect(try await fallback.allMessageIDs().isEmpty)
 }
+
+@Test func fallbackMailRuntimePersistsCreatedDraftsToLocalFile() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("factory-mail-draft-persistence-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let paths = AppStoragePaths(applicationSupportDirectory: root); try paths.ensureDirectoryHierarchy()
+    let graph = try SQLiteGraphKernelStore(path: root.appendingPathComponent("graph.sqlite").path); try graph.migrate()
+    let accountID = MailAccountID(rawValue: "fallback-mail")
+    let identity = MailIdentity(id: MailIdentityID(rawValue: "fallback-identity"), displayName: "Fallback", address: MailAddress(name: "Fallback", email: "fallback@example.com"))
+    let account = MailAccount(
+        id: accountID,
+        provider: .genericIMAPSMTP,
+        displayName: "Fallback Mail",
+        identities: [identity],
+        outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp)
+    )
+    let mailStore = FileBackedMailSourceStore(storagePaths: paths)
+    try await mailStore.saveAccount(account)
+
+    let factory = AppGraphAgentRuntimeFactory(
+        store: graph,
+        settingsRepository: AppLLMSettingsRepository(settingsStore: FactoryMailSettingsStore(), credentialStore: FactoryMailCredentialStore()),
+        storagePaths: paths
+    )
+    let controller = factory.makeAgentLoopController(permissionMode: .allowAll)
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(
+            name: "mail_create_draft",
+            argumentsJSON: #"{"to":["alice@example.com"],"subject":"Persist me","body":"Draft body that must survive app restarts"}"#
+        ),
+        context: AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "default", userPrompt: "create mail draft", toolCallID: "draft", policyEngine: AgentPolicyEngine(permissionMode: .allowAll))
+    )
+    #expect(result.contentText.contains("Created draft") == true)
+
+    // The draft must be recoverable from the local file by a brand-new repository,
+    // proving it was persisted on this machine and not kept only in memory.
+    let drafts = FileBackedMailDraftRepository(storeURL: paths.mailDraftsURL)
+    let persisted = try #require(try await drafts.listDrafts(accountID: accountID, status: .draft).first)
+    #expect(persisted.subject == "Persist me")
+    #expect(persisted.body == "Draft body that must survive app restarts")
+    #expect(FileManager.default.fileExists(atPath: paths.mailDraftsURL.path) == true)
+}

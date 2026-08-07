@@ -5,12 +5,12 @@ import Darwin
 
 public struct LocalReadFileTool: AgentTool {
     public let name = "Read"
-    public let description = "Read a text file from the configured local workspace. Supports 1-based line offset and limit. Paths must stay inside allowed workspace roots."
+    public let description = "Read a text file from the configured local workspace. Supports 1-based line offset and limit; when the result is truncated it returns nextOffset so you can continue reading the file in chunks. Paths must stay inside allowed workspace roots."
     public let permission: AgentPermissionCapability = .readWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "filePath": .string(description: "Path to a file inside the workspace."),
-        "offset": .integer(description: "Optional 1-based line number to start reading from."),
-        "limit": .integer(description: "Optional maximum number of lines to return.")
+        "offset": .integer(description: "Optional 1-based line number to start reading from. Defaults to 1."),
+        "limit": .integer(description: "Optional maximum number of lines to return. Defaults to 2000; maximum 10000.")
     ], required: ["filePath"])
 
     private let policy: LocalWorkspacePolicy
@@ -29,30 +29,35 @@ public struct LocalReadFileTool: AgentTool {
         let text = try String(contentsOf: path, encoding: .utf8)
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let offset = max(arguments.int("offset") ?? 1, 1)
-        let limit = max(arguments.int("limit") ?? min(lines.count, 2000), 0)
+        let requestedLimit = arguments.int("limit") ?? min(lines.count, 2_000)
+        let limit = min(max(requestedLimit, 0), 10_000)
         let start = min(offset - 1, lines.count)
         let end = min(start + limit, lines.count)
         let selected = lines[start..<end].enumerated().map { index, line in
             "\(start + index + 1): \(line)"
         }.joined(separator: "\n")
-        let truncated = start > 0 || end < lines.count
-        let json = LocalToolJSON.encode([
+        let truncated = end < lines.count
+        var jsonObject: [String: Any] = [
             "path": path.path,
             "lineCount": lines.count,
             "offset": offset,
             "limit": limit,
             "truncated": truncated
-        ])
+        ]
+        if truncated { jsonObject["nextOffset"] = end + 1 }
+        let json = LocalToolJSON.encode(jsonObject)
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: selected, contentJSON: json)
     }
 }
 
 public struct LocalListDirectoryTool: AgentTool {
     public let name = "LS"
-    public let description = "List directory contents inside the configured local workspace. Directories end with '/'."
+    public let description = "List directory contents inside the configured local workspace. Directories end with '/'. Large directories are paginated with offset and limit; when the result is truncated it returns nextOffset so you can continue."
     public let permission: AgentPermissionCapability = .listWorkspaceFiles
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "path": .string(description: "Directory path inside the workspace. Defaults to '.'.")
+        "path": .string(description: "Directory path inside the workspace. Defaults to '.'."),
+        "offset": .integer(description: "Optional 0-based index of the first entry to return. Defaults to 0."),
+        "limit": .integer(description: "Optional maximum number of entries to return. Defaults to the workspace search limit; maximum 1000.")
     ], required: [])
 
     private let policy: LocalWorkspacePolicy
@@ -71,20 +76,34 @@ public struct LocalListDirectoryTool: AgentTool {
                 return url.lastPathComponent + ((values?.isDirectory == true) ? "/" : "")
             }
             .sorted()
-        let truncated = entries.count > policy.maxSearchResults
-        let shown = entries.prefix(policy.maxSearchResults).joined(separator: "\n")
-        let json = LocalToolJSON.encode(["path": path.path, "count": entries.count, "truncated": truncated])
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: shown, contentJSON: json)
+        let offset = max(arguments.int("offset") ?? 0, 0)
+        let limit = min(max(arguments.int("limit") ?? policy.maxSearchResults, 0), 1_000)
+        let start = min(offset, entries.count)
+        let end = min(start + limit, entries.count)
+        let shown = entries[start..<end].joined(separator: "\n")
+        let truncated = end < entries.count
+        let suffix = truncated ? "\n[truncated: showing \(end - start) of \(entries.count) entries; continue with offset=\(end)]" : ""
+        var jsonObject: [String: Any] = [
+            "path": path.path,
+            "count": entries.count,
+            "offset": offset,
+            "limit": limit,
+            "truncated": truncated
+        ]
+        if truncated { jsonObject["nextOffset"] = end }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: shown + suffix, contentJSON: LocalToolJSON.encode(jsonObject))
     }
 }
 
 public struct LocalGlobTool: AgentTool {
     public let name = "Glob"
-    public let description = "Find files matching a glob pattern inside the configured local workspace."
+    public let description = "Find files matching a glob pattern inside the configured local workspace. Large result sets are paginated with offset and limit; when the result is truncated it returns nextOffset so you can continue."
     public let permission: AgentPermissionCapability = .listWorkspaceFiles
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "pattern": .string(description: "Glob pattern, for example '**/*.swift'."),
-        "path": .string(description: "Directory to search from. Defaults to '.'.")
+        "path": .string(description: "Directory to search from. Defaults to '.'."),
+        "offset": .integer(description: "Optional 0-based index of the first match to return. Defaults to 0."),
+        "limit": .integer(description: "Optional maximum number of matches to return. Defaults to the workspace search limit; maximum 1000.")
     ], required: ["pattern"])
 
     private let policy: LocalWorkspacePolicy
@@ -102,16 +121,28 @@ public struct LocalGlobTool: AgentTool {
         let matches = try LocalWorkspaceScanner.files(under: root, relativeTo: policy.workingDirectory)
             .filter { LocalWorkspaceScanner.globMatch(pattern: pattern, path: $0) }
             .sorted()
-        let truncated = matches.count > policy.maxSearchResults
-        let shown = matches.prefix(policy.maxSearchResults).joined(separator: "\n")
-        let json = LocalToolJSON.encode(["pattern": pattern, "count": matches.count, "truncated": truncated])
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: shown, contentJSON: json)
+        let offset = max(arguments.int("offset") ?? 0, 0)
+        let limit = min(max(arguments.int("limit") ?? policy.maxSearchResults, 0), 1_000)
+        let start = min(offset, matches.count)
+        let end = min(start + limit, matches.count)
+        let shown = matches[start..<end].joined(separator: "\n")
+        let truncated = end < matches.count
+        let suffix = truncated ? "\n[truncated: showing \(end - start) of \(matches.count) matches; continue with offset=\(end)]" : ""
+        var jsonObject: [String: Any] = [
+            "pattern": pattern,
+            "count": matches.count,
+            "offset": offset,
+            "limit": limit,
+            "truncated": truncated
+        ]
+        if truncated { jsonObject["nextOffset"] = end }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: shown + suffix, contentJSON: LocalToolJSON.encode(jsonObject))
     }
 }
 
 public struct LocalGrepTool: AgentTool {
     public let name = "Grep"
-    public let description = "Search text files inside the configured local workspace using literal or regular expression patterns."
+    public let description = "Search text files inside the configured local workspace using literal or regular expression patterns. Matches are paginated with offset and limit; when the result is truncated it returns nextOffset so you can continue."
     public let permission: AgentPermissionCapability = .searchWorkspaceFiles
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "pattern": .string(description: "Text or regex pattern to search for."),
@@ -119,7 +150,9 @@ public struct LocalGrepTool: AgentTool {
         "glob": .string(description: "Optional file glob filter, for example '*.swift'."),
         "ignoreCase": .boolean(description: "Whether to search case-insensitively."),
         "literal": .boolean(description: "Whether to treat pattern as literal text."),
-        "context": .integer(description: "Number of context lines before and after each match.")
+        "context": .integer(description: "Number of context lines before and after each match."),
+        "offset": .integer(description: "Optional 0-based index of the first match to return. Defaults to 0."),
+        "limit": .integer(description: "Optional maximum number of matches to return. Defaults to the workspace search limit; maximum 1000.")
     ], required: ["pattern"])
 
     private let policy: LocalWorkspacePolicy
@@ -138,12 +171,17 @@ public struct LocalGrepTool: AgentTool {
         let literal = arguments.bool("literal") ?? false
         let ignoreCase = arguments.bool("ignoreCase") ?? arguments.bool("ignore_case") ?? false
         let contextLines = max(arguments.int("context") ?? 0, 0)
+        let offset = max(arguments.int("offset") ?? 0, 0)
+        let limit = min(max(arguments.int("limit") ?? policy.maxSearchResults, 0), 1_000)
+        let windowEnd = offset + limit
         let files = try LocalWorkspaceScanner.files(under: root, relativeTo: policy.workingDirectory)
             .filter { relative in glob.map { LocalWorkspaceScanner.globMatch(pattern: $0, path: relative) } ?? true }
             .sorted()
 
         var rows: [String] = []
-        var matchCount = 0
+        var seenMatches = 0
+        var returnedMatches = 0
+        var hasMoreMatches = false
         let regex: NSRegularExpression?
         if literal {
             regex = nil
@@ -169,19 +207,32 @@ public struct LocalGrepTool: AgentTool {
                     matched = false
                 }
                 guard matched else { continue }
-                let lower = max(0, index - contextLines)
-                let upper = min(lines.count - 1, index + contextLines)
-                for contextIndex in lower...upper {
-                    let marker = contextIndex == index ? ":" : "-"
-                    rows.append("\(relative):\(contextIndex + 1)\(marker) \(lines[contextIndex])")
+                if seenMatches >= windowEnd {
+                    hasMoreMatches = true
+                    break fileLoop
                 }
-                matchCount += 1
-                if matchCount >= policy.maxSearchResults { break fileLoop }
+                if seenMatches >= offset {
+                    let lower = max(0, index - contextLines)
+                    let upper = min(lines.count - 1, index + contextLines)
+                    for contextIndex in lower...upper {
+                        let marker = contextIndex == index ? ":" : "-"
+                        rows.append("\(relative):\(contextIndex + 1)\(marker) \(lines[contextIndex])")
+                    }
+                    returnedMatches += 1
+                }
+                seenMatches += 1
             }
         }
-        let truncated = matchCount >= policy.maxSearchResults
-        let json = LocalToolJSON.encode(["matches": matchCount, "truncated": truncated])
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: rows.joined(separator: "\n"), contentJSON: json)
+        let truncated = hasMoreMatches
+        let suffix = truncated ? "\n[truncated: showing \(returnedMatches) of more matches; continue with offset=\(windowEnd)]" : ""
+        var jsonObject: [String: Any] = [
+            "matches": returnedMatches,
+            "offset": offset,
+            "limit": limit,
+            "truncated": truncated
+        ]
+        if truncated { jsonObject["nextOffset"] = windowEnd }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: rows.joined(separator: "\n") + suffix, contentJSON: LocalToolJSON.encode(jsonObject))
     }
 }
 
@@ -380,7 +431,7 @@ public struct LocalMultiEditTool: AgentTool {
 
 public struct LocalReadManyTool: AgentTool {
     public let name = "ReadMany"
-    public let description = "Read multiple text files from the configured local workspace in a single call. Prefer this over separate Read calls when a task needs several files: every file is returned in one turn. Each request supports optional 1-based line offset and limit; a per-file error does not fail the whole batch. Paths must stay inside allowed workspace roots."
+    public let description = "Read multiple text files from the configured local workspace in a single call. Prefer this over separate Read calls when a task needs several files: every file is returned in one turn. Each request supports optional 1-based line offset and limit, and truncated windows return nextOffset so you can continue reading a large file in chunks; a per-file error does not fail the whole batch. Paths must stay inside allowed workspace roots."
     public let permission: AgentPermissionCapability = .readWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "requests": .array(
@@ -455,7 +506,7 @@ public struct LocalReadManyTool: AgentTool {
                 let selected = lines[start..<end].enumerated().map { offset, line in
                     "\(start + offset + 1): \(line)"
                 }.joined(separator: "\n")
-                let truncated = start > 0 || end < lines.count
+                let truncated = end < lines.count
                 return FileOutcome(index: request.index, filePath: path.path, content: selected, offset: request.offset, limit: limit, lineCount: lines.count, truncated: truncated, error: nil)
             } catch {
                 return FileOutcome(index: request.index, filePath: request.filePath, content: "", offset: request.offset, limit: request.limit ?? 0, lineCount: 0, truncated: false, error: String(describing: error))
@@ -479,6 +530,9 @@ public struct LocalReadManyTool: AgentTool {
             remaining = max(0, remaining - clipped.utf8.count)
             value["content"] = clipped
             value["truncated"] = outcome.truncated || contentTruncated
+            if outcome.truncated && !contentTruncated {
+                value["nextOffset"] = outcome.offset + outcome.limit
+            }
             return value
         }
         let json = LocalToolJSON.encode(["results": resultObjects]) ?? "{}"
