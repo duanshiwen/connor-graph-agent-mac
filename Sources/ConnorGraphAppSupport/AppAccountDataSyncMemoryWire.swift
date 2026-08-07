@@ -60,11 +60,14 @@ struct SyncPersonality: Codable, Sendable {
 // MARK: - 用户偏好（settings|user_preferences，与 Android UserPreferences 逐字段一致）
 
 /// 用户主动维护的基本信息；以“最后设置时间”为准进行跨端合并。
-/// 只同步两端共有的字段（Mac 的 city/country/defaultSearchEngine 等保持本机）。
+/// city/country 为两端共有偏好，随记录同步；defaultSearchEngine 等本机独有字段保持本机。
 struct SyncUserPreferences: Codable, Sendable, Equatable {
     var displayName: String
     var timezone: String
     var preferredLanguage: String
+    /// 旧版本载荷可能没有这两个字段；缺失时按 nil 处理，不覆盖本机已有值。
+    var city: String?
+    var country: String?
     var genderIdentity: String
     var birthDate: String
     var notes: String
@@ -75,6 +78,8 @@ struct SyncUserPreferences: Codable, Sendable, Equatable {
         displayName = preferences.displayName
         timezone = preferences.timezone
         preferredLanguage = preferences.preferredLanguage
+        city = preferences.city.isEmpty ? nil : preferences.city
+        country = preferences.country.isEmpty ? nil : preferences.country
         genderIdentity = preferences.genderIdentity
         birthDate = preferences.birthDate
         notes = preferences.notes
@@ -86,6 +91,8 @@ struct SyncUserPreferences: Codable, Sendable, Equatable {
         updated.displayName = displayName
         updated.timezone = timezone
         updated.preferredLanguage = preferredLanguage
+        if let city { updated.city = city }
+        if let country { updated.country = country }
         updated.genderIdentity = genderIdentity
         updated.birthDate = birthDate
         updated.notes = notes

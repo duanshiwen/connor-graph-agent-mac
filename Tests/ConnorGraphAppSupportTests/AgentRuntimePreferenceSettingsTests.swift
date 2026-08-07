@@ -331,3 +331,65 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(prompt.contains(#""genderIdentity":"不愿透露""#))
     }
 }
+
+@Suite("Sync User Preferences Wire Tests")
+struct SyncUserPreferencesTests {
+    @Test func appliesCityAndCountryToLocalPreferences() {
+        var local = AgentRuntimePreferenceSettings(city: "杭州", country: "中国")
+        let wire = SyncUserPreferences(
+            AgentRuntimePreferenceSettings(city: "上海", country: "中国"),
+            updatedAtMillis: 1_700_000_000_000
+        )
+
+        local = wire.applying(to: local)
+
+        #expect(local.city == "上海")
+        #expect(local.country == "中国")
+    }
+
+    @Test func missingCityAndCountryDoNotOverwriteLocalValues() {
+        var local = AgentRuntimePreferenceSettings(city: "杭州", country: "中国")
+        let wire = SyncUserPreferences(
+            AgentRuntimePreferenceSettings(city: "", country: ""),
+            updatedAtMillis: 1_700_000_000_000
+        )
+
+        local = wire.applying(to: local)
+
+        #expect(local.city == "杭州")
+        #expect(local.country == "中国")
+    }
+
+    @Test func decodesLegacyPayloadWithoutCityAndCountry() throws {
+        let data = Data("""
+        {
+          "displayName": "阿康",
+          "timezone": "Asia/Shanghai",
+          "preferredLanguage": "简体中文",
+          "genderIdentity": "",
+          "birthDate": "",
+          "notes": "",
+          "updatedAt": 1700000000000
+        }
+        """.utf8)
+
+        let wire = try JSONDecoder().decode(SyncUserPreferences.self, from: data)
+
+        #expect(wire.displayName == "阿康")
+        #expect(wire.city == nil)
+        #expect(wire.country == nil)
+    }
+
+    @Test func emptyCityAndCountryAreOmittedFromEncodedPayload() throws {
+        let wire = SyncUserPreferences(
+            AgentRuntimePreferenceSettings(city: "", country: ""),
+            updatedAtMillis: 1_700_000_000_000
+        )
+
+        let encoded = try JSONEncoder().encode(wire)
+        let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+
+        #expect(object?["city"] == nil)
+        #expect(object?["country"] == nil)
+    }
+}

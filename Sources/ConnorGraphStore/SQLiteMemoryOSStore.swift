@@ -219,6 +219,25 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """)
     }
 
+    public func searchIndexQueuePendingCount() throws -> Int {
+        Int(try query(sql: "SELECT COUNT(*) FROM memory_search_index_queue WHERE status = 'pending'").first?.first ?? "0") ?? 0
+    }
+
+    public func searchIndexQueueFailedCount() throws -> Int {
+        Int(try query(sql: "SELECT COUNT(*) FROM memory_search_index_queue WHERE status = 'failed'").first?.first ?? "0") ?? 0
+    }
+
+    /// Marks every pending queue item processed. Used after a full index rebuild,
+    /// where the rebuilt index already reflects the entire database, so the
+    /// backlog no longer represents work to do.
+    public func markAllSearchIndexQueueProcessed(now: Date = Date()) throws {
+        try execute("""
+        UPDATE memory_search_index_queue
+        SET status = 'processed', processed_at = \(quote(iso(now))), error = NULL
+        WHERE status = 'pending'
+        """)
+    }
+
     // MARK: - L0
 
     public func upsert(provenance object: MemoryOSProvenanceObject) throws {

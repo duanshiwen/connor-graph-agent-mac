@@ -580,6 +580,11 @@ private struct PhasedArtifactTool: AgentTool {
 @Test func phasedAgentLoopRunsStrategyBeforeMemoryAndPreparesProfileBeforeFinalAnswer() async throws {
     let commitJSON = #"{"provisionalApproach":"model approach","recommendedApproach":"evidence-adjusted approach","evidenceReferences":[{"id":"doc","claim":"supports approach"}],"taskMode":"coding","memoryDecision":{"action":"query"},"memoryQueries":["project preference"],"memoryPageSize":20}"#
     let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(
+            id: "continuity",
+            name: AgentPhaseToolContract.externalSearchBatchName,
+            argumentsJSON: #"{"calls":[{"toolName":"memory_os_recent_context","arguments":{"query":"project preference","page":1,"pageSize":500}},{"toolName":"memory_os_knowledge_context","arguments":{"query":"project preference","page":1,"pageSize":500,"depth":1}},{"toolName":"memory_os_get_current_user_profile","arguments":{"page":1,"pageSize":500,"purpose":"task_context"}}]}"#
+        )], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: commitJSON)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "memory", name: AgentPhaseToolContract.memoryQueryName, argumentsJSON: #"{"query":"project preference","pageSize":20}"#)], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"final answer"}"#)], finishReason: .toolCalls),
@@ -603,7 +608,7 @@ private struct PhasedArtifactTool: AgentTool {
 
     #expect(finalText == "final")
     let requests = await provider.capturedRequests()
-    #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .taskExecution, .taskExecution, .finalSynthesis])
+    #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .strategyResearch, .taskExecution, .taskExecution, .finalSynthesis])
     #expect(requests[0].messages.first?.content.contains("You are 康纳同学 (Connor), a personal assistant") == true)
     #expect(requests[0].messages.first?.content.contains("## Priority") == true)
     #expect(requests[1].messages.first?.content.contains("## Priority") == true)
@@ -615,8 +620,8 @@ private struct PhasedArtifactTool: AgentTool {
     #expect(!initialPrompt.contains("phase-hidden"))
     #expect(!initialPrompt.contains("Available read-only external knowledge sources"))
     #expect(!initialPrompt.contains("Trusted Prompt Module Activation"))
-    #expect(requests[1].tools.map(\.name).contains(AgentPhaseToolContract.externalReadBatchName))
-    #expect(requests[2].tools.map(\.name).contains(AgentPhaseToolContract.externalSearchBatchName))
+    #expect(requests[2].tools.map(\.name).contains(AgentPhaseToolContract.externalReadBatchName))
+    #expect(requests[3].tools.map(\.name).contains(AgentPhaseToolContract.externalSearchBatchName))
     let stableToolNames = requests[0].tools.map(\.name)
     #expect(requests.dropFirst().allSatisfy { $0.tools.map(\.name) == stableToolNames })
 }
@@ -1013,11 +1018,16 @@ private func assertToolResultsImmediatelyFollowAssistantToolCalls(in requests: [
     })
 }
 
-@Test func prepareFinalOutputReliesOnDeterministicBootstrapProfile() async throws {
+@Test func prepareFinalOutputIsModelDrivenAndDoesNotReloadBootstrapProfile() async throws {
     let recorder = PhasedProfilePageRecorder()
     var registry = AgentToolRegistry()
     registry.register(PagedPhasedProfileTool(recorder: recorder))
     let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(
+            id: "continuity-profile",
+            name: AgentPhaseToolContract.externalSearchBatchName,
+            argumentsJSON: #"{"calls":[{"toolName":"memory_os_get_current_user_profile","arguments":{"page":1,"pageSize":500,"purpose":"task_context"}}]}"#
+        )], finishReason: .toolCalls),
         .init(text: nil, toolCalls: [.init(
             id: "commit",
             name: AgentPhaseToolContract.commitStrategyName,
@@ -1036,10 +1046,10 @@ private func assertToolResultsImmediatelyFollowAssistantToolCalls(in requests: [
 
     #expect(await recorder.snapshot() == [1])
     let requests = await provider.capturedRequests()
-    #expect(requests.count == 3)
-    #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .taskExecution, .finalSynthesis])
+    #expect(requests.count == 4)
+    #expect(requests.map { $0.promptCacheContext?.phase } == [.strategyResearch, .strategyResearch, .taskExecution, .finalSynthesis])
     #expect(requests[0].tools.map(\.name).contains(AgentPhaseToolContract.externalSearchBatchName))
-    #expect(requests[2].messages.contains { $0.toolCallID == "prepare" && $0.content.contains("deterministic bootstrap") })
+    #expect(requests[3].messages.contains { $0.toolCallID == "prepare" && $0.content.contains("model-driven") })
 }
 
 @Test func finalSynthesisResearchReentersStrategyAndRequiresRecommit() async throws {

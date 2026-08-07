@@ -202,23 +202,21 @@ public actor InteractiveWebToolRuntime {
         }
         let changed = after != before
         if !changed {
-            if content != nil {
-                // 分块写入的中间块可能恰好与现有内容相同：视为无变化，不写盘、不升版本，继续返回游标。
-                let unchangedStatus = try status(project)
-                return InteractiveWebDraftEditResult(
-                    status: unchangedStatus,
-                    fileName: name,
-                    beforeHash: Self.sha256(before),
-                    afterHash: Self.sha256(before),
-                    beforeSizeBytes: before.utf8.count,
-                    afterSizeBytes: before.utf8.count,
-                    diff: "",
-                    offset: appliedOffset,
-                    nextOffset: nextOffset,
-                    resultTotalCharacters: before.count
-                )
-            }
-            throw AgentToolError.invalidArguments("newText is identical to oldText; nothing changed")
+            // 目标状态已存在（分块写入的中间块相同，或 oldText/newText 本就相等）：
+            // 视为幂等成功——不写盘、不升版本，继续返回游标/结果，而不是误报失败。
+            let unchangedStatus = try status(project)
+            return InteractiveWebDraftEditResult(
+                status: unchangedStatus,
+                fileName: name,
+                beforeHash: Self.sha256(before),
+                afterHash: Self.sha256(before),
+                beforeSizeBytes: before.utf8.count,
+                afterSizeBytes: before.utf8.count,
+                diff: "",
+                offset: appliedOffset,
+                nextOffset: nextOffset,
+                resultTotalCharacters: before.count
+            )
         }
         let originalData = try Data(contentsOf: target)
         do {
@@ -506,6 +504,14 @@ public actor InteractiveWebToolRuntime {
         let lower = html.lowercased()
         var cursor = lower.startIndex
         while let open = lower.range(of: "<script", range: cursor..<lower.endIndex) {
+            // 跳过 HTML 注释中的 "<script" 字样（例如「<!-- 原内联 <script> 已移除 -->」）。
+            // 注释不是可执行脚本，不应触发内联脚本拒绝，否则合法编辑会被误报失败。
+            if let commentStart = lower.range(of: "<!--", range: cursor..<lower.endIndex),
+               commentStart.lowerBound < open.lowerBound,
+               let commentEnd = lower.range(of: "-->", range: open.lowerBound..<lower.endIndex) {
+                cursor = commentEnd.upperBound
+                continue
+            }
             guard let close = lower.range(of: ">", range: open.upperBound..<lower.endIndex) else { break }
             let tag = lower[open.lowerBound..<close.upperBound]
             if !tag.contains("src=") { return true }

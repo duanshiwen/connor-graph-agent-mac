@@ -114,8 +114,10 @@ public enum AppMemoryOSCLIRouter {
         let store = try SQLiteMemoryOSStore(path: paths.memoryOSDatabaseURL.path)
         try store.migrate()
         try AppMemoryOSFacade(store: store).ensureCurrentUserAnchor()
-        let isExplicitSearchIndexRebuild = CommandLine.arguments.dropFirst().elementsEqual(["memory", "search-index", "rebuild"])
-        let searchKernel = isExplicitSearchIndexRebuild
+        let searchIndexMaintenanceArgs = Array(CommandLine.arguments.dropFirst())
+        let isExplicitSearchIndexMaintenance = searchIndexMaintenanceArgs == ["memory", "search-index", "rebuild"]
+            || searchIndexMaintenanceArgs == ["memory", "search-index", "drain"]
+        let searchKernel = isExplicitSearchIndexMaintenance
             ? try AppMemoryOSSearchKernelFactory.makeLiveWithoutRebuild(paths: paths)
             : try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: paths)
         return AppMemoryOSCLIInspector(store: store, databasePath: paths.memoryOSDatabaseURL.path, searchKernel: searchKernel)
@@ -213,7 +215,8 @@ public enum AppMemoryOSCLIRouter {
         case "stats": return try encode(try inspector.searchIndexStats(), encoder: encoder)
         case "verify": return try encode(try inspector.verifySearchIndex(), encoder: encoder)
         case "rebuild": return try encode(try inspector.rebuildSearchIndex(), encoder: encoder)
-        default: return try encode(MemoryOSCLIError(error: "unknown_search_index_command", usage: "connor memory search-index stats|verify|rebuild"), encoder: encoder)
+        case "drain": return try encode(try inspector.drainSearchIndex(limit: intOption("--limit", in: args, default: 500)), encoder: encoder)
+        default: return try encode(MemoryOSCLIError(error: "unknown_search_index_command", usage: "connor memory search-index stats|verify|rebuild|drain [--limit N]"), encoder: encoder)
         }
     }
 

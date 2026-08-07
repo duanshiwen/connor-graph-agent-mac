@@ -44,6 +44,7 @@ final class AppRuntimeLifecycle {
     static let projectWebsiteURL = URL(string: "https://duanshiwen.github.io/connor-graph-agent-mac/")!
 
     let maintenanceCoordinator = AppMaintenanceCoordinator()
+    private let searchIndexDrainer = AppMemoryOSSearchIndexDrainer()
     private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
     private lazy var chatSessionCoordinator = ChatSessionCoordinator(
         model: chatFeatureModel.sessions,
@@ -1272,7 +1273,10 @@ final class AppRuntimeLifecycle {
                 self.rebuildNativeSessionManagerForActiveSession()
             }
         }
-        maintenanceCoordinator.runScheduledTasks = { [weak self] in await self?.performScheduledTaskRun() }
+        maintenanceCoordinator.runScheduledTasks = { [weak self] in
+            await self?.performScheduledTaskRun()
+            self?.drainMemoryOSSearchIndexIfNeeded()
+        }
         maintenanceCoordinator.runBackgroundJobs = { [weak self] in
             guard let self else { return }
             await self.maintenanceCoordinator.runMemoryBackgroundJobs(
@@ -1330,6 +1334,7 @@ final class AppRuntimeLifecycle {
         browserFeatureModel.loadHistory()
         graphDiagnosticsModel.reloadSchemaHealthReport()
         scheduleMemoryOSSearchIndexRepairIfNeeded()
+        drainMemoryOSSearchIndexIfNeeded()
     }
 
     func prepareInteractiveStartup(snapshot: AppInteractiveBootstrapSnapshot? = nil) {
@@ -1489,6 +1494,7 @@ final class AppRuntimeLifecycle {
             }
         }
         scheduleMemoryOSSearchIndexRepairIfNeeded()
+        drainMemoryOSSearchIndexIfNeeded()
     }
 
     func shutdownRuntimeResourcesForTests() {
@@ -1539,18 +1545,34 @@ final class AppRuntimeLifecycle {
                 self.isMemoryOSSearchIndexRepairing = false
                 self.memoryOSSearchHealthSummary = "Memory OS SearchKernel 正常：后台索引已重建（\(documentCount) 条文档）。"
                 if let store = self.memoryOSStore {
+                    try? store.markAllSearchIndexQueueProcessed()
+                }
+                if let store = self.memoryOSStore {
                     self.memoryOSFacade = AppMemoryOSFacade(store: store, searchKernel: repairedKernel)
                     if let imStore = self.imStore {
                         self.memoryOSFacade?.installImForwardAliasRewriter(imStore: imStore)
                     }
                 }
                 self.rebuildNativeSessionManagerForActiveSession()
+                self.drainMemoryOSSearchIndexIfNeeded()
             },
             onFailed: { [weak self] message in
                 self?.isMemoryOSSearchIndexRepairing = false
                 self?.memoryOSSearchHealthSummary = "Memory OS SearchKernel 后台修复失败：\(message)"
             }
         )
+    }
+
+    /// Consumes the pending search-index queue in the background. The kernel is
+    /// already open and healthy at this point; a failed drain simply leaves the
+    /// backlog for the next maintenance tick.
+    private func drainMemoryOSSearchIndexIfNeeded() {
+        guard let kernel = memoryOSFacade?.searchKernel, let storagePaths else { return }
+        let databaseURL = storagePaths.memoryOSDatabaseURL
+        let drainer = searchIndexDrainer
+        Task.detached(priority: .utility) {
+            _ = await drainer.drainIfNeeded(kernel: kernel, databaseURL: databaseURL)
+        }
     }
 
     private func performScheduledTaskRun() async {
@@ -2567,11 +2589,13 @@ final class AppRuntimeLifecycle {
 
             let rebuiltDocumentCount = try AppMemoryOSSearchKernelFactory.rebuildLiveIndex(paths: storagePaths)
             let searchKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: storagePaths)
+            try memoryOSStore.markAllSearchIndexQueueProcessed()
             memoryOSFacade = AppMemoryOSFacade(store: memoryOSStore, searchKernel: searchKernel)
             if let imStore {
                 memoryOSFacade?.installImForwardAliasRewriter(imStore: imStore)
             }
             memoryOSSearchHealthSummary = "Memory OS 已清空，搜索索引已重建（\(rebuiltDocumentCount) 条文档）。"
+            drainMemoryOSSearchIndexIfNeeded()
 
             chatSessionCoordinator.clearSelection()
             reloadChatSessions(restoreWorkspaceMode: false)

@@ -258,12 +258,14 @@ final class AppMaintenanceCoordinator {
                 await MainActor.run {
                     guard self.generation == currentGeneration, !self.isShutdown else { return }
                     onSucceeded(count, kernel)
+                    self.hasScheduledRepair = false
                     self.repairTask = nil
                 }
             } catch {
                 await MainActor.run {
                     guard self.generation == currentGeneration, !self.isShutdown else { return }
                     onFailed(String(describing: error))
+                    self.hasScheduledRepair = false
                     self.repairTask = nil
                 }
             }

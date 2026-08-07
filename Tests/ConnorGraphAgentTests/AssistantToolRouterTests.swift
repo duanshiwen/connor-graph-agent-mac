@@ -1,16 +1,24 @@
 import Testing
 @testable import ConnorGraphAgent
 
-@Test func toolRouterHidesBootstrapToolsAndKeepsSmallStableSurface() {
+@Test func toolRouterExposesModelDrivenContinuityToolsAndKeepsControlSurfaceStable() {
     let definitions = [
         AgentToolDefinition(name: "memory_os_recent_context", description: "memory", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "memory_os_knowledge_context", description: "knowledge", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "memory_os_get_current_user_profile", description: "profile", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "note_search", description: "notes", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "memory_os_search", description: "removed search surface", inputSchema: .object(properties: [:], required: [])),
         AgentToolDefinition(name: "mail_search_messages", description: "Search email", inputSchema: .object(properties: [:], required: [])),
         AgentToolDefinition(name: "Shell", description: "Run shell", inputSchema: .object(properties: [:], required: []))
     ]
 
     let route = AssistantToolRouter().route(definitions: definitions)
 
-    #expect(!route.discoverableDefinitions.contains { $0.name == "memory_os_recent_context" })
+    #expect(route.discoverableDefinitions.contains { $0.name == "memory_os_recent_context" })
+    #expect(route.discoverableDefinitions.contains { $0.name == "memory_os_knowledge_context" })
+    #expect(route.discoverableDefinitions.contains { $0.name == "memory_os_get_current_user_profile" })
+    #expect(route.discoverableDefinitions.contains { $0.name == "note_search" })
+    #expect(!route.discoverableDefinitions.contains { $0.name == "memory_os_search" })
     #expect(route.modelVisibleDefinitions.contains { $0.name == "Shell" })
     #expect(route.modelVisibleDefinitions.contains { $0.name == AssistantDecisionToolContract.searchName })
     #expect(!route.modelVisibleDefinitions.contains { $0.name == "mail_search_messages" })

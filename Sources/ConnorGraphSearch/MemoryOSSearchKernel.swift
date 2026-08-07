@@ -43,6 +43,76 @@ public final class MemoryOSSearchKernel: @unchecked Sendable {
         return Int(indexedCount)
     }
 
+    /// Upserts one record into the index, or removes the stale document when the
+    /// source record no longer exists. Returns whether the record was upserted.
+    public func upsertRecord(databaseURL: URL, layer: String, recordID: String) throws -> Bool {
+        var errorPointer: UnsafeMutablePointer<CChar>?
+        var upserted: Int32 = 0
+        let status = databaseURL.path.withCString { databasePath in
+            layer.withCString { layerCString in
+                recordID.withCString { recordIDCString in
+                    ffi.upsertRecord(handle, databasePath, layerCString, recordIDCString, &upserted, &errorPointer)
+                }
+            }
+        }
+        guard status == 0 else {
+            throw MemoryOSSearchKernelError.upsertFailed(ffi.takeCString(errorPointer))
+        }
+        return upserted != 0
+    }
+
+    /// Removes a document from the index by layer + record id.
+    public func deleteRecord(layer: String, recordID: String) throws {
+        var errorPointer: UnsafeMutablePointer<CChar>?
+        let status = layer.withCString { layerCString in
+            recordID.withCString { recordIDCString in
+                ffi.deleteRecord(handle, layerCString, recordIDCString, &errorPointer)
+            }
+        }
+        guard status == 0 else {
+            throw MemoryOSSearchKernelError.deleteFailed(ffi.takeCString(errorPointer))
+        }
+    }
+
+    /// Consumes up to `limit` pending `memory_search_index_queue` items.
+    public struct DrainResult: Sendable, Equatable {
+        public var upserted: Int
+        public var deleted: Int
+        public var failed: Int
+        public var remaining: Int
+
+        public init(upserted: Int, deleted: Int, failed: Int, remaining: Int) {
+            self.upserted = upserted
+            self.deleted = deleted
+            self.failed = failed
+            self.remaining = remaining
+        }
+
+        public var processed: Int { upserted + deleted }
+        public var isComplete: Bool { failed == 0 && remaining == 0 }
+    }
+
+    public func drainQueue(databaseURL: URL, limit: Int) throws -> DrainResult {
+        var errorPointer: UnsafeMutablePointer<CChar>?
+        var upserted: UInt = 0
+        var deleted: UInt = 0
+        var failed: UInt = 0
+        var remaining: UInt = 0
+        let rawLimit = UInt(max(1, limit))
+        let status = databaseURL.path.withCString { databasePath in
+            ffi.drainQueue(handle, databasePath, rawLimit, &upserted, &deleted, &failed, &remaining, &errorPointer)
+        }
+        guard status == 0 else {
+            throw MemoryOSSearchKernelError.drainFailed(ffi.takeCString(errorPointer))
+        }
+        return DrainResult(
+            upserted: Int(upserted),
+            deleted: Int(deleted),
+            failed: Int(failed),
+            remaining: Int(remaining)
+        )
+    }
+
     public func search(_ request: MemoryOSSearchKernelRequest) throws -> MemoryOSSearchKernelResponse {
         let requestData = try encoder.encode(request)
         guard let requestJSON = String(data: requestData, encoding: .utf8) else {

@@ -43,6 +43,7 @@ struct AgentComposerOptionBadge: View {
     var showsBorder: Bool = true
     var fill: Color = .clear
     var borderTint: Color = .secondary
+    var horizontalPadding: CGFloat = AgentChatLayout.spaceS
 
     var body: some View {
         HStack(spacing: 6) {
@@ -61,7 +62,7 @@ struct AgentComposerOptionBadge: View {
                     .opacity(0.72)
             }
         }
-        .padding(.horizontal, AgentChatLayout.spaceS)
+        .padding(.horizontal, horizontalPadding)
         .frame(height: AgentChatLayout.chipHeight)
         .foregroundStyle(tint)
         .background(

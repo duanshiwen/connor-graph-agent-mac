@@ -7,6 +7,9 @@ public enum MemoryOSSearchKernelError: Error, Sendable, CustomStringConvertible 
     case openFailed(String)
     case queryFailed(String)
     case rebuildFailed(String)
+    case upsertFailed(String)
+    case deleteFailed(String)
+    case drainFailed(String)
     case invalidResponse(String)
 
     public var description: String {
@@ -16,6 +19,9 @@ public enum MemoryOSSearchKernelError: Error, Sendable, CustomStringConvertible 
         case .openFailed(let message): "Search kernel open failed: \(message)"
         case .queryFailed(let message): "Search kernel query failed: \(message)"
         case .rebuildFailed(let message): "Search kernel rebuild failed: \(message)"
+        case .upsertFailed(let message): "Search kernel upsert failed: \(message)"
+        case .deleteFailed(let message): "Search kernel delete failed: \(message)"
+        case .drainFailed(let message): "Search kernel queue drain failed: \(message)"
         case .invalidResponse(let message): "Search kernel invalid response: \(message)"
         }
     }
@@ -26,6 +32,9 @@ final class MemoryOSSearchKernelFFI {
     typealias CloseFn = @convention(c) (OpaquePointer?) -> Void
     typealias QueryFn = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?) -> Int32
     typealias RebuildFromSQLiteFn = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UInt, UnsafeMutablePointer<UInt>?, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?) -> Int32
+    typealias UpsertRecordFn = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?) -> Int32
+    typealias DeleteRecordFn = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?) -> Int32
+    typealias DrainQueueFn = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UInt, UnsafeMutablePointer<UInt>?, UnsafeMutablePointer<UInt>?, UnsafeMutablePointer<UInt>?, UnsafeMutablePointer<UInt>?, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?) -> Int32
     typealias FreeStringFn = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
 
     let libraryHandle: UnsafeMutableRawPointer
@@ -33,6 +42,9 @@ final class MemoryOSSearchKernelFFI {
     let close: CloseFn
     let query: QueryFn
     let rebuildFromSQLite: RebuildFromSQLiteFn
+    let upsertRecord: UpsertRecordFn
+    let deleteRecord: DeleteRecordFn
+    let drainQueue: DrainQueueFn
     let freeString: FreeStringFn
 
     init(libraryURL: URL) throws {
@@ -48,6 +60,9 @@ final class MemoryOSSearchKernelFFI {
         self.close = try Self.load(handle, "connor_search_close")
         self.query = try Self.load(handle, "connor_search_query")
         self.rebuildFromSQLite = try Self.load(handle, "connor_search_rebuild_from_sqlite")
+        self.upsertRecord = try Self.load(handle, "connor_search_upsert_record")
+        self.deleteRecord = try Self.load(handle, "connor_search_delete_record")
+        self.drainQueue = try Self.load(handle, "connor_search_drain_queue")
         self.freeString = try Self.load(handle, "connor_search_free_string")
     }
 

@@ -238,9 +238,10 @@ private struct MCPToolSelectionMenu: View {
                 tint: .secondary,
                 isActive: false,
                 style: .prominent,
-                showsBorder: false
+                showsBorder: false,
+                horizontalPadding: AgentChatLayout.spaceXS
             )
-            .frame(minWidth: 132, alignment: .leading)
+            .frame(minWidth: 96, alignment: .leading)
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)

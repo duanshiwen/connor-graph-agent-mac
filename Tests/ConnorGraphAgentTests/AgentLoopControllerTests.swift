@@ -1792,7 +1792,7 @@ func agentLoopRequiresStartupContinuityWithoutPreloadingCurrentUserProfile() asy
     #expect(policy.correctionInstruction(for: [names[2]])?.contains("purpose: \"task_context\"") == true)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("successful empty result still counts") == true)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("parallel_tool_query") == true)
-    #expect(policy.correctionInstruction(for: [names[0]])?.contains("prepare_final_output") == true)
+    #expect(policy.correctionInstruction(for: [names[0]])?.contains("pageSize: 500") == true)
 }
 
 @Test func finalAttentionPreflightRequiresEveryAvailableAssistantCheckpoint() {
@@ -2111,7 +2111,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(!ordinary.requiresCurrentTime)
     #expect(ordinary.requiresContinuity)
     #expect(ordinary.requiresNoteSearch)
-    #expect(ordinary.requiresFinalProfile)
+    #expect(!ordinary.requiresFinalProfile)
     #expect(ordinary.requiresFinalAttention)
 
     let personalizedMemory = policy.retrievalPlan(
@@ -2119,7 +2119,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
         mode: .contextual
     )
     #expect(personalizedMemory.requiresContinuity)
-    #expect(personalizedMemory.requiresFinalProfile)
+    #expect(!personalizedMemory.requiresFinalProfile)
     #expect(personalizedMemory.requiresNoteSearch)
 
     let datedNote = policy.retrievalPlan(
@@ -2153,7 +2153,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
         )
         #expect(plan.requiresContinuity)
         #expect(plan.requiresNoteSearch)
-        #expect(plan.requiresFinalProfile)
+        #expect(!plan.requiresFinalProfile)
         #expect(plan.requiresFinalAttention)
     }
 
@@ -2166,7 +2166,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
         mode: .contextual
     )
     #expect(continuation.requiresContinuity)
-    #expect(continuation.requiresFinalProfile)
+    #expect(!continuation.requiresFinalProfile)
 
     let noteLookup = policy.retrievalPlan(
         for: AgentChatRequest(
@@ -2422,7 +2422,7 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
 
     #expect(localDocument.moduleIDs.contains(AgentPromptModuleID(rawValue: "programming_precision")))
     #expect(!localDocument.moduleIDs.contains(AgentPromptModuleID(rawValue: "web_research")))
-    #expect(localOnly.contains("## Core Startup and Final Preference Checkpoint"))
+    #expect(localOnly.contains("## Core Startup and Continuity Checkpoint"))
     #expect(localOnly.contains("## Retrieval Completion Rules"))
     #expect(localOnly.contains("## Programming and Precision Work"))
     #expect(localOnly.contains("## Workspace Tool Rules"))
@@ -3036,11 +3036,15 @@ func phasedAgentLoopRequiresToolsUntilFinalSynthesis() async throws {
     #expect(events.last?.kind == .runCompleted)
 }
 
-@Test func budgetWarningStillCompletesFinalProfileCheckpoint() async throws {
+@Test func budgetWarningStillCompletesMandatoryContinuityProfileRead() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "call-budget-profile-stop", name: "echo_args", argumentsJSON: #"{"value":"budget"}"#)],
+            toolCalls: [AgentToolCall(
+                id: "call-budget-profile-read",
+                name: AgentContinuityPreflightPolicy.currentUserProfileToolName,
+                argumentsJSON: #"{"purpose":"task_context","pageSize":500}"#
+            )],
             usage: AgentModelUsage(promptTokens: 200, completionTokens: 50),
             finishReason: .toolCalls
         ),
@@ -3053,7 +3057,7 @@ func phasedAgentLoopRequiresToolsUntilFinalSynthesis() async throws {
         modelProvider: provider,
         toolRegistry: registry,
         configuration: AgentLoopConfiguration(
-            maxToolIterations: 4,
+            maxToolIterations: 6,
             stopAfterTurnWhenBudgetExceeded: true,
             budget: AgentBudgetConfiguration(maxTotalTokens: 100, warningThresholdRatio: 0.8)
         )

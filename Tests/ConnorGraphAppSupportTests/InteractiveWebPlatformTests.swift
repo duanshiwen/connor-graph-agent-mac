@@ -790,6 +790,49 @@ struct InteractiveWebPlatformTests {
         }
     }
 
+    @Test func editDraftAllowsScriptTagMentionInsideHtmlComment() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let html = "<head><script src=\"/api/v1/sdk/v1.js\"></script></head>\n<body>\n<p>old</p>\n</body>"
+        let created = try await runtime.createDraft(sessionID: "session-1", name: "Result", html: html, css: nil, javascript: nil)
+
+        let target = "<head><script src=\"/api/v1/sdk/v1.js\"></script></head>\n<body>\n<!-- 原内联 <script> 已移除，逻辑迁移到 app.js -->\n<p>new</p>\n</body>"
+        let edit = try await runtime.editDraft(
+            projectID: created.status.projectID,
+            fileName: "index.html",
+            oldText: nil,
+            newText: nil,
+            content: target,
+            offset: 0,
+            final: true
+        )
+        #expect(edit.status.revision == 2)
+        let source = try await runtime.draftSource(projectID: created.status.projectID, fileName: "index.html")
+        #expect(source.content == target)
+    }
+
+    @Test func editDraftIdenticalReplacementIsIdempotentSuccess() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let html = "<head><script src=\"/api/v1/sdk/v1.js\"></script></head>\n<body>\n<p>keep</p>\n</body>"
+        let created = try await runtime.createDraft(sessionID: "session-1", name: "Result", html: html, css: nil, javascript: nil)
+
+        // 目标状态已存在：应返回成功且不升版本，而不是误报失败。
+        let edit = try await runtime.editDraft(
+            projectID: created.status.projectID,
+            fileName: "index.html",
+            oldText: "<p>keep</p>",
+            newText: "<p>keep</p>",
+            content: nil
+        )
+        #expect(edit.status.revision == 1)
+        #expect(edit.diff.isEmpty)
+        let source = try await runtime.draftSource(projectID: created.status.projectID, fileName: "index.html")
+        #expect(source.content == html)
+    }
+
     @Test func editDraftToolSupportsBothModes() async throws {
         let fixture = try makeRuntimeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

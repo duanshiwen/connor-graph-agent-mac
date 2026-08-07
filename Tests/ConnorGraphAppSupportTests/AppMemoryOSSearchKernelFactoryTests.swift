@@ -30,7 +30,7 @@ struct AppMemoryOSSearchKernelFactoryTests {
         #expect(report.checks["connor_meta_exists"] == false)
     }
 
-    @Test func makeLiveIfHealthyReturnsNilForStaleSourceFingerprint() throws {
+    @Test func makeLiveIfHealthyIgnoresStaleSourceFingerprintWhenIndexDocumentsExist() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("memory-os-stale-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let paths = AppStoragePaths(applicationSupportDirectory: root)
@@ -46,9 +46,10 @@ struct AppMemoryOSSearchKernelFactoryTests {
 
         let staleReport = AppMemoryOSSearchKernelFactory.healthReport(paths: paths)
         #expect(staleReport.checks["source_database_current"] == false)
-        #expect(try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: paths) == nil)
-        let unchangedReport = AppMemoryOSSearchKernelFactory.healthReport(paths: paths)
-        #expect(unchangedReport.status == .degraded)
+        // A stale fingerprint is informational: incremental queue draining keeps
+        // the index fresh, so routine database writes must not force a rebuild.
+        #expect(try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: paths) != nil)
+        #expect(staleReport.status == .healthy)
     }
 
     @Test func rebuildLiveIndexRepairsStaleSourceFingerprint() throws {

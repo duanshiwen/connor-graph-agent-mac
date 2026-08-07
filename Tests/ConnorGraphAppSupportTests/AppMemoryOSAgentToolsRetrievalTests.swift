@@ -672,11 +672,11 @@ import ConnorGraphStore
         MemoryOSContextToolResponse.self,
         from: Data(try #require(defaultResult.contentJSON).utf8)
     )
-    #expect(defaultPage.pageSize == 100)
-    #expect(defaultPage.returnedItems == 100)
+    #expect(defaultPage.pageSize == 500)
+    #expect(defaultPage.returnedItems == 250)
     #expect(defaultPage.totalItems == 250)
-    #expect(defaultPage.totalPages == 3)
-    #expect(defaultPage.nextPage == 2)
+    #expect(defaultPage.totalPages == 1)
+    #expect(defaultPage.nextPage == nil)
 
     let modelControlledResult = try await tool.execute(
         arguments: AgentToolArguments(values: ["page": .int(2), "pageSize": .int(125)]),

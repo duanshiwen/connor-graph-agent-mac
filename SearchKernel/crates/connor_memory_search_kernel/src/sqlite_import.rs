@@ -17,6 +17,225 @@ pub fn load_documents_from_sqlite(database_path: &Path, limit_per_layer: Option<
     Ok(documents)
 }
 
+/// Loads a single record by layer and primary key. Returns `None` when the
+/// record no longer exists (e.g. L1 events deleted after processing, merged
+/// L4 entities). The caller must then remove the stale document from the index.
+pub fn load_document_by_id(database_path: &Path, layer: &str, record_id: &str) -> KernelResult<Option<MemorySearchDocument>> {
+    let connection = Connection::open(database_path).map_err(|err| KernelError::new(err.to_string()))?;
+    match layer {
+        "L0" => load_l0_by_id(&connection, record_id),
+        "L1" => load_l1_by_id(&connection, record_id),
+        "L2" => load_l2_by_id(&connection, record_id),
+        "L3" => load_l3_by_id(&connection, record_id),
+        "L4" => {
+            if let Some(document) = load_l4_entity_by_id(&connection, record_id)? {
+                Ok(Some(document))
+            } else {
+                load_l4_statement_by_id(&connection, record_id)
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+fn load_l0_by_id(connection: &Connection, id: &str) -> KernelResult<Option<MemorySearchDocument>> {
+    let sql = "SELECT id, source_type, title, content, occurred_at, ingested_at, metadata_json FROM memory_l0_provenance_objects WHERE id = ?1";
+    query_document(connection, sql, id, |row| {
+        let id: String = row.get(0)?;
+        let source_type: String = row.get(1)?;
+        let title: String = row.get(2)?;
+        let content: String = row.get(3)?;
+        let occurred_at: String = row.get(4)?;
+        let ingested_at: String = row.get(5)?;
+        let metadata_json: String = row.get(6)?;
+        Ok(MemorySearchDocument {
+            id: format!("L0:{}", id),
+            layer: SearchLayer::L0,
+            record_id: id,
+            record_kind: SearchRecordKind::ProvenanceObject,
+            title,
+            aliases: vec![],
+            summary: content.chars().take(240).collect(),
+            body: content,
+            keywords: vec![source_type],
+            ids: vec![],
+            created_at: Some(ingested_at),
+            updated_at: Some(occurred_at),
+            metadata_json,
+        })
+    })
+}
+
+fn load_l1_by_id(connection: &Connection, id: &str) -> KernelResult<Option<MemorySearchDocument>> {
+    let sql = "SELECT c.id, c.event_type, c.occurred_at, c.metadata_json, o.title, o.content, o.id FROM memory_l1_capture_events c JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id WHERE c.id = ?1";
+    query_document(connection, sql, id, |row| {
+        let id: String = row.get(0)?;
+        let event_type: String = row.get(1)?;
+        let occurred_at: String = row.get(2)?;
+        let metadata_json: String = row.get(3)?;
+        let title: String = row.get(4)?;
+        let content: String = row.get(5)?;
+        let provenance_id: String = row.get(6)?;
+        Ok(MemorySearchDocument {
+            id: format!("L1:{}", id),
+            layer: SearchLayer::L1,
+            record_id: id,
+            record_kind: SearchRecordKind::CaptureEvent,
+            title: event_type.clone(),
+            aliases: vec![title],
+            summary: content.chars().take(240).collect(),
+            body: content,
+            keywords: vec![event_type],
+            ids: vec![provenance_id],
+            created_at: Some(occurred_at.clone()),
+            updated_at: Some(occurred_at),
+            metadata_json,
+        })
+    })
+}
+
+fn load_l2_by_id(connection: &Connection, id: &str) -> KernelResult<Option<MemorySearchDocument>> {
+    let sql = "SELECT id, subject_id, predicate, object_id, text, assertion_kind, committed_at, metadata_json FROM memory_l2_statements WHERE id = ?1";
+    query_document(connection, sql, id, |row| {
+        let id: String = row.get(0)?;
+        let subject_id: String = row.get(1)?;
+        let predicate: String = row.get(2)?;
+        let object_id: Option<String> = row.get(3)?;
+        let text: String = row.get(4)?;
+        let assertion_kind: String = row.get(5)?;
+        let committed_at: String = row.get(6)?;
+        let metadata_json: String = row.get(7)?;
+        let mut ids = vec![subject_id];
+        if let Some(object_id) = object_id { ids.push(object_id); }
+        Ok(MemorySearchDocument {
+            id: format!("L2:{}", id),
+            layer: SearchLayer::L2,
+            record_id: id,
+            record_kind: SearchRecordKind::Statement,
+            title: predicate.clone(),
+            aliases: vec![],
+            summary: text.clone(),
+            body: text,
+            keywords: vec![predicate, assertion_kind],
+            ids,
+            created_at: Some(committed_at.clone()),
+            updated_at: Some(committed_at),
+            metadata_json,
+        })
+    })
+}
+
+fn load_l3_by_id(connection: &Connection, id: &str) -> KernelResult<Option<MemorySearchDocument>> {
+    let sql = "SELECT id, statement, domain, related_object_names, created_at, updated_at FROM memory_l3_beliefs WHERE id = ?1";
+    query_document(connection, sql, id, |row| {
+        let id: String = row.get(0)?;
+        let statement: String = row.get(1)?;
+        let domain: String = row.get(2)?;
+        let related_object_names: String = row.get(3)?;
+        let created_at: String = row.get(4)?;
+        let updated_at: String = row.get(5)?;
+        let metadata_json = serde_json::json!({
+            "domain": domain,
+            "related_object_names": related_object_names,
+            "created_at": created_at,
+            "updated_at": updated_at
+        }).to_string();
+        Ok(MemorySearchDocument {
+            id: format!("L3:{}", id),
+            layer: SearchLayer::L3,
+            record_id: id,
+            record_kind: SearchRecordKind::Belief,
+            title: statement.chars().take(80).collect(),
+            aliases: vec![],
+            summary: statement.clone(),
+            body: statement,
+            keywords: vec![],
+            ids: vec![],
+            created_at: Some(created_at),
+            updated_at: Some(updated_at),
+            metadata_json,
+        })
+    })
+}
+
+fn load_l4_entity_by_id(connection: &Connection, id: &str) -> KernelResult<Option<MemorySearchDocument>> {
+    let sql = "SELECT e.id, e.stable_key, e.entity_type, e.name, e.aliases_json, e.summary, e.created_at, e.updated_at, e.metadata_json, COALESCE(group_concat(a.alias, ' '), '') FROM memory_l4_entities e LEFT JOIN memory_l4_entity_aliases a ON a.entity_id = e.id WHERE e.id = ?1 GROUP BY e.id";
+    query_document(connection, sql, id, |row| {
+        let id: String = row.get(0)?;
+        let stable_key: String = row.get(1)?;
+        let entity_type: String = row.get(2)?;
+        let name: String = row.get(3)?;
+        let aliases_json: String = row.get(4)?;
+        let summary: String = row.get(5)?;
+        let created_at: String = row.get(6)?;
+        let updated_at: String = row.get(7)?;
+        let metadata_json: String = row.get(8)?;
+        let alias_blob: String = row.get(9)?;
+        let mut aliases = serde_json::from_str::<Vec<String>>(&aliases_json).unwrap_or_default();
+        aliases.extend(alias_blob.split_whitespace().map(ToOwned::to_owned));
+        aliases.sort();
+        aliases.dedup();
+        Ok(MemorySearchDocument {
+            id: format!("L4:{}", id),
+            layer: SearchLayer::L4,
+            record_id: id.clone(),
+            record_kind: SearchRecordKind::Entity,
+            title: name,
+            aliases,
+            summary: summary.clone(),
+            body: summary,
+            keywords: vec![entity_type],
+            ids: vec![id, stable_key],
+            created_at: Some(created_at),
+            updated_at: Some(updated_at),
+            metadata_json,
+        })
+    })
+}
+
+fn load_l4_statement_by_id(connection: &Connection, id: &str) -> KernelResult<Option<MemorySearchDocument>> {
+    let sql = "SELECT id, entity_id, predicate, object_entity_id, text, assertion_kind, committed_at, metadata_json FROM memory_l4_entity_statements WHERE id = ?1";
+    query_document(connection, sql, id, |row| {
+        let id: String = row.get(0)?;
+        let entity_id: String = row.get(1)?;
+        let predicate: String = row.get(2)?;
+        let object_entity_id: Option<String> = row.get(3)?;
+        let text: String = row.get(4)?;
+        let assertion_kind: String = row.get(5)?;
+        let committed_at: String = row.get(6)?;
+        let metadata_json: String = row.get(7)?;
+        let mut ids = vec![entity_id];
+        if let Some(object_entity_id) = object_entity_id { ids.push(object_entity_id); }
+        Ok(MemorySearchDocument {
+            id: format!("L4S:{}", id),
+            layer: SearchLayer::L4,
+            record_id: id,
+            record_kind: SearchRecordKind::EntityStatement,
+            title: predicate.clone(),
+            aliases: vec![],
+            summary: text.clone(),
+            body: text,
+            keywords: vec![predicate, assertion_kind],
+            ids,
+            created_at: Some(committed_at.clone()),
+            updated_at: Some(committed_at),
+            metadata_json,
+        })
+    })
+}
+
+fn query_document<F>(connection: &Connection, sql: &str, id: &str, mut map: F) -> KernelResult<Option<MemorySearchDocument>>
+where
+    F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<MemorySearchDocument>,
+{
+    let mut statement = connection.prepare(sql).map_err(|err| KernelError::new(format!("prepare failed: {} | {}", err, sql)))?;
+    let mut rows = statement.query_map([id], |row| map(row)).map_err(|err| KernelError::new(err.to_string()))?;
+    match rows.next() {
+        Some(row) => Ok(Some(row.map_err(|err| KernelError::new(err.to_string()))?)),
+        None => Ok(None),
+    }
+}
+
 fn suffix(limit: Option<usize>) -> String {
     limit.map(|value| format!(" LIMIT {}", value)).unwrap_or_default()
 }

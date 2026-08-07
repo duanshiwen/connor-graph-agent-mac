@@ -57,6 +57,136 @@ pub extern "C" fn connor_search_rebuild_from_sqlite(
 }
 
 #[no_mangle]
+pub extern "C" fn connor_search_upsert_record(
+    handle: *mut ConnorMemorySearchKernel,
+    database_path: *const c_char,
+    layer: *const c_char,
+    record_id: *const c_char,
+    upserted: *mut i32,
+    error: *mut *mut c_char,
+) -> i32 {
+    if handle.is_null() {
+        set_error(error, "search handle is null");
+        return -1;
+    }
+    let database_path = match unsafe_string(database_path) {
+        Ok(value) => value,
+        Err(message) => {
+            set_error(error, message);
+            return -1;
+        }
+    };
+    let layer = match unsafe_string(layer) {
+        Ok(value) => value,
+        Err(message) => {
+            set_error(error, message);
+            return -1;
+        }
+    };
+    let record_id = match unsafe_string(record_id) {
+        Ok(value) => value,
+        Err(message) => {
+            set_error(error, message);
+            return -1;
+        }
+    };
+    let kernel = unsafe { &*handle };
+    match kernel.upsert_record_from_sqlite(database_path, &layer, &record_id) {
+        Ok(value) => {
+            if !upserted.is_null() {
+                unsafe { *upserted = if value { 1 } else { 0 } };
+            }
+            0
+        }
+        Err(err) => {
+            set_error(error, err.to_string());
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn connor_search_delete_record(
+    handle: *mut ConnorMemorySearchKernel,
+    layer: *const c_char,
+    record_id: *const c_char,
+    error: *mut *mut c_char,
+) -> i32 {
+    if handle.is_null() {
+        set_error(error, "search handle is null");
+        return -1;
+    }
+    let layer = match unsafe_string(layer) {
+        Ok(value) => value,
+        Err(message) => {
+            set_error(error, message);
+            return -1;
+        }
+    };
+    let record_id = match unsafe_string(record_id) {
+        Ok(value) => value,
+        Err(message) => {
+            set_error(error, message);
+            return -1;
+        }
+    };
+    let kernel = unsafe { &*handle };
+    match kernel.delete_record(&layer, &record_id) {
+        Ok(()) => 0,
+        Err(err) => {
+            set_error(error, err.to_string());
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn connor_search_drain_queue(
+    handle: *mut ConnorMemorySearchKernel,
+    database_path: *const c_char,
+    limit: usize,
+    upserted_count: *mut usize,
+    deleted_count: *mut usize,
+    failed_count: *mut usize,
+    remaining_count: *mut usize,
+    error: *mut *mut c_char,
+) -> i32 {
+    if handle.is_null() {
+        set_error(error, "search handle is null");
+        return -1;
+    }
+    let database_path = match unsafe_string(database_path) {
+        Ok(value) => value,
+        Err(message) => {
+            set_error(error, message);
+            return -1;
+        }
+    };
+    let kernel = unsafe { &*handle };
+    match kernel.drain_queue(database_path, limit) {
+        Ok(result) => {
+            if !upserted_count.is_null() {
+                unsafe { *upserted_count = result.upserted; }
+            }
+            if !deleted_count.is_null() {
+                unsafe { *deleted_count = result.deleted; }
+            }
+            if !failed_count.is_null() {
+                unsafe { *failed_count = result.failed; }
+            }
+            if !remaining_count.is_null() {
+                unsafe { *remaining_count = result.remaining; }
+            }
+            0
+        }
+        Err(err) => {
+            set_error(error, err.to_string());
+            -1
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn connor_search_query(
     handle: *mut ConnorMemorySearchKernel,
     request_json: *const c_char,

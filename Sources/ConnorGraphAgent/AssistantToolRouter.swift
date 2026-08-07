@@ -59,9 +59,12 @@ public struct AssistantToolRouter: Sendable, Equatable {
     ]
     public static let directToolNames = Set<String>(["Shell", "ApplyPatch"])
         .union(interactiveWebDirectToolNames)
-    public static let runtimeInternalToolNames = AssistantBootstrapCoordinator.internalToolNames
-        .union(AssistantAttentionCoordinator.internalToolNames)
+    // Conversation-time Memory/profile/Note continuity tools are model-driven and
+    // therefore discoverable by the model. Only runtime-managed checkpoints and
+    // the removed memory_os_search surface stay hidden from the model.
+    public static let runtimeInternalToolNames = AssistantAttentionCoordinator.internalToolNames
         .union([AgentCurrentTimePreflightPolicy.requiredToolName])
+        .union(["memory_os_search"])
 
     public init() {}
 

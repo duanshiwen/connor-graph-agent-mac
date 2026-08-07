@@ -76,16 +76,38 @@ public enum AppMemoryOSSearchKernelFactory {
         checks["index_directory_exists"] = fileManager.fileExists(atPath: indexDirectory.path)
         checks["connor_meta_exists"] = fileManager.fileExists(atPath: indexDirectory.appendingPathComponent(connorMetaFilename).path)
         checks["index_schema_current"] = isSchemaCurrent(indexDirectory: indexDirectory, fileManager: fileManager)
+        let sourceCounts = (try? sourceTableCounts(databaseURL: paths.memoryOSDatabaseURL)) ?? [:]
+        let totalMemoryRecords = ["memory_l0_provenance_objects", "memory_l1_capture_events", "memory_l2_statements", "memory_l3_beliefs", "memory_l4_entities"]
+            .reduce(0) { $0 + (sourceCounts[$1] ?? 0) }
+        checks["index_has_documents"] = indexDocumentCount(indexDirectory: indexDirectory, fileManager: fileManager) > 0 || totalMemoryRecords == 0
+        // The source-database fingerprint is informational: incremental queue
+        // draining keeps the index fresh, so ordinary writes must not force a
+        // full rebuild every time.
         checks["source_database_current"] = isSourceDatabaseFingerprintCurrent(indexDirectory: indexDirectory, databaseURL: paths.memoryOSDatabaseURL, fileManager: fileManager)
         for key in checks.keys.sorted() where checks[key] != true { messages.append("\(key)=false") }
+        let gatedChecks = [
+            "library_exists",
+            "database_exists",
+            "index_directory_exists",
+            "connor_meta_exists",
+            "index_schema_current",
+            "index_has_documents"
+        ]
         return AppMemoryOSSearchIndexHealthReport(
-            status: checks.values.allSatisfy { $0 } ? .healthy : .degraded,
+            status: gatedChecks.allSatisfy { checks[$0] == true } ? .healthy : .degraded,
             libraryURL: libraryURL,
             indexDirectory: indexDirectory,
             databaseURL: paths.memoryOSDatabaseURL,
             checks: checks,
             messages: messages
         )
+    }
+
+    private static func indexDocumentCount(indexDirectory: URL, fileManager: FileManager) -> Int {
+        guard let object = readMetaObject(indexDirectory: indexDirectory, fileManager: fileManager),
+              let count = object["documentCount"] as? Int
+        else { return 0 }
+        return count
     }
 
     public static func resolveLibraryURL(fileManager: FileManager = .default, bundle: Bundle = .main) throws -> URL {

@@ -143,6 +143,9 @@ private func temporaryMemoryOSDatabaseURL(_ name: String = UUID().uuidString) ->
     let firstQueueID = try #require(indexQueue.first?["id"])
     try store.markSearchIndexQueueItemProcessed(id: firstQueueID, now: now)
     #expect(try store.pendingSearchIndexQueueItems(limit: 20).allSatisfy { $0["id"] != firstQueueID })
+    #expect(try store.searchIndexQueuePendingCount() == 5)
+    try store.markAllSearchIndexQueueProcessed(now: now)
+    #expect(try store.searchIndexQueuePendingCount() == 0)
 }
 
 @Test func sqliteMemoryOSStoreQueriesEntityStatementsByEntity() throws {

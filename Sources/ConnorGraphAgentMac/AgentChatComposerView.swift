@@ -1144,8 +1144,10 @@ struct RemoteKnowledgeBaseSelectionMenu: View {
                 tint: .secondary,
                 isActive: false,
                 style: .prominent,
-                showsBorder: false
+                showsBorder: false,
+                horizontalPadding: AgentChatLayout.spaceXS
             )
+            .frame(minWidth: 96, alignment: .leading)
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
