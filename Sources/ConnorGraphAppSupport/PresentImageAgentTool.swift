@@ -106,6 +106,13 @@ public struct PresentImageAgentTool: AgentTool {
         ["source": .string("https://example.com/chart.png"), "altText": .string("Quarterly revenue chart")]
     ]
 
+    public func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments {
+        arguments.normalizingAliases([
+            "source": ["imageURL", "imageUrl", "image_url", "url"],
+            "altText": ["alt", "alt_text"]
+        ])
+    }
+
     private let store: AppSessionAttachmentStore
     private let localWorkspacePolicy: LocalWorkspacePolicy
     private let downloader: AnyPresentImageDownloader

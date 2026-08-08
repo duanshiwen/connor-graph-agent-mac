@@ -34,14 +34,14 @@ public struct AgentRunRetrievalPlan: Sendable, Equatable {
     public var instruction: String {
         let startup = [
             requiresContinuity
-                ? "memory_os_recent_context and memory_os_knowledge_context with compact topic keywords you choose from the latest actual user request, plus memory_os_get_current_user_profile with purpose task_context and pageSize 500, all in one parallel_tool_query batch"
+                ? "memory_os_recent_context and memory_os_knowledge_context with compact topic terms you choose from the latest actual user request, plus memory_os_get_current_user_profile with purpose task_context and pageSize 500, all in one parallel_tool_query batch"
                 : nil,
             requiresNoteSearch ? "one initial note_search" : nil
         ].compactMap { $0 }
         let startupText = startup.isEmpty ? "No startup retrieval is required." : "Required startup retrieval: \(startup.joined(separator: ", "))."
         let profileText = requiresFinalProfile
             ? "Before the final answer, complete the full memory_os_get_current_user_profile final_response pagination chain."
-            : "Profile reads are model-driven: read one page of 500 records (pageSize 500) in the startup batch, then continue through nextPage only when the task genuinely needs more profile evidence. You may also re-search the profile with compact keywords through the same tool."
+            : "Profile reads are model-driven: read one page of 500 records (pageSize 500) in the startup batch, then continue through nextPage only when the task genuinely needs more profile evidence. You may also re-search the profile with compact topic terms through the same tool."
         let attentionText = requiresFinalAttention
             ? "The Runtime will complete the final calendar, mail, and RSS attention check before final synthesis; do not call generic attention tools yourself."
             : "No final attention checkpoint is required."

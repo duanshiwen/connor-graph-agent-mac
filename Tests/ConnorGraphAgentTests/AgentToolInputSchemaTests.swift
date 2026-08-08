@@ -149,6 +149,27 @@ import ConnorGraphAgent
     ]))
 }
 
+@Test func agentToolInputSchemaNormalizesLegacyKeywordsAliasToQuery() {
+    let schema = AgentToolInputSchema.closedObject(
+        properties: ["query": .string(description: "Query")],
+        required: ["query"]
+    )
+
+    #expect(schema.normalizingLegacyPropertyAliases(.object([
+        "keywords": .string("Project A")
+    ])) == .object(["query": .string("Project A")]))
+
+    // A direct query still wins when both are present, and unrelated unknown keys stay rejected.
+    #expect(schema.normalizingLegacyPropertyAliases(.object([
+        "keywords": .string("Project A"),
+        "query": .string("Project B")
+    ])) == .object(["query": .string("Project B")]))
+    #expect(schema.argumentValidationIssues(.object(["topic": .string("Project A")])) == [
+        "$.query is required",
+        "$.topic is not supported"
+    ])
+}
+
 @Test func agentToolRegistryAcceptsLegacySnakeCaseAliasesWithoutExposingThem() async throws {
     var registry = AgentToolRegistry()
     registry.register(LegacyAliasTestTool())

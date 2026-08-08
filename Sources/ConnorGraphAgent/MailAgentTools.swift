@@ -385,6 +385,12 @@ public struct MailGetMessageTool: AgentTool {
         self.recorder = recorder
     }
 
+    public func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments {
+        arguments.normalizingAliases([
+            "messageID": ["id", "message_id", "summaryID"]
+        ])
+    }
+
     private static func guidanceForOrdinalLikeMessageID(_ value: String) -> AgentToolError {
         .invalidArguments("mail_get_message expects the exact messageID returned by mail_search_messages or mail_list_recent_messages. Received \"\(value)\", which looks like a result index or invented pseudo ID. Copy the selected result's messageID field exactly; do not pass ordinals such as '1', pseudo IDs such as 'message1'/'msg1', or IMAP UIDs.")
     }

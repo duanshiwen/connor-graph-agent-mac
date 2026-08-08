@@ -93,7 +93,7 @@ public struct AgentNoteSearchPreflightPolicy: Sendable, Equatable {
 
     public func correctionInstruction() -> String {
         """
-        Mandatory Note preflight is incomplete. Before task-specific tool use or a final answer, include one `note_search` native call inside `parallel_tool_query`, using compact topic keywords, entity names, or a subject phrase tied to the latest actual user request. Use an empty `query` only when no meaningful search terms can be formed. This is a one-attempt requirement: a successful empty result or a real failure satisfies the startup attempt. Inspect candidates first; put only selected `note_get` calls into a later `parallel_tool_query` batch alongside any selected Web or other detail reads.
+        Mandatory Note preflight is incomplete. Before task-specific tool use or a final answer, include one `note_search` native call inside `parallel_tool_query`, using compact topic terms, entity names, or a subject phrase tied to the latest actual user request. Use an empty `query` only when no meaningful search terms can be formed. This is a one-attempt requirement: a successful empty result or a real failure satisfies the startup attempt. Inspect candidates first; put only selected `note_get` calls into a later `parallel_tool_query` batch alongside any selected Web or other detail reads.
         """
     }
 }
@@ -121,7 +121,7 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
         guard !missingToolNames.isEmpty else { return nil }
         let names = missingToolNames.map { "`\($0)`" }.joined(separator: ", ")
         return """
-        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, include every still-missing available continuity read in one `parallel_tool_query` batch: \(names). Each `calls` item uses the exact native tool name and native arguments object. Choose compact topic keywords for `memory_os_recent_context` and `memory_os_knowledge_context` from the latest actual user request. Call `memory_os_get_current_user_profile` with `purpose: "task_context"` and `pageSize: 500` (read one page of 500 records; continue through `nextPage` only when more profile evidence is genuinely needed). These are independent paginated sources; do not substitute one for another. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory.
+        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, include every still-missing available continuity read in one `parallel_tool_query` batch: \(names). Each `calls` item uses the exact native tool name and native arguments object. Choose compact topic terms for `memory_os_recent_context` and `memory_os_knowledge_context` from the latest actual user request. Call `memory_os_get_current_user_profile` with `purpose: "task_context"` and `pageSize: 500` (read one page of 500 records; continue through `nextPage` only when more profile evidence is genuinely needed). These are independent paginated sources; do not substitute one for another. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory.
         """
     }
 

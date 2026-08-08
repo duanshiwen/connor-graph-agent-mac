@@ -166,7 +166,14 @@ public extension AgentToolInputSchema {
         }
     }
 
+    private static let legacyArgumentAliases: [String: String] = [
+        "keywords": "query"
+    ]
+
     private func matchingProperty(for legacyKey: String, in properties: Dictionary<String, AgentToolInputSchema>.Keys) -> String? {
+        if let canonical = Self.legacyArgumentAliases[legacyKey.lowercased()], properties.contains(canonical) {
+            return canonical
+        }
         guard legacyKey.contains("_") else { return nil }
         let normalizedLegacy = legacyKey.replacingOccurrences(of: "_", with: "").lowercased()
         let matches = properties.filter { $0.lowercased() == normalizedLegacy }
