@@ -894,7 +894,8 @@ final class AppRuntimeLifecycle {
                         }
                     }
                 ),
-                environmentProvider: environmentProvider
+                environmentProvider: environmentProvider,
+                imTranscriptSearch: imStore
             ))
             self.knowledgeCreatorStore.installGeneration { [weak self] conversationID in
                 guard let self else { throw CancellationError() }

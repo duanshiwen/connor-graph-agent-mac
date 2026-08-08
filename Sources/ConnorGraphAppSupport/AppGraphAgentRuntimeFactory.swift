@@ -65,6 +65,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var personalityRuntime: ConnorPersonalityRuntime?
     public var environmentProvider: AnyAgentEnvironmentProvider?
     public var memoryOSContextToolConfiguration: MemoryOSContextToolConfiguration
+    public var imTranscriptSearch: (any ImTranscriptSearchProviding)?
     public var generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)?
     private let sharedCache: AppGraphAgentRuntimeSharedCache
 
@@ -88,6 +89,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         personalityRuntime: ConnorPersonalityRuntime? = nil,
         environmentProvider: AnyAgentEnvironmentProvider? = nil,
         memoryOSContextToolConfiguration: MemoryOSContextToolConfiguration = .init(),
+        imTranscriptSearch: (any ImTranscriptSearchProviding)? = nil,
         generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)? = nil
     ) {
         self.store = store
@@ -109,6 +111,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.personalityRuntime = personalityRuntime
         self.environmentProvider = environmentProvider
         self.memoryOSContextToolConfiguration = memoryOSContextToolConfiguration
+        self.imTranscriptSearch = imTranscriptSearch
         self.generatedMediaProviderResolver = generatedMediaProviderResolver
         self.sharedCache = AppGraphAgentRuntimeSharedCache()
     }
@@ -271,7 +274,15 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL)
         }
         if let sessionSearchService {
-            registry.register(SessionSearchTool(sessionSearch: sessionSearchService))
+            // FTS 索引为主，命中不足时回退全量会话扫描（对齐 Android RoomSessionSearchSource 与
+            // UI 全局搜索）：索引缺失/过期时也不会漏掉历史会话内容。
+            let hybrid = HybridSessionSearchProvider(index: sessionSearchService) {
+                try sessionRepository.loadSessions(filter: .all)
+            }
+            registry.register(SessionSearchTool(
+                sessionSearch: hybrid,
+                imTranscriptSearch: imTranscriptSearch
+            ))
         }
         if let cloudKnowledgeConsumptionClient {
             registry.registerCloudKnowledgeConsumptionTools(
