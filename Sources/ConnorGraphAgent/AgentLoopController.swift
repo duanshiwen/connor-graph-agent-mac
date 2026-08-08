@@ -377,6 +377,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var didAttemptNoteSearch = assistantBootstrap.attemptedToolNames.contains(
                     AgentNoteSearchPreflightPolicy.requiredToolName
                 )
+                let sessionSearchPreflightPolicy = AgentSessionSearchPreflightPolicy()
+                var didAttemptSessionSearch = false
+                var memorySearchReturnedEmpty = false
                 var finalAttentionPack: AssistantAttentionPack?
                 let hasAvailableAttentionSource = !AssistantAttentionCoordinator.internalToolNames.isDisjoint(
                     with: Set(toolRegistry.definitions.map(\.name))
@@ -723,6 +726,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(role: .user, content: noteSearchPreflightPolicy.correctionInstruction()))
                                 continue
                             }
+                            if memorySearchReturnedEmpty, sessionSearchPreflightPolicy.requiresAttempt(
+                                availableTools: availableToolDefinitions,
+                                didAttempt: didAttemptSessionSearch
+                            ), shouldApplyCorrectionContinue("session_search") {
+                                messages.append(Self.assistantHistoryMessage(from: modelResponse))
+                                messages.append(AgentModelMessage(role: .user, content: sessionSearchPreflightPolicy.correctionInstruction()))
+                                continue
+                            }
                             if retrievalPlan.requiresFinalAttention, finalAttentionPack == nil {
                                 let pack = await AssistantAttentionCoordinator().run(
                                     request: request,
@@ -838,6 +849,21 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 continue
                             }
                         }
+                        if memorySearchReturnedEmpty,
+                           sessionSearchPreflightPolicy.requiresAttempt(
+                               availableTools: availableToolDefinitions,
+                               didAttempt: didAttemptSessionSearch
+                           ) {
+                            if let sessionSearchCall = calls.first(where: {
+                                Self.selectedNativeToolNames(in: [$0]).contains(AgentSessionSearchPreflightPolicy.requiredToolName)
+                            }) {
+                                calls = [sessionSearchCall]
+                            } else if shouldApplyCorrectionContinue("session_search") {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .system, content: sessionSearchPreflightPolicy.correctionInstruction()))
+                                continue
+                            }
+                        }
                         if let discoveryCall = calls.first(where: { $0.name == AssistantDecisionToolContract.searchName }),
                            let arguments = try? AgentToolArguments(json: discoveryCall.argumentsJSON),
                            let query = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -922,6 +948,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         ))
                         if selectedNativeToolNames.contains(AgentNoteSearchPreflightPolicy.requiredToolName) {
                             didAttemptNoteSearch = true
+                        }
+                        if selectedNativeToolNames.contains(AgentSessionSearchPreflightPolicy.requiredToolName) {
+                            didAttemptSessionSearch = true
                         }
                         logger.info("Executing \(calls.count) tool calls: \(calls.map(\.name).joined(separator: ", "))")
 
@@ -1041,6 +1070,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             if batchResult.result.error == nil,
                                batchResult.call.name == AgentPhaseToolContract.commitStrategyName {
                                 runtimeToolResultNote = "Current phase: \(phasedState.phase.rawValue)."
+                            }
+                            if batchResult.result.error == nil,
+                               (batchResult.call.name == "memory_os_recent_context" || batchResult.call.name == "memory_os_knowledge_context"),
+                               Self.memorySearchReturnedEmpty(batchResult.result) {
+                                memorySearchReturnedEmpty = true
                             }
                             if selectedNames.contains("memory_os_update_current_user_profile"),
                                batchResult.result.error == nil {
@@ -1192,6 +1226,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             messages.append(AgentModelMessage(
                                 role: .system,
                                 content: noteSearchPreflightPolicy.correctionInstruction()
+                            ))
+                        } else if memorySearchReturnedEmpty, sessionSearchPreflightPolicy.requiresAttempt(
+                            availableTools: availableToolDefinitions,
+                            didAttempt: didAttemptSessionSearch
+                        ) {
+                            messages.append(AgentModelMessage(
+                                role: .system,
+                                content: sessionSearchPreflightPolicy.correctionInstruction()
                             ))
                         }
 
@@ -2196,6 +2238,22 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         These task-relevant native tools are loaded for this run and are not called directly. Pass their exact names and native arguments through parallel_tool_query or parallel_tool_execute. Shell and ApplyPatch are direct tools and are intentionally absent from this catalog. Do not invent arguments outside a selected native schema.
         \(json)
         """
+    }
+
+    private static func memorySearchReturnedEmpty(_ result: AgentToolResult) -> Bool {
+        guard result.error == nil,
+              let payload = result.contentJSON,
+              let data = payload.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        if let totalItems = root["totalItems"] as? Int {
+            return totalItems == 0
+        }
+        if let records = root["records"] as? [Any] {
+            return records.isEmpty
+        }
+        return false
     }
 
     private static func selectedNativeToolNames(in calls: [AgentToolCall]) -> Set<String> {

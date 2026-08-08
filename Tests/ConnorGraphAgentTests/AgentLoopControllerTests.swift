@@ -1848,6 +1848,22 @@ func agentLoopRequiresStartupContinuityWithoutPreloadingCurrentUserProfile() asy
     #expect(draft.providerMetadata?.rawAssistantContentJSON?.contains(#""signature":"sig""#) == true)
 }
 
+@Test func sessionSearchPreflightPolicyRequiresOneAvailableAttempt() {
+    var registry = AgentToolRegistry()
+    registry.register(RetrievalEvidenceTool(name: "unrelated_tool"))
+    registry.register(RetrievalEvidenceTool(name: AgentSessionSearchPreflightPolicy.requiredToolName))
+    let policy = AgentSessionSearchPreflightPolicy()
+
+    #expect(policy.requiresAttempt(availableTools: registry.definitions, didAttempt: false))
+    #expect(!policy.requiresAttempt(availableTools: registry.definitions, didAttempt: true))
+    #expect(!policy.requiresAttempt(
+        availableTools: registry.definitions.filter { $0.name == "unrelated_tool" },
+        didAttempt: false
+    ))
+    #expect(policy.correctionInstruction().contains("session_search"))
+    #expect(policy.correctionInstruction().contains("one-attempt requirement"))
+}
+
 @Test(.disabled("Note search is now completed by deterministic assistant bootstrap"))
 func noteSearchPreflightPolicyRequiresOneAvailableAttempt() {
     var registry = AgentToolRegistry()

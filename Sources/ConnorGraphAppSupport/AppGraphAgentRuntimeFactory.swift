@@ -267,6 +267,12 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 configuration: memoryOSContextToolConfiguration
             )
         }
+        let sessionSearchService: (any SessionSearchProviding)? = storagePaths.flatMap {
+            try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL)
+        }
+        if let sessionSearchService {
+            registry.register(SessionSearchTool(sessionSearch: sessionSearchService))
+        }
         if let cloudKnowledgeConsumptionClient {
             registry.registerCloudKnowledgeConsumptionTools(
                 client: cloudKnowledgeConsumptionClient,

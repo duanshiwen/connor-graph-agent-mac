@@ -98,6 +98,28 @@ public struct AgentNoteSearchPreflightPolicy: Sendable, Equatable {
     }
 }
 
+/// Requires one Session full-text search when the model already ran the Memory OS
+/// continuity searches and they returned no hits. Invocation, rather than success,
+/// unlocks the rest of the run.
+public struct AgentSessionSearchPreflightPolicy: Sendable, Equatable {
+    public static let requiredToolName = "session_search"
+
+    public init() {}
+
+    public func requiresAttempt(
+        availableTools: [AgentToolDefinition],
+        didAttempt: Bool
+    ) -> Bool {
+        !didAttempt && availableTools.contains { $0.name == Self.requiredToolName }
+    }
+
+    public func correctionInstruction() -> String {
+        """
+        Memory OS continuity searches returned no matching records. Before task-specific tool use or a final answer, include one `session_search` native call inside `parallel_tool_query`, using compact topic terms, entity names, or a subject phrase tied to the latest actual user request. The session full-text index covers raw chat transcripts; use it to check whether the requested topic was ever discussed before. This is a one-attempt requirement: a successful empty result or a real failure satisfies the startup attempt; never fabricate a claim that memory or transcripts were searched.
+        """
+    }
+}
+
 /// Enforces startup continuity retrieval and the late full-profile checkpoint.
 public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
     public static let currentUserProfileToolName = "memory_os_get_current_user_profile"

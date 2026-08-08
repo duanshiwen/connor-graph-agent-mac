@@ -20,6 +20,12 @@ public struct SessionSearchResult: Sendable, Equatable, Identifiable {
     }
 }
 
+public protocol SessionSearchProviding: Sendable {
+    func search(query: String, limit: Int) async throws -> [SessionSearchResult]
+}
+
+extension SessionSearchIndexService: SessionSearchProviding {}
+
 public struct SessionSearchIndexSynchronizationResult: Sendable, Equatable {
     public var upsertedCount: Int
     public var removedCount: Int
@@ -163,7 +169,7 @@ public actor SessionSearchIndexService {
     }
 
     private static func recentMessagesText(for session: AgentSession) -> String {
-        session.messages.suffix(12).map { message in
+        session.messages.map { message in
             "\(message.role.rawValue): \(message.content)"
         }.joined(separator: "\n")
     }
@@ -178,9 +184,26 @@ public actor SessionSearchIndexService {
         return String(trimmed[trimmed.index(trimmed.startIndex, offsetBy: start)..<trimmed.index(trimmed.startIndex, offsetBy: end)])
     }
 
+    private static let currentIndexFormatVersion = 2
+    private static let indexVersionKey = "index_version"
+
     private static func migrate(_ db: OpaquePointer?) throws {
         try execute("PRAGMA journal_mode=WAL", db: db)
         try execute("PRAGMA synchronous=NORMAL", db: db)
+        try execute("""
+        CREATE TABLE IF NOT EXISTS session_search_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """, db: db)
+        let storedVersion = try metaValue(indexVersionKey, db: db).flatMap(Int.init) ?? 1
+        if storedVersion != currentIndexFormatVersion {
+            // Index format changed (e.g. full-transcript indexing). Drop the derived
+            // index so the next bootstrap rebuilds every session from scratch.
+            try execute("DROP TABLE IF EXISTS session_search_docs", db: db)
+            try execute("DROP TABLE IF EXISTS session_search_fts", db: db)
+            try execute("DELETE FROM session_search_meta WHERE key = '" + indexVersionKey + "'", db: db)
+        }
         try execute("""
         CREATE TABLE IF NOT EXISTS session_search_docs (
             session_id TEXT PRIMARY KEY,
@@ -199,6 +222,18 @@ public actor SessionSearchIndexService {
             tokenize = 'unicode61'
         )
         """, db: db)
+        try execute("INSERT OR REPLACE INTO session_search_meta(key, value) VALUES ('" + indexVersionKey + "', '" + String(currentIndexFormatVersion) + "')", db: db)
+    }
+
+    private static func metaValue(_ key: String, db: OpaquePointer?) throws -> String? {
+        var statement: OpaquePointer?
+        let sql = "SELECT value FROM session_search_meta WHERE key = ?"
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw SessionSearchIndexError.sqlite(String(cString: sqlite3_errmsg(db))) }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_bind_text(statement, 1, key, -1, SESSION_SEARCH_SQLITE_TRANSIENT) == SQLITE_OK else { throw SessionSearchIndexError.sqlite(String(cString: sqlite3_errmsg(db))) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        guard let value = sqlite3_column_text(statement, 0) else { return nil }
+        return String(cString: value)
     }
 
     private static func execute(_ sql: String, db: OpaquePointer?) throws {
@@ -409,7 +444,6 @@ public actor ConnorSpotlightSessionIndexService {
         let kind = session.governance.kind == .note ? "笔记" : "对话"
         let recentText = session.messages
             .filter { $0.role == .user || $0.role == .assistant }
-            .suffix(12)
             .map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")

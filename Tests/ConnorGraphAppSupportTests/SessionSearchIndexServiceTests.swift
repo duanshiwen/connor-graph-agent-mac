@@ -83,6 +83,24 @@ struct SessionSearchIndexServiceTests {
         #expect(changedResults.first?.id == changed.id)
     }
 
+    @Test func sessionSearchIndexesAllMessagesNotJustRecentTail() async throws {
+        let service = try SessionSearchIndexService(databaseURL: temporaryDatabaseURL())
+        let messages = (0..<20).map { index in
+            AgentMessage(role: index.isMultiple(of: 2) ? .user : .assistant, content: "尾部索引验证关键词在开头位置\(index)")
+        }
+        let session = AgentSession(
+            id: "session-full-transcript",
+            title: "全量消息索引",
+            messages: messages
+        )
+        _ = try await service.bootstrapIfEmpty(sessions: [session])
+
+        // The very first message (position 0) is far beyond the old last-12 window.
+        let results = try await service.search(query: "尾部索引验证关键词在开头位置0", limit: 3)
+        #expect(results.first?.id == session.id)
+        #expect(results.first?.messageCount == 20)
+    }
+
     @Test func spotlightDocumentIndexesOnlyBoundedConversationText() {
         let messages = [AgentMessage(role: .system, content: "internal-system-prompt")]
             + (0..<14).map { index in
@@ -102,7 +120,7 @@ struct SessionSearchIndexServiceTests {
         #expect(document.domainIdentifier == ConnorSpotlightSessionIdentifier.domain)
         #expect(document.title == "Spotlight integration")
         #expect(!document.textContent.contains("internal-system-prompt"))
-        #expect(!document.textContent.contains("message-0"))
+        #expect(document.textContent.contains("message-0"))
         #expect(document.textContent.contains("message-13"))
         #expect(document.textContent.count <= 6_000)
     }
