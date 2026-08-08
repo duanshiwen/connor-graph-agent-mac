@@ -29,7 +29,8 @@ public struct AgentEvidenceValidationPolicy: Sendable, Equatable {
             "memory os", "memory_os", "记忆", "回忆", "我之前", "我们之前",
             "我的偏好", "我的习惯", "我的历史", "此前决定", "过去提到",
             "工作总结", "任务总结", "工作回顾", "任务回顾", "本周工作", "这周工作",
-            "总结今天", "总结昨天", "回顾今天", "回顾昨天"
+            "总结今天", "总结昨天", "回顾今天", "回顾昨天",
+            "上次", "上回", "之前", "以前", "说过", "聊过", "提到过", "讨论过", "商量过"
         ]
         return memorySignals.contains(where: normalized.contains)
     }
@@ -102,9 +103,11 @@ public struct AgentNoteSearchPreflightPolicy: Sendable, Equatable {
     }
 }
 
-/// Requires one Session full-text search when the model already ran the Memory OS
-/// continuity searches and their results are insufficient (empty, partial, or lacking
-/// the requested detail). Invocation, rather than success, unlocks the rest of the run.
+/// Nudges one Session full-text search attempt when the user asks about past
+/// conversations or the run is memory-related. The model itself judges whether the
+/// Memory OS continuity results are sufficient; the runtime only reminds it to
+/// consider `session_search` (and enforces a hard fallback when memory searches
+/// returned empty). Invocation, rather than success, unlocks the rest of the run.
 public struct AgentSessionSearchPreflightPolicy: Sendable, Equatable {
     public static let requiredToolName = "session_search"
 
@@ -119,7 +122,7 @@ public struct AgentSessionSearchPreflightPolicy: Sendable, Equatable {
 
     public func correctionInstruction() -> String {
         """
-        The Memory OS continuity searches' results are insufficient for the current task — empty, partial, or lacking the specific detail the user asked about. Before task-specific tool use or a final answer, include one `session_search` native call inside `parallel_tool_query`, using compact topic terms, entity names, or a subject phrase tied to the latest actual user request. The session full-text index covers raw chat transcripts; use it to check whether the requested topic was ever discussed before. `session_search` belongs to the memory search group and is encouraged whenever memory retrieval results are insufficient, not only when they are empty. This is a one-attempt requirement: a successful empty result or a real failure satisfies the startup attempt; never fabricate a claim that memory or transcripts were searched.
+        After the Memory OS continuity reads, judge for yourself whether their results are sufficient for the current task. If you judge them insufficient — empty, partial, irrelevant, or lacking the specific detail the user asked about — include one `session_search` native call inside `parallel_tool_query`, using compact topic terms, entity names, or a subject phrase tied to the latest actual user request. Do not wait for the results to be empty before considering `session_search`; `session_search` belongs to the memory search group and covers raw chat transcripts. This is a one-attempt requirement: a successful empty result or a real failure satisfies the startup attempt; never fabricate a claim that memory or transcripts were searched.
         """
     }
 }

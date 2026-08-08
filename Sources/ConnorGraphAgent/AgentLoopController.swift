@@ -380,6 +380,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 let sessionSearchPreflightPolicy = AgentSessionSearchPreflightPolicy()
                 var didAttemptSessionSearch = false
                 var memorySearchResultsInsufficient = false
+                // session_search 触发：记忆检索结果不足，或用户明确询问/引用过往对话
+                // （“我之前/我们之前/回忆/历史/上次…”），此时即使记忆工具返回了部分记录也要尝试会话原文检索。
+                let requiresSessionSearchAttempt: () -> Bool = { memorySearchResultsInsufficient || isPureMemoryTask }
                 var finalAttentionPack: AssistantAttentionPack?
                 let hasAvailableAttentionSource = !AssistantAttentionCoordinator.internalToolNames.isDisjoint(
                     with: Set(toolRegistry.definitions.map(\.name))
@@ -726,7 +729,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(role: .user, content: noteSearchPreflightPolicy.correctionInstruction()))
                                 continue
                             }
-                            if memorySearchResultsInsufficient, sessionSearchPreflightPolicy.requiresAttempt(
+                            if requiresSessionSearchAttempt(), sessionSearchPreflightPolicy.requiresAttempt(
                                 availableTools: availableToolDefinitions,
                                 didAttempt: didAttemptSessionSearch
                             ), shouldApplyCorrectionContinue("session_search") {
@@ -849,7 +852,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 continue
                             }
                         }
-                        if memorySearchResultsInsufficient,
+                        if requiresSessionSearchAttempt(),
                            sessionSearchPreflightPolicy.requiresAttempt(
                                availableTools: availableToolDefinitions,
                                didAttempt: didAttemptSessionSearch
@@ -1227,7 +1230,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 role: .system,
                                 content: noteSearchPreflightPolicy.correctionInstruction()
                             ))
-                        } else if memorySearchResultsInsufficient, sessionSearchPreflightPolicy.requiresAttempt(
+                        } else if requiresSessionSearchAttempt(), sessionSearchPreflightPolicy.requiresAttempt(
                             availableTools: availableToolDefinitions,
                             didAttempt: didAttemptSessionSearch
                         ) {
