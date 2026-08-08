@@ -225,6 +225,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
             ("generate_image", "image"),
             ("edit_image", "image"),
             ("present_image", "image"),
+            ("session_search", "memory"),
             ("local_", "workspace"),
             ("workspace_", "workspace"),
             ("cloud_kb_", "knowledge")

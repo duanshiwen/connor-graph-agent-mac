@@ -1403,9 +1403,11 @@ final class AppRuntimeLifecycle {
             messageCounts: snapshot.messageCounts,
             summary: snapshot.summary
         )
-        globalSearchFeatureModel.bootstrapSessionIndexIfNeeded(sessions: snapshot.allSessions)
         if let chatSessionRepository {
+            globalSearchFeatureModel.repairSessionIndexIfNeeded(repository: chatSessionRepository)
             globalSearchFeatureModel.synchronizeSpotlightIndex(repository: chatSessionRepository)
+        } else {
+            globalSearchFeatureModel.bootstrapSessionIndexIfNeeded(sessions: snapshot.allSessions)
         }
         synchronizeSessionReadStates(from: snapshot.allSessions)
         guard let session = snapshot.selectedSession else {

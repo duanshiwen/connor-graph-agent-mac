@@ -13,6 +13,10 @@ public struct AgentEvidenceValidationPolicy: Sendable, Equatable {
         "memory_os_get_current_user_profile"
     ]
 
+    /// 记忆搜索工具组：结构化记忆 + 会话原文检索。session_search 归类于记忆搜索，
+    /// 但不加入强制启动读取（只在记忆获取结果不足时使用）。
+    public static let memorySearchTools = memoryEvidenceTools + ["session_search"]
+
     public init() {}
 
     public func isPureMemoryTask(_ prompt: String) -> Bool {
@@ -99,8 +103,8 @@ public struct AgentNoteSearchPreflightPolicy: Sendable, Equatable {
 }
 
 /// Requires one Session full-text search when the model already ran the Memory OS
-/// continuity searches and they returned no hits. Invocation, rather than success,
-/// unlocks the rest of the run.
+/// continuity searches and their results are insufficient (empty, partial, or lacking
+/// the requested detail). Invocation, rather than success, unlocks the rest of the run.
 public struct AgentSessionSearchPreflightPolicy: Sendable, Equatable {
     public static let requiredToolName = "session_search"
 
@@ -115,7 +119,7 @@ public struct AgentSessionSearchPreflightPolicy: Sendable, Equatable {
 
     public func correctionInstruction() -> String {
         """
-        Memory OS continuity searches returned no matching records. Before task-specific tool use or a final answer, include one `session_search` native call inside `parallel_tool_query`, using compact topic terms, entity names, or a subject phrase tied to the latest actual user request. The session full-text index covers raw chat transcripts; use it to check whether the requested topic was ever discussed before. This is a one-attempt requirement: a successful empty result or a real failure satisfies the startup attempt; never fabricate a claim that memory or transcripts were searched.
+        The Memory OS continuity searches' results are insufficient for the current task — empty, partial, or lacking the specific detail the user asked about. Before task-specific tool use or a final answer, include one `session_search` native call inside `parallel_tool_query`, using compact topic terms, entity names, or a subject phrase tied to the latest actual user request. The session full-text index covers raw chat transcripts; use it to check whether the requested topic was ever discussed before. `session_search` belongs to the memory search group and is encouraged whenever memory retrieval results are insufficient, not only when they are empty. This is a one-attempt requirement: a successful empty result or a real failure satisfies the startup attempt; never fabricate a claim that memory or transcripts were searched.
         """
     }
 }

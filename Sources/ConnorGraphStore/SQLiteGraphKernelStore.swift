@@ -1021,6 +1021,28 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         return Dictionary(uniqueKeysWithValues: rows.map { ($0[0], Int($0[1]) ?? 0) })
     }
 
+    /// Per-session message IDs (source of truth for per-message index coverage).
+    /// Includes every non-deleted session, including sessions with no messages.
+    public func sessionMessageIDs(includeDeleted: Bool = false) throws -> [String: [String]] {
+        let whereClause = includeDeleted ? "" : "WHERE deleted_at IS NULL"
+        var result: [String: [String]] = Dictionary(
+            uniqueKeysWithValues: try sessionMessageCounts(includeDeleted: includeDeleted).keys.map { ($0, [String]()) }
+        )
+        let rows = try query(sql: """
+        SELECT s.id, json_group_array(json_extract(m.value, '$.id'))
+        FROM agent_sessions AS s, json_each(s.messages_json) AS m
+        \(whereClause)
+        GROUP BY s.id
+        """)
+        for row in rows {
+            guard row.count >= 2,
+                  let data = row[1].data(using: .utf8),
+                  let ids = try? JSONSerialization.jsonObject(with: data) as? [String] else { continue }
+            result[row[0]] = ids
+        }
+        return result
+    }
+
     public func sessionMessageCount(id: String) throws -> Int? {
         try query(sql: "SELECT message_count FROM agent_sessions WHERE id = \(quote(id)) LIMIT 1")
             .first?.first.flatMap(Int.init)

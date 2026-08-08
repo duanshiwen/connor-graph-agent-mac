@@ -38,6 +38,36 @@ public struct SessionSearchIndexSynchronizationResult: Sendable, Equatable {
     }
 }
 
+public struct SessionSearchIndexCoverage: Sendable, Equatable {
+    public var indexedSessionCount: Int
+    public var sourceSessionCount: Int
+    public var indexedMessageCount: Int
+    public var sourceMessageCount: Int
+    /// Sessions that are missing from the index or whose indexed message IDs do
+    /// not cover all of the session's messages (computed per session, not by totals).
+    public var missingSessionCount: Int
+    /// Source message IDs not present in the index (computed per session).
+    public var missingMessageCount: Int
+
+    public init(indexedSessionCount: Int, sourceSessionCount: Int, indexedMessageCount: Int, sourceMessageCount: Int, missingSessionCount: Int, missingMessageCount: Int) {
+        self.indexedSessionCount = indexedSessionCount
+        self.sourceSessionCount = sourceSessionCount
+        self.indexedMessageCount = indexedMessageCount
+        self.sourceMessageCount = sourceMessageCount
+        self.missingSessionCount = missingSessionCount
+        self.missingMessageCount = missingMessageCount
+    }
+
+    /// The index has no documents at all (fresh install or a dropped index).
+    public var isIndexEmpty: Bool { indexedSessionCount == 0 }
+
+    /// True only when every source session is indexed and every message ID of
+    /// every source session is present in the index.
+    public var isComplete: Bool {
+        missingSessionCount == 0 && missingMessageCount == 0
+    }
+}
+
 public actor SessionSearchIndexService {
     private let databaseURL: URL
     private nonisolated(unsafe) var db: OpaquePointer?
@@ -71,6 +101,70 @@ public actor SessionSearchIndexService {
 
         try execute("BEGIN IMMEDIATE")
         do {
+            for session in sessions {
+                try Task.checkCancellation()
+                try upsertOne(session)
+            }
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+        return SessionSearchIndexSynchronizationResult(
+            upsertedCount: sessions.count,
+            removedCount: 0,
+            unchangedCount: 0
+        )
+    }
+
+    /// Startup coverage check: compares the index against the source store
+    /// **per session and per message ID** — a session counts as covered only when
+    /// every message ID of that session is present in the index. Totals alone can
+    /// hide a partially indexed session, so this check never relies on sums.
+    public func coverage(sourceSessionMessageIDs: [String: [String]]) throws -> SessionSearchIndexCoverage {
+        let indexedRows = try queryRows("SELECT session_id, message_ids_json FROM session_search_docs")
+        var indexedIDsBySession: [String: Set<String>] = [:]
+        for row in indexedRows {
+            guard let sessionID = row[0].text else { continue }
+            indexedIDsBySession[sessionID] = Set(Self.decodeMessageIDs(row[1].text))
+        }
+
+        var missingSessions = 0
+        var missingMessages = 0
+        for (sessionID, sourceIDs) in sourceSessionMessageIDs {
+            let indexedIDs = indexedIDsBySession[sessionID] ?? []
+            let missing = sourceIDs.filter { !indexedIDs.contains($0) }
+            if !missing.isEmpty {
+                missingSessions += 1
+                missingMessages += missing.count
+            }
+        }
+
+        return SessionSearchIndexCoverage(
+            indexedSessionCount: indexedIDsBySession.count,
+            sourceSessionCount: sourceSessionMessageIDs.count,
+            indexedMessageCount: indexedIDsBySession.values.reduce(0) { $0 + $1.count },
+            sourceMessageCount: sourceSessionMessageIDs.values.reduce(0) { $0 + $1.count },
+            missingSessionCount: missingSessions,
+            missingMessageCount: missingMessages
+        )
+    }
+
+    private static func decodeMessageIDs(_ raw: String?) -> [String] {
+        guard let raw, let data = raw.data(using: .utf8),
+              let ids = try? JSONSerialization.jsonObject(with: data) as? [String] else { return [] }
+        return ids
+    }
+
+    /// Full rebuild used by the startup repair path: replaces every indexed
+    /// document with the provided full-transcript sessions so the index covers
+    /// all historical sessions and all of their messages.
+    public func rebuild(sessions: [AgentSession]) async throws -> SessionSearchIndexSynchronizationResult {
+        try Task.checkCancellation()
+        try execute("BEGIN IMMEDIATE")
+        do {
+            try execute("DELETE FROM session_search_fts")
+            try execute("DELETE FROM session_search_docs")
             for session in sessions {
                 try Task.checkCancellation()
                 try upsertOne(session)
@@ -148,17 +242,20 @@ public actor SessionSearchIndexService {
             temporal: NativeSearchTemporalMetadata(primaryTime: session.updatedAt, primaryTimeKind: .updatedAt, updatedAt: session.updatedAt),
             contentHash: session.id
         ))
+        let messageIDsData = try JSONSerialization.data(withJSONObject: session.messages.map(\.id))
+        let messageIDsJSON = String(data: messageIDsData, encoding: .utf8) ?? "[]"
         try execute(
             """
-            INSERT INTO session_search_docs(session_id, title, recent_messages, updated_at, message_count)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO session_search_docs(session_id, title, recent_messages, message_ids_json, updated_at, message_count)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
               title=excluded.title,
               recent_messages=excluded.recent_messages,
+              message_ids_json=excluded.message_ids_json,
               updated_at=excluded.updated_at,
               message_count=excluded.message_count
             """,
-            bindings: [.text(session.id), .text(session.title), .text(recentMessages), .double(session.updatedAt.timeIntervalSince1970), .int(session.messages.count)]
+            bindings: [.text(session.id), .text(session.title), .text(recentMessages), .text(messageIDsJSON), .double(session.updatedAt.timeIntervalSince1970), .int(session.messages.count)]
         )
         try execute("DELETE FROM session_search_fts WHERE session_id = ?", bindings: [.text(session.id)])
         try execute("INSERT INTO session_search_fts(session_id, title, recent_messages, indexed_text) VALUES (?, ?, ?, ?)", bindings: [.text(session.id), .text(session.title), .text(recentMessages), .text(indexedText)])
@@ -184,7 +281,9 @@ public actor SessionSearchIndexService {
         return String(trimmed[trimmed.index(trimmed.startIndex, offsetBy: start)..<trimmed.index(trimmed.startIndex, offsetBy: end)])
     }
 
-    private static let currentIndexFormatVersion = 2
+    // v3: per-session message-ID tracking so the startup check can verify that
+    // every message of every session is indexed, not just the session itself.
+    private static let currentIndexFormatVersion = 3
     private static let indexVersionKey = "index_version"
 
     private static func migrate(_ db: OpaquePointer?) throws {
@@ -209,6 +308,7 @@ public actor SessionSearchIndexService {
             session_id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             recent_messages TEXT NOT NULL,
+            message_ids_json TEXT NOT NULL DEFAULT '[]',
             updated_at REAL NOT NULL,
             message_count INTEGER NOT NULL
         )

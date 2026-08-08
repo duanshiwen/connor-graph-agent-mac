@@ -198,3 +198,17 @@ import Testing
     #expect(result.availableNamespaces == ["mail"])
     #expect(result.tools.map(\.name) == ["mail_search_messages"])
 }
+
+@Test func sessionSearchIsDiscoveredUnderMemoryNamespace() {
+    let definitions = [
+        AgentToolDefinition(name: "session_search", description: "raw chat transcript search", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "session_list_by_status", description: "session status listing", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "memory_os_recent_context", description: "memory recent context", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let discovered = AssistantToolRouter().discover(query: "记忆", definitions: definitions)
+
+    #expect(discovered.contains { $0.name == "session_search" })
+    #expect(discovered.contains { $0.name == "memory_os_recent_context" })
+    #expect(!discovered.contains { $0.name == "session_list_by_status" })
+}

@@ -101,6 +101,108 @@ struct SessionSearchIndexServiceTests {
         #expect(results.first?.messageCount == 20)
     }
 
+    @Test func startupCoverageIsIncompleteUntilFullRebuild() async throws {
+        let service = try SessionSearchIndexService(databaseURL: temporaryDatabaseURL())
+        // Legacy index built from a metadata-only first page: only one session, no messages.
+        let stale = AgentSession(id: "session-stale", title: "旧索引", messages: [])
+        _ = try await service.bootstrapIfEmpty(sessions: [stale])
+
+        let sourceSessions = [
+            stale,
+            AgentSession(
+                id: "session-new",
+                title: "历史会话",
+                messages: [AgentMessage(role: .user, content: "只有重建后才能搜到的旧关键词")]
+            )
+        ]
+        let sourceMessageIDs = Dictionary(
+            uniqueKeysWithValues: sourceSessions.map { ($0.id, $0.messages.map(\.id)) }
+        )
+
+        var coverage = try await service.coverage(sourceSessionMessageIDs: sourceMessageIDs)
+        #expect(!coverage.isComplete)
+        #expect(coverage.missingSessionCount == 1)
+        #expect(coverage.missingMessageCount == 1)
+
+        _ = try await service.rebuild(sessions: sourceSessions)
+
+        coverage = try await service.coverage(sourceSessionMessageIDs: sourceMessageIDs)
+        #expect(coverage.isComplete)
+        #expect(coverage.missingSessionCount == 0)
+        #expect(coverage.missingMessageCount == 0)
+        let results = try await service.search(query: "只有重建后才能搜到的旧关键词", limit: 3)
+        #expect(results.first?.id == "session-new")
+        #expect(results.first?.messageCount == 1)
+    }
+
+    @Test func rebuildReplacesStaleDocuments() async throws {
+        let service = try SessionSearchIndexService(databaseURL: temporaryDatabaseURL())
+        let old = AgentSession(
+            id: "session-a",
+            title: "旧标题",
+            messages: [AgentMessage(role: .user, content: "zxqj-oldmarker")]
+        )
+        _ = try await service.bootstrapIfEmpty(sessions: [old])
+
+        let replacement = AgentSession(
+            id: "session-b",
+            title: "新标题",
+            messages: [AgentMessage(role: .user, content: "zzzz-newmarker")]
+        )
+        _ = try await service.rebuild(sessions: [replacement])
+
+        let coverage = try await service.coverage(sourceSessionMessageIDs: [replacement.id: replacement.messages.map(\.id)])
+        #expect(coverage.isComplete)
+        #expect(coverage.indexedSessionCount == 1)
+        #expect(coverage.indexedMessageCount == 1)
+        // ASCII terms make the FTS match unambiguous (CJK queries are OR-combined
+        // by the query builder, so a short CJK phrase can match shared tokens).
+        #expect(try await service.search(query: "zxqj-oldmarker", limit: 3).isEmpty)
+        #expect(try await service.search(query: "zzzz-newmarker", limit: 3).first?.id == "session-b")
+    }
+
+    @Test func perSessionCoverageCatchesPartialIndexEvenWhenTotalsMatch() async throws {
+        let service = try SessionSearchIndexService(databaseURL: temporaryDatabaseURL())
+        // Indexed state: A has 1 message (m1), B has 2 (m2, m3) → totals are 2 sessions / 3 messages.
+        let indexedA = AgentSession(
+            id: "session-a",
+            title: "A",
+            messages: [AgentMessage(id: "m1", role: .user, content: "a1")]
+        )
+        let indexedB = AgentSession(
+            id: "session-b",
+            title: "B",
+            messages: [AgentMessage(id: "m2", role: .user, content: "b1"), AgentMessage(id: "m3", role: .assistant, content: "b2")]
+        )
+        _ = try await service.bootstrapIfEmpty(sessions: [indexedA, indexedB])
+
+        // Source of truth: A actually has 2 messages (m1 + m4), B has 1 (m2) → totals still 2 / 3.
+        let sourceA = AgentSession(
+            id: "session-a",
+            title: "A",
+            messages: [AgentMessage(id: "m1", role: .user, content: "a1"), AgentMessage(id: "m4", role: .assistant, content: "a2")]
+        )
+        let sourceB = AgentSession(
+            id: "session-b",
+            title: "B",
+            messages: [AgentMessage(id: "m2", role: .user, content: "b1")]
+        )
+        let sourceMessageIDs = ["session-a": sourceA.messages.map(\.id), "session-b": sourceB.messages.map(\.id)]
+
+        // Aggregate totals alone would look complete; per-session check must not.
+        let coverage = try await service.coverage(sourceSessionMessageIDs: sourceMessageIDs)
+        #expect(!coverage.isComplete)
+        #expect(coverage.missingSessionCount == 1)
+        #expect(coverage.missingMessageCount == 1)
+
+        // Rebuild from the true source → complete.
+        _ = try await service.rebuild(sessions: [sourceA, sourceB])
+        let after = try await service.coverage(sourceSessionMessageIDs: sourceMessageIDs)
+        #expect(after.isComplete)
+        #expect(after.missingSessionCount == 0)
+        #expect(after.missingMessageCount == 0)
+    }
+
     @Test func spotlightDocumentIndexesOnlyBoundedConversationText() {
         let messages = [AgentMessage(role: .system, content: "internal-system-prompt")]
             + (0..<14).map { index in

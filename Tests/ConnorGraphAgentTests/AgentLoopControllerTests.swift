@@ -1862,6 +1862,7 @@ func agentLoopRequiresStartupContinuityWithoutPreloadingCurrentUserProfile() asy
     ))
     #expect(policy.correctionInstruction().contains("session_search"))
     #expect(policy.correctionInstruction().contains("one-attempt requirement"))
+    #expect(policy.correctionInstruction().contains("insufficient"))
 }
 
 @Test(.disabled("Note search is now completed by deterministic assistant bootstrap"))

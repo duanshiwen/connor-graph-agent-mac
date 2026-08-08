@@ -348,7 +348,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     environmentText,
                     """
                     ## Model-Driven Continuity Retrieval
-                    Every user run must complete the continuity reads in one startup `parallel_tool_query` batch: `memory_os_recent_context` and `memory_os_knowledge_context` with compact topic terms you choose from the latest actual user request, plus `memory_os_get_current_user_profile` with `purpose: "task_context"` and `pageSize: 500`, plus one `note_search`. None substitutes for another; a successful empty result or a real failure satisfies the attempt. The profile call reads one page of 500 records by default; continue through `nextPage` only when the task genuinely needs more profile evidence. You may also re-search the profile with compact topic terms through the same tool.
+                    Every user run must complete the continuity reads in one startup `parallel_tool_query` batch: `memory_os_recent_context` and `memory_os_knowledge_context` with compact topic terms you choose from the latest actual user request, plus `memory_os_get_current_user_profile` with `purpose: "task_context"` and `pageSize: 500`, plus one `note_search`. None substitutes for another; a successful empty result or a real failure satisfies the attempt. The profile call reads one page of 500 records by default; continue through `nextPage` only when the task genuinely needs more profile evidence. You may also re-search the profile with compact topic terms through the same tool. When those continuity results are insufficient for the task — empty, partial, or lacking the specific detail the user asked about — also run one `session_search` against the raw chat-transcript index in the same or a following `parallel_tool_query` batch; `session_search` belongs to the memory search group and is encouraged whenever memory retrieval results are insufficient.
                     Shell and ApplyPatch are direct workspace tools. Other applicable native tools are supplied through the routed catalog above.
                     """,
                     assistantToolRouter.compactCatalogSummary(definitions: availableRegisteredToolDefinitions)
@@ -379,7 +379,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 )
                 let sessionSearchPreflightPolicy = AgentSessionSearchPreflightPolicy()
                 var didAttemptSessionSearch = false
-                var memorySearchReturnedEmpty = false
+                var memorySearchResultsInsufficient = false
                 var finalAttentionPack: AssistantAttentionPack?
                 let hasAvailableAttentionSource = !AssistantAttentionCoordinator.internalToolNames.isDisjoint(
                     with: Set(toolRegistry.definitions.map(\.name))
@@ -726,7 +726,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(role: .user, content: noteSearchPreflightPolicy.correctionInstruction()))
                                 continue
                             }
-                            if memorySearchReturnedEmpty, sessionSearchPreflightPolicy.requiresAttempt(
+                            if memorySearchResultsInsufficient, sessionSearchPreflightPolicy.requiresAttempt(
                                 availableTools: availableToolDefinitions,
                                 didAttempt: didAttemptSessionSearch
                             ), shouldApplyCorrectionContinue("session_search") {
@@ -849,7 +849,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 continue
                             }
                         }
-                        if memorySearchReturnedEmpty,
+                        if memorySearchResultsInsufficient,
                            sessionSearchPreflightPolicy.requiresAttempt(
                                availableTools: availableToolDefinitions,
                                didAttempt: didAttemptSessionSearch
@@ -1073,8 +1073,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }
                             if batchResult.result.error == nil,
                                (batchResult.call.name == "memory_os_recent_context" || batchResult.call.name == "memory_os_knowledge_context"),
-                               Self.memorySearchReturnedEmpty(batchResult.result) {
-                                memorySearchReturnedEmpty = true
+                               Self.memorySearchResultsInsufficient(batchResult.result) {
+                                memorySearchResultsInsufficient = true
                             }
                             if selectedNames.contains("memory_os_update_current_user_profile"),
                                batchResult.result.error == nil {
@@ -1085,7 +1085,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                promotedSkillIdentifiers.insert(promotion.identifier).inserted {
                                 promoteSkillInstruction(promotion, in: &messages)
                             }
-                            if !selectedNames.isDisjoint(with: Set(AgentEvidenceValidationPolicy.memoryEvidenceTools)),
+                            if !selectedNames.isDisjoint(with: Set(AgentEvidenceValidationPolicy.memorySearchTools)),
                                batchResult.result.error == nil {
                                 for citation in batchResult.result.citations where !memoryCitations.contains(citation) {
                                     memoryCitations.append(citation)
@@ -1227,7 +1227,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 role: .system,
                                 content: noteSearchPreflightPolicy.correctionInstruction()
                             ))
-                        } else if memorySearchReturnedEmpty, sessionSearchPreflightPolicy.requiresAttempt(
+                        } else if memorySearchResultsInsufficient, sessionSearchPreflightPolicy.requiresAttempt(
                             availableTools: availableToolDefinitions,
                             didAttempt: didAttemptSessionSearch
                         ) {
@@ -2240,7 +2240,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         """
     }
 
-    private static func memorySearchReturnedEmpty(_ result: AgentToolResult) -> Bool {
+    private static func memorySearchResultsInsufficient(_ result: AgentToolResult) -> Bool {
         guard result.error == nil,
               let payload = result.contentJSON,
               let data = payload.data(using: .utf8),

@@ -26,7 +26,8 @@ public struct AgentToolResultGate: Sendable, Equatable {
     private static let memoryEvidenceToolNames: Set<String> = [
         "memory_os_recent_context",
         "memory_os_knowledge_context",
-        "memory_os_get_current_user_profile"
+        "memory_os_get_current_user_profile",
+        "session_search"
     ]
 
     private static let memoryEvidenceBoundary = """

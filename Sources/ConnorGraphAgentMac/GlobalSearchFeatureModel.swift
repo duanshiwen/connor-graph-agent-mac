@@ -273,6 +273,44 @@ final class GlobalSearchFeatureModel {
         }
     }
 
+    /// Startup check mechanism for the session-history (session_search) index.
+    ///
+    /// Verifies that the persistent FTS index covers every historical session and
+    /// every message in the source store. When coverage is incomplete — for example
+    /// an index built before full-transcript indexing, or sessions/messages that
+    /// arrived while the app was closed — it rebuilds the index from the full
+    /// session store. Runs in the background so startup is never blocked.
+    func repairSessionIndexIfNeeded(repository: AppChatSessionRepository?) {
+        guard let sessionSearchIndexService else { return }
+        sessionIndexGeneration &+= 1
+        let generation = sessionIndexGeneration
+        sessionIndexBootstrapTask?.cancel()
+        sessionIndexBootstrapTask = Task(priority: .utility) { [weak self] in
+            await self?.performSessionIndexRepairIfNeeded(repository: repository)
+            guard let self, self.sessionIndexGeneration == generation else { return }
+            self.sessionIndexBootstrapTask = nil
+        }
+    }
+
+    private func performSessionIndexRepairIfNeeded(repository: AppChatSessionRepository?) async {
+        guard let sessionSearchIndexService, let repository else { return }
+        do {
+            // Per-session, per-message-ID coverage: the index is only considered
+            // complete when every message ID of every session is present in it.
+            let sourceMessageIDs = try repository.store.sessionMessageIDs()
+            let coverage = try await sessionSearchIndexService.coverage(
+                sourceSessionMessageIDs: sourceMessageIDs
+            )
+            guard !coverage.isComplete else { return }
+            // Full rebuild: load every session with its complete transcript.
+            let sessions = try repository.loadSessions(filter: .all)
+            _ = try await sessionSearchIndexService.rebuild(sessions: sessions)
+        } catch {
+            // Startup repair must never block or crash the app; failures are
+            // logged and simply retried on the next launch.
+        }
+    }
+
     func synchronizeSpotlightIndex(repository: AppChatSessionRepository) {
         guard let spotlightSessionIndexService else { return }
         spotlightIndexBootstrapTask?.cancel()
