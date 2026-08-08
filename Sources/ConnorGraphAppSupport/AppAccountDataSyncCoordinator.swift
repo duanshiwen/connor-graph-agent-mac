@@ -67,11 +67,23 @@ public struct ConnorPortableSession: Codable, Sendable, Equatable {
         let secondary = localIsNewer ? remote : existing
         var merged = preferred
         var messagesByID: [String: AgentMessage] = [:]
-        for message in preferred.messages + secondary.messages where messagesByID[message.id] == nil {
-            messagesByID[message.id] = message
+        // 同 id 消息以“createdAt 较新的一侧”为准（与 Android mergeSyncedSession 对齐）：
+        // 流式草稿与最终回复复用同一 id 时，最终文本（createdAt 更晚）会覆盖旧内容，
+        // 而不是把“last-writer-wins 更旧一侧”的半条草稿保留下来。
+        for message in preferred.messages + secondary.messages {
+            if let existing = messagesByID[message.id] {
+                if message.createdAt > existing.createdAt {
+                    messagesByID[message.id] = message
+                }
+            } else {
+                messagesByID[message.id] = message
+            }
         }
         merged.messages = messagesByID.values.sorted {
             if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+            // 同一毫秒内的用户提问/助手回复按角色稳定排序（用户消息在前），
+            // 避免用随机 UUID 决定顺序导致问答颠倒。
+            if $0.role != $1.role { return $0.role == .user }
             return $0.id < $1.id
         }
         // 标签按“两端并集”合并：一方没有的标签直接补上（与 Android mergeSyncedSession 对齐），
@@ -236,21 +248,27 @@ public actor AppAccountDataSyncCoordinator {
                     || change.collection == SyncCollection.governanceLabels
                     || change.collection == SyncCollection.rssSubscriptions
                 guard !change.deleted || isTombstoneCollection else { continue }
-                let clear: (change: ConnorSyncChange, encrypted: Bool)
-                if change.deleted && isTombstoneCollection {
-                    let decrypted = try cipher.decrypt(change.payload, collection: change.collection, recordID: change.recordId)
-                    var copy = change
-                    copy.payload = decrypted.payload
-                    clear = (copy, decrypted.encrypted)
-                } else {
-                    clear = try decrypted(change, using: cipher)
+                do {
+                    let clear: (change: ConnorSyncChange, encrypted: Bool)
+                    if change.deleted && isTombstoneCollection {
+                        let decrypted = try cipher.decrypt(change.payload, collection: change.collection, recordID: change.recordId)
+                        var copy = change
+                        copy.payload = decrypted.payload
+                        clear = (copy, decrypted.encrypted)
+                    } else {
+                        clear = try decrypted(change, using: cipher)
+                    }
+                    if change.sourceDeviceId != deviceID, let kind = try await AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try await apply(clear.change) }) {
+                        record(kind, in: &syncResult)
+                    }
+                    let key = recordKey(change.collection, change.recordId)
+                    state.records[key] = RecordState(version: change.version ?? 0, hash: "", deleted: change.deleted, encrypted: clear.encrypted)
+                    appliedKeys.append(key)
+                } catch {
+                    // 单条坏载荷（解密/解码/应用失败）不拖垮整轮同步：跳过并继续，
+                    // 游标照常推进，避免一条毒记录让该设备永久卡在同一个 pull 页。
+                    AppPerformanceLog.chatTurnLogger.warning("account.sync.apply-skipped collection=\(change.collection, privacy: .public) record=\(change.recordId, privacy: .public) error=\(String(describing: error), privacy: .public)")
                 }
-                if change.sourceDeviceId != deviceID, let kind = try await AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try await apply(clear.change) }) {
-                    record(kind, in: &syncResult)
-                }
-                let key = recordKey(change.collection, change.recordId)
-                state.records[key] = RecordState(version: change.version ?? 0, hash: "", deleted: change.deleted, encrypted: clear.encrypted)
-                appliedKeys.append(key)
             }
             state.cursor = page.nextCursor; hasMore = page.hasMore
             saveState(state, key: stateKey)
@@ -268,7 +286,14 @@ public actor AppAccountDataSyncCoordinator {
         var mutations: [ConnorSyncChange] = []
         for (key, payload) in projected where state.records[key]?.hash != (try payloadHash(payload)) || state.records[key]?.encrypted != true {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
-            mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: cipher.encrypt(payload, collection: parts[0], recordID: parts[1])))
+            let encrypted = try cipher.encrypt(payload, collection: parts[0], recordID: parts[1])
+            // 超过 1 MiB 的记录跳过不推（后端对整批中的超限条目同样只跳过、不报错），
+            // 避免一条超大载荷永久阻塞该账号所有设备的同步。
+            guard try encoder.encode(encrypted).count <= 1_048_576 else {
+                AppPerformanceLog.chatTurnLogger.warning("account.sync.payload-too-large collection=\(parts[0], privacy: .public) record=\(parts[1], privacy: .public)")
+                continue
+            }
+            mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: encrypted))
         }
         // 技能包与 L0/L1 按“最新操作优先”：本地已删除且此前同步过的记录回推 tombstone（载荷带删除时间）。
         let nowMillis = Int64(Date().timeIntervalSince1970 * 1_000)

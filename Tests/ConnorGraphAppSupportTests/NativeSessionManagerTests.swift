@@ -594,3 +594,64 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
         ($0.toolCalls ?? []).contains { !phaseToolNames.contains($0.name) }
     })
 }
+
+private struct NativeSessionStreamingProvider: StreamingAgentModelProvider {
+    let modelID = "native-session-streaming"
+    let capabilities = AgentModelCapabilities(
+        supportsStreaming: true,
+        supportsToolCalling: true,
+        supportsParallelToolCalls: false,
+        supportsStructuredOutput: false,
+        supportsVision: false
+    )
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        let final = AgentModelResponse(text: "Hello", usage: AgentModelUsage(promptTokens: 2, completionTokens: 1))
+        return appSupportAutomaticPhaseResponse(for: request, nextResponse: final) ?? final
+    }
+
+    func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            if let automatic = appSupportAutomaticPhaseResponse(for: request, nextResponse: AgentModelResponse(text: "Hello")) {
+                continuation.yield(.completed(automatic))
+                continuation.finish()
+                return
+            }
+            continuation.yield(.textDelta("Hel"))
+            continuation.yield(.textDelta("lo"))
+            continuation.yield(.completed(AgentModelResponse(
+                text: "Hello",
+                usage: AgentModelUsage(promptTokens: 2, completionTokens: 1)
+            )))
+            continuation.finish()
+        }
+    }
+}
+
+@Test func nativeSessionManagerPersistsStreamedAssistantReplyWithoutDraftResidue() async throws {
+    let store = try makeNativeSessionStore()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "native-session-streaming", title: "New Chat", createdAt: Date(timeIntervalSince1970: 1_000))
+    try repository.saveSession(session)
+    let provider = NativeSessionStreamingProvider()
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        streamComplete: { provider, request in provider.streamComplete(request) }
+    )
+    var manager = NativeSessionManager(loopController: loop, sessionRepository: repository, session: session)
+
+    let response = try await manager.submit("Stream me an answer")
+    let loaded = try #require(try repository.loadSession(id: session.id))
+
+    // 最终回复应完整落库；流式草稿与最终消息必须合并为同一条（id 稳定），
+    // 这样跨端按消息 id 去重合并时不会残留半条流式草稿。
+    #expect(response.assistantMessage?.content == "Hello")
+    let assistantMessages = loaded.messages.filter { $0.role == .assistant }
+    #expect(assistantMessages.count == 1)
+    #expect(assistantMessages.first?.content == "Hello")
+    #expect(assistantMessages.first?.runID == response.assistantMessage?.runID)
+    #expect(assistantMessages.first?.sessionID == session.id)
+    #expect(Set(loaded.messages.map(\.id)).count == loaded.messages.count)
+    #expect(manager.session.messages.map(\.id) == loaded.messages.map(\.id))
+}

@@ -104,4 +104,47 @@ struct ConnorPortableSessionMergeTests {
         #expect(merged.governance.status == .inProgress)
         #expect(merged.governance.labels.map(\.id) == ["important", "priority"])
     }
+
+    @Test func newerCopyOfSameMessageIDWinsEvenWhenLocalSessionIsNewer() {
+        // 本地会话更新（updatedAt 更新），但远端对同一消息 id 有 createdAt 更晚的最终文本
+        // （流式草稿 → 最终回复复用同一 id）。合并后应取最终文本，而不是留下本地旧草稿。
+        let local = AgentSession(
+            id: "session",
+            messages: [
+                AgentMessage(id: "m1", role: .assistant, content: "流式草稿（旧）", createdAt: Date(timeIntervalSince1970: 5)),
+            ],
+            updatedAt: Date(timeIntervalSince1970: 20)
+        )
+        let remote = ConnorPortableSession(AgentSession(
+            id: "session",
+            messages: [
+                AgentMessage(id: "m1", role: .assistant, content: "最终回复（新）", createdAt: Date(timeIntervalSince1970: 10)),
+            ],
+            updatedAt: Date(timeIntervalSince1970: 15)
+        ))
+
+        let merged = remote.merging(into: local)
+
+        #expect(merged.messages.count == 1)
+        #expect(merged.messages[0].id == "m1")
+        #expect(merged.messages[0].content == "最终回复（新）")
+    }
+
+    @Test func sameMillisecondUserMessageComesBeforeAssistantReply() {
+        // 同一毫秒内的用户提问/助手回复不得按随机 UUID 排序：
+        // 即使载荷里回复在前，合并后也必须用户消息在前。
+        let remote = ConnorPortableSession(AgentSession(
+            id: "session",
+            messages: [
+                AgentMessage(id: "z-reply", role: .assistant, content: "回复", createdAt: Date(timeIntervalSince1970: 100)),
+                AgentMessage(id: "a-question", role: .user, content: "提问", createdAt: Date(timeIntervalSince1970: 100)),
+            ],
+            updatedAt: Date(timeIntervalSince1970: 20)
+        ))
+        let local = AgentSession(id: "session", updatedAt: Date(timeIntervalSince1970: 10))
+
+        let merged = remote.merging(into: local)
+
+        #expect(merged.messages.map(\.id) == ["a-question", "z-reply"])
+    }
 }

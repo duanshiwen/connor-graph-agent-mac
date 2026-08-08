@@ -324,6 +324,10 @@ public struct NativeSessionManager: Sendable {
         var assistantMessage: AgentMessage?
         var generatedAttachmentRefs: [AgentMessageAttachmentRef] = []
         var promptInspectionSnapshot: AgentPromptInspectionSnapshot?
+        // 流式回复的持久化游标：textDelta 期间累积到同一条 assistant 消息，
+        // 并限流落库，避免进程在 textComplete 前被中断时整条回复丢失（从而无法同步）。
+        var streamingMessageID: String?
+        var lastStreamingPersistAt = Date.distantPast
 
         do {
             for try await event in backend.chat(request) {
@@ -374,8 +378,35 @@ public struct NativeSessionManager: Sendable {
                     generatedAttachmentRefs.append(attachment)
                 }
 
+                // 流式文本增量：把增量累积进本 run 正在生成的 assistant 消息，
+                // 首段立即持久化、之后最多每秒一次，保证回复进入本地库并可随账号同步；
+                // textComplete 会按 runID 移除这条草稿并复用同一 message id 写入最终文本。
+                if case .textDelta(let payload) = event, !payload.text.isEmpty {
+                    if let messageID = streamingMessageID,
+                       let index = session.messages.lastIndex(where: { $0.id == messageID }) {
+                        session.messages[index].content += payload.text
+                    } else {
+                        let messageID = streamingMessageID ?? UUID().uuidString
+                        var message = AgentMessage(id: messageID, role: .assistant, content: payload.text)
+                        message.runID = run.id
+                        message.sessionID = session.id
+                        session.messages.append(message)
+                        streamingMessageID = messageID
+                    }
+                    let now = Date()
+                    if lastStreamingPersistAt == .distantPast || now.timeIntervalSince(lastStreamingPersistAt) >= 1 {
+                        lastStreamingPersistAt = now
+                        try persistSession(previousMessageCount: session.messages.count)
+                    }
+                }
+
                 if case .assistantMessageCreated(var message) = event,
                    !session.messages.contains(where: { $0.id == message.id }) {
+                    // 模型返回了完整文本（工具轮），流式草稿不再需要，避免同 run 出现两条 assistant 消息。
+                    if let streamedID = streamingMessageID {
+                        session.messages.removeAll { $0.id == streamedID }
+                        streamingMessageID = nil
+                    }
                     message.runID = message.runID ?? run.id
                     message.sessionID = message.sessionID ?? session.id
                     session.appendAssistantMessage(message)
@@ -386,14 +417,20 @@ public struct NativeSessionManager: Sendable {
                 }
 
                 if case .textComplete(let payload) = event {
+                    // 最终文本复用流式草稿的 id：跨端按消息 id 去重合并时，
+                    // Android 上的同一条消息会原地更新，而不是残留半条流式草稿。
+                    let finalMessageID = streamingMessageID ?? UUID().uuidString
+                    streamingMessageID = nil
                     session.removeAssistantMessages(forRunID: run.id)
-                    assistantMessage = session.appendAssistantMessage(
-                        payload.text,
+                    assistantMessage = session.appendAssistantMessage(AgentMessage(
+                        id: finalMessageID,
+                        role: .assistant,
+                        content: payload.text,
                         citations: payload.citations,
                         contextSnapshot: payload.contextSnapshot,
-                        promptInspection: promptInspectionSnapshot,
-                        attachments: generatedAttachmentRefs
-                    )
+                        attachments: generatedAttachmentRefs,
+                        promptInspection: promptInspectionSnapshot
+                    ))
                     if let messageID = assistantMessage?.id,
                        let index = session.messages.lastIndex(where: { $0.id == messageID }) {
                         session.messages[index].runID = run.id
@@ -553,7 +590,7 @@ public struct NativeSessionManager: Sendable {
         return snapshot
     }
 
-    private mutating func persistSession() throws {
+    private mutating func persistSession(previousMessageCount: Int = 0) throws {
         var sessionToPersist = session
         if let persisted = try sessionRepository.loadSession(id: session.id) {
             session.governance = persisted.governance
@@ -568,7 +605,7 @@ public struct NativeSessionManager: Sendable {
                 sessionToPersist.messages = persisted.messages.filter { !currentIDs.contains($0.id) } + session.messages
             }
         }
-        try sessionRepository.saveSession(sessionToPersist)
+        try sessionRepository.saveSession(sessionToPersist, previousMessageCount: previousMessageCount)
     }
 
     // MARK: - Conversation Summary
