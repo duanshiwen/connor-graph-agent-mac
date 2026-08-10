@@ -238,9 +238,44 @@ public struct MailRuntime: Sendable {
 
     public func getMessage(id: MailMessageID, includeBody: Bool = false, runID: String? = nil, sessionID: String? = nil) async throws -> MailMessageDetail {
         guard var message = try await cache.message(id: id) else { throw MailRuntimeError.messageNotFound(id.rawValue) }
+        if includeBody && !MailBodyOnDemandFetchPlanner.hasDisplayableBody(message) {
+            // 本地缓存没有正文（列表同步通常只带摘要/简短 snippet）时，按需从服务器
+            // 拉取完整正文并写回缓存，让 LLM 无需先在列表里点开邮件即可读到详情。
+            if let fetched = try await fetchMessageBodyOnDemand(for: message) {
+                message = fetched
+                try await cache.saveMessage(fetched)
+            }
+        }
         if !includeBody { message.body = nil }
         try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: message.summary.accountID, messageID: id, kind: includeBody ? .messageBodyRead : .messageRead, riskClass: includeBody ? .bodyRead : .read, redactedSummary: includeBody ? "Read mail body without mutating read state" : "Read mail summary/detail without body and without mutating read state", payloadHash: message.headers.rawHeaderHash))
         return message
+    }
+
+    /// 本地缓存缺少可显示正文时，按需从 IMAP 拉取完整消息；拉不到则返回 nil（保持缓存内容）。
+    /// 使用消息所在真实邮箱解码 UID，覆盖 Inbox/Sent 之外的自定义文件夹。
+    private func fetchMessageBodyOnDemand(for message: MailMessageDetail) async throws -> MailMessageDetail? {
+        guard let account = try await repository.account(id: message.summary.accountID) else { return nil }
+        let mailboxes = try await cache.listMailboxes(accountID: message.summary.accountID)
+        let cachedMailbox = mailboxes.first { $0.id == message.summary.mailboxID }
+        let remoteMailbox = RemoteIMAPMailbox(
+            name: cachedMailbox?.name ?? "INBOX",
+            path: cachedMailbox?.path ?? "INBOX",
+            role: cachedMailbox?.role ?? .inbox
+        )
+        guard let uid = remoteMailbox.uid(fromMessageID: message.id, accountID: message.summary.accountID),
+              uid.allSatisfy(\.isNumber) else { return nil }
+        let service = MailIMAPInitialSyncService(credentialStore: credentialStore, messageLimit: 0)
+        guard let fetched = try await service.fetchMessageBody(
+            account: account,
+            uid: uid,
+            messageID: message.id,
+            mailboxID: message.summary.mailboxID,
+            mailboxPath: remoteMailbox.path,
+            mailboxRole: remoteMailbox.role,
+            snippet: message.summary.snippet
+        ) else { return nil }
+        guard MailBodyOnDemandFetchPlanner.hasDisplayableBody(fetched) else { return nil }
+        return fetched
     }
 
     public func setReadState(messageIDs: [MailMessageID], isRead: Bool, runID: String? = nil, sessionID: String? = nil) async throws {
@@ -261,6 +296,26 @@ public struct MailRuntime: Sendable {
     }
 
     public func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress] = [], bcc: [MailAddress] = [], replyTo: [MailAddress] = [], subject: String, body: String, htmlBody: String? = nil, inReplyToMessageID: MailMessageID? = nil, attachmentIDs: [MailAttachmentID] = [], intentSummary: String? = nil, runID: String? = nil, sessionID: String? = nil) async throws -> MailDraft {
+        try await persistDraft(
+            accountID: accountID,
+            identityID: identityID,
+            to: to,
+            cc: cc,
+            bcc: bcc,
+            replyTo: replyTo,
+            subject: subject,
+            body: body,
+            htmlBody: htmlBody,
+            inReplyToMessageID: inReplyToMessageID,
+            attachmentIDs: attachmentIDs,
+            intentSummary: intentSummary,
+            runID: runID,
+            sessionID: sessionID
+        )
+    }
+
+    /// createDraft 的完整实现：校验账户/身份后落盘草稿，支持回复/转发所需的线程头。
+    private func persistDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress] = [], bcc: [MailAddress] = [], replyTo: [MailAddress] = [], subject: String, body: String, htmlBody: String? = nil, inReplyToMessageID: MailMessageID? = nil, messageIDHeader: String? = nil, inReplyToHeader: String? = nil, referencesHeaders: [String] = [], attachmentIDs: [MailAttachmentID] = [], intentSummary: String? = nil, runID: String? = nil, sessionID: String? = nil) async throws -> MailDraft {
         guard let account = try await repository.account(id: accountID) else {
             throw MailRuntimeError.accountNotFound(accountID.rawValue)
         }
@@ -273,11 +328,128 @@ public struct MailRuntime: Sendable {
         guard account.outgoing != nil else {
             throw MailRuntimeError.missingOutgoingEndpoint(accountID.rawValue)
         }
-        let draft = MailDraft(id: MailDraftID(rawValue: UUID().uuidString), accountID: accountID, identityID: identityID, to: to, cc: cc, bcc: bcc, subject: subject, body: body, htmlBody: htmlBody, replyTo: replyTo, attachmentIDs: attachmentIDs, inReplyToMessageID: inReplyToMessageID, intentSummary: intentSummary)
+        let draft = MailDraft(id: MailDraftID(rawValue: UUID().uuidString), accountID: accountID, identityID: identityID, to: to, cc: cc, bcc: bcc, subject: subject, body: body, htmlBody: htmlBody, replyTo: replyTo, attachmentIDs: attachmentIDs, inReplyToMessageID: inReplyToMessageID, messageIDHeader: messageIDHeader, inReplyToHeader: inReplyToHeader, referencesHeaders: referencesHeaders, intentSummary: intentSummary)
         try await draftStore.save(draft)
         try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: accountID, draftID: draft.id, kind: .draftCreated, riskClass: .mutation, redactedSummary: "Created mail draft to \(to.map(\.email).joined(separator: ", "))"))
         return draft
     }
+
+    /// 创建“回复”草稿：收件人自动取原发件人（原邮件为自己发送时取原收件人），
+    /// 主题自动加 Re: 前缀，正文默认引用原邮件，并带上 In-Reply-To / References 线程头。
+    public func createReplyDraft(accountID: MailAccountID, identityID: MailIdentityID, messageID: MailMessageID, body: String, includeOriginal: Bool = true, intentSummary: String? = nil, runID: String? = nil, sessionID: String? = nil) async throws -> MailDraft {
+        let original = try await getMessage(id: messageID, includeBody: includeOriginal, runID: runID, sessionID: sessionID)
+        guard let identity = try await repository.account(id: accountID)?.identities.first(where: { $0.id == identityID }) else {
+            throw MailRuntimeError.identityNotFound(identityID.rawValue)
+        }
+        let recipients = Self.replyRecipients(for: original, selfEmail: identity.address.email)
+        var subject = original.summary.subject
+        if !Self.hasPrefix(subject, prefixes: ["Re:", "回复："]) {
+            subject = "Re: " + subject
+        }
+        var bodyText = body
+        if includeOriginal {
+            bodyText += "\n\n" + Self.quotedOriginal(original)
+        }
+        var references = original.headers.references
+        if let messageIDHeader = original.headers.messageIDHeader, !references.contains(messageIDHeader) {
+            references.append(messageIDHeader)
+        }
+        return try await persistDraft(
+            accountID: accountID,
+            identityID: identityID,
+            to: recipients,
+            subject: subject,
+            body: bodyText,
+            inReplyToMessageID: messageID,
+            inReplyToHeader: original.headers.messageIDHeader,
+            referencesHeaders: references,
+            intentSummary: intentSummary ?? "Reply to \(original.summary.subject)",
+            runID: runID,
+            sessionID: sessionID
+        )
+    }
+
+    /// 创建“转发”草稿：主题自动加 Fwd: 前缀，正文默认附上原邮件（From/Date/To/Subject + 正文）。
+    public func createForwardDraft(accountID: MailAccountID, identityID: MailIdentityID, messageID: MailMessageID, to: [MailAddress], cc: [MailAddress] = [], bcc: [MailAddress] = [], body: String, includeOriginal: Bool = true, intentSummary: String? = nil, runID: String? = nil, sessionID: String? = nil) async throws -> MailDraft {
+        let original = try await getMessage(id: messageID, includeBody: includeOriginal, runID: runID, sessionID: sessionID)
+        var subject = original.summary.subject
+        if !Self.hasPrefix(subject, prefixes: ["Fwd:", "转发："]) {
+            subject = "Fwd: " + subject
+        }
+        var bodyText = body
+        if includeOriginal {
+            bodyText += "\n\n" + Self.forwardedOriginal(original)
+        }
+        return try await persistDraft(
+            accountID: accountID,
+            identityID: identityID,
+            to: to,
+            cc: cc,
+            bcc: bcc,
+            subject: subject,
+            body: bodyText,
+            intentSummary: intentSummary ?? "Forward \(original.summary.subject)",
+            runID: runID,
+            sessionID: sessionID
+        )
+    }
+
+    private static func replyRecipients(for original: MailMessageDetail, selfEmail: String) -> [MailAddress] {
+        let sender = original.summary.from
+        if sender.email.lowercased() == selfEmail.lowercased() {
+            // 原邮件是自己发的（例如从 Sent 回复）→ 回给原始收件人，排除自己。
+            return (original.summary.to + original.summary.cc).filter { $0.email.lowercased() != selfEmail.lowercased() }
+        }
+        return [sender]
+    }
+
+    private static func quotedOriginal(_ detail: MailMessageDetail) -> String {
+        let sender = Self.formatAddress(detail.summary.from)
+        let date = Self.mailQuoteDateFormatter.string(from: detail.summary.date)
+        var lines = ["On \(date), \(sender) wrote:"]
+        let body = detail.body?.plainText?.text ?? detail.body?.redactedPreview ?? ""
+        for line in body.components(separatedBy: .newlines) where !line.isEmpty {
+            lines.append("> " + line)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func forwardedOriginal(_ detail: MailMessageDetail) -> String {
+        var lines: [String] = []
+        lines.append("-------- Forwarded Message --------")
+        lines.append("From: \(Self.formatAddress(detail.summary.from))")
+        lines.append("Date: \(Self.mailQuoteDateFormatter.string(from: detail.summary.date))")
+        if !detail.summary.to.isEmpty {
+            lines.append("To: \(detail.summary.to.map(Self.formatAddress).joined(separator: ", "))")
+        }
+        if !detail.summary.cc.isEmpty {
+            lines.append("Cc: \(detail.summary.cc.map(Self.formatAddress).joined(separator: ", "))")
+        }
+        lines.append("Subject: \(detail.summary.subject)")
+        lines.append("")
+        let body = detail.body?.plainText?.text ?? detail.body?.redactedPreview ?? ""
+        lines.append(body)
+        return lines.joined(separator: "\n")
+    }
+
+    private static func formatAddress(_ address: MailAddress) -> String {
+        if let name = address.name, !name.isEmpty {
+            return "\(name) <\(address.email)>"
+        }
+        return address.email
+    }
+
+    private static func hasPrefix(_ subject: String, prefixes: [String]) -> Bool {
+        let trimmed = subject.trimmingCharacters(in: .whitespaces)
+        return prefixes.contains { trimmed.hasPrefix($0) || trimmed.lowercased().hasPrefix($0.lowercased()) }
+    }
+
+    private static let mailQuoteDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
 
     public func sendApprovalPayload(draftID: MailDraftID) async throws -> MailRuntimeSendApproval {
         guard let draft = try await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }

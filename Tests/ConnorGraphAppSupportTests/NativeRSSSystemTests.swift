@@ -247,3 +247,32 @@ struct NativeRSSSystemTests {
         #expect(shell.command(for: .openRSSSources)?.keyboardShortcut == "⌘9")
     }
 }
+
+    @Test func fileBackedRSSStorageTracksExplicitDeletesOnly() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorRSSDeleteMarkerTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let repository = FileBackedRSSSourceRepository(storagePaths: paths)
+        let sourceID = RSSSourceID(rawValue: "marker-source")
+        let source = RSSSource(id: sourceID, feedURL: URL(string: "https://example.com/feed.xml")!, displayName: "Example")
+
+        try await repository.saveSource(source)
+        #expect(try await repository.pendingDeletes().isEmpty)
+
+        // 用户显式删除 → 产生待回推删除标记；重启后标记仍在。
+        try await repository.deleteSource(id: sourceID)
+        #expect(try await repository.listSources().isEmpty)
+        #expect(Array(try await repository.pendingDeletes().keys) == [sourceID])
+
+        let restarted = FileBackedRSSSourceRepository(storagePaths: paths)
+        #expect(Array(try await restarted.pendingDeletes().keys) == [sourceID])
+
+        // 重新订阅同一 URL（同 id）→ 撤消标记。
+        try await restarted.saveSource(source)
+        #expect(try await restarted.pendingDeletes().isEmpty)
+
+        // 远端 tombstone 落库（applyRemoteDelete）→ 不产生标记。
+        try await restarted.applyRemoteDelete(id: sourceID)
+        #expect(try await restarted.pendingDeletes().isEmpty)
+    }

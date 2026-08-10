@@ -37,6 +37,9 @@ Interactive-web guide — SDK v1 usage (window.platform):
    - forms.submit(name, formOrData)
    - auth.status(), auth.login(), auth.logout(), auth.onAuthChange(handler), auth.require(name)
    - collection.rules(name), collection.me(name), collection.myRecords(name, limit, page), collection.stats(name, query), collection.ranking(name, query), collection.capacity(name), collection.onChange(name, renderFn)
+   - links.open(url) — open an external URL in a new tab/window (only http/https accepted)
+
+   External links (new window/tab): published pages run inside a sandboxed iframe, so a raw target="_blank" or window.open() cannot open a new window by itself. The SDK intercepts clicks on <a target="_blank"> and <a data-connor-external> anchors and opens them in a new tab/window; you may also call window.platform.link.open("https://...") from app.js for programmatic opens. Only http/https URLs are accepted; never use javascript: URLs.
 
 3. Forms and events: set data-connor-collection="<name>" on submission forms and add a hidden _connor_honeypot input (autocomplete="off"); the SDK submits automatically and blocks duplicate submissions. Listen for connor:submit-start, connor:submit-success, connor:submit-error, connor:auth-required and connor:already-submitted to show clear submitting, success, failure, login-needed and already-submitted states.
 

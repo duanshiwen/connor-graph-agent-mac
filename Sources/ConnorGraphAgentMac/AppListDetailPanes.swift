@@ -71,12 +71,58 @@ private func listSearchTextMatches(_ text: String, terms: [String]) -> Bool {
     return matchedCount >= requiredMatches
 }
 
+private struct SyncStatusBanner: View {
+    var isSyncing: Bool
+    var message: String
+    var hasError: Bool
+    var onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: AppShellLayout.spaceS) {
+            if isSyncing {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: hasError ? "exclamationmark.triangle" : "checkmark.circle")
+                    .foregroundStyle(hasError ? Color.orange : Color.secondary)
+            }
+            Text(message)
+                .font(AgentChatTypography.meta)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("关闭同步状态提示")
+            .accessibilityLabel("关闭同步状态提示")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(AppShellColors.cardBackground)
+    }
+}
+
 struct CraftCalendarListPane: View {
     @Bindable var model: CalendarFeatureModel
 
     var body: some View {
         VStack(spacing: 0) {
             AppListPaneHeader(title: "日历") {
+                Button(action: { model.syncAllSources() }) {
+                    if model.isSyncingAll {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.appIcon)
+                .disabled(model.isSyncingAll)
+                .help("刷新全部日历")
+                .accessibilityLabel("刷新全部日历")
                 Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
                 }
@@ -87,6 +133,15 @@ struct CraftCalendarListPane: View {
 
             ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "日历") {
                 model.searchQuery = ""
+            }
+
+            if model.showsSyncStatusBanner, let syncMessage = model.syncMessage {
+                SyncStatusBanner(
+                    isSyncing: model.isSyncingAll,
+                    message: syncMessage,
+                    hasError: model.errorMessage != nil,
+                    onDismiss: { model.dismissSyncStatusBanner() }
+                )
             }
 
             if model.presentation.daySections.isEmpty {
@@ -1870,6 +1925,17 @@ struct CraftMailListPane: View {
     var body: some View {
         VStack(spacing: 0) {
             AppListPaneHeader(title: "邮件") {
+                Button(action: { model.refreshAllNow() }) {
+                    if model.isSyncing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.appIcon)
+                .disabled(model.isSyncing)
+                .help("刷新全部邮箱")
+                .accessibilityLabel("刷新全部邮箱")
                 Button(action: { model.presentAddAccountSheet() }) {
                     Image(systemName: "plus")
                 }
@@ -1883,23 +1949,12 @@ struct CraftMailListPane: View {
             }
 
             if model.showsSyncStatusBanner, let syncMessage = model.syncMessage {
-                HStack(spacing: AppShellLayout.spaceS) {
-                    if model.isSyncing {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: model.errorMessage == nil ? "checkmark.circle" : "exclamationmark.triangle")
-                            .foregroundStyle(model.errorMessage == nil ? Color.secondary : Color.orange)
-                    }
-                    Text(syncMessage)
-                        .font(AgentChatTypography.meta)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(AppShellColors.cardBackground)
+                SyncStatusBanner(
+                    isSyncing: model.isSyncing,
+                    message: syncMessage,
+                    hasError: model.errorMessage != nil,
+                    onDismiss: { model.dismissSyncStatusBanner() }
+                )
             }
 
             if presentation.accounts.isEmpty {
@@ -2208,6 +2263,17 @@ struct CraftRSSListPane: View {
     var body: some View {
         VStack(spacing: 0) {
             AppListPaneHeader(title: "RSS 阅读") {
+                Button(action: { model.refreshAllNow() }) {
+                    if model.isRefreshingAll {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.appIcon)
+                .disabled(model.isRefreshingAll)
+                .help("刷新全部订阅源")
+                .accessibilityLabel("刷新全部订阅源")
                 Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
                 }
@@ -2218,6 +2284,15 @@ struct CraftRSSListPane: View {
 
             ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "RSS") {
                 model.searchQuery = ""
+            }
+
+            if model.showsSyncStatusBanner, let refreshSummary = model.refreshSummary {
+                SyncStatusBanner(
+                    isSyncing: model.isRefreshingAll,
+                    message: refreshSummary,
+                    hasError: model.errorMessage != nil,
+                    onDismiss: { model.dismissSyncStatusBanner() }
+                )
             }
 
             if presentation.sources.isEmpty {

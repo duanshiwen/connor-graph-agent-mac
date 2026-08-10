@@ -169,3 +169,70 @@ import Testing
     #expect(recent.count < request.messages.last?.content.count ?? 0)
 }
 
+
+@Test func largeRecentToolResultIsCompactedBySizeEvenWhenRecent() throws {
+    let messages = [
+        AgentModelMessage(role: .user, content: "historical user message"),
+        AgentModelMessage(role: .assistant, content: "historical final response"),
+        AgentModelMessage(role: .assistant, content: "", toolCalls: [
+            AgentToolCall(id: "call-large", name: "read_file", argumentsJSON: "{}")
+        ]),
+        AgentModelMessage(role: .tool, content: String(repeating: "big payload ", count: 2_000), toolCallID: "call-large", name: "read_file"),
+        AgentModelMessage(role: .assistant, content: "", toolCalls: [
+            AgentToolCall(id: "call-small", name: "read_status", argumentsJSON: "{}")
+        ]),
+        AgentModelMessage(role: .tool, content: "small result", toolCallID: "call-small", name: "read_status")
+    ]
+    let checkpoint = AgentRunCheckpointBuilder().build(
+        generation: 2,
+        originalGoal: "Read two files",
+        currentPhase: "taskExecution",
+        iteration: 3,
+        messages: messages
+    )
+
+    let result = try AgentLoopContextCompactor().compact(
+        AgentModelRequest(messages: messages),
+        checkpoint: checkpoint,
+        retainedRecentToolResults: 2,
+        largeResultByteThreshold: 1_024
+    )
+
+    // 超大结果即使是最新一条也被压掉；小结果仍按“最近 N 条”保留。
+    #expect(result.compactedToolResultCount == 1)
+    #expect(result.request.messages.first { $0.toolCallID == "call-large" }?.content.hasPrefix("[Compacted tool result:") == true)
+    #expect(result.request.messages.first { $0.toolCallID == "call-small" }?.content == "small result")
+}
+
+@Test func resolvedPromptLimitDerivesFromModelWindowAndRespectsExplicitOverride() {
+    // 默认 64_000 视为自动：1M 窗口 → min(1M×0.8, 512k) = 512k；200k 窗口 → 160k。
+    let automatic = AgentLoopConfiguration()
+    #expect(automatic.resolvedPromptMaxEstimatedTokens(modelWindowTokens: 1_000_000) == 512_000)
+    #expect(automatic.resolvedPromptMaxEstimatedTokens(modelWindowTokens: 200_000) == 160_000)
+
+    // 显式配置原样生效。
+    let explicit = AgentLoopConfiguration(promptMaxEstimatedTokens: 100_000)
+    #expect(explicit.resolvedPromptMaxEstimatedTokens(modelWindowTokens: 1_000_000) == 100_000)
+}
+
+@Test func compactionConfigDecodesLegacyJSONWithoutNewKey() throws {
+    // 老版本持久化设置没有 largeResultByteThreshold，必须能解出来并落到默认值。
+    let legacy = #"{"isEnabled":true,"checkpointRatio":0.7,"compactionRatio":0.8,"emergencyRatio":0.9,"targetRatio":0.45,"minimumTokenGrowth":20000,"retainedRecentToolResults":2}"#
+    let decoded = try JSONDecoder().decode(AgentLoopCompactionConfiguration.self, from: Data(legacy.utf8))
+    #expect(decoded.largeResultByteThreshold == 8 * 1_024)
+    #expect(decoded.retainedRecentToolResults == 2)
+
+    // 空对象也应解码为全默认值。
+    let empty = try JSONDecoder().decode(AgentLoopCompactionConfiguration.self, from: Data("{}".utf8))
+    #expect(empty.isEnabled)
+    #expect(empty.checkpointRatio == 0.70)
+    #expect(empty.largeResultByteThreshold == 8 * 1_024)
+
+    // 新值应能编码后再解回。
+    let configured = AgentLoopCompactionConfiguration(largeResultByteThreshold: 16 * 1_024)
+    let roundTripped = try JSONDecoder().decode(
+        AgentLoopCompactionConfiguration.self,
+        from: JSONEncoder().encode(configured)
+    )
+    #expect(roundTripped.largeResultByteThreshold == 16 * 1_024)
+}

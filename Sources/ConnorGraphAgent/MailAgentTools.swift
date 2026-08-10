@@ -22,6 +22,10 @@ public protocol AgentMailRuntime: Sendable {
     func getMessage(id: MailMessageID, includeBody: Bool, runID: String?, sessionID: String?) async throws -> MailMessageDetail
     func setReadState(messageIDs: [MailMessageID], isRead: Bool, runID: String?, sessionID: String?) async throws
     func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress], bcc: [MailAddress], replyTo: [MailAddress], subject: String, body: String, htmlBody: String?, inReplyToMessageID: MailMessageID?, attachmentIDs: [MailAttachmentID], intentSummary: String?, runID: String?, sessionID: String?) async throws -> MailDraft
+    /// 创建回复草稿：自动填收件人、Re: 主题前缀、引用原文与 In-Reply-To/References 线程头。
+    func createReplyDraft(accountID: MailAccountID, identityID: MailIdentityID, messageID: MailMessageID, body: String, includeOriginal: Bool, intentSummary: String?, runID: String?, sessionID: String?) async throws -> MailDraft
+    /// 创建转发草稿：自动加 Fwd: 主题前缀并附上原文。
+    func createForwardDraft(accountID: MailAccountID, identityID: MailIdentityID, messageID: MailMessageID, to: [MailAddress], cc: [MailAddress], bcc: [MailAddress], body: String, includeOriginal: Bool, intentSummary: String?, runID: String?, sessionID: String?) async throws -> MailDraft
     func sendApprovalBridgePayload(draftID: MailDraftID) async throws -> MailSendApprovalBridge
     func sendDraft(draftID: MailDraftID, approved: Bool, runID: String?, sessionID: String?) async throws -> MailSendReceipt
 }
@@ -53,6 +57,14 @@ public extension AgentMailRuntime {
 
     func sendApprovalBridgePayload(draftID: MailDraftID) async throws -> MailSendApprovalBridge {
         MailSendApprovalBridge(draftID: draftID, title: "Send email authorization", from: "unknown", to: [], cc: [], bcc: [], subject: "", bodyPreview: "", attachmentCount: 0, riskSummary: "Email sending follows the current session permission mode.", envelopeHash: "")
+    }
+
+    func createReplyDraft(accountID: MailAccountID, identityID: MailIdentityID, messageID: MailMessageID, body: String, includeOriginal: Bool, intentSummary: String?, runID: String?, sessionID: String?) async throws -> MailDraft {
+        throw AgentToolError.invalidArguments("mail_reply_to_message is not supported by this mail runtime")
+    }
+
+    func createForwardDraft(accountID: MailAccountID, identityID: MailIdentityID, messageID: MailMessageID, to: [MailAddress], cc: [MailAddress], bcc: [MailAddress], body: String, includeOriginal: Bool, intentSummary: String?, runID: String?, sessionID: String?) async throws -> MailDraft {
+        throw AgentToolError.invalidArguments("mail_forward_message is not supported by this mail runtime")
     }
 }
 
@@ -402,7 +414,7 @@ public struct MailGetMessageTool: AgentTool {
         return lowercased.range(of: pattern, options: .regularExpression) != nil
     }
 
-    private static func normalizedMessageID(from arguments: AgentToolArguments) throws -> String {
+    static func normalizedMessageID(from arguments: AgentToolArguments) throws -> String {
         guard let rawMessageID = arguments.string("messageID") else { throw AgentToolError.invalidArguments("messageID is required") }
         let messageID = rawMessageID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !messageID.isEmpty else { throw AgentToolError.invalidArguments("messageID is required") }
@@ -464,11 +476,11 @@ public struct MailCreateDraftTool: AgentTool {
         ], required: ["to", "subject", "body"])
     }
     public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
-    private static func addresses(_ values: [SendableJSONValue]?) -> [MailAddress] {
+    static func addresses(_ values: [SendableJSONValue]?) -> [MailAddress] {
         (values ?? []).compactMap(\.stringValue).map { MailAddress(email: $0) }
     }
 
-    private struct ResolvedSendIdentity: Sendable {
+    struct ResolvedSendIdentity: Sendable {
         var account: MailAccount
         var identity: MailIdentity
     }
@@ -478,7 +490,7 @@ public struct MailCreateDraftTool: AgentTool {
         return trimmed.lowercased() == "default" ? nil : trimmed
     }
 
-    private func resolveSendIdentity(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> ResolvedSendIdentity {
+    func resolveSendIdentity(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> ResolvedSendIdentity {
         let accounts = try await runtime.listAccounts(runID: context.runID, sessionID: context.sessionID)
         guard !accounts.isEmpty else {
             throw AgentToolError.invalidArguments("No mail accounts configured. Add a mail account in Settings before sending mail.")
@@ -549,6 +561,96 @@ public struct MailCreateDraftTool: AgentTool {
             toolCallID: context.toolCallID,
             toolName: name,
             contentText: "Created draft \(draftID) using account=\"\(resolved.account.id.rawValue)\" from=\"\(resolved.identity.address.email)\"; not sent. To send it through the current session permission policy, call mail_send_draft with draftID=\"\(draftID)\". Ask mode presents the native Compose approval card; Execute mode sends immediately. Do not ask the user to provide the draft ID.",
+            contentJSON: try MailJSON.encodeDraft(draft)
+        )
+    }
+}
+
+public struct MailReplyToMessageTool: AgentTool {
+    public let runtime: any AgentMailRuntime
+    public var name: String { "mail_reply_to_message" }
+    public var description: String { "Create a governed reply draft to an existing mail message: the recipient is automatically set to the original sender, the subject is prefixed with Re:, and the original message is quoted when includeOriginal is true (default). Call mail_send_draft with the returned draftID to send it through the session permission policy." }
+    public var permission: AgentPermissionCapability { .createMailDraft }
+    public var inputSchema: AgentToolInputSchema {
+        .closedObject(properties: [
+            "messageID": .string(description: "Exact messageID returned by a mail list/search/get result. Copy the field without renaming it."),
+            "body": .string(description: "Reply body text (plain text)"),
+            "accountID": .string(description: "Optional exact accountID returned by mail_list_accounts. Omit, empty, or pass default to use the Settings default send account; never invent account IDs."),
+            "identityID": .string(description: "Optional exact identityID from the selected account. Omit to use the default send identity; never invent identity IDs."),
+            "includeOriginal": .boolean(description: "Whether to quote the original message below the reply; defaults to true"),
+            "intentSummary": .string(description: "Optional short human-readable summary of the intent")
+        ], required: ["messageID", "body"])
+    }
+    public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let messageID = try MailGetMessageTool.normalizedMessageID(from: arguments)
+        let body = arguments.string("body")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !body.isEmpty else { throw AgentToolError.invalidArguments("body is required") }
+        let resolver = MailCreateDraftTool(runtime: runtime)
+        let resolved = try await resolver.resolveSendIdentity(arguments: arguments, context: context)
+        let draft = try await runtime.createReplyDraft(
+            accountID: resolved.account.id,
+            identityID: resolved.identity.id,
+            messageID: MailMessageID(rawValue: messageID),
+            body: body,
+            includeOriginal: arguments.bool("includeOriginal") ?? true,
+            intentSummary: arguments.string("intentSummary"),
+            runID: context.runID,
+            sessionID: context.sessionID
+        )
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Created reply draft \(draft.id.rawValue) using account=\"\(resolved.account.id.rawValue)\" from=\"\(resolved.identity.address.email)\"; not sent. To send it through the current session permission policy, call mail_send_draft with draftID=\"\(draft.id.rawValue)\". Do not ask the user to provide the draft ID.",
+            contentJSON: try MailJSON.encodeDraft(draft)
+        )
+    }
+}
+
+public struct MailForwardMessageTool: AgentTool {
+    public let runtime: any AgentMailRuntime
+    public var name: String { "mail_forward_message" }
+    public var description: String { "Create a governed forward draft of an existing mail message to new recipients: the subject is prefixed with Fwd:, and the original message is quoted when includeOriginal is true (default). Call mail_send_draft with the returned draftID to send it through the session permission policy." }
+    public var permission: AgentPermissionCapability { .createMailDraft }
+    public var inputSchema: AgentToolInputSchema {
+        .closedObject(properties: [
+            "messageID": .string(description: "Exact messageID returned by a mail list/search/get result. Copy the field without renaming it."),
+            "to": .array(items: .string(description: "Recipient email address"), description: "Forward recipients"),
+            "cc": .array(items: .string(description: "Cc email address"), description: "Optional CC recipients"),
+            "bcc": .array(items: .string(description: "Bcc email address"), description: "Optional BCC recipients"),
+            "body": .string(description: "Forward body text (plain text)"),
+            "accountID": .string(description: "Optional exact accountID returned by mail_list_accounts. Omit, empty, or pass default to use the Settings default send account; never invent account IDs."),
+            "identityID": .string(description: "Optional exact identityID from the selected account. Omit to use the default send identity; never invent identity IDs."),
+            "includeOriginal": .boolean(description: "Whether to include the forwarded original message below the body; defaults to true"),
+            "intentSummary": .string(description: "Optional short human-readable summary of the intent")
+        ], required: ["messageID", "to", "body"])
+    }
+    public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let messageID = try MailGetMessageTool.normalizedMessageID(from: arguments)
+        let body = arguments.string("body")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !body.isEmpty else { throw AgentToolError.invalidArguments("body is required") }
+        let to = MailCreateDraftTool.addresses(arguments.array("to"))
+        guard !to.isEmpty else { throw AgentToolError.invalidArguments("to is required for forwarding") }
+        let resolver = MailCreateDraftTool(runtime: runtime)
+        let resolved = try await resolver.resolveSendIdentity(arguments: arguments, context: context)
+        let draft = try await runtime.createForwardDraft(
+            accountID: resolved.account.id,
+            identityID: resolved.identity.id,
+            messageID: MailMessageID(rawValue: messageID),
+            to: to,
+            cc: MailCreateDraftTool.addresses(arguments.array("cc")),
+            bcc: MailCreateDraftTool.addresses(arguments.array("bcc")),
+            body: body,
+            includeOriginal: arguments.bool("includeOriginal") ?? true,
+            intentSummary: arguments.string("intentSummary"),
+            runID: context.runID,
+            sessionID: context.sessionID
+        )
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Created forward draft \(draft.id.rawValue) using account=\"\(resolved.account.id.rawValue)\" from=\"\(resolved.identity.address.email)\"; not sent. To send it through the current session permission policy, call mail_send_draft with draftID=\"\(draft.id.rawValue)\". Do not ask the user to provide the draft ID.",
             contentJSON: try MailJSON.encodeDraft(draft)
         )
     }
@@ -705,6 +807,8 @@ public extension AgentToolRegistry {
         register(MailGetMessageTool(runtime: runtime, recorder: recorder))
         register(MailSetReadStateTool(runtime: runtime))
         register(MailCreateDraftTool(runtime: runtime))
+        register(MailReplyToMessageTool(runtime: runtime))
+        register(MailForwardMessageTool(runtime: runtime))
         if let contactRuntime {
             register(MailCreateDraftToPeopleTool(mailRuntime: runtime, contactRuntime: contactRuntime))
         }

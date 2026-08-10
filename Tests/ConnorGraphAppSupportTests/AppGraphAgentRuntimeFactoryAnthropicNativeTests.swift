@@ -277,6 +277,8 @@ private func anthropicNativeTemporaryDatabaseURL(_ name: String = UUID().uuidStr
         reservedOutputTokens: 8_192
     ))
 
-    #expect(manager.maximumInputTokens == 64_000)
-    #expect(outputLimitedManager.maximumInputTokens == 51_808)
+    // promptMaxEstimatedTokens 默认值 64_000 现在视为“自动”：按模型窗口×0.8 推导，
+    // 因此 200k 窗口 → 160k；60k 窗口 → 48k（不再被固定 64k 卡住）。
+    #expect(manager.maximumInputTokens == 160_000)
+    #expect(outputLimitedManager.maximumInputTokens == 48_000)
 }

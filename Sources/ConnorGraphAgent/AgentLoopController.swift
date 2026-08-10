@@ -68,6 +68,19 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.providerRetryDelaySeconds = max(0.1, providerRetryDelaySeconds)
     }
 
+    /// 默认值 64_000 现在视为“自动”：按模型真实上下文窗口推导输入上限
+    /// （窗口 × 0.8，并夹到产品上限 512_000）；显式配置的值则原样生效。
+    /// 这样 1M 窗口的模型不会再被固定 64k 卡住、每轮触发压缩。
+    public static let autoPromptLimitDefault: Int = 64_000
+    public static let productPromptLimitCap: Int = 512_000
+    public static let promptLimitFraction: Double = 0.8
+
+    public func resolvedPromptMaxEstimatedTokens(modelWindowTokens: Int) -> Int {
+        guard promptMaxEstimatedTokens == Self.autoPromptLimitDefault else { return promptMaxEstimatedTokens }
+        let derived = Int(Double(max(1, modelWindowTokens)) * Self.promptLimitFraction)
+        return max(1, min(derived, Self.productPromptLimitCap))
+    }
+
     private enum CodingKeys: String, CodingKey {
         case maxToolIterations
         case maxToolCallsPerIteration
@@ -416,8 +429,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     var compactionGeneration = 0
                     var lastCompactionEstimateAfter: Int?
                     var hasCheckpointForCurrentPressure = false
-                    var budgetCompactionRequested = false
-                    var nextBudgetCompactionTokenThreshold = max(1, configuration.budget.maxTotalTokens)
                     var artifactWasProduced = false
                     var unavailableDiscoveryNamespaces = Set<String>()
 
@@ -505,7 +516,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
                         let localMaximumInputTokens = localContextGuard.maximumInputTokens(
                             contextWindowTokens: localContextWindowTokens,
-                            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+                            configuredPromptLimit: configuration.resolvedPromptMaxEstimatedTokens(modelWindowTokens: localContextWindowTokens),
                             reservedOutputTokens: configuration.reservedOutputTokens
                         )
                         var localInputEstimate = localContextGuard.estimatedInputTokens(modelRequest)
@@ -521,17 +532,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         // handled by rolling summaries. This policy is exclusively for tool trace
                         // accumulated inside the current run.
                         let hasCurrentRunToolTrace = iterationCount > 1 && modelRequest.messages.contains { $0.role == .tool }
-                        let shouldCompactForExceededBudget = hasCurrentRunToolTrace
-                            && budgetCompactionRequested
-                        let shouldForceCompaction = shouldCompactForExceededBudget
-                        let compactionDecision = shouldForceCompaction
-                            ? AgentLoopCompactionDecision.compact
-                            : hasCurrentRunToolTrace
-                                ? compactionPolicy.decision(
-                                    for: compactionSnapshot,
-                                    hasCheckpointForCurrentPressure: hasCheckpointForCurrentPressure
-                                )
-                                : .none
+                        // 预算（累计 token 用量）只作为成本告警，不再强制逐轮压缩；
+                        // 压缩完全由“当前请求输入 vs 模型窗口×比例”的上下文压力决定。
+                        let compactionDecision = hasCurrentRunToolTrace
+                            ? compactionPolicy.decision(
+                                for: compactionSnapshot,
+                                hasCheckpointForCurrentPressure: hasCheckpointForCurrentPressure
+                            )
+                            : .none
                         if compactionDecision == .checkpoint {
                             runCheckpoint = AgentRunCheckpointBuilder().build(
                                 generation: max(1, compactionGeneration + 1),
@@ -567,7 +575,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 let compacted = try contextCompactor.compact(
                                     modelRequest,
                                     checkpoint: checkpoint,
-                                    retainedRecentToolResults: configuration.compaction.retainedRecentToolResults
+                                    retainedRecentToolResults: configuration.compaction.retainedRecentToolResults,
+                                    largeResultByteThreshold: configuration.compaction.largeResultByteThreshold
                                 )
                                 var compactedRequest = compacted.request
                                 let targetTokens = compactionPolicy.targetTokens(maximumInputTokens: localMaximumInputTokens)
@@ -589,9 +598,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 hasCheckpointForCurrentPressure = true
                                 localInputEstimate = localContextGuard.estimatedInputTokens(compactedRequest)
                                 lastCompactionEstimateAfter = localInputEstimate
-                                if shouldCompactForExceededBudget {
-                                    budgetCompactionRequested = false
-                                }
                                 yield(.compactionCompleted(AgentCompactionCompletedEvent(
                                     runID: run.id,
                                     sessionID: run.sessionID,
@@ -633,7 +639,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             currentUserInput: request.userMessage,
                             currentAttachmentEstimatedTokens: request.attachmentContextPlan.estimatedTokens,
                             contextWindowTokens: localContextWindowTokens,
-                            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+                            configuredPromptLimit: configuration.resolvedPromptMaxEstimatedTokens(modelWindowTokens: localContextWindowTokens),
                             reservedOutputTokens: configuration.reservedOutputTokens,
                             isAfterToolExecution: iterationCount > 1
                         )
@@ -688,14 +694,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                         let budgetSnapshot = await budgetMeter.record(modelResponse.usage)
                         let budgetExceeded = budgetSnapshot.status == .exceeded
-                        if budgetExceeded,
-                           budgetSnapshot.totalTokens >= nextBudgetCompactionTokenThreshold {
-                            budgetCompactionRequested = true
-                            let interval = max(1, configuration.budget.maxTotalTokens)
-                            while nextBudgetCompactionTokenThreshold <= budgetSnapshot.totalTokens {
-                                nextBudgetCompactionTokenThreshold += interval
-                            }
-                        }
                         if budgetSnapshot.status == .warning || budgetExceeded {
                             let label = budgetExceeded ? "Token budget exceeded" : "Token budget warning"
                             let suffix = budgetExceeded
@@ -1044,7 +1042,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
                         let maximumInputTokens = contextGuard.maximumInputTokens(
                             contextWindowTokens: contextWindowTokens,
-                            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+                            configuredPromptLimit: configuration.resolvedPromptMaxEstimatedTokens(modelWindowTokens: contextWindowTokens),
                             reservedOutputTokens: configuration.reservedOutputTokens
                         )
                         let contextSafetyMarginTokens = min(512, max(32, maximumInputTokens / 100))
@@ -2660,7 +2658,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         let contextGuard = AgentModelContextGuard()
         let maximumInputTokens = contextGuard.maximumInputTokens(
             contextWindowTokens: contextWindowTokens,
-            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+            configuredPromptLimit: configuration.resolvedPromptMaxEstimatedTokens(modelWindowTokens: contextWindowTokens),
             reservedOutputTokens: configuration.reservedOutputTokens
         )
         let toolDefinitionTokens = contextGuard.estimatedInputTokens(

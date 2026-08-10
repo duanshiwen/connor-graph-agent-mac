@@ -183,7 +183,8 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
         sessionRepository: AppChatSessionRepository(store: store)
     )
 
-    #expect(manager.maximumInputTokens == 51_808)
+    // 默认 64_000 视为自动：60k 窗口 → min(60k×0.8, 512k)=48k。
+    #expect(manager.maximumInputTokens == 48_000)
 }
 
 @Test func nativeSessionManagerCompactsAtMostOncePerSubmission() async throws {

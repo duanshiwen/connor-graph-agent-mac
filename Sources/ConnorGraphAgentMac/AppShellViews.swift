@@ -242,12 +242,20 @@ struct AppShellView: View {
         .overlay(alignment: .topLeading) {
             BrowserBackgroundTaskRunnerView(model: graph.browser)
         }
-        .overlay(alignment: .top) {
+        .overlay {
             if graph.globalSearch.isOverlayPresented && (!graph.globalSearch.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !graph.globalSearch.historyEntries.isEmpty) {
-                AppGlobalSearchOverlayView(model: graph.globalSearch)
-                    .padding(.top, 8)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .zIndex(20)
+                ZStack(alignment: .top) {
+                    // 透明点击层：点击搜索面板之外的任意页面区域即关闭浮层。
+                    // 面板本身叠加在其上层，仍正常响应；工具栏/搜索框区域在内容区之外不受影响。
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { graph.globalSearch.dismissOverlay() }
+                        .accessibilityHidden(true)
+                    AppGlobalSearchOverlayView(model: graph.globalSearch)
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                .zIndex(20)
             }
         }
         .background(WindowTitlebarConfigurator())

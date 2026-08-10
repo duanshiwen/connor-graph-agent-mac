@@ -28,7 +28,9 @@ final class CalendarFeatureModel {
     var selectedEventID: CalendarEventID?
     var isPresentingAddSourceSheet = false
     private(set) var isSyncingSystemCalendar = false
+    private(set) var isSyncingAll = false
     private(set) var syncMessage: String?
+    private(set) var isSyncStatusBannerDismissed = false
     private(set) var errorMessage: String?
 
     @ObservationIgnored private let legacyStore: FileBackedCalendarSourceStore?
@@ -281,6 +283,66 @@ final class CalendarFeatureModel {
         }
         let succeeded = await syncSystemCalendarNow()
         return succeeded ? (syncMessage ?? "Calendar refreshed") : (syncMessage ?? "Calendar refresh failed")
+    }
+
+    /// 手动刷新全部日历源：本机日历 + 所有已配置的远程账户（CalDAV/ICS）。
+    var showsSyncStatusBanner: Bool {
+        isSyncingAll && syncMessage != nil && !isSyncStatusBannerDismissed
+    }
+
+    /// 关闭当前同步状态提示；下一次新同步开始时自动恢复显示。
+    func dismissSyncStatusBanner() {
+        isSyncStatusBannerDismissed = true
+    }
+
+    func syncAllSources() {
+        guard !isShutdown, !isSyncingAll else { return }
+        isSyncingAll = true
+        isSyncStatusBannerDismissed = false
+        syncMessage = "正在同步全部日历源…"
+        startOwnedTask { [weak self] in
+            guard let self else { return }
+            defer { self.isSyncingAll = false }
+            var summaries: [String] = []
+            var failures: [String] = []
+            // 1) 本机系统日历（EventKit）
+            let systemOK = await self.syncSystemCalendarNow()
+            if systemOK, let message = self.syncMessage { summaries.append(message) }
+            // 2) 远程账户（CalDAV / ICS 订阅）
+            for account in self.accounts where account.id.rawValue != CalendarEventKitAdapter.systemAccountID.rawValue {
+                guard let runtimeStore = self.runtimeStore else { continue }
+                do {
+                    let result = try await self.remoteAccountSynchronizer(
+                        account,
+                        self.readCredential(for: account),
+                        nil,
+                        runtimeStore
+                    )
+                    let snapshot = try await runtimeStore.loadSnapshot()
+                    guard !Task.isCancelled, !self.isShutdown else { return }
+                    self.accounts = self.mergeAccounts(self.accounts, snapshot.accounts)
+                    self.collections = self.mergeCollections(self.collections, snapshot.collections)
+                    self.events = self.mergeEvents(self.events, snapshot.events)
+                    self.rebuildPresentation()
+                    await self.persistSnapshot()
+                    summaries.append("\(account.displayName)：\(result.events.count) 个日程")
+                } catch is CancellationError {
+                    return
+                } catch {
+                    failures.append("\(account.displayName)：\(error.localizedDescription)")
+                }
+            }
+            if summaries.isEmpty { summaries.append("已同步全部日历源") }
+            let combined = summaries.joined(separator: "；")
+            if failures.isEmpty {
+                self.syncMessage = combined
+                self.reportSuccess()
+            } else {
+                let failureSummary = failures.joined(separator: "；")
+                self.syncMessage = combined + "；失败：\(failureSummary)"
+                self.reportFailure(failureSummary)
+            }
+        }
     }
 
     func waitForPendingOperations() async {

@@ -56,10 +56,16 @@ final class MailFeatureModel {
     var isPresentingAddAccountSheet = false
     private(set) var isSyncing = false
     private(set) var syncMessage: String?
+    private(set) var isSyncStatusBannerDismissed = false
     private(set) var errorMessage: String?
 
     var showsSyncStatusBanner: Bool {
-        isSyncing && syncMessage != nil
+        isSyncing && syncMessage != nil && !isSyncStatusBannerDismissed
+    }
+
+    /// 关闭当前同步状态提示；下一次新同步开始时自动恢复显示。
+    func dismissSyncStatusBanner() {
+        isSyncStatusBannerDismissed = true
     }
 
     @ObservationIgnored private let store: FileBackedMailSourceStore?
@@ -234,6 +240,7 @@ final class MailFeatureModel {
         try credentialStore.saveCredential(password, binding: binding)
         try await store.saveAccount(account); try await store.saveMailbox(inbox)
         selectedAccountID = accountID; selectedMailboxID = inbox.id
+        isSyncStatusBannerDismissed = false
         syncMessage = "已添加邮箱：\(account.displayName)，正在全量同步全部邮箱文件夹…"
         await reload()
         isPresentingAddAccountSheet = false
@@ -246,10 +253,36 @@ final class MailFeatureModel {
     func rebuildCacheAndRefresh() async -> String {
         do {
             guard let store else { return "Mail store unavailable" }
+            isSyncStatusBannerDismissed = false
             try await store.clearCachedMailData(); await reload()
             let result = try await refreshForScheduledTask(sourceInstanceID: nil, runID: nil)
             let message = "已清空本地邮件缓存并重新同步。\(result)"; syncMessage = message; return message
         } catch { let message = "无法重建邮件缓存：\(error.localizedDescription)"; syncMessage = message; reportFailure(message); return message }
+    }
+
+    /// 手动刷新全部邮箱账户（增量同步；尚未同步过的账户走全量）。
+    func refreshAllNow() {
+        guard !isShutdown, !isSyncing else { return }
+        isSyncing = true
+        isSyncStatusBannerDismissed = false
+        syncMessage = "正在同步全部邮箱…"
+        startOwnedTask { [weak self] in
+            guard let self else { return }
+            defer { self.isSyncing = false }
+            do {
+                let summary = try await self.refreshForScheduledTask(sourceInstanceID: nil, runID: nil)
+                guard !self.isShutdown else { return }
+                self.syncMessage = summary
+                self.reportSuccess()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !self.isShutdown else { return }
+                let message = error.localizedDescription
+                self.syncMessage = message
+                self.reportFailure(message)
+            }
+        }
     }
 
     func refreshForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {

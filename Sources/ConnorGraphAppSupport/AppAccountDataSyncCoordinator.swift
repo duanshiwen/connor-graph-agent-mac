@@ -295,11 +295,17 @@ public actor AppAccountDataSyncCoordinator {
             }
             mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: encrypted))
         }
-        // 技能包与 L0/L1 按“最新操作优先”：本地已删除且此前同步过的记录回推 tombstone（载荷带删除时间）。
+        // 技能包与 L0/L1/标签按“最新操作优先”：本地已删除且此前同步过的记录回推 tombstone（载荷带删除时间）。
+        // 集合级防护：本机该集合投影完全为空时不回推 tombstone——空列表更可能是本地数据
+        // 丢失/列表被清空，而不是“删光了全部”，避免一台空设备把其它端的数据也清掉。
+        // RSS 订阅源不走这里：它使用显式删除标记（pendingDeletes），见下方单独逻辑。
         let nowMillis = Int64(Date().timeIntervalSince1970 * 1_000)
-        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|", "rss_subscriptions|"]
+        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|"]
+        let projectedCollections = Set(projected.keys.map { String($0.split(separator: "|", maxSplits: 1)[0]) })
         for key in state.records.keys where tombstonePrefixes.contains(where: { key.hasPrefix($0) }) {
             guard state.records[key]?.deleted != true, projected[key] == nil else { continue }
+            let collection = String(key.split(separator: "|", maxSplits: 1)[0])
+            guard projectedCollections.contains(collection) else { continue }
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
             let tombstone = SyncTombstone(updatedAt: nowMillis)
             mutations.append(try ConnorSyncChange(
@@ -310,6 +316,33 @@ public actor AppAccountDataSyncCoordinator {
                 deleted: true
             ))
         }
+        // RSS 订阅源：只对“本机显式删除”（用户在 RSS 列表里删除）回推 tombstone，
+        // 删除时间取标记时间而不是当前时间。本地列表被清空/文件丢失时不产生标记，
+        // 因此不会把“我这边空了”当成“全都删了”传播到其它设备。
+        var rssTombstoneKeys: [String: RSSSourceID] = [:]
+        if let rss {
+            for (sourceID, deletedAt) in try await rss.pendingDeletes() {
+                let key = recordKey(SyncCollection.rssSubscriptions, sourceID.rawValue)
+                guard let record = state.records[key], !record.deleted else {
+                    try? await rss.clearPendingDelete(id: sourceID)
+                    continue
+                }
+                // 删除后又重新订阅（同 URL 同 id）→ 本地已恢复，撤消待回推删除。
+                guard projected[key] == nil else {
+                    try? await rss.clearPendingDelete(id: sourceID)
+                    continue
+                }
+                let tombstone = SyncTombstone(updatedAt: deletedAt)
+                mutations.append(try ConnorSyncChange(
+                    collection: SyncCollection.rssSubscriptions,
+                    recordId: sourceID.rawValue,
+                    baseVersion: record.version,
+                    payload: cipher.encrypt(jsonValue(tombstone), collection: SyncCollection.rssSubscriptions, recordID: sourceID.rawValue),
+                    deleted: true
+                ))
+                rssTombstoneKeys[key] = sourceID
+            }
+        }
 
         for batch in mutations.chunked(into: 200) {
             let results = try await identity.pushSyncChanges(batch)
@@ -317,6 +350,9 @@ public actor AppAccountDataSyncCoordinator {
                 let clear = try cipher.decrypt(mutation.payload, collection: mutation.collection, recordID: mutation.recordId)
                 state.records[recordKey(mutation.collection, mutation.recordId)] = RecordState(version: (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(clear.payload), deleted: mutation.deleted, encrypted: true)
                 syncResult.pushedChangeCount += 1
+                if let sourceID = rssTombstoneKeys[recordKey(mutation.collection, mutation.recordId)] {
+                    try? await rss?.clearPendingDelete(id: sourceID)
+                }
             }
         }
         // 清理历史残留（settings|profile 等不可同步记录），避免重新进入同步状态机。
@@ -535,7 +571,8 @@ public actor AppAccountDataSyncCoordinator {
                 let tombstone: SyncTombstone = try decode(change.payload)
                 let local = try await rss.source(id: sourceID)
                 if tombstone.updatedAt > Int64((local?.updatedAt ?? .distantPast).timeIntervalSince1970 * 1_000) {
-                    try await rss.deleteSource(id: sourceID)
+                    try await rss.applyRemoteDelete(id: sourceID)
+                    try? await rss.clearPendingDelete(id: sourceID)
                     return .rssSubscriptions
                 }
             } else {
@@ -545,7 +582,8 @@ public actor AppAccountDataSyncCoordinator {
                 let sources = try await rss.listSources()
                 if let byURL = sources.first(where: { $0.feedURL.absoluteString == wire.feedURL && $0.id.rawValue != id }) {
                     if wire.updatedAt > Int64(byURL.updatedAt.timeIntervalSince1970 * 1_000) {
-                        try await rss.deleteSource(id: byURL.id)
+                        // 去重替换是远端驱动的合并，不是用户删除：不产生删除标记。
+                        try await rss.applyRemoteDelete(id: byURL.id)
                         try await rss.saveSource(SyncRSSSubscription.makeSource(wire, local: nil))
                     }
                     return .rssSubscriptions

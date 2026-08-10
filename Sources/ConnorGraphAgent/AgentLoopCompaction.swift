@@ -8,6 +8,9 @@ public struct AgentLoopCompactionConfiguration: Codable, Sendable, Equatable {
     public var targetRatio: Double
     public var minimumTokenGrowth: Int
     public var retainedRecentToolResults: Int
+    /// 工具结果超过该字节数时，即使是“最近 N 条”也一律压成 checkpoint 占位符。
+    /// 避免超大结果（例如整页草稿 15k–30k 字符）永远留在上下文里，导致压缩无效。
+    public var largeResultByteThreshold: Int
 
     public init(
         isEnabled: Bool = true,
@@ -16,7 +19,8 @@ public struct AgentLoopCompactionConfiguration: Codable, Sendable, Equatable {
         emergencyRatio: Double = 0.90,
         targetRatio: Double = 0.45,
         minimumTokenGrowth: Int = 20_000,
-        retainedRecentToolResults: Int = 2
+        retainedRecentToolResults: Int = 2,
+        largeResultByteThreshold: Int = 8 * 1_024
     ) {
         self.isEnabled = isEnabled
         self.checkpointRatio = Self.clamped(checkpointRatio)
@@ -25,10 +29,27 @@ public struct AgentLoopCompactionConfiguration: Codable, Sendable, Equatable {
         self.targetRatio = min(self.checkpointRatio, Self.clamped(targetRatio))
         self.minimumTokenGrowth = max(0, minimumTokenGrowth)
         self.retainedRecentToolResults = max(0, retainedRecentToolResults)
+        self.largeResultByteThreshold = max(1, largeResultByteThreshold)
     }
 
     private static func clamped(_ ratio: Double) -> Double {
         min(max(ratio, 0.05), 1.0)
+    }
+
+    /// 容错解码：老版本持久化的设置 JSON 没有 largeResultByteThreshold（以及可能缺其它键）时，
+    /// 用默认值补齐，避免整个设置加载失败（此前合成 Codable 要求所有键都存在）。
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true,
+            checkpointRatio: try container.decodeIfPresent(Double.self, forKey: .checkpointRatio) ?? 0.70,
+            compactionRatio: try container.decodeIfPresent(Double.self, forKey: .compactionRatio) ?? 0.80,
+            emergencyRatio: try container.decodeIfPresent(Double.self, forKey: .emergencyRatio) ?? 0.90,
+            targetRatio: try container.decodeIfPresent(Double.self, forKey: .targetRatio) ?? 0.45,
+            minimumTokenGrowth: try container.decodeIfPresent(Int.self, forKey: .minimumTokenGrowth) ?? 20_000,
+            retainedRecentToolResults: try container.decodeIfPresent(Int.self, forKey: .retainedRecentToolResults) ?? 2,
+            largeResultByteThreshold: try container.decodeIfPresent(Int.self, forKey: .largeResultByteThreshold) ?? 8 * 1_024
+        )
     }
 }
 
@@ -230,7 +251,8 @@ public struct AgentLoopContextCompactor: Sendable {
     public func compact(
         _ request: AgentModelRequest,
         checkpoint: AgentRunCheckpoint,
-        retainedRecentToolResults: Int
+        retainedRecentToolResults: Int,
+        largeResultByteThreshold: Int = 8 * 1_024
     ) throws -> AgentLoopCompactionResult {
         var compacted = request
         compacted.messages.removeAll {
@@ -243,13 +265,21 @@ public struct AgentLoopContextCompactor: Sendable {
             at: checkpointIndex
         )
 
+        // 按“大小 + 新旧”双条件决定保留：最近 N 条里只有小结果原样保留；
+        // 任何超过阈值的超大结果（整页草稿、大文件读取等）一律压成 checkpoint 占位符，
+        // 否则它们会永远留在“最近结果”窗口里，压缩形同虚设。
         let toolIndices = compacted.messages.indices.filter { compacted.messages[$0].role == .tool }
-        let compactCount = max(0, toolIndices.count - max(0, retainedRecentToolResults))
-        for index in toolIndices.prefix(compactCount) {
+        let retainedCount = max(0, retainedRecentToolResults)
+        var compactCount = 0
+        for (offset, index) in toolIndices.enumerated() {
+            let isRecent = offset >= toolIndices.count - retainedCount
             let message = compacted.messages[index]
+            let isLarge = message.content.utf8.count >= largeResultByteThreshold
+            if isRecent && !isLarge { continue }
             compacted.messages[index].content = "\(Self.compactedToolResultPrefix) name=\(message.name ?? "tool"), callID=\(message.toolCallID ?? "unknown"), originalCharacters=\(message.content.count); see checkpoint generation \(checkpoint.generation).]"
             compacted.messages[index].contentParts = nil
             compacted.messages[index].providerMetadata = nil
+            compactCount += 1
         }
         return AgentLoopCompactionResult(request: compacted, compactedToolResultCount: compactCount)
     }

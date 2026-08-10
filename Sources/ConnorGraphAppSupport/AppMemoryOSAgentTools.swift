@@ -122,7 +122,10 @@ enum MemoryOSLayeredContextSupport {
     static func normalizeLegacyArguments(_ arguments: AgentToolArguments, includeDepth: Bool) -> AgentToolArguments {
         var values = arguments.values
         values.removeValue(forKey: "limit")
+        // 模型经常把整数参数（page/pageSize/depth）发成 JSON 字符串，这里统一转回整数，
+        // 否则本地搜索工具会因“pageSize 必须是 JSON 整数”这类错误瞬时失败，触发模型反复重试。
         normalizeIntegerString(named: "page", in: &values)
+        normalizeIntegerString(named: "pageSize", in: &values)
         if includeDepth {
             normalizeIntegerString(named: "depth", in: &values)
         }
@@ -625,6 +628,10 @@ public struct MemoryOSGetCurrentUserProfileTool: AgentTool {
     public init(facade: AppMemoryOSFacade, configuration: MemoryOSContextToolConfiguration = .init(pageSize: 500)) {
         self.facade = facade
         self.configuration = configuration
+    }
+
+    public func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments {
+        MemoryOSLayeredContextSupport.normalizeLegacyArguments(arguments, includeDepth: false)
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {

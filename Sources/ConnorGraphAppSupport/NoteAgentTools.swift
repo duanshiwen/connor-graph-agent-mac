@@ -45,6 +45,16 @@ public struct NoteSearchTool: AgentTool {
 
     public init(search: NoteSearchService) { self.search = search }
 
+    public func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments {
+        var values = arguments.values
+        // 模型经常把 page 发成字符串（如 "1"），这里转回整数，避免本地笔记搜索被误判为无效参数。
+        if case .string(let raw)? = values["page"] {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let integer = Int(trimmed) { values["page"] = .int(integer) }
+        }
+        return AgentToolArguments(values: values)
+    }
+
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let query = arguments.string("query") ?? ""
         let page: Int

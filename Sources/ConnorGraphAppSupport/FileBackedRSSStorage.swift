@@ -4,19 +4,23 @@ import ConnorGraphCore
 
 public actor FileBackedRSSSourceRepository: RSSSourceRepository {
     private let storageURL: URL
+    private let deletedStorageURL: URL
     private let fileManager: FileManager
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
     public init(storageDirectory: URL, fileManager: FileManager = .default) {
         self.storageURL = storageDirectory.appendingPathComponent("sources.json")
+        self.deletedStorageURL = storageDirectory.appendingPathComponent("deleted-sources.json")
         self.fileManager = fileManager
         self.encoder = rssStorageJSONEncoder()
         self.decoder = rssStorageJSONDecoder()
     }
 
     public init(storagePaths: AppStoragePaths, fileManager: FileManager = .default) {
-        self.storageURL = storagePaths.sourcesDirectory.appendingPathComponent("rss", isDirectory: true).appendingPathComponent("sources.json")
+        let directory = storagePaths.sourcesDirectory.appendingPathComponent("rss", isDirectory: true)
+        self.storageURL = directory.appendingPathComponent("sources.json")
+        self.deletedStorageURL = directory.appendingPathComponent("deleted-sources.json")
         self.fileManager = fileManager
         self.encoder = rssStorageJSONEncoder()
         self.decoder = rssStorageJSONDecoder()
@@ -38,14 +42,57 @@ public actor FileBackedRSSSourceRepository: RSSSourceRepository {
             sources.append(source)
         }
         try saveSources(sources)
+        // 重新订阅同一 URL（同 id）说明用户改主意了，撤消待回推的删除标记。
+        try await clearPendingDelete(id: source.id)
         // 订阅源增改后通知账号同步（本地编辑触发 reconcile，删除同样传播）。
         AppAccountSyncSignal.postLocalDataDidChange()
     }
 
+    /// 用户在本机显式删除：先记录待回推删除标记（删除时间），再删除本地源。
+    /// 只有带标记的记录才会在同步时回推 tombstone，避免“本地列表被清空/丢失”
+    /// 被误判成“全部删除”而把其它设备上的订阅也删掉。
     public func deleteSource(id: RSSSourceID) async throws {
+        try await recordPendingDelete(id: id)
         let sources = try loadSources().filter { $0.id != id }
         try saveSources(sources)
         AppAccountSyncSignal.postLocalDataDidChange()
+    }
+
+    public func applyRemoteDelete(id: RSSSourceID) async throws {
+        let sources = try loadSources().filter { $0.id != id }
+        try saveSources(sources)
+        AppAccountSyncSignal.postLocalDataDidChange()
+    }
+
+    public func pendingDeletes() async throws -> [RSSSourceID: Int64] {
+        try loadPendingDeletes().reduce(into: [RSSSourceID: Int64]()) { result, entry in
+            result[RSSSourceID(rawValue: entry.key)] = entry.value
+        }
+    }
+
+    public func clearPendingDelete(id: RSSSourceID) async throws {
+        var markers = try loadPendingDeletes()
+        guard markers.removeValue(forKey: id.rawValue) != nil else { return }
+        try savePendingDeletes(markers)
+    }
+
+    private func recordPendingDelete(id: RSSSourceID) async throws {
+        var markers = try loadPendingDeletes()
+        markers[id.rawValue] = Int64(Date().timeIntervalSince1970 * 1_000)
+        try savePendingDeletes(markers)
+    }
+
+    private func loadPendingDeletes() throws -> [String: Int64] {
+        guard fileManager.fileExists(atPath: deletedStorageURL.path) else { return [:] }
+        let data = try Data(contentsOf: deletedStorageURL)
+        guard !data.isEmpty else { return [:] }
+        return try decoder.decode([String: Int64].self, from: data)
+    }
+
+    private func savePendingDeletes(_ markers: [String: Int64]) throws {
+        try fileManager.createDirectory(at: deletedStorageURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try encoder.encode(markers)
+        try writeAtomically(data, to: deletedStorageURL, fileManager: fileManager)
     }
 
     private func loadSources() throws -> [RSSSource] {

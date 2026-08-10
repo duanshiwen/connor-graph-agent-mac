@@ -4,6 +4,12 @@ import ConnorGraphCore
 import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
 
+private actor CalendarSyncCallCounter {
+    private var count = 0
+    func increment() { count += 1 }
+    func value() -> Int { count }
+}
+
 @Suite("Calendar Feature Model Tests")
 @MainActor
 struct CalendarFeatureModelTests {
@@ -268,6 +274,50 @@ struct CalendarFeatureModelTests {
             status: .confirmed
         )
         try await store.applyMutationResult(result, audit: audit)
+    }
+
+    @Test func syncAllSourcesSyncsSystemAndRemoteAccounts() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let systemAccount = makeAccount(id: CalendarEventKitAdapter.systemAccountID.rawValue, name: "System", sourceKind: .macOSEventKit)
+        let systemCollection = makeCollection(id: "system-calendar", accountID: systemAccount.id, name: "System")
+        let systemEvent = makeEvent(id: "system-event", calendarID: systemCollection.id.rawValue, title: "System Event")
+        let remoteAccount = makeAccount(id: "remote-account", name: "Remote")
+        try await fixture.runtime.saveSnapshot(.init(accounts: [remoteAccount]))
+        let counter = CalendarSyncCallCounter()
+        let model = fixture.model(
+            systemSnapshotLoader: {
+                CalendarEventKitSnapshot(accounts: [systemAccount], collections: [systemCollection], events: [systemEvent])
+            },
+            remoteAccountSynchronizer: { account, _, _, _ in
+                await counter.increment()
+                return CalendarSourceSyncResult(accountID: account.id, sourceKind: account.sourceKind)
+            }
+        )
+        await model.reload()
+
+        model.syncAllSources()
+        await model.waitForPendingOperations()
+
+        #expect(!model.isSyncingAll)
+        #expect(model.errorMessage == nil)
+        #expect(await counter.value() == 1)
+        #expect(model.syncMessage?.contains("已同步本机日历") == true)
+        #expect(model.syncMessage?.contains("Remote：0 个日程") == true)
+    }
+
+    @Test func syncAllSourcesStatusBannerIsDismissible() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        model.syncAllSources()
+        #expect(model.showsSyncStatusBanner)
+
+        model.dismissSyncStatusBanner()
+        #expect(!model.showsSyncStatusBanner)
+
+        await model.waitForPendingOperations()
+        #expect(!model.isSyncingAll)
     }
 
     private func makeFixture() throws -> Fixture {

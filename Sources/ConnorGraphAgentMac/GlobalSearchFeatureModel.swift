@@ -281,7 +281,7 @@ final class GlobalSearchFeatureModel {
     /// arrived while the app was closed — it rebuilds the index from the full
     /// session store. Runs in the background so startup is never blocked.
     func repairSessionIndexIfNeeded(repository: AppChatSessionRepository?) {
-        guard let sessionSearchIndexService else { return }
+        guard sessionSearchIndexService != nil else { return }
         sessionIndexGeneration &+= 1
         let generation = sessionIndexGeneration
         sessionIndexBootstrapTask?.cancel()

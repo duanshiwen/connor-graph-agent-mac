@@ -27,6 +27,18 @@ public protocol RSSSourceRepository: Sendable {
     func source(id: RSSSourceID) async throws -> RSSSource?
     func saveSource(_ source: RSSSource) async throws
     func deleteSource(id: RSSSourceID) async throws
+    /// 远端 tombstone 落库：删除但不产生本地删除标记（避免把远端删除再回推一遍）。
+    func applyRemoteDelete(id: RSSSourceID) async throws
+    /// 待回推的本地删除（id -> 删除时间毫秒）。只有用户在本机显式删除才会留下标记。
+    func pendingDeletes() async throws -> [RSSSourceID: Int64]
+    /// 清除指定 id 的待回推删除标记（重新订阅或 tombstone 已推送后调用）。
+    func clearPendingDelete(id: RSSSourceID) async throws
+}
+
+public extension RSSSourceRepository {
+    func applyRemoteDelete(id: RSSSourceID) async throws { try await deleteSource(id: id) }
+    func pendingDeletes() async throws -> [RSSSourceID: Int64] { [:] }
+    func clearPendingDelete(id: RSSSourceID) async throws {}
 }
 
 public protocol RSSSourceCache: Sendable {

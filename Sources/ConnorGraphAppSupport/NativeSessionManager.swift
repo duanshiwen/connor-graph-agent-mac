@@ -134,7 +134,7 @@ public struct NativeSessionManager: Sendable {
             ?? SessionContextBudget.inferContextWindowSize(modelID: loopController.modelProvider.modelID)
         let maximumInputTokens = AgentModelContextGuard().maximumInputTokens(
             contextWindowTokens: contextWindowTokens,
-            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+            configuredPromptLimit: configuration.resolvedPromptMaxEstimatedTokens(modelWindowTokens: contextWindowTokens),
             reservedOutputTokens: configuration.reservedOutputTokens
         )
         self.init(

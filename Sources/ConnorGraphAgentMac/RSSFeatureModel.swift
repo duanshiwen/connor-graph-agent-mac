@@ -39,6 +39,9 @@ final class RSSFeatureModel {
     var editingSource: RSSSource?
     var pendingSourceDeletion: RSSSource?
     private(set) var errorMessage: String?
+    private(set) var isRefreshingAll = false
+    private(set) var refreshSummary: String?
+    private(set) var isSyncStatusBannerDismissed = false
 
     @ObservationIgnored private let runtime: RSSRuntime
     @ObservationIgnored private var reloadGeneration: UInt64 = 0
@@ -274,6 +277,39 @@ final class RSSFeatureModel {
         }
         await reload(runID: runID, sessionID: sessionID)
         return "RSS refreshed \(sources.count) sources; inserted \(inserted), duplicates \(duplicates)"
+    }
+
+    /// 手动刷新全部 RSS 订阅源（等价于定时任务的“全部刷新”）。
+    var showsSyncStatusBanner: Bool {
+        isRefreshingAll && refreshSummary != nil && !isSyncStatusBannerDismissed
+    }
+
+    /// 关闭当前同步状态提示；下一次新同步开始时自动恢复显示。
+    func dismissSyncStatusBanner() {
+        isSyncStatusBannerDismissed = true
+    }
+
+    func refreshAllNow() {
+        guard !isShutdown, !isRefreshingAll else { return }
+        isRefreshingAll = true
+        isSyncStatusBannerDismissed = false
+        refreshSummary = "正在同步全部订阅源…"
+        startOwnedTask { [weak self] in
+            guard let self else { return }
+            defer { self.isRefreshingAll = false }
+            do {
+                let summary = try await self.refreshForScheduledTask(sourceInstanceID: nil, runID: nil)
+                guard !self.isShutdown else { return }
+                self.refreshSummary = summary
+                self.reportSuccess()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !self.isShutdown else { return }
+                self.refreshSummary = nil
+                self.reportFailure(String(describing: error))
+            }
+        }
     }
 
     func waitForPendingOperations() async {

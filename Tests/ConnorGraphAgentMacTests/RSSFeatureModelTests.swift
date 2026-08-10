@@ -328,3 +328,46 @@ private func waitUntil(
     #expect(all == "RSS refreshed 1 sources; inserted 0, duplicates 1")
     #expect(model.presentation.items.count == 1)
 }
+
+@MainActor
+@Test func rssFeatureRefreshAllNowRefreshesEverySource() async throws {
+    let (source, _) = makeRSSFixture()
+    let runtime = RSSRuntime(
+        repository: InMemoryRSSSourceRepository(sources: [source]),
+        cache: InMemoryRSSSourceCache(),
+        fetcher: RSSStaticFetcher(result: .success(rssFixtureXML))
+    )
+    let model = RSSFeatureModel(runtime: runtime)
+
+    model.refreshAllNow()
+    await model.waitForPendingOperations()
+
+    #expect(!model.isRefreshingAll)
+    #expect(model.errorMessage == nil)
+    #expect(model.refreshSummary == "RSS refreshed 1 sources; inserted 1, duplicates 0")
+    #expect(model.presentation.items.count == 1)
+}
+
+@MainActor
+@Test func rssFeatureSyncStatusBannerIsDismissibleAndResetsOnNextRefresh() async throws {
+    let (source, _) = makeRSSFixture()
+    let runtime = RSSRuntime(
+        repository: InMemoryRSSSourceRepository(sources: [source]),
+        cache: InMemoryRSSSourceCache(),
+        fetcher: RSSStaticFetcher(result: .success(rssFixtureXML))
+    )
+    let model = RSSFeatureModel(runtime: runtime)
+
+    model.refreshAllNow()
+    #expect(model.showsSyncStatusBanner)
+    model.dismissSyncStatusBanner()
+    #expect(!model.showsSyncStatusBanner)
+
+    await model.waitForPendingOperations()
+
+    // 下一次新同步开始时自动恢复显示。
+    model.refreshAllNow()
+    #expect(model.showsSyncStatusBanner)
+    await model.waitForPendingOperations()
+    #expect(!model.isRefreshingAll)
+}

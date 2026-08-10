@@ -3095,7 +3095,7 @@ func phasedAgentLoopRequiresToolsUntilFinalSynthesis() async throws {
     #expect(events.last?.kind == .runCompleted)
 }
 
-@Test func agentLoopCompactsAfterSoftBudgetExceededAndContinuesToCompletion() async throws {
+@Test func agentLoopDoesNotCompactFromBudgetAloneAndCompletes() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
             text: nil,
@@ -3125,8 +3125,11 @@ func phasedAgentLoopRequiresToolsUntilFinalSynthesis() async throws {
         events.append(event)
     }
 
-    #expect(events.map(\.kind).contains(.compactionStarted))
-    #expect(events.map(\.kind).contains(.compactionCompleted))
+    // C 方案后，累计预算只做成本告警，不再强制压缩；压缩由上下文压力决定。
+    // 该测试用小预算验证：预算超限不会触发 compaction，任务仍正常完成。
+    #expect(events.map(\.kind).contains(.budgetWarning))
+    #expect(!events.map(\.kind).contains(.compactionStarted))
+    #expect(!events.map(\.kind).contains(.compactionCompleted))
     #expect(events.map(\.kind).contains(.textComplete))
     #expect(events.last?.kind == .runCompleted)
 }
