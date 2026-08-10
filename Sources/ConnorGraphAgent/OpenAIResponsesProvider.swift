@@ -261,9 +261,10 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
         var body: [String: Any] = [
             "model": config.requestModel,
             "input": inputItems(for: request),
-            "store": false,
-            "max_output_tokens": request.maxTokens ?? 8_192
+            "store": false
         ]
+        // 默认不发送 max_output_tokens（由服务端默认决定）；互动网页等长任务显式放大。
+        if let maxTokens = request.maxTokens { body["max_output_tokens"] = maxTokens }
         if request.temperature > 0 { body["temperature"] = request.temperature }
         if stream { body["stream"] = true }
         if let reasoningEffort = config.reasoningEffort, !reasoningEffort.isEmpty {

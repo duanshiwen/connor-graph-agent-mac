@@ -400,7 +400,8 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                 ? nil
                 : request.toolChoice.rawValue,
             reasoningEffort: config.reasoningEffort,
-            maxTokens: request.maxTokens ?? 8_192,
+            // 默认不发送 max_tokens（由服务端默认决定）；互动网页等长任务显式放大。
+            maxTokens: request.maxTokens,
             stream: stream
         )
         let data = try JSONSerialization.data(withJSONObject: try body.jsonObject(), options: [.sortedKeys])

@@ -35,7 +35,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         preflightMode: AgentPreflightMode = .contextual,
         toolExposureMode: AgentToolExposureMode = .contextual,
         promptProjectionMode: AgentPromptProjectionMode = .legacySingleUserMessage,
-        promptMaxEstimatedTokens: Int = 64_000,
+        promptMaxEstimatedTokens: Int = 128_000,
         modelContextWindowTokens: Int? = nil,
         reservedOutputTokens: Int = 8_192,
         permissionMode: AgentPermissionMode = .askToWrite,
@@ -1315,7 +1315,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         // 互动网页等长代码任务：放大单次输出上限，避免模型因 max_tokens 被迫压缩页面。
         if request.maxTokens == nil,
            request.tools.contains(where: { AssistantToolRouter.interactiveWebDirectToolNames.contains($0.name) }) {
-            request.maxTokens = 16_384
+            request.maxTokens = 32_768
         }
         let maxTransientAttempts = 1 + configuration.providerRetryCount
         var attempt = 1
