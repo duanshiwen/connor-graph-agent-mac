@@ -173,6 +173,19 @@ final class MailFeatureModel {
     }
 
     func selectMessageFromList(_ message: MailMessageSummary) { selectMessage(message) }
+
+    /// 右键菜单「标记为已读 / 标记为未读」：更新本地缓存并触发列表刷新。
+    func setReadState(messageIDs: [MailMessageID], isRead: Bool) async {
+        guard !isShutdown, let runtime = agentRuntime else { return }
+        do {
+            try await runtime.setReadState(messageIDs: messageIDs, isRead: isRead)
+            await reload()
+        } catch is CancellationError {
+            return
+        } catch {
+            reportFailure("无法更新邮件已读状态：\(error.localizedDescription)")
+        }
+    }
     func selectedMessageForDetail() -> MailMessageSummary? {
         if let message = presentation.message(id: selectedMessageID) { return message }
         return selectedMessageSummary?.id == selectedMessageID ? selectedMessageSummary : nil

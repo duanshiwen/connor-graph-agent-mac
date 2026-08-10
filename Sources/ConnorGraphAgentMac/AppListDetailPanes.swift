@@ -108,6 +108,10 @@ private struct SyncStatusBanner: View {
 
 struct CraftCalendarListPane: View {
     @Bindable var model: CalendarFeatureModel
+    var forwarding: ListItemForwardingContext
+
+    @State private var pendingForwardBundle: ForwardedChatBundle?
+    @State private var isForwardSending = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -154,13 +158,38 @@ struct CraftCalendarListPane: View {
                 CalendarSectionScrollView(
                     sections: filteredCalendarSections,
                     selectedID: model.selectedEventID,
-                    onSelect: { model.selectEvent(id: $0) }
+                    onSelect: { model.selectEvent(id: $0) },
+                    onForward: { event in
+                        pendingForwardBundle = calendarForwardBundle(event)
+                    },
+                    onCopyEventInfo: { event in
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(calendarEventInfoText(event), forType: .string)
+                    }
                 )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $model.isPresentingAddSourceSheet) {
             AddCalendarSourceSheet(model: model)
+        }
+        .sheet(item: $pendingForwardBundle) { bundle in
+            ForwardDestinationSheet(
+                bundle: bundle,
+                destinations: forwarding.destinations(),
+                isSending: isForwardSending,
+                onCancel: { pendingForwardBundle = nil },
+                onSend: { caption, keys in
+                    var copy = bundle
+                    copy.caption = caption
+                    isForwardSending = true
+                    defer {
+                        isForwardSending = false
+                        pendingForwardBundle = nil
+                    }
+                    try? await forwarding.send(copy, keys)
+                }
+            )
         }
     }
 
@@ -492,6 +521,8 @@ private struct CalendarSectionScrollView: View {
     var sections: [NativeCalendarDaySectionPresentation]
     var selectedID: CalendarEventID?
     var onSelect: (CalendarEventID) -> Void
+    var onForward: (NativeCalendarEventRowPresentation) -> Void
+    var onCopyEventInfo: (NativeCalendarEventRowPresentation) -> Void
 
     var body: some View {
         ScrollView {
@@ -503,7 +534,13 @@ private struct CalendarSectionScrollView: View {
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 10)
                         ForEach(section.events) { event in
-                            CalendarEventButton(row: event, isSelected: event.id == selectedID, onSelect: { onSelect(event.id) })
+                            CalendarEventButton(
+                                row: event,
+                                isSelected: event.id == selectedID,
+                                onSelect: { onSelect(event.id) },
+                                onForward: { onForward(event) },
+                                onCopyEventInfo: { onCopyEventInfo(event) }
+                            )
                         }
                     }
                 }
@@ -519,6 +556,8 @@ private struct CalendarEventButton: View {
     var row: NativeCalendarEventRowPresentation
     var isSelected: Bool
     var onSelect: () -> Void
+    var onForward: () -> Void
+    var onCopyEventInfo: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
@@ -556,6 +595,11 @@ private struct CalendarEventButton: View {
             .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("转发到…", systemImage: "arrowshape.turn.up.right") { onForward() }
+            Divider()
+            Button("复制事件信息", systemImage: "doc.on.doc") { onCopyEventInfo() }
+        }
     }
 }
 
@@ -1918,6 +1962,10 @@ private struct AddTaskAutomationSheet: View {
 
 struct CraftMailListPane: View {
     @Bindable var model: MailFeatureModel
+    var forwarding: ListItemForwardingContext
+
+    @State private var pendingForwardBundle: ForwardedChatBundle?
+    @State private var isForwardSending = false
 
     private var presentation: NativeMailBrowserPresentation { model.presentation }
     private var visibleMessages: [MailMessageSummary] { model.visibleListMessages }
@@ -1985,7 +2033,17 @@ struct CraftMailListPane: View {
                                     account: presentation.account(id: message.accountID),
                                     mailbox: presentation.mailbox(id: message.mailboxID),
                                     isSelected: message.id == model.selectedMessageID,
-                                    onSelect: { selectMessage(message) }
+                                    onSelect: { selectMessage(message) },
+                                    onSetRead: { isRead in
+                                        Task { await model.setReadState(messageIDs: [message.id], isRead: isRead) }
+                                    },
+                                    onForward: {
+                                        pendingForwardBundle = mailForwardBundle(message)
+                                    },
+                                    onCopySubject: {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(message.subject, forType: .string)
+                                    }
                                 )
                                 .equatable()
                                 .nativeListRowStyle()
@@ -2013,6 +2071,24 @@ struct CraftMailListPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $model.isPresentingAddAccountSheet) {
             AddMailAccountSheet(model: model)
+        }
+        .sheet(item: $pendingForwardBundle) { bundle in
+            ForwardDestinationSheet(
+                bundle: bundle,
+                destinations: forwarding.destinations(),
+                isSending: isForwardSending,
+                onCancel: { pendingForwardBundle = nil },
+                onSend: { caption, keys in
+                    var copy = bundle
+                    copy.caption = caption
+                    isForwardSending = true
+                    defer {
+                        isForwardSending = false
+                        pendingForwardBundle = nil
+                    }
+                    try? await forwarding.send(copy, keys)
+                }
+            )
         }
     }
 
@@ -2177,6 +2253,9 @@ private struct MailMessageListRow: View, Equatable {
     var mailbox: MailMailbox?
     var isSelected: Bool
     var onSelect: () -> Void
+    var onSetRead: (Bool) -> Void
+    var onForward: () -> Void
+    var onCopySubject: () -> Void
 
     nonisolated static func == (lhs: MailMessageListRow, rhs: MailMessageListRow) -> Bool {
         lhs.message == rhs.message
@@ -2250,11 +2329,25 @@ private struct MailMessageListRow: View, Equatable {
             .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if message.flags.isRead {
+                Button("标记为未读", systemImage: "envelope.badge") { onSetRead(false) }
+            } else {
+                Button("标记为已读", systemImage: "envelope.open") { onSetRead(true) }
+            }
+            Button("转发到…", systemImage: "arrowshape.turn.up.right") { onForward() }
+            Divider()
+            Button("复制主题", systemImage: "doc.on.doc") { onCopySubject() }
+        }
     }
 }
 
 struct CraftRSSListPane: View {
     @Bindable var model: RSSFeatureModel
+    var forwarding: ListItemForwardingContext
+
+    @State private var pendingForwardBundle: ForwardedChatBundle?
+    @State private var isForwardSending = false
 
     private var presentation: NativeRSSBrowserPresentation { model.presentation }
     private var visibleItems: [RSSItemSummary] { model.visibleItems }
@@ -2310,7 +2403,22 @@ struct CraftRSSListPane: View {
                         item: item,
                         source: presentation.source(id: item.sourceID),
                         isSelected: item.id == model.selectedItemID,
-                        onSelect: { selectItem(item) }
+                        onSelect: { selectItem(item) },
+                        onSetRead: { isRead in
+                            model.setReadState([item.id], isRead: isRead)
+                        },
+                        onForward: {
+                            pendingForwardBundle = rssForwardBundle(item, source: presentation.source(id: item.sourceID))
+                        },
+                        onCopyLink: {
+                            guard let link = item.link else { return }
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(link.absoluteString, forType: .string)
+                        },
+                        onCopyTitle: {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(item.title, forType: .string)
+                        }
                     )
                     .nativeListRowStyle()
                     .onAppear {
@@ -2328,6 +2436,24 @@ struct CraftRSSListPane: View {
                 try await model.addSourceAndSync(feedURL: feedURL, displayName: displayName)
             }
         }
+        .sheet(item: $pendingForwardBundle) { bundle in
+            ForwardDestinationSheet(
+                bundle: bundle,
+                destinations: forwarding.destinations(),
+                isSending: isForwardSending,
+                onCancel: { pendingForwardBundle = nil },
+                onSend: { caption, keys in
+                    var copy = bundle
+                    copy.caption = caption
+                    isForwardSending = true
+                    defer {
+                        isForwardSending = false
+                        pendingForwardBundle = nil
+                    }
+                    try? await forwarding.send(copy, keys)
+                }
+            )
+        }
     }
 
     private func selectItem(_ item: RSSItemSummary) {
@@ -2340,6 +2466,10 @@ private struct RSSItemListRow: View {
     var source: RSSSource?
     var isSelected: Bool
     var onSelect: () -> Void
+    var onSetRead: (Bool) -> Void
+    var onForward: () -> Void
+    var onCopyLink: () -> Void
+    var onCopyTitle: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
@@ -2375,6 +2505,19 @@ private struct RSSItemListRow: View {
             .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if item.state.isRead {
+                Button("标记为未读", systemImage: "dot.radiowaves.right") { onSetRead(false) }
+            } else {
+                Button("标记为已读", systemImage: "checkmark.circle") { onSetRead(true) }
+            }
+            Button("转发到…", systemImage: "arrowshape.turn.up.right") { onForward() }
+            Divider()
+            if item.link != nil {
+                Button("复制链接", systemImage: "link") { onCopyLink() }
+            }
+            Button("复制标题", systemImage: "doc.on.doc") { onCopyTitle() }
+        }
     }
 
     private var contextText: String {
@@ -4163,4 +4306,94 @@ struct CraftSimpleListPane: View {
             }
         }
     }
+}
+
+
+// MARK: - 列表项「转发到…」卡片构造
+
+private func mailForwardBundle(_ message: MailMessageSummary) -> ForwardedChatBundle {
+    let sender = message.from.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? message.from.email
+    let subject = message.subject.trimmingCharacters(in: .whitespacesAndNewlines)
+    let title = subject.isEmpty ? "（无主题）" : subject
+    let dateText = message.date.connorLocalFormatted(date: .medium, time: .short)
+    let body: String
+    if subject.isEmpty {
+        body = message.snippet
+    } else if message.snippet.isEmpty {
+        body = subject
+    } else {
+        body = "\(subject)\n\n\(message.snippet)"
+    }
+    return ForwardedChatBundle(
+        title: "邮件：\(title)",
+        sourceTitle: "\(sender) · \(dateText)",
+        items: [
+            ForwardedChatItem(
+                id: message.id.rawValue,
+                senderName: sender,
+                createdAt: Int64(message.date.timeIntervalSince1970 * 1000),
+                text: body
+            )
+        ]
+    )
+}
+
+private func rssForwardBundle(_ item: RSSItemSummary, source: RSSSource?) -> ForwardedChatBundle {
+    let sourceName = source?.displayName ?? item.sourceID.rawValue
+    let dateText = item.publishedAt.connorLocalFormatted(date: .medium, time: .short)
+    var body = item.title
+    if let author = item.author?.trimmingCharacters(in: .whitespacesAndNewlines), !author.isEmpty {
+        body += "\n作者：\(author)"
+    }
+    if !item.snippet.isEmpty {
+        body += "\n\n\(item.snippet)"
+    }
+    if let link = item.link {
+        body += "\n链接：\(link.absoluteString)"
+    }
+    return ForwardedChatBundle(
+        title: "文章：\(item.title)",
+        sourceTitle: "\(sourceName) · \(dateText)",
+        items: [
+            ForwardedChatItem(
+                id: item.id.rawValue,
+                senderName: sourceName,
+                createdAt: Int64(item.publishedAt.timeIntervalSince1970 * 1000),
+                text: body
+            )
+        ]
+    )
+}
+
+private func calendarForwardBundle(_ row: NativeCalendarEventRowPresentation) -> ForwardedChatBundle {
+    var body = "时间：\(row.timeText)"
+    if let calendarName = row.calendarName?.trimmingCharacters(in: .whitespacesAndNewlines), !calendarName.isEmpty {
+        body += "\n日历：\(calendarName)"
+    }
+    if let location = row.location?.trimmingCharacters(in: .whitespacesAndNewlines), !location.isEmpty {
+        body += "\n地点：\(location)"
+    }
+    return ForwardedChatBundle(
+        title: "日程：\(row.title)",
+        sourceTitle: row.calendarName ?? "日历",
+        items: [
+            ForwardedChatItem(
+                id: row.id.rawValue,
+                senderName: "康纳同学",
+                createdAt: Int64(Date().timeIntervalSince1970 * 1000),
+                text: body
+            )
+        ]
+    )
+}
+
+private func calendarEventInfoText(_ row: NativeCalendarEventRowPresentation) -> String {
+    var lines = [row.title, "时间：\(row.timeText)"]
+    if let calendarName = row.calendarName?.trimmingCharacters(in: .whitespacesAndNewlines), !calendarName.isEmpty {
+        lines.append("日历：\(calendarName)")
+    }
+    if let location = row.location?.trimmingCharacters(in: .whitespacesAndNewlines), !location.isEmpty {
+        lines.append("地点：\(location)")
+    }
+    return lines.joined(separator: "\n")
 }

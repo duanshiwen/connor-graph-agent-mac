@@ -32,7 +32,7 @@ struct CraftListPaneView: View {
             case .llmSettings:
                 CraftSettingsListPane(shellModel: graph.shell, selection: $selection)
             case .calendar:
-                CraftCalendarListPane(model: graph.calendar)
+                CraftCalendarListPane(model: graph.calendar, forwarding: makeListItemForwarding(graph: graph))
             case .contacts:
                 CraftContactsListPane(
                     model: graph.contacts,
@@ -41,9 +41,9 @@ struct CraftListPaneView: View {
                     addFriendRequestID: graph.shell.addFriendRequestID
                 )
             case .rss:
-                RSSListRouteView(model: graph.rss)
+                RSSListRouteView(model: graph.rss, forwarding: makeListItemForwarding(graph: graph))
             case .mail:
-                MailListRouteView(model: graph.mail)
+                MailListRouteView(model: graph.mail, forwarding: makeListItemForwarding(graph: graph))
             case .sources:
                 CraftSourceListPane(model: graph.sources)
             case .skills:
@@ -168,4 +168,32 @@ struct CraftDetailPaneView: View {
             )
         }
     }
+}
+
+
+// MARK: - 列表项转发上下文
+
+private enum ListItemForwardingError: LocalizedError {
+    case imUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .imUnavailable: "IM 功能未就绪，暂时无法转发。"
+        }
+    }
+}
+
+private func makeListItemForwarding(graph: AppFeatureGraph) -> ListItemForwardingContext {
+    ListItemForwardingContext(
+        destinations: {
+            forwardDestinations(
+                sessions: graph.chat.sessions.allSessions,
+                conversations: graph.im?.conversations ?? []
+            )
+        },
+        send: { bundle, keys in
+            guard let im = graph.im else { throw ListItemForwardingError.imUnavailable }
+            try await im.forward(bundle: bundle, destinationKeys: keys)
+        }
+    )
 }

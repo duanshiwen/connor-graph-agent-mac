@@ -17,6 +17,13 @@ struct ForwardDestination: Identifiable, Hashable {
     var updatedAt: TimeInterval? = nil
 }
 
+/// 列表项（邮件 / RSS / 日历）右键菜单「转发到…」所需的运行上下文：
+/// 目标列表来自康纳会话与 IM 联系人，发送复用 IM 的转发链路。
+struct ListItemForwardingContext {
+    var destinations: @MainActor () -> [ForwardDestination]
+    var send: @MainActor (ForwardedChatBundle, Set<String>) async throws -> Void
+}
+
 func forwardDestinations(sessions: [AgentSession], conversations: [ImConversation]) -> [ForwardDestination] {
     let newSession = ForwardDestination(key: "agent:new", targetID: "", title: "新建与康纳的会话", subtitle: "创建后保存聊天记录", kind: .agent)
     var existing = sessions.filter { $0.governance.kind == .chat }.map {

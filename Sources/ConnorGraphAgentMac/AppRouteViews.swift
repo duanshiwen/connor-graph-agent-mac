@@ -42,9 +42,10 @@ struct ChatDetailRouteView: View {
 
 struct MailListRouteView: View {
     @Bindable var model: MailFeatureModel
+    var forwarding: ListItemForwardingContext
 
     var body: some View {
-        CraftMailListPane(model: model)
+        CraftMailListPane(model: model, forwarding: forwarding)
     }
 }
 
@@ -58,9 +59,10 @@ struct MailDetailRouteView: View {
 
 struct RSSListRouteView: View {
     @Bindable var model: RSSFeatureModel
+    var forwarding: ListItemForwardingContext
 
     var body: some View {
-        CraftRSSListPane(model: model)
+        CraftRSSListPane(model: model, forwarding: forwarding)
     }
 }
 
