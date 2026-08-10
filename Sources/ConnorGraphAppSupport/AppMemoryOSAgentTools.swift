@@ -834,6 +834,64 @@ public struct MemoryOSUpdateCurrentUserProfileTool: AgentTool {
     }
 }
 
+public struct MemoryOSRememberTool: AgentTool {
+    public let name = "memory_os_remember"
+    public let description = "Record one fact or preference the user explicitly asked to remember into Memory OS, preserving the L0 original-text evidence (source = current conversation) and generating an L1 retrievable record with the normal downstream projection. Call this ONLY when the user clearly asks to remember something (for example “记住…”“以后都…”“帮我记一下…”); never proactively write memory on your own, and never record one-off or casually mentioned content the user did not ask to keep. Pass the user’s original wording unchanged in content — do not rewrite or compress it."
+    public let permission: AgentPermissionCapability = .proposeGraphWrite
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "content": .string(description: "The exact content the user explicitly asked to remember; keep the original wording, do not rewrite or compress.")
+    ], required: ["content"])
+
+    private let facade: AppMemoryOSFacade
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let content = arguments.string("content")?.trimmingCharacters(in: .whitespacesAndNewlines), !content.isEmpty else {
+            throw AgentToolError.invalidArguments("content is required")
+        }
+        let occurredAt = Date()
+        let result = try facade.ingestChatMessage(
+            messageID: "explicit-remember-\(UUID().uuidString)",
+            sessionID: context.sessionID,
+            role: "user",
+            content: content,
+            occurredAt: occurredAt,
+            retrievalText: content,
+            normalizationStatus: .notRequired,
+            metadata: ["source_kind": "explicit_user_remember_request", "trigger": "user_requested"]
+        )
+        let provenanceObjectID = result.provenanceObject?.id ?? ""
+        let contentHash = result.provenanceObject?.contentHash ?? ""
+        let json: String
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            json = String(data: try encoder.encode(MemoryOSRememberResult(
+                accepted: result.provenanceObject != nil,
+                provenanceObjectID: provenanceObjectID,
+                contentHash: contentHash
+            )), encoding: .utf8) ?? "{}"
+        } catch {
+            json = "{}"
+        }
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: provenanceObjectID.isEmpty
+                ? "未写入记忆（内容可能被预摄取过滤拦截）。"
+                : "已记住。L0 原文证据已保留，provenanceObjectID=\(provenanceObjectID)。",
+            contentJSON: json,
+            citations: []
+        )
+    }
+}
+
+private struct MemoryOSRememberResult: Codable, Sendable {
+    var accepted: Bool
+    var provenanceObjectID: String
+    var contentHash: String
+}
+
 public struct MemoryOSExpandL4Tool: AgentTool {
     public let name = "memory_os_expand_l4"
     public let description = "Expand a Memory OS L4 entity/concept by depth-limited traversal. Accepts entity name (not ID) — internally resolves to the matching L4 entity. Use this for neighborhood context around a known entity; for complete class membership/list questions, use memory_os_l4_instances instead. Expansion hits are context and do not replace evidence validation."
@@ -1387,6 +1445,8 @@ public extension AgentToolRegistry {
         register(MemoryOSRecentContextTool(facade: facade, configuration: configuration))
         register(MemoryOSKnowledgeContextTool(facade: facade, configuration: configuration))
         register(MemoryOSGetCurrentUserProfileTool(facade: facade, configuration: configuration))
+        // 会话级显式「记住」写入：只在用户明确要求记住时由模型调用，保留 L0 证据。
+        register(MemoryOSRememberTool(facade: facade))
     }
 
     /// Full tool set for batch/background jobs — includes write tools and low-level graph primitives.
