@@ -32,6 +32,8 @@ Interactive-web guide — SDK v1 usage (window.platform):
 
 1. SDK script: add <script src="/api/v1/sdk/v1.js"></script> inside <head> before any other script. This is the backend-provided absolute path on the same domain as the published page; copy it exactly. Never construct apiBase, projectId, or endpoint URLs yourself, and do not rewrite it as a relative path.
 
+   Stylesheet link check: if you pass CSS through the css parameter (saved as style.css), index.html MUST link it inside <head> with <link rel="stylesheet" href="style.css">. Before creating or updating the draft, double-check that the link tag is actually present in the returned index.html — a missing or mistyped stylesheet link is the most common reason a page publishes without its styles.
+
 2. window.platform API surface:
    - data.create(name, value), data.updateMine(name, recordId, value), data.deleteMine(name, recordId), data.list(name, query)
    - forms.submit(name, formOrData)
