@@ -34,7 +34,7 @@ public actor OpenMeteoWeatherProvider: EnvironmentWeatherProviding {
 
     public init(
         endpoint: URL = URL(string: "https://api.open-meteo.com/v1/forecast")!,
-        cacheLifetime: TimeInterval = 15 * 60,
+        cacheLifetime: TimeInterval = 60 * 60,
         requestTimeout: TimeInterval = 10,
         now: @escaping @Sendable () -> Date = Date.init,
         dataLoader: @escaping DataLoader = OpenMeteoWeatherProvider.liveDataLoader

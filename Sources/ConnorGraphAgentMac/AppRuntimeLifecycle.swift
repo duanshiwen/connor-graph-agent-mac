@@ -1336,6 +1336,17 @@ final class AppRuntimeLifecycle {
         graphDiagnosticsModel.reloadSchemaHealthReport()
         scheduleMemoryOSSearchIndexRepairIfNeeded()
         drainMemoryOSSearchIndexIfNeeded()
+        // 首次启动预取位置 + 天气写入暂存；之后位置未明显改变时 1 小时内不再重复请求。
+        Task { await prefetchEnvironmentSnapshot() }
+    }
+
+    /// 启动预取环境快照（位置 + 天气），结果写入 provider 缓存。
+    /// 后续 run 预检以 refresh=false 读取，位置/天气在 1 小时内直接命中缓存。
+    private func prefetchEnvironmentSnapshot() async {
+        _ = await environmentProvider.snapshot(for: AgentEnvironmentRequest(
+            runID: "startup-prefetch",
+            sessionID: "startup"
+        ))
     }
 
     func prepareInteractiveStartup(snapshot: AppInteractiveBootstrapSnapshot? = nil) {

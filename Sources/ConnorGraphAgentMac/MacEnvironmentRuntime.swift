@@ -31,7 +31,13 @@ final class MacCurrentLocationService: NSObject, @preconcurrency CLLocationManag
         manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
     }
 
-    func currentLocation() async -> MacEnvironmentLocationReading {
+    /// 获取当前位置。位置未明显改变时（1 小时内）直接返回缓存，不重复请求定位服务。
+    /// forceRefresh=true 时忽略缓存（用户/任务明确要求最新位置）。
+    func currentLocation(forceRefresh: Bool = false) async -> MacEnvironmentLocationReading {
+        if !forceRefresh, let cached = cachedReading, let capturedAt = cached.capturedAt,
+           Date().timeIntervalSince(capturedAt) <= 60 * 60 {
+            return cached
+        }
         await withCheckedContinuation { continuation in
             continuations.append(continuation)
             guard !requestIsActive else { return }
@@ -165,7 +171,7 @@ actor MacAgentEnvironmentProvider: AgentEnvironmentProviding {
     }
 
     func snapshot(for request: AgentEnvironmentRequest) async -> AgentEnvironmentSnapshot {
-        let location = await locationService.currentLocation()
+        let location = await locationService.currentLocation(forceRefresh: request.refresh)
         let capturedAt = now()
         let timeZone = location.timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
         let region: AgentEnvironmentRegion?
