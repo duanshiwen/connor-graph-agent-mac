@@ -259,6 +259,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let sessionRepository = AppChatSessionRepository(store: store, storagePaths: storagePaths)
         registry.registerSessionStatusTools(repository: sessionRepository, governanceConfig: governanceConfig)
         registry.registerNoteReadTools(repository: AppNoteRepository(store: store))
+        registry.register(NoteCreateTool(repository: sessionRepository, noteRepository: AppNoteRepository(store: store)))
+        registry.register(NoteEditTool(repository: sessionRepository, noteRepository: AppNoteRepository(store: store)))
         if let personalityRuntime {
             registry.registerConnorPersonalityTools(runtime: personalityRuntime, provider: modelProvider)
         }

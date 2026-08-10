@@ -198,6 +198,115 @@ private enum NoteToolJSON {
     }
 }
 
+public struct NoteCreateTool: AgentTool {
+    public let name = "note_create"
+    public let description = "Create a new Note: a NOTE-type session with the given title and body, immediately projected into the Note index. Use ONLY when the user explicitly asks to create a note, take notes, or save something as a note (for example “记个笔记”“新建笔记”“帮我写一条笔记”); do not create notes proactively. The body is stored verbatim as the first user message — do not rewrite or summarize it."
+    public let permission: AgentPermissionCapability = .mutateSessionStatus
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "title": .string(description: "Note title; required, 1 to 120 characters."),
+        "content": .string(description: "Note body; stored verbatim, do not rewrite or compress.")
+    ], required: ["title", "content"])
+
+    private let repository: AppChatSessionRepository
+    private let noteRepository: AppNoteRepository
+    public init(repository: AppChatSessionRepository, noteRepository: AppNoteRepository) {
+        self.repository = repository
+        self.noteRepository = noteRepository
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let title = (arguments.string("title") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let content = arguments.string("content") ?? ""
+        guard (1...120).contains(title.count), !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AgentToolError.invalidArguments("title (1-120 characters) and non-empty content are required")
+        }
+        let session = try repository.createImportedNoteSession(title: title, content: content)
+        let note = try noteRepository.note(sessionID: session.id)
+        let payload = NoteCreateResult(noteID: note?.id ?? "", sessionID: session.id, title: session.title)
+        let json: String
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            json = String(data: try encoder.encode(payload), encoding: .utf8) ?? "{}"
+        } catch { json = "{}" }
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "已新建笔记「\(session.title)」：noteID=\(payload.noteID) sessionID=\(session.id)。",
+            contentJSON: json,
+            citations: []
+        )
+    }
+}
+
+public struct NoteEditTool: AgentTool {
+    public let name = "note_edit"
+    public let description = "Edit an existing Note: replace its body (and optionally retitle) using an exact noteID copied from note_search or note_get. The note's first user message is replaced in place and the Note projection/index is refreshed. Use ONLY when the user explicitly asks to edit, update, revise, or change a note; do not edit notes proactively. Provide content verbatim — do not rewrite or summarize."
+    public let permission: AgentPermissionCapability = .mutateSessionStatus
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "noteID": .string(description: "Exact noteID copied from note_search or note_get."),
+        "title": .string(description: "Optional new title; omit or pass empty to keep the current title."),
+        "content": .string(description: "New note body; stored verbatim.")
+    ], required: ["noteID", "content"])
+
+    private let repository: AppChatSessionRepository
+    private let noteRepository: AppNoteRepository
+    public init(repository: AppChatSessionRepository, noteRepository: AppNoteRepository) {
+        self.repository = repository
+        self.noteRepository = noteRepository
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let noteID = arguments.string("noteID")?.trimmingCharacters(in: .whitespacesAndNewlines), !noteID.isEmpty else {
+            throw AgentToolError.invalidArguments("noteID is required")
+        }
+        let content = arguments.string("content") ?? ""
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AgentToolError.invalidArguments("content must not be empty")
+        }
+        guard let note = try noteRepository.note(id: noteID) else {
+            throw AgentToolError.invalidArguments("note not found for noteID=\(noteID); read notes with note_search/note_get first")
+        }
+        guard var session = try repository.loadSession(id: note.sessionID) else {
+            throw AgentToolError.invalidArguments("note session not found")
+        }
+        let newTitle = (arguments.string("title") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !newTitle.isEmpty { session.title = newTitle }
+        session.messages = [AgentMessage(id: note.sourceMessageID, role: .user, content: content, createdAt: Date(), attachments: [])]
+        session.updatedAt = Date()
+        session.governance.kind = .note
+        _ = try repository.saveSession(session, previousMessageCount: max(1, session.messages.count))
+        let refreshed = try noteRepository.note(sessionID: session.id)
+        let payload = NoteEditResult(noteID: noteID, sessionID: session.id, title: session.title, updatedAt: refreshed?.updatedAt)
+        let json: String
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            json = String(data: try encoder.encode(payload), encoding: .utf8) ?? "{}"
+        } catch { json = "{}" }
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "已更新笔记「\(session.title)」（noteID=\(noteID)），正文与索引已刷新。",
+            contentJSON: json,
+            citations: []
+        )
+    }
+}
+
+private struct NoteCreateResult: Codable, Sendable {
+    var noteID: String
+    var sessionID: String
+    var title: String
+}
+
+private struct NoteEditResult: Codable, Sendable {
+    var noteID: String
+    var sessionID: String
+    var title: String
+    var updatedAt: Date?
+}
+
 public extension AgentToolRegistry {
     mutating func registerNoteReadTools(repository: AppNoteRepository) {
         register(NoteSearchTool(search: NoteSearchService(repository: repository)))
