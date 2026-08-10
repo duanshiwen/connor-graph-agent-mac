@@ -115,7 +115,7 @@ final class MacCurrentLocationService: NSObject, @preconcurrency CLLocationManag
     private func scheduleTimeout() {
         timeoutTask?.cancel()
         timeoutTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(10))
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self, self.requestIsActive else { return }

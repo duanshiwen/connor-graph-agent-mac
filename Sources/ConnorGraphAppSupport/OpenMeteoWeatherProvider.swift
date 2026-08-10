@@ -35,7 +35,7 @@ public actor OpenMeteoWeatherProvider: EnvironmentWeatherProviding {
     public init(
         endpoint: URL = URL(string: "https://api.open-meteo.com/v1/forecast")!,
         cacheLifetime: TimeInterval = 15 * 60,
-        requestTimeout: TimeInterval = 3,
+        requestTimeout: TimeInterval = 10,
         now: @escaping @Sendable () -> Date = Date.init,
         dataLoader: @escaping DataLoader = OpenMeteoWeatherProvider.liveDataLoader
     ) {
@@ -72,7 +72,7 @@ public actor OpenMeteoWeatherProvider: EnvironmentWeatherProviding {
                 return cached
             }
             return AgentEnvironmentWeather(
-                status: error is CancellationError ? .timedOut : .unavailable,
+                status: (error is CancellationError || (error as? URLError)?.code == .timedOut) ? .timedOut : .unavailable,
                 source: "Open-Meteo",
                 sourceURL: "https://open-meteo.com/",
                 updatedAt: fetchedAt,
