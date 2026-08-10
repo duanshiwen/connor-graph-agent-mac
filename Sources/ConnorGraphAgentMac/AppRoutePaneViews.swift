@@ -187,7 +187,7 @@ private func makeListItemForwarding(graph: AppFeatureGraph) -> ListItemForwardin
     ListItemForwardingContext(
         destinations: {
             forwardDestinations(
-                sessions: graph.chat.sessions.allSessions,
+                sessions: graph.chat.sessions.loadAllChatSessionsForForwarding(),
                 conversations: graph.im?.conversations ?? []
             )
         },

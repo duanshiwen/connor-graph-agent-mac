@@ -1096,7 +1096,7 @@ private struct AgentChatConversationView: View {
             if let bundle = selectedAgentForwardBundle, let imModel {
                 ForwardDestinationSheet(
                     bundle: bundle,
-                    destinations: forwardDestinations(sessions: model.sessions.allSessions, conversations: imModel.conversations),
+                    destinations: forwardDestinations(sessions: model.sessions.loadAllChatSessionsForForwarding(), conversations: imModel.conversations),
                     isSending: isForwarding,
                     onCancel: { isForwardSheetPresented = false },
                     onSend: { caption, destinationKeys in

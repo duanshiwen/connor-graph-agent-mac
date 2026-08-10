@@ -35,6 +35,12 @@ final class ChatSessionCoordinator {
     init(model: ChatSessionListModel, repository: AppChatSessionRepository?) {
         self.model = model
         self.repository = repository
+        // 转发对话框使用全量会话（绕过 UI 分页），保证目标列表完整。
+        model.loadAllChatSessionsForForwarding = { [weak self] in
+            guard let self, let repository = self.repository else { return [] }
+            return (try? repository.loadSessions(filter: .all))?
+                .filter { $0.governance.kind == .chat } ?? []
+        }
     }
 
     var isLoadingSelectedDetail: Bool {

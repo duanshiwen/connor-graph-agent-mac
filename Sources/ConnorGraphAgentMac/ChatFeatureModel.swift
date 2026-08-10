@@ -74,6 +74,8 @@ final class ChatSessionListModel {
     var messageCountsBySessionID: [String: Int] = [:] {
         didSet { rebuildRowPresentations() }
     }
+    /// 转发对话框的全量目标会话（由 ChatSessionCoordinator 注入，走 repository 全量加载，不受分页限制）。
+    @ObservationIgnored var loadAllChatSessionsForForwarding: () -> [AgentSession] = { [] }
     var selectedSessionID: String?
     var loadingSessionDetailID: String?
     var presentedSessionDetailID: String?

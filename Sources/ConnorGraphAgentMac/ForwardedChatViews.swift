@@ -66,11 +66,16 @@ struct ForwardDestinationSheet: View {
     @State private var searchText = ""
     @State private var caption = ""
     @State private var selectedKeys: Set<String> = []
+    @State private var kindFilter: ForwardDestinationKind? = nil
 
     private var visibleDestinations: [ForwardDestination] {
+        var result = destinations
+        if let kindFilter {
+            result = result.filter { $0.kind == kindFilter }
+        }
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return destinations }
-        return destinations.filter { $0.title.localizedCaseInsensitiveContains(query) || $0.subtitle.localizedCaseInsensitiveContains(query) }
+        guard !query.isEmpty else { return result }
+        return result.filter { $0.title.localizedCaseInsensitiveContains(query) || $0.subtitle.localizedCaseInsensitiveContains(query) }
     }
 
     var body: some View {
@@ -80,6 +85,14 @@ struct ForwardDestinationSheet: View {
                     .font(.headline)
                 TextField("搜索", text: $searchText)
                     .textFieldStyle(.roundedBorder)
+                Picker("筛选", selection: $kindFilter) {
+                    Text("全部").tag(Optional<ForwardDestinationKind>.none)
+                    Text("会话").tag(Optional<ForwardDestinationKind>.some(.agent))
+                    Text("联系人").tag(Optional<ForwardDestinationKind>.some(.peer))
+                    Text("群聊").tag(Optional<ForwardDestinationKind>.some(.group))
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
                 List(visibleDestinations, selection: $selectedKeys) { destination in
                     HStack(spacing: 10) {
                         Image(systemName: icon(for: destination.kind))

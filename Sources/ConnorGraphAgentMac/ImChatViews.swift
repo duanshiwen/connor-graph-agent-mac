@@ -313,7 +313,7 @@ struct ImChatDetailView: View {
             if let bundle = model.selectedForwardBundle() {
                 ForwardDestinationSheet(
                     bundle: bundle,
-                    destinations: forwardDestinations(sessions: chatModel.sessions.allSessions, conversations: model.conversations),
+                    destinations: forwardDestinations(sessions: chatModel.sessions.loadAllChatSessionsForForwarding(), conversations: model.conversations),
                     isSending: model.isForwarding,
                     onCancel: { model.isForwardSheetPresented = false },
                     onSend: { caption, destinationKeys in
