@@ -29,6 +29,7 @@ Interactive-web guide — SDK v1 usage (window.platform):
    - Full rewrite: alternatively call interactive_web_create_draft with the SAME projectID and the full edited files; files you do not pass (for example css) stay unchanged.
    - Publish the same projectID afterwards: the URL and collected data stay with the project. Never recreate a project merely to change it, and never rewrite an existing page from memory.
    - Per-file size limit is 20 MB (20480 KB). Files larger than that are rejected.
+   - Content must be delivered complete: never compress, simplify, or cut page features to fit a shorter output. If the complete html, css, or javascript exceeds what you can emit in one response, do NOT shorten it — create the draft with a minimal valid placeholder index.html first (it must still include the SDK script and the style.css/app.js links), then write the full content in chunks with interactive_web_edit_draft: pass content=first chunk with offset=0, continue with offset=nextOffset from each result, and set final=true on the last chunk for each file (index.html, style.css, app.js). Each chunk must carry the exact characters of the final file; chunks are concatenated in order, never summarized or paraphrased.
 
 1. SDK script: add <script src="/api/v1/sdk/v1.js"></script> inside <head> before any other script. This is the backend-provided absolute path on the same domain as the published page; copy it exactly. Never construct apiBase, projectId, or endpoint URLs yourself, and do not rewrite it as a relative path.
 
