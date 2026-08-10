@@ -489,12 +489,15 @@ public struct RSSRuntime: Sendable {
         return source
     }
 
-    public func updateSource(sourceID: RSSSourceID, feedURL: URL, displayName: String?, runID: String? = nil, sessionID: String? = nil) async throws -> RSSSource {
+    public func updateSource(sourceID: RSSSourceID, feedURL: URL? = nil, displayName: String? = nil, runID: String? = nil, sessionID: String? = nil) async throws -> RSSSource {
         guard var source = try await repository.source(id: sourceID) else { throw RSSRuntimeError.sourceNotFound(sourceID.rawValue) }
-        let trimmedName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let feedURLChanged = source.feedURL != feedURL
-        source.feedURL = feedURL
-        source.displayName = trimmedName.isEmpty ? (feedURL.host ?? feedURL.absoluteString) : trimmedName
+        let trimmedName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let feedURLChanged = feedURL.map { $0 != source.feedURL } ?? false
+        if let feedURL { source.feedURL = feedURL }
+        if let trimmedName {
+            // nil 表示保留当前名称；空串表示重置为 feed 主机名（与 UI 清空名称行为一致）。
+            source.displayName = trimmedName.isEmpty ? (source.feedURL.host ?? source.feedURL.absoluteString) : trimmedName
+        }
         source.updatedAt = Date()
         if feedURLChanged {
             source.format = .unknown
@@ -505,7 +508,7 @@ public struct RSSRuntime: Sendable {
             try await cache.deleteItems(sourceID: sourceID)
         }
         try await repository.saveSource(source)
-        try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: sourceID, kind: .sourceUpdated, riskClass: .sourceManagement, redactedSummary: "Updated RSS source \(source.displayName)", payloadHash: RSSHash.sha256(feedURL.absoluteString)))
+        try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: sourceID, kind: .sourceUpdated, riskClass: .sourceManagement, redactedSummary: "Updated RSS source \(source.displayName)", payloadHash: RSSHash.sha256(source.feedURL.absoluteString)))
         return source
     }
 

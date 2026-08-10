@@ -1248,11 +1248,6 @@ struct AddRSSSourceSheet: View {
     private var saveDisabled: Bool { feedURL == nil || isSaving }
     private var isEditing: Bool { source != nil }
 
-    private var normalizedDisplayName: String? {
-        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             dialogHeader
@@ -1389,7 +1384,7 @@ struct AddRSSSourceSheet: View {
         saveMessage = nil
         Task {
             do {
-                try await onSave(feedURL, normalizedDisplayName)
+                try await onSave(feedURL, displayName.trimmingCharacters(in: .whitespacesAndNewlines))
                 await MainActor.run {
                     isSaving = false
                     dismiss()

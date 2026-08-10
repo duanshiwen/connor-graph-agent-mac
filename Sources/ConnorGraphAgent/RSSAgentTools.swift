@@ -4,6 +4,10 @@ import ConnorGraphCore
 public protocol AgentRSSRuntime: Sendable {
     func listSources(runID: String?, sessionID: String?) async throws -> [RSSSource]
     func addSource(feedURL: URL, displayName: String?, runID: String?, sessionID: String?) async throws -> RSSSource
+    /// 更新既有源：feedURL 传 nil 表示保留当前地址；displayName 传 nil 表示保留当前名称，传空串表示重置为 feed 主机名。
+    func updateSource(sourceID: RSSSourceID, feedURL: URL?, displayName: String?, runID: String?, sessionID: String?) async throws -> RSSSource
+    /// 删除既有源：本地删除并记录待回推 tombstone，同时清空其缓存条目。
+    func deleteSource(sourceID: RSSSourceID, runID: String?, sessionID: String?) async throws
     func syncSource(sourceID: RSSSourceID, runID: String?, sessionID: String?) async throws -> RSSFetchResult
     func listItems(sourceID: RSSSourceID?, includeHidden: Bool, limit: Int, runID: String?, sessionID: String?) async throws -> [RSSItemSummary]
     func searchItems(_ request: RSSRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [RSSItemSummary]
@@ -114,6 +118,50 @@ public struct RSSAddSourceTool: AgentTool {
         guard let urlString = arguments.string("feedURL"), let url = URL(string: urlString) else { throw AgentToolError.invalidArguments("feedURL is required") }
         let source = try await runtime.addSource(feedURL: url, displayName: arguments.string("displayName"), runID: context.runID, sessionID: context.sessionID)
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Added RSS source \(source.displayName); copy sourceID into source-specific RSS operations", contentJSON: try RSSJSON.encodeSource(source))
+    }
+}
+
+public struct RSSUpdateSourceTool: AgentTool {
+    public let runtime: any AgentRSSRuntime
+    public var name: String { "rss_update_source" }
+    public var description: String { "Update an existing RSS/Atom/JSON Feed source: rename it and/or replace its feed URL. Provide at least one of feedURL or displayName; omit displayName to keep the current name, or pass an empty string to reset it to the feed host." }
+    public var permission: AgentPermissionCapability { .manageRSSSources }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: [
+        "sourceID": .string(description: "Exact sourceID returned by rss_list_sources or rss_add_source; copy the field without renaming it"),
+        "feedURL": .string(description: "Optional replacement feed URL; omit to keep the current feed URL"),
+        "displayName": .string(description: "Optional replacement display name; omit to keep the current name, pass empty to reset to feed host")
+    ], required: ["sourceID"]) }
+    public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let sourceID = arguments.string("sourceID") else { throw AgentToolError.invalidArguments("sourceID is required") }
+        let feedURLString = arguments.string("feedURL")
+        let displayName = arguments.string("displayName")
+        guard feedURLString != nil || displayName != nil else {
+            throw AgentToolError.invalidArguments("Provide at least one of feedURL or displayName to update")
+        }
+        var feedURL: URL?
+        if let feedURLString {
+            guard let parsed = URL(string: feedURLString) else { throw AgentToolError.invalidArguments("feedURL is invalid") }
+            feedURL = parsed
+        }
+        let source = try await runtime.updateSource(sourceID: RSSSourceID(rawValue: sourceID), feedURL: feedURL, displayName: displayName, runID: context.runID, sessionID: context.sessionID)
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Updated RSS source \(source.displayName); copy sourceID into source-specific RSS operations", contentJSON: try RSSJSON.encodeSource(source))
+    }
+}
+
+public struct RSSRemoveSourceTool: AgentTool {
+    public let runtime: any AgentRSSRuntime
+    public var name: String { "rss_remove_source" }
+    public var description: String { "Remove an existing RSS/Atom/JSON Feed source from Connor source registry. Deleting a source also deletes its cached items." }
+    public var permission: AgentPermissionCapability { .manageRSSSources }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: [
+        "sourceID": .string(description: "Exact sourceID returned by rss_list_sources or rss_add_source; copy the field without renaming it")
+    ], required: ["sourceID"]) }
+    public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let sourceID = arguments.string("sourceID") else { throw AgentToolError.invalidArguments("sourceID is required") }
+        try await runtime.deleteSource(sourceID: RSSSourceID(rawValue: sourceID), runID: context.runID, sessionID: context.sessionID)
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Removed RSS source \(sourceID)", contentJSON: "{\"success\":true,\"sourceID\":\"\(sourceID)\"}")
     }
 }
 
@@ -283,6 +331,8 @@ public extension AgentToolRegistry {
     mutating func registerNativeRSSTools(runtime: any AgentRSSRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
         register(RSSListSourcesTool(runtime: runtime))
         register(RSSAddSourceTool(runtime: runtime))
+        register(RSSUpdateSourceTool(runtime: runtime))
+        register(RSSRemoveSourceTool(runtime: runtime))
         register(RSSSyncSourceTool(runtime: runtime))
         register(RSSListItemsTool(runtime: runtime, recorder: recorder))
         register(RSSSearchItemsTool(runtime: runtime, recorder: recorder))

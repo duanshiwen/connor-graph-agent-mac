@@ -44,6 +44,8 @@ struct NativeRSSSystemTests {
         #expect(!toolNames.contains("rss_export_opml"))
         #expect(registry.permission(named: "rss_get_item") == .readRSSContent)
         #expect(registry.permission(named: "rss_add_source") == .manageRSSSources)
+        #expect(registry.permission(named: "rss_update_source") == .manageRSSSources)
+        #expect(registry.permission(named: "rss_remove_source") == .manageRSSSources)
 
         let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "rss", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .readOnly))
         let call = AgentToolCall(id: "call", runID: "run", sessionID: "session", name: "rss_search_items", argumentsJSON: "{\"query\":\"Memory\",\"limit\":1}")
@@ -275,4 +277,44 @@ struct NativeRSSSystemTests {
         // 远端 tombstone 落库（applyRemoteDelete）→ 不产生标记。
         try await restarted.applyRemoteDelete(id: sourceID)
         #expect(try await restarted.pendingDeletes().isEmpty)
+    }
+
+    @Test func agentToolsUpdateAndRemoveRSSSources() async throws {
+        let runtime = RSSRuntime.fixture()
+        var registry = AgentToolRegistry()
+        registry.registerNativeRSSTools(runtime: runtime)
+        let policy = AgentPolicyEngine(permissionMode: .trustedWrite)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "rss", toolCallID: "call", policyEngine: policy)
+
+        let sourcesResult = try await registry.execute(AgentToolCall(name: "rss_list_sources", argumentsJSON: "{}"), context: context)
+        let sourcesJSON = try #require(sourcesResult.contentJSON)
+        let sources = try #require(try JSONSerialization.jsonObject(with: Data(sourcesJSON.utf8)) as? [[String: Any]])
+        let sourceID = try #require(sources.first?["sourceID"] as? String)
+
+        let update = try await registry.execute(AgentToolCall(name: "rss_update_source", argumentsJSON: "{\"sourceID\":\"\(sourceID)\",\"displayName\":\"Renamed Feed\",\"feedURL\":\"https://example.org/new-feed.xml\"}"), context: context)
+        #expect(update.contentText.contains("Updated RSS source Renamed Feed"))
+        let updateJSON = try #require(update.contentJSON)
+        let updated = try #require(try JSONSerialization.jsonObject(with: Data(updateJSON.utf8)) as? [String: Any])
+        #expect(updated["sourceID"] as? String == sourceID)
+        #expect(updated["displayName"] as? String == "Renamed Feed")
+        #expect((updated["feedURL"] as? String)?.contains("new-feed.xml") == true)
+
+        let remove = try await registry.execute(AgentToolCall(name: "rss_remove_source", argumentsJSON: "{\"sourceID\":\"\(sourceID)\"}"), context: context)
+        #expect(remove.contentText.contains("Removed RSS source"))
+
+        let remaining = try await registry.execute(AgentToolCall(name: "rss_list_sources", argumentsJSON: "{}"), context: context)
+        let remainingJSON = try #require(remaining.contentJSON)
+        let remainingSources = try #require(try JSONSerialization.jsonObject(with: Data(remainingJSON.utf8)) as? [[String: Any]])
+        #expect(remainingSources.isEmpty)
+    }
+
+    @Test func agentToolsRejectUpdateWithoutChanges() async throws {
+        let runtime = RSSRuntime.fixture()
+        var registry = AgentToolRegistry()
+        registry.registerNativeRSSTools(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "rss", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .trustedWrite))
+        let call = AgentToolCall(name: "rss_update_source", argumentsJSON: "{\"sourceID\":\"fixture-rss-source\"}")
+        await #expect(throws: AgentToolError.self) {
+            _ = try await registry.execute(call, context: context)
+        }
     }

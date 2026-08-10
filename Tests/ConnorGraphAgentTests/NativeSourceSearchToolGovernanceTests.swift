@@ -94,6 +94,8 @@ private struct MailRuntimeSearchFixture: AgentMailRuntime {
 private struct RSSRuntimeSearchFixture: AgentRSSRuntime {
     func listSources(runID: String?, sessionID: String?) async throws -> [RSSSource] { [] }
     func addSource(feedURL: URL, displayName: String?, runID: String?, sessionID: String?) async throws -> RSSSource { RSSSource(id: RSSSourceID(rawValue: "s"), feedURL: feedURL, displayName: displayName ?? "s") }
+    func updateSource(sourceID: RSSSourceID, feedURL: URL?, displayName: String?, runID: String?, sessionID: String?) async throws -> RSSSource { RSSSource(id: sourceID, feedURL: feedURL ?? URL(string: "https://example.com/feed")!, displayName: displayName ?? "s") }
+    func deleteSource(sourceID: RSSSourceID, runID: String?, sessionID: String?) async throws {}
     func syncSource(sourceID: RSSSourceID, runID: String?, sessionID: String?) async throws -> RSSFetchResult { throw AgentToolError.invalidArguments("fixture") }
     func listItems(sourceID: RSSSourceID?, includeHidden: Bool, limit: Int, runID: String?, sessionID: String?) async throws -> [RSSItemSummary] { [] }
     func searchItems(_ request: RSSRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [RSSItemSummary] { [] }

@@ -52,7 +52,7 @@ public enum AgentToolDisplayNameResolver {
         "mail_list_accounts": "查看邮箱账户", "mail_search_messages": "搜索邮件", "mail_list_recent_messages": "查看近期邮件",
         "mail_search_messages_with_body_preview": "搜索邮件正文", "mail_list_recent_messages_with_body_preview": "查看近期邮件正文",
         "mail_get_message": "读取邮件", "mail_set_read_state": "更新邮件阅读状态", "mail_create_draft": "创建邮件草稿", "mail_send_draft": "发送邮件",
-        "rss_list_sources": "查看 RSS 订阅源", "rss_add_source": "添加 RSS 订阅源", "rss_sync_source": "同步 RSS 订阅源",
+        "rss_list_sources": "查看 RSS 订阅源", "rss_add_source": "添加 RSS 订阅源", "rss_update_source": "修改 RSS 订阅源", "rss_remove_source": "删除 RSS 订阅源", "rss_sync_source": "同步 RSS 订阅源",
         "rss_list_items": "查看 RSS 文章", "rss_search_items": "搜索 RSS 文章", "rss_get_item": "读取 RSS 文章",
         "rss_set_read_state": "更新 RSS 阅读状态", "rss_set_star_state": "更新 RSS 收藏状态", "rss_set_hidden_state": "更新 RSS 隐藏状态",
         "rss_import_opml": "导入 RSS 订阅", "rss_export_opml": "导出 RSS 订阅", "rss_create_evidence_candidate": "保存 RSS 证据",

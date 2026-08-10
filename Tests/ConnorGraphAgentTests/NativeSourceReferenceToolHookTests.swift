@@ -218,6 +218,8 @@ private struct RSSRuntimeFixture: AgentRSSRuntime {
 
     func listSources(runID: String?, sessionID: String?) async throws -> [RSSSource] { [] }
     func addSource(feedURL: URL, displayName: String?, runID: String?, sessionID: String?) async throws -> RSSSource { RSSSource(id: RSSSourceID(rawValue: "source-1"), feedURL: feedURL, displayName: displayName ?? "Source") }
+    func updateSource(sourceID: RSSSourceID, feedURL: URL?, displayName: String?, runID: String?, sessionID: String?) async throws -> RSSSource { RSSSource(id: sourceID, feedURL: feedURL ?? URL(string: "https://example.com/feed")!, displayName: displayName ?? "Source") }
+    func deleteSource(sourceID: RSSSourceID, runID: String?, sessionID: String?) async throws {}
     func syncSource(sourceID: RSSSourceID, runID: String?, sessionID: String?) async throws -> RSSFetchResult { RSSFetchResult(runID: RSSFetchRunID(rawValue: "run"), sourceID: sourceID, insertedCount: 0, duplicateCount: 0, parseReport: RSSParseReport(format: .rss, itemCount: 0)) }
     func listItems(sourceID: RSSSourceID?, includeHidden: Bool, limit: Int, runID: String?, sessionID: String?) async throws -> [RSSItemSummary] { Array(items.prefix(limit)) }
     func searchItems(_ request: RSSRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [RSSItemSummary] { Array(items.prefix(request.limit)) }
