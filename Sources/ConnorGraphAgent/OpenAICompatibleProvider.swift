@@ -400,6 +400,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                 ? nil
                 : request.toolChoice.rawValue,
             reasoningEffort: config.reasoningEffort,
+            maxTokens: request.maxTokens ?? 8_192,
             stream: stream
         )
         let data = try JSONSerialization.data(withJSONObject: try body.jsonObject(), options: [.sortedKeys])
@@ -504,15 +505,17 @@ private struct OpenAIChatCompletionRequest: Encodable {
     var tools: [OpenAIToolDefinition]?
     var toolChoice: String?
     var reasoningEffort: String?
+    var maxTokens: Int?
     var stream: Bool?
 
-    init(model: String, messages: [OpenAIChatMessage], temperature: Double? = nil, tools: [OpenAIToolDefinition]? = nil, toolChoice: String? = nil, reasoningEffort: String? = nil, stream: Bool? = nil) {
+    init(model: String, messages: [OpenAIChatMessage], temperature: Double? = nil, tools: [OpenAIToolDefinition]? = nil, toolChoice: String? = nil, reasoningEffort: String? = nil, maxTokens: Int? = nil, stream: Bool? = nil) {
         self.model = model
         self.messages = messages
         self.temperature = temperature
         self.tools = tools
         self.toolChoice = toolChoice
         self.reasoningEffort = reasoningEffort
+        self.maxTokens = maxTokens
         self.stream = stream
     }
 
@@ -523,6 +526,7 @@ private struct OpenAIChatCompletionRequest: Encodable {
         case tools
         case toolChoice = "tool_choice"
         case reasoningEffort = "reasoning_effort"
+        case maxTokens = "max_tokens"
         case stream
     }
 

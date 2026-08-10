@@ -264,6 +264,8 @@ public struct AgentModelRequest: Sendable, Equatable {
     public var auditContext: AgentLLMRequestAuditContext
     public var promptCacheContext: AgentPromptCacheContext?
     public var toolChoice: AgentModelToolChoice
+    /// 单次输出 token 上限；nil 表示使用 provider/服务端默认。互动网页等长代码任务会放大。
+    public var maxTokens: Int?
 
     public init(
         messages: [AgentModelMessage],
@@ -273,7 +275,8 @@ public struct AgentModelRequest: Sendable, Equatable {
         instructionPlacement: AgentInstructionPlacement = .systemMessage,
         auditContext: AgentLLMRequestAuditContext = .init(),
         promptCacheContext: AgentPromptCacheContext? = nil,
-        toolChoice: AgentModelToolChoice = .auto
+        toolChoice: AgentModelToolChoice = .auto,
+        maxTokens: Int? = nil
     ) {
         self.messages = messages
         self.tools = tools
@@ -283,6 +286,7 @@ public struct AgentModelRequest: Sendable, Equatable {
         self.auditContext = auditContext
         self.promptCacheContext = promptCacheContext
         self.toolChoice = toolChoice
+        self.maxTokens = maxTokens
     }
 }
 

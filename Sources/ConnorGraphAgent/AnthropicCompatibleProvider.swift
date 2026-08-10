@@ -335,7 +335,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         try validateVisionSendAllowed(request)
         var body: [String: Any] = [
             "model": config.requestModel,
-            "max_tokens": config.maxTokens,
+            "max_tokens": request.maxTokens ?? config.maxTokens,
             "messages": anthropicMessages(for: AgentModelMessageProtocolRepair.repairing(request.messages))
         ]
         if stream { body["stream"] = true }

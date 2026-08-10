@@ -261,7 +261,8 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
         var body: [String: Any] = [
             "model": config.requestModel,
             "input": inputItems(for: request),
-            "store": false
+            "store": false,
+            "max_output_tokens": request.maxTokens ?? 8_192
         ]
         if request.temperature > 0 { body["temperature"] = request.temperature }
         if stream { body["stream"] = true }

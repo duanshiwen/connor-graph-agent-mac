@@ -1311,6 +1311,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         publishesTextDeltas: Bool,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentModelResponse {
+        var request = request
+        // 互动网页等长代码任务：放大单次输出上限，避免模型因 max_tokens 被迫压缩页面。
+        if request.maxTokens == nil,
+           request.tools.contains(where: { AssistantToolRouter.interactiveWebDirectToolNames.contains($0.name) }) {
+            request.maxTokens = 16_384
+        }
         let maxTransientAttempts = 1 + configuration.providerRetryCount
         var attempt = 1
         while true {
