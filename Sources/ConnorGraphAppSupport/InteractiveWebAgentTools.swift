@@ -29,7 +29,7 @@ Interactive-web guide — SDK v1 usage (window.platform):
    - Full rewrite: alternatively call interactive_web_create_draft with the SAME projectID and the full edited files; files you do not pass (for example css) stay unchanged.
    - Publish the same projectID afterwards: the URL and collected data stay with the project. Never recreate a project merely to change it, and never rewrite an existing page from memory.
    - Per-file size limit is 20 MB (20480 KB). Files larger than that are rejected.
-   - Content must be delivered complete: never compress, simplify, or cut page features to fit a shorter output. If the complete html, css, or javascript exceeds what you can emit in one response, do NOT shorten it — create the draft with a minimal valid placeholder index.html first (it must still include the SDK script and the style.css/app.js links), then write the full content in chunks with interactive_web_edit_draft: pass content=first chunk with offset=0, continue with offset=nextOffset from each result, and set final=true on the last chunk for each file (index.html, style.css, app.js). Each chunk must carry the exact characters of the final file; chunks are concatenated in order, never summarized or paraphrased.
+   - Content must be delivered complete: never compress, simplify, or cut page features to fit a shorter output. If the complete html, css, or javascript exceeds what you can emit in one response, do NOT shorten it — write it in chunks from the very start with interactive_web_create_draft: pass fileName (default index.html), content (the current chunk), offset (default 0) and final (default false); the first call creates the project and writes chunk 1, continue with offset=nextOffset from each result on the SAME projectID, and set final=true on the last chunk for each file (index.html, style.css, app.js). Chunks are concatenated locally in exact order, never summarized or paraphrased. A draft is NOT created successfully until every chunked file has final=true: interactive_web_get_status reports incompleteWrites and interactive_web_publish rejects drafts with incomplete writes.
 
 1. SDK script: add <script src="/api/v1/sdk/v1.js"></script> inside <head> before any other script. This is the backend-provided absolute path on the same domain as the published page; copy it exactly. Never construct apiBase, projectId, or endpoint URLs yourself, and do not rewrite it as a relative path.
 
@@ -111,10 +111,13 @@ public actor InteractiveWebToolRuntime {
         css: String?,
         javascript: String?,
         collections: [InteractiveWebCollectionDefinition] = [],
-        projectID: String? = nil
+        projectID: String? = nil,
+        fileName: String? = nil,
+        content: String? = nil,
+        offset: Int = 0,
+        final: Bool = false
     ) async throws -> InteractiveWebDraftSaveResult {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        try validate(html, named: "index.html")
 
         var project: LocalInteractiveWebProject
         if let projectID {
@@ -132,6 +135,65 @@ public actor InteractiveWebToolRuntime {
         }
 
         let root = project.rootURL
+
+        // 分块创建/续写：一次只写一个文件的当前块，在本地拼接；final=true 才算该文件写完。
+        // 未 final 完成的文件会记入 incompleteWrites，草稿不算创建成功，publish 会拒绝。
+        if let content {
+            let chunkFileName = try validatedDraftFileName(fileName ?? "index.html")
+            let target = root.appendingPathComponent(chunkFileName)
+            let exists = fileManager.fileExists(atPath: target.path)
+            guard exists || offset == 0 else {
+                throw AgentToolError.invalidArguments("\(chunkFileName) does not exist yet; the first chunk must start at offset 0")
+            }
+            let before = exists ? (try? String(contentsOf: target, encoding: .utf8)) ?? "" : ""
+            let after: String
+            if exists {
+                let start = max(offset, 0)
+                let startIndex = before.index(before.startIndex, offsetBy: min(start, before.count))
+                let replacedEnd = before.index(startIndex, offsetBy: min(content.count, before.count - min(start, before.count)))
+                var replaced = before.replacingCharacters(in: startIndex..<replacedEnd, with: content)
+                if final {
+                    replaced = String(replaced.prefix(min(start + content.count, replaced.count)))
+                }
+                after = replaced
+            } else {
+                after = content
+            }
+            if final {
+                try validate(after, named: chunkFileName)
+            }
+            let beforeHash = exists ? Self.sha256(before) : ""
+            let afterHash = Self.sha256(after)
+            try Data(after.utf8).write(to: target, options: .atomic)
+            var incomplete = project.incompleteWrites ?? []
+            if final {
+                incomplete.removeAll { $0 == chunkFileName }
+            } else if !incomplete.contains(chunkFileName) {
+                incomplete.append(chunkFileName)
+            }
+            project.incompleteWrites = incomplete
+            project.revision = (project.revision ?? 1) + 1
+            try await store.save(project: project)
+            return InteractiveWebDraftSaveResult(
+                status: try status(project),
+                changes: [InteractiveWebDraftFileChange(
+                    fileName: chunkFileName,
+                    operation: exists ? "chunk-appended" : "created",
+                    beforeHash: beforeHash,
+                    afterHash: afterHash,
+                    beforeSizeBytes: before.utf8.count,
+                    afterSizeBytes: after.utf8.count,
+                    diff: Self.unifiedDiff(before: before, after: after, filePath: chunkFileName)
+                )],
+                offset: max(offset, 0),
+                nextOffset: final ? nil : (max(offset, 0) + content.count)
+            )
+        }
+
+        // 完整模式：一次写入完整 html/css/js（原行为）。
+        guard !html.isEmpty else { throw AgentToolError.invalidArguments("html is required when not writing in chunks") }
+        try validate(html, named: "index.html")
+
         var changes: [InteractiveWebDraftFileChange] = []
         changes.append(contentsOf: try saveFile(named: "index.html", content: html, in: root))
         if let css {
@@ -147,6 +209,12 @@ public actor InteractiveWebToolRuntime {
                 in: root
             ))
         }
+        // 完整写入的文件视为已完成，清除未完成标记
+        var incomplete = project.incompleteWrites ?? []
+        for name in ["index.html", "style.css", "app.js"] where fileManager.fileExists(atPath: root.appendingPathComponent(name).path) {
+            incomplete.removeAll { $0 == name }
+        }
+        project.incompleteWrites = incomplete
         if projectID != nil {
             project.revision = (project.revision ?? 1) + 1
         }
@@ -347,6 +415,9 @@ public actor InteractiveWebToolRuntime {
 
     public func publish(projectID: String, expectedManifestHash: String, accessMode: InteractiveWebAccessMode, password: String?) async throws -> InteractiveWebProjectStatus {
         let project = try await requireProject(projectID)
+        guard (project.incompleteWrites ?? []).isEmpty else {
+            throw AgentToolError.invalidArguments("draft is not complete: chunked writes for \((project.incompleteWrites ?? []).joined(separator: ", ")) have not finished (missing final=true). Continue writing the remaining chunks with interactive_web_create_draft or interactive_web_edit_draft before publishing.")
+        }
         let manifest = try packager.package(rootURL: project.rootURL)
         let currentManifestHash = packager.fingerprint(manifest)
         guard currentManifestHash == expectedManifestHash else {
@@ -445,7 +516,8 @@ public actor InteractiveWebToolRuntime {
             remoteProjectID: project.remoteProjectID,
             remoteSiteID: project.remoteSiteID,
             latestDeploymentID: project.latestDeploymentID,
-            publishedURL: project.publishedURL
+            publishedURL: project.publishedURL,
+            incompleteWrites: project.incompleteWrites ?? []
         )
     }
 
@@ -612,7 +684,7 @@ public struct InteractiveWebAgentTool: AgentTool {
 		case .listProjects: "List the signed-in user's published interactive webpage projects, one page at a time (default 50 per page, max 100). Continue with page until fewer than limit items are returned."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
-        case .createDraft: "Create a new local interactive webpage draft, or update an existing one. Create: omit projectID and pass the complete name/html/css/javascript/collections. Update: first read every file with interactive_web_get_draft, edit the contents, then call this same tool with the SAME projectID and the full edited files — the files are written back to the existing draft (files you do not pass, such as css, stay unchanged), revision increments, and the result includes per-file unified diffs so you can verify the exact change in plain text. Before any interactive-web use (creating or updating), call interactive_web_sdk_usage in this session to get the complete SDK contract and example; updates often happen in a separate session, so never skip the guide. Every page must load the backend-provided absolute SDK path /api/v1/sdk/v1.js and use window.platform instead of constructing API URLs; put all page JavaScript in the javascript parameter (app.js) and never write inline <script> blocks (CSP blocks them); drafts without the SDK script or with inline scripts are rejected with step-by-step fix guidance. The tool writes files into the app-managed user-data sandbox and does not publish anything."
+        case .createDraft: "Create a new local interactive webpage draft, or update an existing one. Two write modes: (1) Complete mode — omit projectID and pass the complete name/html/css/javascript/collections (or update with the SAME projectID and full edited files; files you do not pass, such as css, stay unchanged). (2) Chunked mode from the very start — pass fileName (default index.html), content (the current chunk), offset (default 0) and final (default false); chunks are concatenated locally in order, continue with offset=nextOffset from each result, and set final=true on the last chunk so the file is validated and marked complete. A draft is NOT created successfully until every chunked file has final=true: get_status shows incompleteWrites and publish rejects incomplete drafts; never compress or cut page content to fit a shorter output. Before any interactive-web use (creating or updating), call interactive_web_sdk_usage in this session to get the complete SDK contract and example; updates often happen in a separate session, so never skip the guide. Every page must load the backend-provided absolute SDK path /api/v1/sdk/v1.js and use window.platform instead of constructing API URLs; put all page JavaScript in the javascript parameter (app.js) and never write inline <script> blocks (CSP blocks them); drafts without the SDK script or with inline scripts are rejected with step-by-step fix guidance. The tool writes files into the app-managed user-data sandbox and does not publish anything."
         case .editDraft: "Edit one source file of an app-managed interactive webpage draft. Two modes (choose one): targeted edit — pass the exact oldText (must occur exactly once in the current file; read it first with interactive_web_get_draft) and newText (empty string deletes the oldText); or full-file replacement — pass content with the complete new file. For very large files, write content in chunks: start with offset=0 and content=first chunk, continue with offset=nextOffset from each result, and set final=true on the last chunk (the tool then truncates the old tail and validates the complete file). The tool applies each change atomically and returns the new revision, manifestHash, file hashes, the applied offset/nextOffset, and a plain-text unified diff. Edits to index.html must keep the SDK script tag (/api/v1/sdk/v1.js)."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft; the result includes availableFiles so you can see which files exist in the draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash. Large files are paginated by character offset: the result reports totalCharacters and, when truncated, nextOffset — continue with offset=nextOffset to read the rest."
         case .getStatus: "Read the current local and published status of an interactive webpage project, including the list of draft files."
@@ -636,9 +708,13 @@ public struct InteractiveWebAgentTool: AgentTool {
             .object(properties: [
                 "projectID": .string(description: "Optional existing projectID to UPDATE instead of creating a new draft. Omit to create a new project."),
                 "name": .string(description: "Webpage name; required when creating a new draft, optional when updating with projectID (the existing name is kept)"),
-                "html": .string(description: "Complete index.html (edited for updates)"),
+                "html": .string(description: "Complete index.html (edited for updates); omit when writing in chunks via content/fileName/offset/final"),
                 "css": .string(description: "Optional stylesheet"),
                 "javascript": .string(description: "Optional script"),
+                "fileName": .string(description: "Optional target file for chunked creation; defaults to index.html. Allowed extensions: html, css, js, json, svg"),
+                "content": .string(description: "Optional current chunk content. When provided, creates/continues ONE file in chunks (with fileName/offset/final); chunks are concatenated locally and the file is not complete until final=true. Omit to use the complete html/css/javascript mode."),
+                "offset": .integer(description: "Optional 0-based character position for chunked creation; default 0. Continue with offset=nextOffset from the previous result."),
+                "final": .boolean(description: "Optional; set true on the last chunk so the file is validated and marked complete. A draft is not created successfully until every chunked file has final=true."),
                 "collections": .array(items: .object(properties: [
                     "name": .string(description: "Lowercase collection name"),
                     "fields": .array(items: .object(properties: [
@@ -658,7 +734,7 @@ public struct InteractiveWebAgentTool: AgentTool {
                         "scope": .stringEnumeration(values: ["account", "ip"], description: "account counts per logged-in user (requires anonymousCreate=false); ip counts per anonymous visitor")
                     ], required: ["max", "window", "scope"])
                 ], required: ["name", "fields", "anonymousCreate", "anonymousRead"]), description: "Persistent data schemas and submission rules required by the page")
-            ], required: ["html"])
+            ], required: [])
         case .editDraft:
             .closedObject(properties: [
                 "projectID": .string(description: Self.localProjectIDDescription),
@@ -748,21 +824,32 @@ public struct InteractiveWebAgentTool: AgentTool {
 			status = try await runtime.downloadRemoteProject(sessionID: context.sessionID, remoteProjectID: requiredString("remoteProjectID", arguments))
 			text = "Online webpage downloaded to Connor's user data directory."
         case .createDraft:
+            let chunked = arguments.string("content") != nil
             let save = try await runtime.createDraft(
                 sessionID: context.sessionID,
                 name: arguments.string("name") ?? "",
-                html: requiredString("html", arguments),
+                html: arguments.string("html") ?? "",
                 css: optionalString("css", arguments),
                 javascript: optionalString("javascript", arguments),
                 collections: try parseCollections(arguments),
-                projectID: arguments.string("projectID")
+                projectID: arguments.string("projectID"),
+                fileName: arguments.string("fileName"),
+                content: arguments.string("content"),
+                offset: arguments.int("offset") ?? 0,
+                final: arguments.bool("final") ?? false
             )
             status = save.status
             json = try encode(save)
             let changeLines = save.changes.map { change in
                 "\(change.fileName): \(change.operation) (\(change.beforeSizeBytes) -> \(change.afterSizeBytes) bytes)\n\(change.diff)"
             }.joined(separator: "\n")
-            text = "Local webpage draft \(arguments.string("projectID") == nil ? "created" : "updated").\n" + changeLines
+            if chunked, let nextOffset = save.nextOffset {
+                text = "Chunk written (file not complete yet): continue with offset=\(nextOffset) on the same projectID until final=true.\n" + changeLines
+            } else if chunked {
+                text = "Chunk final written; file is now complete and validated.\n" + changeLines
+            } else {
+                text = "Local webpage draft \(arguments.string("projectID") == nil ? "created" : "updated").\n" + changeLines
+            }
         case .editDraft:
             let rawOldText = arguments.string("oldText")
             let rawNewText = arguments.string("newText") ?? ""

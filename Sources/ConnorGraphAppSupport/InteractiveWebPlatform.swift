@@ -91,8 +91,10 @@ public struct LocalInteractiveWebProject: Codable, Sendable, Equatable, Identifi
     public var latestDeploymentID: String?
     public var publishedURL: URL?
     public var revision: Int?
-    public init(id: String = UUID().uuidString, accountID: String, name: String, rootURL: URL, conversationID: String, remoteProjectID: String? = nil, remoteSiteID: String? = nil, latestDeploymentID: String? = nil, publishedURL: URL? = nil, revision: Int? = 1) {
-        self.id = id; self.accountID = accountID; self.name = name; self.rootURL = rootURL; self.conversationID = conversationID; self.remoteProjectID = remoteProjectID; self.remoteSiteID = remoteSiteID; self.latestDeploymentID = latestDeploymentID; self.publishedURL = publishedURL; self.revision = revision
+    /// 正在进行分块写入、尚未 final 完成的文件名列表（nil 视为空）。非空时草稿不算创建完成，publish 会拒绝。
+    public var incompleteWrites: [String]?
+    public init(id: String = UUID().uuidString, accountID: String, name: String, rootURL: URL, conversationID: String, remoteProjectID: String? = nil, remoteSiteID: String? = nil, latestDeploymentID: String? = nil, publishedURL: URL? = nil, revision: Int? = 1, incompleteWrites: [String]? = nil) {
+        self.id = id; self.accountID = accountID; self.name = name; self.rootURL = rootURL; self.conversationID = conversationID; self.remoteProjectID = remoteProjectID; self.remoteSiteID = remoteSiteID; self.latestDeploymentID = latestDeploymentID; self.publishedURL = publishedURL; self.revision = revision; self.incompleteWrites = incompleteWrites
     }
 }
 
@@ -109,6 +111,8 @@ public struct InteractiveWebProjectStatus: Codable, Sendable, Equatable {
     public var remoteSiteID: String?
     public var latestDeploymentID: String?
     public var publishedURL: URL?
+    /// 尚未 final 完成的分块写入文件；非空表示草稿未创建完成。
+    public var incompleteWrites: [String]
 
     public init(
         projectID: String,
@@ -122,7 +126,8 @@ public struct InteractiveWebProjectStatus: Codable, Sendable, Equatable {
         remoteProjectID: String? = nil,
         remoteSiteID: String? = nil,
         latestDeploymentID: String? = nil,
-        publishedURL: URL? = nil
+        publishedURL: URL? = nil,
+        incompleteWrites: [String] = []
     ) {
         self.projectID = projectID
         self.name = name
@@ -136,6 +141,7 @@ public struct InteractiveWebProjectStatus: Codable, Sendable, Equatable {
         self.remoteSiteID = remoteSiteID
         self.latestDeploymentID = latestDeploymentID
         self.publishedURL = publishedURL
+        self.incompleteWrites = incompleteWrites
     }
 }
 
@@ -219,10 +225,16 @@ public struct InteractiveWebDraftFileChange: Codable, Sendable, Equatable {
 public struct InteractiveWebDraftSaveResult: Codable, Sendable, Equatable {
     public var status: InteractiveWebProjectStatus
     public var changes: [InteractiveWebDraftFileChange]
+    /// 分块写入时本块写入的起始位置；完整模式为 0。
+    public var offset: Int
+    /// 分块写入未完成时的下一个写入位置；完成或完整模式为 nil。
+    public var nextOffset: Int?
 
-    public init(status: InteractiveWebProjectStatus, changes: [InteractiveWebDraftFileChange]) {
+    public init(status: InteractiveWebProjectStatus, changes: [InteractiveWebDraftFileChange], offset: Int = 0, nextOffset: Int? = nil) {
         self.status = status
         self.changes = changes
+        self.offset = offset
+        self.nextOffset = nextOffset
     }
 }
 
