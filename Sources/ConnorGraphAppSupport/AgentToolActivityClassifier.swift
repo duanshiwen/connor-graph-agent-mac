@@ -110,7 +110,7 @@ public struct AgentToolActivityClassifier: Sendable {
             let limit = int(arguments["limit"])
             return ToolDescriptor(
                 semanticKind: .readFile,
-                title: "Read File",
+                title: "读取文件",
                 target: basename(string(arguments["filePath"]) ?? string(arguments["file_path"]) ?? string(result["path"])),
                 subtitle: lineRange(offset: offset, limit: limit),
                 icon: "doc.text.magnifyingglass"
@@ -119,7 +119,7 @@ public struct AgentToolActivityClassifier: Sendable {
             let operation = string(result["operation"])
             return ToolDescriptor(
                 semanticKind: .writeFile,
-                title: "Write File",
+                title: "写入文件",
                 target: basename(string(arguments["filePath"]) ?? string(arguments["file_path"]) ?? string(result["path"])),
                 subtitle: operation,
                 icon: "square.and.pencil"
@@ -127,7 +127,7 @@ public struct AgentToolActivityClassifier: Sendable {
         case "Edit", "MultiEdit":
             return ToolDescriptor(
                 semanticKind: .editFile,
-                title: "Edit File",
+                title: "编辑文件",
                 target: basename(string(arguments["filePath"]) ?? string(arguments["file_path"]) ?? string(result["path"])),
                 subtitle: editSubtitle(arguments: arguments, result: result),
                 icon: "pencil"
@@ -135,15 +135,15 @@ public struct AgentToolActivityClassifier: Sendable {
         case "LS":
             return ToolDescriptor(
                 semanticKind: .listDirectory,
-                title: "List Directory",
+                title: "查看目录",
                 target: pathTarget(string(arguments["path"]) ?? string(result["path"])),
-                subtitle: countSubtitle(result["count"], noun: "items"),
+                subtitle: countSubtitle(result["count"], noun: "项"),
                 icon: "folder"
             )
         case "Glob":
             return ToolDescriptor(
                 semanticKind: .findFiles,
-                title: "Find Files",
+                title: "查找文件",
                 target: string(arguments["pattern"]),
                 subtitle: countSubtitle(result["count"], noun: "matches"),
                 icon: "scope"
@@ -151,9 +151,9 @@ public struct AgentToolActivityClassifier: Sendable {
         case "Grep":
             return ToolDescriptor(
                 semanticKind: .searchFiles,
-                title: "Search Files",
+                title: "搜索文件内容",
                 target: string(arguments["pattern"]),
-                subtitle: countSubtitle(result["matches"], noun: "matches"),
+                subtitle: countSubtitle(result["matches"], noun: "条匹配"),
                 icon: "magnifyingglass"
             )
         case "Shell", "Bash":
@@ -161,15 +161,15 @@ public struct AgentToolActivityClassifier: Sendable {
         case "ApplyPatch":
             return ToolDescriptor(
                 semanticKind: .editFile,
-                title: "Apply Patch",
-                target: countSubtitle(result["filesChanged"], noun: "files"),
-                subtitle: countSubtitle(result["operations"], noun: "operations"),
+                title: "应用补丁",
+                target: countSubtitle(result["filesChanged"], noun: "个文件"),
+                subtitle: countSubtitle(result["operations"], noun: "个操作"),
                 icon: "doc.badge.gearshape"
             )
         case "interactive_web_edit_draft":
             return ToolDescriptor(
                 semanticKind: .editFile,
-                title: "Edit Interactive Web Draft",
+                title: "编辑互动网页草稿",
                 target: basename(string(arguments["fileName"]) ?? string(result["fileName"])),
                 subtitle: nil,
                 icon: "pencil"
@@ -178,10 +178,10 @@ public struct AgentToolActivityClassifier: Sendable {
             let operation = string(arguments["operation"])
             let title: String
             switch operation {
-            case "create_event": title = "Calendar: Create Event"
-            case "update_event": title = "Calendar: Update Event"
-            case "delete_event": title = "Calendar: Delete Event"
-            default: title = "Calendar: Write"
+            case "create_event": title = "日历：新建日程"
+            case "update_event": title = "日历：修改日程"
+            case "delete_event": title = "日历：删除日程"
+            default: title = "日历：更新"
             }
             return ToolDescriptor(
                 semanticKind: .calendar,
@@ -196,7 +196,7 @@ public struct AgentToolActivityClassifier: Sendable {
         case "calendar_read", "calendar_search_events":
             return ToolDescriptor(
                 semanticKind: .calendar,
-                title: "Calendar: Read",
+                title: "日历：查看",
                 target: string(arguments["calendarID"])
                     ?? string(arguments["calendar_id"])
                     ?? string(arguments["eventID"])
@@ -209,9 +209,15 @@ public struct AgentToolActivityClassifier: Sendable {
         default:
             if let mcp = mcpDescriptor(rawToolName) { return mcp }
             if rawToolName.localizedCaseInsensitiveContains("browser") {
-                return ToolDescriptor(semanticKind: .browser, title: "Browser", target: rawToolName, subtitle: nil, icon: "safari")
+                return ToolDescriptor(semanticKind: .browser, title: "浏览网页", target: rawToolName, subtitle: nil, icon: "safari")
             }
-            return ToolDescriptor(semanticKind: .unknown, title: rawToolName, target: nil, subtitle: nil, icon: "wrench.and.screwdriver")
+            return ToolDescriptor(
+                semanticKind: .unknown,
+                title: AgentToolDisplayNameResolver.displayName(rawToolName: rawToolName, semanticKind: .unknown),
+                target: nil,
+                subtitle: nil,
+                icon: "wrench.and.screwdriver"
+            )
         }
     }
 
@@ -278,13 +284,14 @@ public struct AgentToolActivityClassifier: Sendable {
     private func batchDescriptor(rawToolName: String, arguments: [String: Any], result: [String: Any]) -> ToolDescriptor {
         let isQuery = rawToolName == "parallel_tool_query"
         let names = batchToolNames(arguments: arguments, result: result)
+        let displayNames = names.map(localizedToolName)
         let title: String
-        if names.isEmpty {
+        if displayNames.isEmpty {
             title = isQuery ? "并行查询" : "批量执行"
-        } else if names.count <= 3 {
-            title = names.joined(separator: "、")
+        } else if displayNames.count <= 3 {
+            title = displayNames.joined(separator: "、")
         } else {
-            title = "\(names.prefix(3).joined(separator: "、")) 等 \(names.count) 个工具"
+            title = "\(displayNames.prefix(3).joined(separator: "、")) 等 \(displayNames.count) 个工具"
         }
         let categories = stableUnique(names.map(toolCategory))
         let operation = isQuery ? "并行查询" : "批量执行"
@@ -296,6 +303,14 @@ public struct AgentToolActivityClassifier: Sendable {
             subtitle: subtitle,
             icon: isQuery ? "square.stack.3d.up" : "square.stack.3d.down.right"
         )
+    }
+
+    /// 批量行里展示中文工具名；无法解析的 MCP/未知工具保留原名，浏览器类工具统一为“浏览网页”。
+    private func localizedToolName(_ raw: String) -> String {
+        let display = AgentToolDisplayNameResolver.displayName(rawToolName: raw, semanticKind: .unknown)
+        if display != raw { return display }
+        if raw.localizedCaseInsensitiveContains("browser") { return "浏览网页" }
+        return display
     }
 
     private func batchToolNames(arguments: [String: Any], result: [String: Any]) -> [String] {
@@ -341,7 +356,7 @@ public struct AgentToolActivityClassifier: Sendable {
     private func editSubtitle(arguments: [String: Any], result: [String: Any]) -> String? {
         let edits = int(result["edits"]) ?? int(arguments["edits"])
         guard let edits else { return nil }
-        return edits == 1 ? "1 edit" : "\(edits) edits"
+        return edits == 1 ? "1 处修改" : "\(edits) 处修改"
     }
 
     private func lineRange(offset: Int?, limit: Int?) -> String? {
@@ -351,7 +366,7 @@ public struct AgentToolActivityClassifier: Sendable {
     }
 
     private func resultSubtitle(from result: [String: Any]) -> String? {
-        if let exitCode = int(result["exitCode"]) { return "exit \(exitCode)" }
+        if let exitCode = int(result["exitCode"]) { return "退出码 \(exitCode)" }
         if let operation = string(result["operation"]) { return operation }
         return nil
     }
@@ -359,10 +374,10 @@ public struct AgentToolActivityClassifier: Sendable {
     private func fallbackSubtitle(for phase: AgentToolActivityPhase) -> String? {
         switch phase {
         case .requested: nil
-        case .approved: "approved"
-        case .running: "running"
-        case .finished: "done"
-        case .failed: "failed"
+        case .approved: "已批准"
+        case .running: "执行中"
+        case .finished: "已完成"
+        case .failed: "失败"
         }
     }
 

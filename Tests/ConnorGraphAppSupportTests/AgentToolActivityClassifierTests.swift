@@ -15,7 +15,7 @@ import ConnorGraphAgent
     let activity = AgentToolActivityClassifier().activity(forRequestedCall: call)
 
     #expect(activity?.semanticKind == .readFile)
-    #expect(activity?.title == "Read File")
+    #expect(activity?.title == "读取文件")
     #expect(activity?.target == "AgentChatActivityViews.swift")
     #expect(activity?.subtitle == "596–865")
     #expect(activity?.icon == "doc.text.magnifyingglass")
@@ -31,7 +31,7 @@ import ConnorGraphAgent
     let activity = AgentToolActivityClassifier().activity(forRequestedCall: call)
 
     #expect(activity?.semanticKind == .writeFile)
-    #expect(activity?.title == "Write File")
+    #expect(activity?.title == "写入文件")
     #expect(activity?.target == "README.md")
     #expect(activity?.icon == "square.and.pencil")
 }
@@ -47,9 +47,9 @@ import ConnorGraphAgent
     let activity = AgentToolActivityClassifier().activity(forFinishedResult: result)
 
     #expect(activity?.semanticKind == .editFile)
-    #expect(activity?.title == "Edit File")
+    #expect(activity?.title == "编辑文件")
     #expect(activity?.target == "BrowserHistoryPanelView.swift")
-    #expect(activity?.subtitle == "3 edits")
+    #expect(activity?.subtitle == "3 处修改")
     #expect(activity?.icon == "pencil")
 }
 
@@ -117,9 +117,9 @@ import ConnorGraphAgent
     #expect(shellActivity?.icon == "magnifyingglass")
 
     #expect(patchActivity?.semanticKind == .editFile)
-    #expect(patchActivity?.title == "Apply Patch")
-    #expect(patchActivity?.target == "2 files")
-    #expect(patchActivity?.subtitle == "3 operations")
+    #expect(patchActivity?.title == "应用补丁")
+    #expect(patchActivity?.target == "2 个文件")
+    #expect(patchActivity?.subtitle == "3 个操作")
     #expect(patchActivity?.icon == "doc.badge.gearshape")
 }
 
@@ -130,11 +130,11 @@ import ConnorGraphAgent
 
     let classifier = AgentToolActivityClassifier()
 
-    #expect(classifier.activity(forRequestedCall: grep)?.title == "Search Files")
+    #expect(classifier.activity(forRequestedCall: grep)?.title == "搜索文件内容")
     #expect(classifier.activity(forRequestedCall: grep)?.icon == "magnifyingglass")
-    #expect(classifier.activity(forRequestedCall: glob)?.title == "Find Files")
+    #expect(classifier.activity(forRequestedCall: glob)?.title == "查找文件")
     #expect(classifier.activity(forRequestedCall: glob)?.icon == "scope")
-    #expect(classifier.activity(forRequestedCall: ls)?.title == "List Directory")
+    #expect(classifier.activity(forRequestedCall: ls)?.title == "查看目录")
     #expect(classifier.activity(forRequestedCall: ls)?.icon == "folder")
 }
 
@@ -166,7 +166,7 @@ import ConnorGraphAgent
     )
     let queryActivity = classifier.activity(forRequestedCall: query)
     #expect(queryActivity?.semanticKind == .parallelQuery)
-    #expect(queryActivity?.title == "mcp__lark__search、cloud_kb_knowledge_context、mail_search_messages")
+    #expect(queryActivity?.title == "mcp__lark__search、查询知识库知识、搜索邮件")
     #expect(queryActivity?.subtitle == "并行查询 · MCP · 知识库 · 邮件")
 
     let execution = AgentToolResult(
@@ -177,7 +177,7 @@ import ConnorGraphAgent
     )
     let executionActivity = classifier.activity(forFinishedResult: execution)
     #expect(executionActivity?.semanticKind == .batchExecution)
-    #expect(executionActivity?.title == "WriteBatch、calendar_write")
+    #expect(executionActivity?.title == "WriteBatch、更新日历")
     #expect(executionActivity?.subtitle == "批量执行 · 文件修改 · 日历")
 }
 
@@ -189,7 +189,7 @@ import ConnorGraphAgent
     let requested = classifier.activity(forRequestedCall: call)
     let failed = classifier.activity(forFailure: failure)
     #expect(requested?.semanticKind == .calendar)
-    #expect(requested?.title == "Calendar: Create Event")
+    #expect(requested?.title == "日历：新建日程")
     #expect(requested?.target == "default")
     #expect(failed?.semanticKind == .calendar)
     #expect(failed?.phase == .failed)
