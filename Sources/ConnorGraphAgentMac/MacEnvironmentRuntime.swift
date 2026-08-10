@@ -38,7 +38,7 @@ final class MacCurrentLocationService: NSObject, @preconcurrency CLLocationManag
            Date().timeIntervalSince(capturedAt) <= 60 * 60 {
             return cached
         }
-        await withCheckedContinuation { continuation in
+        return await withCheckedContinuation { continuation in
             continuations.append(continuation)
             guard !requestIsActive else { return }
             requestIsActive = true
