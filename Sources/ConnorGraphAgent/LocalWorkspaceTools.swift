@@ -20,7 +20,7 @@ public struct LocalReadFileTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path") else {
+        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path") ?? arguments.string("path") else {
             throw AgentToolError.invalidArguments("filePath is required")
         }
         let path = try policy.resolvePath(rawPath)
@@ -324,7 +324,7 @@ public struct LocalWriteFileTool: AgentTool {
     public init(policy: LocalWorkspacePolicy) { self.policy = policy }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path"), let content = arguments.string("content") else {
+        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path") ?? arguments.string("path"), let content = arguments.string("content") else {
             throw AgentToolError.invalidArguments("filePath and content are required")
         }
         let path = try policy.resolvePath(rawPath)
@@ -358,9 +358,9 @@ public struct LocalEditFileTool: AgentTool {
     public init(policy: LocalWorkspacePolicy) { self.policy = policy }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path"),
-              let oldText = arguments.string("oldText") ?? arguments.string("old_text"),
-              let newText = arguments.string("newText") ?? arguments.string("new_text") else {
+        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path") ?? arguments.string("path"),
+              let oldText = arguments.string("oldText") ?? arguments.string("old_text") ?? arguments.string("old_string"),
+              let newText = arguments.string("newText") ?? arguments.string("new_text") ?? arguments.string("new_string") else {
             throw AgentToolError.invalidArguments("filePath, oldText, and newText are required")
         }
         let path = try policy.resolvePath(rawPath)
@@ -400,13 +400,13 @@ public struct LocalMultiEditTool: AgentTool {
     public init(policy: LocalWorkspacePolicy) { self.policy = policy }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path"), let rawEdits = arguments.array("edits") else {
+        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path") ?? arguments.string("path"), let rawEdits = arguments.array("edits") else {
             throw AgentToolError.invalidArguments("filePath and edits are required")
         }
         let edits: [(oldText: String, newText: String)] = try rawEdits.map { value in
             guard let object = value.objectValue,
-                  let oldText = object["oldText"]?.stringValue ?? object["old_text"]?.stringValue,
-                  let newText = object["newText"]?.stringValue ?? object["new_text"]?.stringValue else {
+                  let oldText = object["oldText"]?.stringValue ?? object["old_text"]?.stringValue ?? object["old_string"]?.stringValue,
+                  let newText = object["newText"]?.stringValue ?? object["new_text"]?.stringValue ?? object["new_string"]?.stringValue else {
                 throw AgentToolError.invalidArguments("Each edit requires oldText and newText")
             }
             return (oldText, newText)
@@ -616,7 +616,7 @@ public struct LocalApplyPatchTool: AgentTool {
         let summary: [[String: Any]] = rawOps.enumerated().compactMap { index, value in
             guard let object = value.objectValue,
                   let op = object["op"]?.stringValue,
-                  let path = object["filePath"]?.stringValue ?? object["file_path"]?.stringValue else {
+                  let path = object["filePath"]?.stringValue ?? object["file_path"]?.stringValue ?? object["path"]?.stringValue else {
                 return nil
             }
             return ["index": index, "op": op, "filePath": path]
@@ -634,7 +634,7 @@ public struct LocalApplyPatchTool: AgentTool {
         for (index, value) in rawOps.enumerated() {
             guard let object = value.objectValue,
                   let opName = object["op"]?.stringValue?.lowercased(),
-                  let rawPath = object["filePath"]?.stringValue ?? object["file_path"]?.stringValue else {
+                  let rawPath = object["filePath"]?.stringValue ?? object["file_path"]?.stringValue ?? object["path"]?.stringValue else {
                 throw AgentToolError.invalidArguments("Each operation requires op and filePath")
             }
             let path = try policy.resolvePath(rawPath)
@@ -645,8 +645,8 @@ public struct LocalApplyPatchTool: AgentTool {
                 }
                 operations.append(ParsedOperation(index: index, path: path, op: .create(content: content)))
             case "edit":
-                guard let oldText = object["oldText"]?.stringValue ?? object["old_text"]?.stringValue,
-                      let newText = object["newText"]?.stringValue ?? object["new_text"]?.stringValue else {
+                guard let oldText = object["oldText"]?.stringValue ?? object["old_text"]?.stringValue ?? object["old_string"]?.stringValue,
+                      let newText = object["newText"]?.stringValue ?? object["new_text"]?.stringValue ?? object["new_string"]?.stringValue else {
                     throw AgentToolError.invalidArguments("operation \(index) (edit) requires oldText and newText")
                 }
                 operations.append(ParsedOperation(index: index, path: path, op: .edit(oldText: oldText, newText: newText)))
@@ -656,8 +656,8 @@ public struct LocalApplyPatchTool: AgentTool {
                 }
                 let edits: [(oldText: String, newText: String)] = try rawEdits.map { editValue in
                     guard let editObject = editValue.objectValue,
-                          let oldText = editObject["oldText"]?.stringValue ?? editObject["old_text"]?.stringValue,
-                          let newText = editObject["newText"]?.stringValue ?? editObject["new_text"]?.stringValue else {
+                          let oldText = editObject["oldText"]?.stringValue ?? editObject["old_text"]?.stringValue ?? editObject["old_string"]?.stringValue,
+                          let newText = editObject["newText"]?.stringValue ?? editObject["new_text"]?.stringValue ?? editObject["new_string"]?.stringValue else {
                         throw AgentToolError.invalidArguments("operation \(index) (multiedit) each edit requires oldText and newText")
                     }
                     return (oldText, newText)

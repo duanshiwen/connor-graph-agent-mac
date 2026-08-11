@@ -597,15 +597,38 @@ public struct NativeSessionManager: Sendable {
             session.readState = persisted.readState
             sessionToPersist.governance = persisted.governance
             sessionToPersist.readState = persisted.readState
-            if let firstLoadedID = session.messages.first?.id,
-               let firstLoadedIndex = persisted.messages.firstIndex(where: { $0.id == firstLoadedID }) {
-                sessionToPersist.messages = Array(persisted.messages[..<firstLoadedIndex]) + session.messages
-            } else if !persisted.messages.isEmpty, !session.messages.isEmpty {
-                let currentIDs = Set(session.messages.map(\.id))
-                sessionToPersist.messages = persisted.messages.filter { !currentIDs.contains($0.id) } + session.messages
-            }
+            sessionToPersist.messages = Self.mergedMessages(
+                inMemory: session.messages,
+                persisted: persisted.messages,
+                activeRunID: runtimeState.activeRunID
+            )
         }
         try sessionRepository.saveSession(sessionToPersist, previousMessageCount: previousMessageCount)
+    }
+
+    /// 把本 run 内存中的会话消息与持久化版本合并。
+    /// 本 run 只会新增/修改带 `activeRunID` 的 assistant 消息；其它消息（例如笔记正文的首条 user 消息）
+    /// 若持久化版本已变化（note_edit 工具改了正文、或跨端同步），必须保留持久化版本，
+    /// 否则会用 run 开始时加载的旧内存副本把外部修改回滚掉。
+    public static func mergedMessages(
+        inMemory: [AgentMessage],
+        persisted: [AgentMessage],
+        activeRunID: String?
+    ) -> [AgentMessage] {
+        let persistedByID = Dictionary(uniqueKeysWithValues: persisted.map { ($0.id, $0) })
+        let merged = inMemory.map { message -> AgentMessage in
+            guard message.runID != activeRunID, let external = persistedByID[message.id] else { return message }
+            return external
+        }
+        if let firstLoadedID = inMemory.first?.id,
+           let firstLoadedIndex = persisted.firstIndex(where: { $0.id == firstLoadedID }) {
+            return Array(persisted[..<firstLoadedIndex]) + merged
+        }
+        if !persisted.isEmpty, !inMemory.isEmpty {
+            let currentIDs = Set(inMemory.map(\.id))
+            return persisted.filter { !currentIDs.contains($0.id) } + merged
+        }
+        return merged
     }
 
     // MARK: - Conversation Summary

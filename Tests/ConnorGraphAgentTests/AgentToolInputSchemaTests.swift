@@ -159,6 +159,17 @@ import ConnorGraphAgent
         "keywords": .string("Project A")
     ])) == .object(["query": .string("Project A")]))
 
+    // The model often invents topicTerm/topicTerms/topic_terms from "topic terms" wording; all map to query.
+    #expect(schema.normalizingLegacyPropertyAliases(.object([
+        "topicTerm": .string("Project A")
+    ])) == .object(["query": .string("Project A")]))
+    #expect(schema.normalizingLegacyPropertyAliases(.object([
+        "topicTerms": .string("Project A")
+    ])) == .object(["query": .string("Project A")]))
+    #expect(schema.normalizingLegacyPropertyAliases(.object([
+        "topic_terms": .string("Project A")
+    ])) == .object(["query": .string("Project A")]))
+
     // A direct query still wins when both are present, and unrelated unknown keys stay rejected.
     #expect(schema.normalizingLegacyPropertyAliases(.object([
         "keywords": .string("Project A"),
@@ -168,6 +179,36 @@ import ConnorGraphAgent
         "$.query is required",
         "$.topic is not supported"
     ])
+}
+
+@Test func agentToolInputSchemaNormalizesFileToolAliases() {
+    let schema = AgentToolInputSchema.closedObject(
+        properties: [
+            "filePath": .string(description: "Path"),
+            "oldText": .string(description: "Old"),
+            "newText": .string(description: "New")
+        ],
+        required: ["filePath", "oldText", "newText"]
+    )
+
+    // 模型常把 filePath 写成 path、把 oldText/newText 写成 old_string/new_string。
+    #expect(schema.normalizingLegacyPropertyAliases(.object([
+        "path": .string("App.swift"),
+        "old_string": .string("let a = 1"),
+        "new_string": .string("let a = 2")
+    ])) == .object([
+        "filePath": .string("App.swift"),
+        "oldText": .string("let a = 1"),
+        "newText": .string("let a = 2")
+    ]))
+
+    // 规范化后不再有未知键错误。
+    let normalized = schema.normalizingLegacyPropertyAliases(.object([
+        "path": .string("App.swift"),
+        "old_string": .string("let a = 1"),
+        "new_string": .string("let a = 2")
+    ]))
+    #expect(schema.argumentValidationIssues(normalized).isEmpty)
 }
 
 @Test func agentToolRegistryAcceptsLegacySnakeCaseAliasesWithoutExposingThem() async throws {

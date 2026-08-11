@@ -272,12 +272,17 @@ public struct NoteEditTool: AgentTool {
         }
         let newTitle = (arguments.string("title") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !newTitle.isEmpty { session.title = newTitle }
-        session.messages = [AgentMessage(id: note.sourceMessageID, role: .user, content: content, createdAt: Date(), attachments: [])]
-        session.updatedAt = Date()
-        session.governance.kind = .note
-        _ = try repository.saveSession(session, previousMessageCount: max(1, session.messages.count))
+        // 与 UI 编辑路径一致：原位更新笔记正文首条消息（保留会话其它消息、带冲突校验），
+        // 并刷新笔记投影与索引。
+        let updated = try repository.updateNoteBody(
+            sessionID: session.id,
+            messageID: note.sourceMessageID,
+            expectedContent: note.body,
+            content: content,
+            updatedAt: Date()
+        )
         let refreshed = try noteRepository.note(sessionID: session.id)
-        let payload = NoteEditResult(noteID: noteID, sessionID: session.id, title: session.title, updatedAt: refreshed?.updatedAt)
+        let payload = NoteEditResult(noteID: noteID, sessionID: session.id, title: updated.title, updatedAt: refreshed?.updatedAt)
         let json: String
         do {
             let encoder = JSONEncoder()

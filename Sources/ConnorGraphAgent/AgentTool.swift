@@ -167,7 +167,15 @@ public extension AgentToolInputSchema {
     }
 
     private static let legacyArgumentAliases: [String: String] = [
-        "keywords": "query"
+        "keywords": "query",
+        // 模型常把 System Prompt 里的 "topic terms" 直接当成参数名（topicTerm/topicTerms/topic_terms），统一归一到 query。
+        "topicterm": "query",
+        "topicterms": "query",
+        "topic_terms": "query",
+        // 文件类工具：模型常把 filePath 写成 path（与 LS/Glob/Grep 一致的习惯），把 oldText/newText 写成 old_string/new_string。
+        "path": "filePath",
+        "old_string": "oldText",
+        "new_string": "newText"
     ]
 
     private func matchingProperty(for legacyKey: String, in properties: Dictionary<String, AgentToolInputSchema>.Keys) -> String? {

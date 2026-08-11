@@ -206,6 +206,60 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     }
 }
 
+@Test func readToolAcceptsPathAlias() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("README.md")
+    try "hello\nworld\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"path":"README.md"}"#),
+        context: .localToolTestContext(toolCallID: "read-path")
+    )
+
+    #expect(result.contentText.contains("hello"))
+}
+
+@Test func writeToolAcceptsPathAlias() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let tool = LocalWriteFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    _ = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"path":"out.txt","content":"data"}"#),
+        context: .localToolTestContext(toolCallID: "write-path")
+    )
+
+    #expect(try String(contentsOf: workspace.appendingPathComponent("out.txt"), encoding: .utf8) == "data")
+}
+
+@Test func editToolAcceptsLegacyStringAliases() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("App.swift")
+    try "let a = 1\nlet b = 2\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalEditFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"path":"App.swift","old_string":"let a = 1","new_string":"let a = 10"}"#),
+        context: .localToolTestContext(toolCallID: "edit-alias")
+    )
+
+    #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 10\nlet b = 2\n")
+}
+
+@Test func applyPatchToolAcceptsLegacyAliasesInOperations() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("App.swift")
+    try "let a = 1\nlet b = 2\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"operations":[{"op":"edit","path":"App.swift","old_string":"let a = 1","new_string":"let a = 10"}]}"#),
+        context: .localToolTestContext(toolCallID: "patch-alias")
+    )
+
+    #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 10\nlet b = 2\n")
+}
+
 @Test func editToolReplacesUniqueOldText() async throws {
     let workspace = try makeToolTempWorkspace()
     let file = workspace.appendingPathComponent("App.swift")

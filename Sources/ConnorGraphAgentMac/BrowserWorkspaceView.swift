@@ -660,6 +660,30 @@ struct BrowserWorkspaceView: View {
             .help(activeDownloadCount > 0 ? "正在下载 \(activeDownloadCount) 个项目" : "下载")
             .accessibilityLabel("下载")
 
+            Button(action: shareCurrentURL) {
+                BrowserToolbarIconButtonLabel(
+                    systemImage: "square.and.arrow.up",
+                    iconFont: .system(size: 16, weight: .semibold)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(activeWebView?.url == nil)
+            .opacity(activeWebView?.url == nil ? 0.48 : 1)
+            .help("分享当前页面")
+            .accessibilityLabel("分享当前页面")
+
+            Button(action: closeOtherTabs) {
+                BrowserToolbarIconButtonLabel(
+                    systemImage: "xmark.square",
+                    iconFont: .system(size: 16, weight: .semibold)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(activeSession.tabs.count <= 1)
+            .opacity(activeSession.tabs.count <= 1 ? 0.48 : 1)
+            .help("关闭其他标签页")
+            .accessibilityLabel("关闭其他标签页")
+
             browserToolsMenu
 
             Button(action: showPageQuestionPopover) {
@@ -1058,6 +1082,17 @@ struct BrowserWorkspaceView: View {
         readerHTMLByTabID[reference.tabID] = nil
         processRecoveryAttempts.remove(reference.tabID)
         model.removeGlobalTab(reference)
+    }
+
+    /// 一键清理：关闭除当前标签页外的所有标签页（无选中标签页时保留第一个）。
+    private func closeOtherTabs() {
+        let tabs = activeSession.tabs
+        guard tabs.count > 1 else { return }
+        let keepID = activeSelectedTabID ?? tabs.first?.id
+        let closingIDs = tabs.map(\.id).filter { $0 != keepID }
+        for id in closingIDs {
+            closeTab(id)
+        }
     }
 
     private func closeTab(_ id: BrowserTabState.ID) {

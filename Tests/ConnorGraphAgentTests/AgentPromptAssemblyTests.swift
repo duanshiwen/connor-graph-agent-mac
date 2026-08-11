@@ -7,7 +7,7 @@ import ConnorGraphAgent
     let document = AgentPromptModuleCatalog.document(from: prompt)
 
     #expect(AgentPromptModuleCatalog.unclassifiedHeadings(in: prompt).isEmpty)
-    #expect(AgentPromptModuleCatalog.specifications.count == 43)
+    #expect(AgentPromptModuleCatalog.specifications.count == 44)
     #expect(document.modules.count == AgentPromptModuleCatalog.specifications.count + 1)
     #expect(Set(document.moduleIDs).count == document.moduleIDs.count)
     #expect(Set(AgentPromptModuleCatalog.specifications.map(\.title)).count == AgentPromptModuleCatalog.specifications.count)
@@ -207,6 +207,16 @@ import ConnorGraphAgent
     #expect(!prompt.contains("Do not create or apply a personality that encourages"))
 }
 
+@Test func defaultSystemPromptDocumentsFileHandoffRetrievalAndReuse() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## File Handoff, Retrieval, and Reuse"))
+    #expect(prompt.contains("`file_register` using exact current-session `attachmentIDs`"))
+    #expect(prompt.contains("`file_lookup` or Memory OS search and copy the exact returned `fileID`"))
+    #expect(prompt.contains("pass its `fileID` in `mail_create_draft.attachmentIDs`"))
+    #expect(prompt.contains("Cross-session reuse is allowed only when backed by a real registered `fileID`"))
+}
+
 @Test func defaultSystemPromptAppliesPersonalityWithoutWeakeningPrecision() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
@@ -279,7 +289,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("Only checkpoints named by the Runtime Retrieval Plan are mandatory"))
     #expect(prompt.contains("omitted checkpoints must not be performed merely as generic preflight"))
     #expect(prompt.contains("Complete the mandatory continuity reads for each run"))
-    #expect(prompt.contains("`memory_os_recent_context` and `memory_os_knowledge_context` with compact topic terms"))
+    #expect(prompt.contains("`memory_os_recent_context` and `memory_os_knowledge_context` passing the compact topic keywords"))
     #expect(prompt.contains("`purpose: \"task_context\"` and `pageSize: 500`"))
     #expect(prompt.contains("None substitutes for another"))
     #expect(prompt.contains("reads one page of 500 records by default"))
@@ -375,8 +385,8 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("Startup continuity reads are mandatory and model-driven"))
-    #expect(prompt.contains("compact topic terms, entity names, or subject phrases for the recent and knowledge searches yourself"))
-    #expect(prompt.contains("give the two context tools only compact topic terms, entity names, or subject phrases tied to the actual user request"))
+    #expect(prompt.contains("compact topic keywords, entity names, or subject phrases yourself from the latest actual user request and pass them in the `query` argument"))
+    #expect(prompt.contains("give the two context tools only compact topic keywords, entity names, or subject phrases tied to the actual user request, passed in their `query` argument"))
     #expect(prompt.contains("Use `web_search` when the user asks to search, research, look up, verify, or consult external sources"))
     #expect(prompt.contains("strongly prefer checking current authoritative guidance and established external best practices"))
     #expect(prompt.contains("recommended decision rule, not a mandatory startup step"))
