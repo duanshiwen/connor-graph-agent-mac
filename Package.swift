@@ -66,6 +66,7 @@ let package = Package(
                 .linkedFramework("CoreLocation"),
                 .linkedFramework("EventKit"),
                 .linkedFramework("Contacts"),
+                .linkedLibrary("z"),
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",

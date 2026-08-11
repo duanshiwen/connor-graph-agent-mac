@@ -407,7 +407,7 @@ struct BrowserWorkspaceView: View {
                 .help("新建标签页")
 
                 Button(action: closeOtherTabs) {
-                    Image(systemName: "xmark.square")
+                    Image(systemName: "xmark.circle")
                         .font(BrowserFloatingTypography.toolbarIcon)
                         .foregroundStyle(.secondary)
                         .frame(width: cleanupButtonWidth, height: 26)
@@ -418,10 +418,10 @@ struct BrowserWorkspaceView: View {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
                 )
-                .disabled(activeSession.tabs.count <= 1)
-                .opacity(activeSession.tabs.count <= 1 ? 0.48 : 1)
-                .help("关闭其他标签页")
-                .accessibilityLabel("关闭其他标签页")
+                .disabled(globalTabs.count <= 1)
+                .opacity(globalTabs.count <= 1 ? 0.48 : 1)
+                .help("关闭所有会话中的其他标签页")
+                .accessibilityLabel("关闭所有会话中的其他标签页")
             }
         }
         .frame(height: 30)
@@ -477,16 +477,16 @@ struct BrowserWorkspaceView: View {
 
                 if isExpanded {
                     Button(action: closeOtherTabs) {
-                        Image(systemName: "xmark.square")
+                        Image(systemName: "xmark.circle")
                             .font(BrowserFloatingTypography.toolbarIcon)
                             .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    .disabled(activeSession.tabs.count <= 1)
-                    .opacity(activeSession.tabs.count <= 1 ? 0.48 : 1)
-                    .help("关闭其他标签页")
-                    .accessibilityLabel("关闭其他标签页")
+                    .disabled(globalTabs.count <= 1)
+                    .opacity(globalTabs.count <= 1 ? 0.48 : 1)
+                    .help("关闭所有会话中的其他标签页")
+                    .accessibilityLabel("关闭所有会话中的其他标签页")
                 }
             }
             .padding(.horizontal, isExpanded ? 8 : 9)
@@ -1094,6 +1094,8 @@ struct BrowserWorkspaceView: View {
             closeTab(reference.tabID)
             return
         }
+        let closingTab = model.workspaceSnapshotsBySessionID[reference.sessionID]?
+            .tabs.first(where: { $0.id == reference.tabID })
         let key = BrowserLiveWebViewKey(sessionID: reference.sessionID, tabID: reference.tabID)
         prepareWebViewForTabClose(webViewsByTabID[reference.tabID])
         model.liveWebViewStore.remove(key)
@@ -1102,22 +1104,33 @@ struct BrowserWorkspaceView: View {
         readerHTMLByTabID[reference.tabID] = nil
         processRecoveryAttempts.remove(reference.tabID)
         model.removeGlobalTab(reference)
+        EPUBBookParser.cleanupExtractedDirectoryIfNeeded(path: closingTab?.localFileReadAccessPath)
     }
 
-    /// 一键清理：关闭除当前标签页外的所有标签页（无选中标签页时保留第一个）。
+    /// 一键清理：关闭所有会话中除当前标签页外的所有标签页（无选中标签页时保留第一个）。
     private func closeOtherTabs() {
-        let tabs = activeSession.tabs
+        let keepID = activeSelectedTabID ?? activeSession.tabs.first?.id
+        let keepReference: BrowserGlobalTabReference?
+        if let keepID {
+            keepReference = BrowserGlobalTabReference(sessionID: activeSessionID, tabID: keepID)
+        } else {
+            keepReference = globalTabs.first?.reference
+        }
+        let tabs = globalTabs
         guard tabs.count > 1 else { return }
-        let keepID = activeSelectedTabID ?? tabs.first?.id
-        let closingIDs = tabs.map(\.id).filter { $0 != keepID }
-        for id in closingIDs {
-            closeTab(id)
+        for item in tabs where item.reference != keepReference {
+            if item.reference.sessionID == activeSessionID {
+                closeTab(item.reference.tabID)
+            } else {
+                closeGlobalTab(item.reference)
+            }
         }
     }
 
     private func closeTab(_ id: BrowserTabState.ID) {
         if formAssistant?.tabID == id { closeFormAssistant() }
         var shouldReturnToConversation = false
+        let closingTab = activeSession.tabs.first(where: { $0.id == id })
         let closingReference = BrowserGlobalTabReference(sessionID: activeSessionID, tabID: id)
         let replacementReference = model.replacementGlobalTab(afterClosing: closingReference)
         let wasPrivate = privateTabIDs.contains(id)
@@ -1147,6 +1160,7 @@ struct BrowserWorkspaceView: View {
                 session.selectedTabID = session.tabs[nextIndex].id
             }
         }
+        EPUBBookParser.cleanupExtractedDirectoryIfNeeded(path: closingTab?.localFileReadAccessPath)
 
         if shouldReturnToConversation {
             if let replacementReference {

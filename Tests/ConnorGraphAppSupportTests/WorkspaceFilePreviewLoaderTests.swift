@@ -7,6 +7,8 @@ struct WorkspaceFilePreviewLoaderTests {
     @Test("Classifies common preview renderers")
     func classifiesRenderers() {
         #expect(WorkspaceFilePreviewLoader.renderer(for: URL(fileURLWithPath: "/tmp/index.html")) == .html)
+        #expect(WorkspaceFilePreviewLoader.renderer(for: URL(fileURLWithPath: "/tmp/book.epub")) == .epub)
+        #expect(WorkspaceFilePreviewLoader.renderer(for: URL(fileURLWithPath: "/tmp/book.epub")).previewsInBrowser)
         #expect(WorkspaceFilePreviewLoader.renderer(for: URL(fileURLWithPath: "/tmp/README.md")) == .markdown)
         #expect(WorkspaceFilePreviewLoader.renderer(for: URL(fileURLWithPath: "/tmp/App.swift")) == .monospacedText)
         #expect(WorkspaceFilePreviewLoader.renderer(for: URL(fileURLWithPath: "/tmp/report.pdf")) == .pdf)

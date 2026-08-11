@@ -147,7 +147,7 @@ final class WorkspaceExplorerFeatureModel {
     ) {
         if node.isExpandable {
             toggleNode(node)
-        } else if WorkspaceFilePreviewLoader.renderer(for: node.url) == .html,
+        } else if WorkspaceFilePreviewLoader.renderer(for: node.url).previewsInBrowser,
                   let root = roots.first(where: { $0.id == node.rootID }) {
             selectedNodeID = node.id
             closePreview()

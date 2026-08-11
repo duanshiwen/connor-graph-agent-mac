@@ -191,7 +191,7 @@ struct WorkspaceFilePreviewOverlay: View {
             } else {
                 NativeFileQuickLookPreview(fileURL: model.node.url)
             }
-        case .html:
+        case .html, .epub:
             ContentUnavailableView("将在浏览器中预览", systemImage: "globe", description: Text(model.node.relativePath))
         case .unsupported:
             ContentUnavailableView(
@@ -233,6 +233,7 @@ struct WorkspaceFilePreviewOverlay: View {
         case .pdf: "doc.richtext"
         case .quickLook: "doc"
         case .html: "globe"
+        case .epub: "book.closed"
         case .unsupported: "doc.badge.ellipsis"
         }
     }
