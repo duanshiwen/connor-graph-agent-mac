@@ -14,7 +14,7 @@ enum BrowserLocalFilePreviewError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .unsupportedFile(let path): "只能在浏览器中预览 HTML 文件：\(path)"
+        case .unsupportedFile(let path): "只能在浏览器中预览 HTML 或 EPUB 文件：\(path)"
         case .fileOutsideWorkspace(let path): "文件不在当前工作区范围内：\(path)"
         case .fileMissing(let path): "找不到要预览的文件：\(path)"
         }
@@ -443,7 +443,10 @@ final class BrowserFeatureModel {
         do {
             let file = fileURL.standardizedFileURL.resolvingSymlinksInPath()
             let root = readAccessRootURL.standardizedFileURL.resolvingSymlinksInPath()
-            guard ["html", "htm"].contains(file.pathExtension.lowercased()) else {
+            let fileExtension = file.pathExtension.lowercased()
+            let isHTML = ["html", "htm"].contains(fileExtension)
+            let isEPUB = fileExtension == "epub"
+            guard isHTML || isEPUB else {
                 throw BrowserLocalFilePreviewError.unsupportedFile(file.path)
             }
             guard FileManager.default.fileExists(atPath: file.path) else {
@@ -455,21 +458,45 @@ final class BrowserFeatureModel {
             }
 
             let sessionID = preferredSessionID ?? currentSessionID
-            let urlString = file.absoluteString
+            let tabURL: URL
+            let tabTitle: String
+            let readAccessPath: String
+            if isEPUB {
+                let extractionDirectory = EPUBBookParser.extractionDirectory()
+                do {
+                    try EPUBBookParser.extract(fileURL: file, to: extractionDirectory)
+                    let book = try EPUBBookParser.parseBook(
+                        at: extractionDirectory,
+                        defaultTitle: file.deletingPathExtension().lastPathComponent
+                    )
+                    tabURL = try EPUBBookParser.writeLandingPage(for: book, in: extractionDirectory)
+                    tabTitle = book.title
+                    readAccessPath = extractionDirectory.path
+                } catch {
+                    EPUBBookParser.cleanupExtractedDirectoryIfNeeded(path: extractionDirectory.path)
+                    throw error
+                }
+            } else {
+                tabURL = file
+                tabTitle = file.deletingPathExtension().lastPathComponent
+                readAccessPath = root.path
+            }
+
+            let urlString = tabURL.absoluteString
             var snapshot = workspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
             let tabID: UUID
             if let index = snapshot.tabs.firstIndex(where: {
                 $0.initialURLString == urlString || $0.currentURLString == urlString
             }) {
-                snapshot.tabs[index].localFileReadAccessPath = root.path
+                snapshot.tabs[index].localFileReadAccessPath = readAccessPath
                 snapshot.selectedTabID = snapshot.tabs[index].id
                 tabID = snapshot.tabs[index].id
             } else {
                 let tab = AppBrowserTabSnapshot(
                     initialURLString: urlString,
-                    title: file.deletingPathExtension().lastPathComponent,
+                    title: tabTitle,
                     currentURLString: urlString,
-                    localFileReadAccessPath: root.path
+                    localFileReadAccessPath: readAccessPath
                 )
                 snapshot.tabs.append(tab)
                 snapshot.selectedTabID = tab.id
@@ -478,7 +505,10 @@ final class BrowserFeatureModel {
             errorMessage = nil
             saveWorkspaceSnapshot(snapshot, for: sessionID)
             if let webView = liveWebViewStore.webView(for: BrowserLiveWebViewKey(sessionID: sessionID, tabID: tabID)) {
-                webView.loadFileURL(file, allowingReadAccessTo: root)
+                webView.loadFileURL(
+                    tabURL,
+                    allowingReadAccessTo: URL(fileURLWithPath: readAccessPath, isDirectory: true)
+                )
             }
             showWorkspace(for: sessionID)
         } catch {

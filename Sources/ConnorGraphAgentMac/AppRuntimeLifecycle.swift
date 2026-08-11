@@ -43,6 +43,33 @@ final class AppRuntimeLifecycle {
 
     static let projectWebsiteURL = URL(string: "https://duanshiwen.github.io/connor-graph-agent-mac/")!
 
+    private static let assistantExportLastDirectoryDefaultsKey = "AssistantMessageExport.LastDirectoryPath"
+
+    /// 导出助理回复时保存面板默认打开的目录：
+    /// 上次导出位置（存在且可打开）→ 工作区当前工作目录 → 下载文件夹 → 用户主目录。
+    private static func assistantExportDefaultDirectory(
+        rememberedPath: String?,
+        workspaceDirectoryPath: String,
+        fileManager: FileManager = .default
+    ) -> URL {
+        func isExistingDirectory(_ path: String) -> Bool {
+            var isDirectory: ObjCBool = false
+            return fileManager.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+        }
+        if let rememberedPath, isExistingDirectory(rememberedPath) {
+            return URL(fileURLWithPath: rememberedPath, isDirectory: true)
+        }
+        let workspacePath = workspaceDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !workspacePath.isEmpty, isExistingDirectory(workspacePath) {
+            return URL(fileURLWithPath: workspacePath, isDirectory: true)
+        }
+        if let downloads = fileManager.urls(for: .downloadsDirectory, in: .userDomainMask).first,
+           isExistingDirectory(downloads.path) {
+            return downloads
+        }
+        return fileManager.homeDirectoryForCurrentUser
+    }
+
     let maintenanceCoordinator = AppMaintenanceCoordinator()
     private let searchIndexDrainer = AppMemoryOSSearchIndexDrainer()
     private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
@@ -269,12 +296,19 @@ final class AppRuntimeLifecycle {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
-        panel.directoryURL = chatFeatureModel.sessions.selectedArtifactDirectories?.exports
+        panel.directoryURL = Self.assistantExportDefaultDirectory(
+            rememberedPath: UserDefaults.standard.string(forKey: Self.assistantExportLastDirectoryDefaultsKey),
+            workspaceDirectoryPath: workspaceSettingsModel.defaultWorkingDirectoryPath
+        )
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         do {
             try content.write(to: url, atomically: true, encoding: .utf8)
+            UserDefaults.standard.set(
+                url.deletingLastPathComponent().path,
+                forKey: Self.assistantExportLastDirectoryDefaultsKey
+            )
             chatComposerCoordinator.showToast(
                 title: "已导出回复",
                 message: url.path,

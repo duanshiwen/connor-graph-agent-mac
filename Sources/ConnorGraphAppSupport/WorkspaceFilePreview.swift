@@ -8,7 +8,15 @@ public enum WorkspaceFilePreviewRenderer: String, Sendable, Equatable {
     case pdf
     case quickLook
     case html
+    case epub
     case unsupported
+}
+
+public extension WorkspaceFilePreviewRenderer {
+    /// 该类型是否会在浏览器中打开（而不是应用内预览）。
+    var previewsInBrowser: Bool {
+        self == .html || self == .epub
+    }
 }
 
 public enum WorkspaceCodeHighlightKind: String, Sendable, Equatable {
@@ -144,6 +152,7 @@ public actor WorkspaceFilePreviewLoader {
     public nonisolated static func renderer(for url: URL) -> WorkspaceFilePreviewRenderer {
         let extensionName = url.pathExtension.lowercased()
         if ["html", "htm"].contains(extensionName) { return .html }
+        if extensionName == "epub" { return .epub }
         if ["md", "markdown"].contains(extensionName) { return .markdown }
         if extensionName == "pdf" { return .pdf }
         if monospacedTextExtensions.contains(extensionName) { return .monospacedText }

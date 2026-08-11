@@ -28,6 +28,65 @@ struct BrowserFeatureModelTests {
         #expect(fixture.model.errorMessage == nil)
     }
 
+    @Test func localEPUBPreviewExtractsIntoReaderTab() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let workspace = fixture.root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let epub = workspace.appendingPathComponent("book.epub")
+        let entries: [(String, Data)] = [
+            ("mimetype", Data("application/epub+zip".utf8)),
+            ("META-INF/container.xml", Data("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles>
+                <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+              </rootfiles>
+            </container>
+            """.utf8)),
+            ("OEBPS/content.opf", Data("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+              <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                <dc:title>集成测试电子书</dc:title>
+                <dc:creator>康纳</dc:creator>
+              </metadata>
+              <manifest>
+                <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+                <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+              </manifest>
+              <spine>
+                <itemref idref="c1"/>
+              </spine>
+            </package>
+            """.utf8)),
+            ("OEBPS/nav.xhtml", Data("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+              <body><nav epub:type="toc"><ol><li><a href="chapter1.xhtml">第一章</a></li></ol></nav></body>
+            </html>
+            """.utf8)),
+            ("OEBPS/chapter1.xhtml", Data("<html xmlns='http://www.w3.org/1999/xhtml'><body><p>正文</p></body></html>".utf8))
+        ]
+        try TestZIPWriter.write(entries: entries, to: epub)
+
+        fixture.model.openLocalHTMLPreview(fileURL: epub, readAccessRootURL: workspace)
+
+        let snapshot = try #require(fixture.model.workspaceSnapshotsBySessionID["session-1"])
+        let tab = try #require(snapshot.tabs.first)
+        #expect(snapshot.tabs.count == 1)
+        #expect(tab.title == "集成测试电子书")
+        #expect(tab.currentURLString.hasSuffix(EPUBBookParser.landingPageFilename))
+        let readAccessPath = try #require(tab.localFileReadAccessPath)
+        #expect(URL(fileURLWithPath: readAccessPath).lastPathComponent.hasPrefix(EPUBBookParser.extractionDirectoryPrefix))
+        #expect(FileManager.default.fileExists(atPath: readAccessPath))
+        #expect(fixture.model.isVisible)
+        #expect(fixture.model.errorMessage == nil)
+
+        EPUBBookParser.cleanupExtractedDirectoryIfNeeded(path: readAccessPath)
+        #expect(!FileManager.default.fileExists(atPath: readAccessPath))
+    }
+
     @Test func localHTMLPreviewRejectsFilesOutsideWorkspaceRoot() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
