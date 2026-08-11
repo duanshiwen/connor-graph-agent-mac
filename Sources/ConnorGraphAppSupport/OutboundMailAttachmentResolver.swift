@@ -7,15 +7,19 @@ public protocol OutboundMailAttachmentResolving: Sendable {
 
 public struct AppSessionOutboundMailAttachmentResolver: OutboundMailAttachmentResolving, Sendable {
     public var store: AppSessionAttachmentStore
+    /// 业务文件库：`file:` 前缀的 attachmentID 从这里解析字节（跨会话已登记文件）。
+    public var fileStore: FileArtifactStore?
     public var maximumAttachmentBytes: Int64
     public var maximumTotalBytes: Int64
 
     public init(
         store: AppSessionAttachmentStore,
+        fileStore: FileArtifactStore? = nil,
         maximumAttachmentBytes: Int64 = 25_000_000,
         maximumTotalBytes: Int64 = 50_000_000
     ) {
         self.store = store
+        self.fileStore = fileStore
         self.maximumAttachmentBytes = maximumAttachmentBytes
         self.maximumTotalBytes = maximumTotalBytes
     }
@@ -37,6 +41,33 @@ public struct AppSessionOutboundMailAttachmentResolver: OutboundMailAttachmentRe
                   !id.rawValue.contains("\\"),
                   !id.rawValue.contains("..") else {
                 throw MailRuntimeError.invalidAttachment(id.rawValue)
+            }
+            if id.rawValue.hasPrefix("file:") {
+                guard let fileStore else {
+                    throw MailRuntimeError.attachmentNotFound(id.rawValue)
+                }
+                let record: FileArtifactRecord
+                do {
+                    record = try fileStore.artifact(fileID: id.rawValue)
+                } catch {
+                    throw MailRuntimeError.attachmentNotFound(id.rawValue)
+                }
+                guard record.byteCount >= 0, record.byteCount <= maximumAttachmentBytes else {
+                    throw MailRuntimeError.attachmentTooLarge(id: id.rawValue, maximumBytes: maximumAttachmentBytes)
+                }
+                totalBytes += record.byteCount
+                guard totalBytes <= maximumTotalBytes else {
+                    throw MailRuntimeError.attachmentsTooLarge(maximumBytes: maximumTotalBytes)
+                }
+                let data = try fileStore.readBytes(fileID: id.rawValue)
+                attachments.append(OutboundMailAttachment(
+                    id: id,
+                    filename: record.originalName,
+                    mimeType: record.mimeType ?? "application/octet-stream",
+                    data: data,
+                    contentHash: record.sha256
+                ))
+                continue
             }
             let manifest: AgentAttachmentManifest
             do {

@@ -667,8 +667,8 @@ public enum MemoryOSBackgroundToolCatalog {
     private static func readRecordTool() -> MemoryOSBackgroundToolDescriptor {
         MemoryOSBackgroundToolDescriptor(
             name: "memory_os_read_record",
-            description: "Read a full Memory OS record from a search hit when summary-level context is insufficient.",
-            inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"layer\":{\"type\":\"string\",\"enum\":[\"L0\",\"L1\",\"L2\",\"L3\",\"L4\"],\"description\":\"Memory OS layer.\"},\"recordID\":{\"type\":\"string\",\"description\":\"Exact record ID returned by search.\"}},\"required\":[\"layer\",\"recordID\"],\"additionalProperties\":false}",
+            description: "Read a full Memory OS record from a search hit when summary-level context is insufficient. A hit identifies a record as `record_id`; pass that value in the `recordID` argument (input names are camelCase, never `record_id`).",
+            inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"layer\":{\"type\":\"string\",\"enum\":[\"L0\",\"L1\",\"L2\",\"L3\",\"L4\"],\"description\":\"Memory OS layer.\"},\"recordID\":{\"type\":\"string\",\"description\":\"Exact record ID returned by search (the `record_id` field of a hit); pass as `recordID`, never as `record_id`.\"}},\"required\":[\"layer\",\"recordID\"],\"additionalProperties\":false}",
             usagePolicy: "Use only when summary-level context is insufficient for novelty, duplicate, grounding or concept identity decisions."
         )
     }

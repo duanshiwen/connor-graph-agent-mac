@@ -12,6 +12,7 @@ public struct AppStoragePaths: Sendable, Equatable {
     public var labelsDirectory: URL
     public var statusesDirectory: URL
     public var artifactsDirectory: URL
+    public var filesDirectory: URL
     public var graphDirectory: URL
     public var graphIndexesDirectory: URL
     public var graphExportsDirectory: URL
@@ -38,6 +39,7 @@ public struct AppStoragePaths: Sendable, Equatable {
         labelsDirectory: URL? = nil,
         statusesDirectory: URL? = nil,
         artifactsDirectory: URL? = nil,
+        filesDirectory: URL? = nil,
         graphDirectory: URL? = nil,
         graphIndexesDirectory: URL? = nil,
         graphExportsDirectory: URL? = nil,
@@ -70,6 +72,7 @@ public struct AppStoragePaths: Sendable, Equatable {
         self.labelsDirectory = labelsDirectory ?? applicationSupportDirectory.appendingPathComponent("labels", isDirectory: true)
         self.statusesDirectory = statusesDirectory ?? applicationSupportDirectory.appendingPathComponent("statuses", isDirectory: true)
         self.artifactsDirectory = artifactsDirectory ?? applicationSupportDirectory.appendingPathComponent("artifacts", isDirectory: true)
+        self.filesDirectory = filesDirectory ?? applicationSupportDirectory.appendingPathComponent("files", isDirectory: true)
         self.graphDirectory = resolvedGraphDirectory
         self.graphIndexesDirectory = graphIndexesDirectory ?? resolvedGraphDirectory.appendingPathComponent("indexes", isDirectory: true)
         self.graphExportsDirectory = graphExportsDirectory ?? resolvedGraphDirectory.appendingPathComponent("exports", isDirectory: true)
@@ -113,6 +116,7 @@ public struct AppStoragePaths: Sendable, Equatable {
             labelsDirectory,
             statusesDirectory,
             artifactsDirectory,
+            filesDirectory,
             graphDirectory,
             graphIndexesDirectory,
             graphExportsDirectory,

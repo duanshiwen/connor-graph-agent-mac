@@ -266,6 +266,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         }
         registry.register(GraphSearchTool(searchService: searchService))
         let memoryOSFacade = makeMemoryOSFacade()
+        let fileStore = storagePaths.map { FileArtifactStore(paths: $0) }
         if let memoryOSFacade {
             registry.registerMemoryOSReadTools(
                 facade: memoryOSFacade,
@@ -319,6 +320,15 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 store: AppSessionAttachmentStore(paths: storagePaths),
                 localWorkspacePolicy: localWorkspacePolicy
             ))
+            let fileArtifactStore = FileArtifactStore(paths: storagePaths)
+            registry.register(FileLookupTool(store: fileArtifactStore))
+            if let memoryOSFacade {
+                registry.register(FileRegisterTool(
+                    attachmentStore: AppSessionAttachmentStore(paths: storagePaths),
+                    fileStore: fileArtifactStore,
+                    memory: FileMemoryRegistrationService(facade: memoryOSFacade, store: fileArtifactStore)
+                ))
+            }
             let skillMutationService = SkillManagerMutationService(storagePaths: storagePaths)
             registry.register(ConnorSkillCreateTool(service: skillMutationService))
             registry.register(ConnorSkillUpdateTool(service: skillMutationService))
@@ -385,7 +395,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             }
             if effectiveMailRuntime.outboundAttachmentResolver == nil {
                 effectiveMailRuntime.outboundAttachmentResolver = AppSessionOutboundMailAttachmentResolver(
-                    store: AppSessionAttachmentStore(paths: storagePaths)
+                    store: AppSessionAttachmentStore(paths: storagePaths),
+                    fileStore: fileStore
                 )
             }
             registry.registerNativeMailTools(

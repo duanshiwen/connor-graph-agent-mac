@@ -138,6 +138,7 @@ public enum AgentPromptModuleCatalog {
         .init(id: "session_status_tool_rules", title: "Session Status Tool Rules", requirement: .allOf([.sessions])),
         .init(id: "workspace_execution_rules", title: "Workspace Execution Rules", requirement: .allOf([.workspace]), dependencies: ["workspace_tool_rules"], toolFamilies: ["workspace"]),
         .init(id: "tool_failure_safety", title: "Tool Failure and Safety Rules"),
+        .init(id: "file_handoff_reuse", title: "File Handoff, Retrieval, and Reuse", requirement: .allOf([.workspace]), toolFamilies: ["workspace"]),
         .init(id: "note_session_file_boundary", title: "Note Session File Boundary", requirement: .allOf([.workspace, .note])),
         .init(id: "programming_precision", title: "Programming and Precision Work", requirement: .allOf([.workspace]), dependencies: ["workspace_execution_rules"], toolFamilies: ["workspace"]),
         .init(id: "memory_architecture", title: "Memory OS Architecture", requirement: .allOf([.memory]), toolFamilies: ["memory"]),
