@@ -365,8 +365,9 @@ struct BrowserWorkspaceView: View {
     private var tabBar: some View {
         GeometryReader { geometry in
             let addButtonWidth: CGFloat = 30
+            let cleanupButtonWidth: CGFloat = 30
             let interItemSpacing: CGFloat = 8
-            let availableTabWidth = max(0, geometry.size.width - addButtonWidth - interItemSpacing)
+            let availableTabWidth = max(0, geometry.size.width - addButtonWidth - cleanupButtonWidth - interItemSpacing * 2)
             let visibleTabs = globalTabs
             let layout = BrowserTabStripLayoutCalculator().layout(tabCount: visibleTabs.count, availableWidth: Double(availableTabWidth))
 
@@ -404,6 +405,23 @@ struct BrowserWorkspaceView: View {
                         .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
                 )
                 .help("新建标签页")
+
+                Button(action: closeOtherTabs) {
+                    Image(systemName: "xmark.square")
+                        .font(BrowserFloatingTypography.toolbarIcon)
+                        .foregroundStyle(.secondary)
+                        .frame(width: cleanupButtonWidth, height: 26)
+                }
+                .buttonStyle(.plain)
+                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
+                )
+                .disabled(activeSession.tabs.count <= 1)
+                .opacity(activeSession.tabs.count <= 1 ? 0.48 : 1)
+                .help("关闭其他标签页")
+                .accessibilityLabel("关闭其他标签页")
             }
         }
         .frame(height: 30)
@@ -456,6 +474,20 @@ struct BrowserWorkspaceView: View {
                 .foregroundStyle(.secondary)
                 .help("新建标签页")
                 .accessibilityLabel("新建标签页")
+
+                if isExpanded {
+                    Button(action: closeOtherTabs) {
+                        Image(systemName: "xmark.square")
+                            .font(BrowserFloatingTypography.toolbarIcon)
+                            .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .disabled(activeSession.tabs.count <= 1)
+                    .opacity(activeSession.tabs.count <= 1 ? 0.48 : 1)
+                    .help("关闭其他标签页")
+                    .accessibilityLabel("关闭其他标签页")
+                }
             }
             .padding(.horizontal, isExpanded ? 8 : 9)
             .frame(height: 40)
@@ -671,18 +703,6 @@ struct BrowserWorkspaceView: View {
             .opacity(activeWebView?.url == nil ? 0.48 : 1)
             .help("分享当前页面")
             .accessibilityLabel("分享当前页面")
-
-            Button(action: closeOtherTabs) {
-                BrowserToolbarIconButtonLabel(
-                    systemImage: "xmark.square",
-                    iconFont: .system(size: 16, weight: .semibold)
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(activeSession.tabs.count <= 1)
-            .opacity(activeSession.tabs.count <= 1 ? 0.48 : 1)
-            .help("关闭其他标签页")
-            .accessibilityLabel("关闭其他标签页")
 
             browserToolsMenu
 
