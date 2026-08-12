@@ -58,6 +58,7 @@ public enum CloudKnowledgeExtractionPrompt {
     4. Use the write tools only for derived durable knowledge. Record duplicate or unsuitable candidates with the appropriate non-writing decision. Do not copy raw conversation text into tool payloads.
     5. For create_new, use the exact candidate payload envelope: {"kind":"reusable_knowledge","stableKey":"lowercase-kebab-key","validFrom":"ISO-8601 timestamp","payload":{"title":"short title","summary":"concise summary","text":"derived reusable knowledge"}}. Do not flatten the nested payload or omit any of those four envelope fields.
     6. Do not call publication validation; the application validates once after all selected conversations finish.
+    7. Batch aggressively: when multiple independent semantic groups are ready, issue multiple search and write tool calls in the SAME assistant turn to reduce round trips; each write still requires its own search context, so pair each write with its covering search in the same batch when possible.
 
     Termination contract:
     - Do not re-scan the source, expand the frozen candidate list, or invent optional L3/L4 representations after processing begins.
@@ -260,7 +261,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
     public var maximumToolCallsPerIteration: Int
     public var maximumTotalToolErrors: Int
 
-    public init(maximumIterations: Int = 48, maximumToolCallsPerIteration: Int = 4, maximumTotalToolErrors: Int = 8) {
+    public init(maximumIterations: Int = 48, maximumToolCallsPerIteration: Int = 8, maximumTotalToolErrors: Int = 8) {
         self.maximumIterations = maximumIterations
         self.maximumToolCallsPerIteration = maximumToolCallsPerIteration
         self.maximumTotalToolErrors = maximumTotalToolErrors
@@ -467,12 +468,25 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     consecutiveErrors = 0
                     messages.append(AgentModelMessage(role: .tool, content: result.contentJSON ?? result.contentText, toolCallID: call.id, name: call.name))
                 } catch {
+                    // 服务端限流（429）不是模型生成的无效操作：不计入错误计数，
+                    // 退避后把限流提示回填给模型，让它稍后重试同一调用，
+                    // 避免把限流误判成“模型连续生成无效知识操作”并放大请求风暴。
+                    if case CloudKnowledgeError.server(let status, _, _) = error, status == 429 {
+                        try await Task.sleep(for: .seconds(1.5))
+                        let diagnostic = (error as? AgentToolError)?.description ?? error.localizedDescription
+                        let bounded = String(diagnostic.prefix(240))
+                        emit(CloudKnowledgeExtractionTraceEvent(sequence: traceSequence, iteration: iteration, kind: .toolError, modelID: provider.modelID, toolCall: attemptedCall, error: diagnostic))
+                        messages.append(AgentModelMessage(role: .tool, content: "Tool failed (rate limited; retry the same call in a later turn): \(bounded)", toolCallID: call.id, name: call.name))
+                        continue
+                    }
                     consecutiveErrors += 1
                     totalToolErrors += 1
                     let diagnostic = (error as? AgentToolError)?.description ?? error.localizedDescription
                     lastToolError = String(diagnostic.prefix(240))
                     emit(CloudKnowledgeExtractionTraceEvent(sequence: traceSequence, iteration: iteration, kind: .toolError, modelID: provider.modelID, toolCall: attemptedCall, error: diagnostic))
                     messages.append(AgentModelMessage(role: .tool, content: "Tool failed: \(lastToolError)", toolCallID: call.id, name: call.name))
+                    // 失败退避：避免瞬时打满服务端限流，形成请求风暴。
+                    try await Task.sleep(for: .milliseconds(300))
                     if consecutiveErrors >= 3 || totalToolErrors >= maximumTotalToolErrors {
                         throw CloudKnowledgeLLMGenerationError.tooManyToolErrors(lastError: lastToolError)
                     }
