@@ -27,6 +27,13 @@ struct CloudKnowledgeCreatorView: View {
             stageContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
+            // 所有操作按钮固定在窗口最下端，上面内容区可滚动。
+            Divider()
+            bottomActionBar
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(.bar)
+
             if store.snapshot.stage == .validating || store.snapshot.stage == .preview {
                 Divider()
                 pendingCommitBar
@@ -120,17 +127,6 @@ struct CloudKnowledgeCreatorView: View {
                 }
             }
             .formStyle(.columns)
-
-            actionBar {
-                Spacer()
-                Button("保存并选择对话") {
-                    store.updateDraft(draft)
-                    Task { await store.saveKnowledgeBase() }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(AppButtonLayout.controlSize)
-                .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
         }
     }
 
@@ -172,23 +168,6 @@ struct CloudKnowledgeCreatorView: View {
             }
             .listStyle(.inset)
             .frame(minHeight: 280, maxHeight: .infinity)
-
-            Divider()
-
-            actionBar {
-                Button("返回") { store.advance(to: .configure) }
-                    .controlSize(AppButtonLayout.controlSize)
-                Spacer()
-                Text("已选择 \(store.snapshot.selectedConversationIDs.count) 个对话")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("下一步：确认生成") { store.advance(to: .confirm) }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(AppButtonLayout.controlSize)
-                    .disabled(store.snapshot.selectedConversationIDs.isEmpty)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
@@ -225,14 +204,6 @@ struct CloudKnowledgeCreatorView: View {
             summaryRow("从 \(store.snapshot.selectedConversationIDs.count) 个本地对话生成结构化 L2/L3/L4 知识操作", systemImage: "wand.and.stars")
             summaryRow("每组写入前检索已提交和本次暂存的知识", systemImage: "magnifyingglass")
             summaryRow("提交前可以查看完整变更预览", systemImage: "checkmark.rectangle")
-            actionBar {
-                Button("返回") { store.advance(to: .conversations) }
-                    .controlSize(AppButtonLayout.controlSize)
-                Spacer()
-                Button("确认并开始") { Task { await store.beginPublication() } }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(AppButtonLayout.controlSize)
-            }
         }
     }
 
@@ -265,19 +236,6 @@ struct CloudKnowledgeCreatorView: View {
             ForEach(Array(store.snapshot.summaries.enumerated()), id: \.offset) { _, summary in
                 Label(summary, systemImage: "checkmark.circle")
             }
-            actionBar {
-                Button(store.snapshot.stage == .paused ? "恢复" : "暂停") {
-                    store.snapshot.stage == .paused ? store.resume() : store.pause()
-                }
-                .controlSize(AppButtonLayout.controlSize)
-                Button("取消", role: .destructive) { store.cancel() }
-                    .controlSize(AppButtonLayout.controlSize)
-                Spacer()
-                Button("验证发布") { Task { await store.validatePublication() } }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(AppButtonLayout.controlSize)
-                    .disabled(store.snapshot.processedConversationIDs.count < store.snapshot.selectedConversationIDs.count)
-            }
         }
     }
 
@@ -290,13 +248,6 @@ struct CloudKnowledgeCreatorView: View {
                     Label(issue.message, systemImage: issue.repairable ? "wrench.and.screwdriver" : "exclamationmark.octagon")
                         .foregroundStyle(issue.repairable ? .orange : .red)
                 }
-            }
-            actionBar {
-                Spacer()
-                Button("修复后重试") { Task { await store.finalizePublication() } }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(AppButtonLayout.controlSize)
-                    .disabled(store.snapshot.validationIssues.isEmpty || store.isWorking)
             }
         }
     }
@@ -316,10 +267,6 @@ struct CloudKnowledgeCreatorView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            }
-            actionBar {
-                Button("返回修复") { store.advance(to: .validating) }
-                    .controlSize(AppButtonLayout.controlSize)
             }
         }
     }
@@ -349,12 +296,6 @@ struct CloudKnowledgeCreatorView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("知识库在生成期间发生了变化。请重新检索受影响知识并 rebase，避免覆盖远端历史。", systemImage: "arrow.triangle.2.circlepath")
                 .foregroundStyle(.orange)
-            actionBar {
-                Spacer()
-                Button("重新检索并继续") { store.resume() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(AppButtonLayout.controlSize)
-            }
         }
     }
 
@@ -378,26 +319,13 @@ struct CloudKnowledgeCreatorView: View {
                     .onAppear { Task { await store.loadMoreHistoryIfNeeded(currentRevisionID: revision.id) } }
                 }
             }
-            actionBar {
-                Spacer()
-                Button("创建新的发布") {
-                    store.reset()
-                    draft = .init()
-                }
-                .controlSize(AppButtonLayout.controlSize)
-            }
         }
     }
 
     private var cancelled: some View {
-        actionBar {
+        VStack(alignment: .leading, spacing: 12) {
             Label("发布已取消；未提交的 Run 可由后端 abandon。", systemImage: "xmark.circle")
-            Spacer()
-            Button("重新开始") {
-                store.reset()
-                draft = .init()
-            }
-            .controlSize(AppButtonLayout.controlSize)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -556,6 +484,99 @@ struct CloudKnowledgeCreatorView: View {
             get: { store.snapshot.selectedConversationIDs.contains(id) },
             set: { _ in store.toggleConversation(id) }
         )
+    }
+
+    /// 底部固定操作栏：按当前阶段显示对应按钮，与可滚动内容区分离。
+    @ViewBuilder
+    private var bottomActionBar: some View {
+        switch store.snapshot.stage {
+        case .configure:
+            actionBar {
+                Spacer()
+                Button("保存并选择对话") {
+                    store.updateDraft(draft)
+                    Task { await store.saveKnowledgeBase() }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(AppButtonLayout.controlSize)
+                .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        case .conversations:
+            actionBar {
+                Button("返回") { store.advance(to: .configure) }
+                    .controlSize(AppButtonLayout.controlSize)
+                Spacer()
+                Text("已选择 \(store.snapshot.selectedConversationIDs.count) 个对话")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("下一步：确认生成") { store.advance(to: .confirm) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(AppButtonLayout.controlSize)
+                    .disabled(store.snapshot.selectedConversationIDs.isEmpty)
+            }
+        case .confirm:
+            actionBar {
+                Button("返回") { store.advance(to: .conversations) }
+                    .controlSize(AppButtonLayout.controlSize)
+                Spacer()
+                Button("确认并开始") { Task { await store.beginPublication() } }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(AppButtonLayout.controlSize)
+            }
+        case .generating, .paused:
+            actionBar {
+                Button(store.snapshot.stage == .paused ? "恢复" : "暂停") {
+                    store.snapshot.stage == .paused ? store.resume() : store.pause()
+                }
+                .controlSize(AppButtonLayout.controlSize)
+                Button("取消", role: .destructive) { store.cancel() }
+                    .controlSize(AppButtonLayout.controlSize)
+                Spacer()
+                Button("验证发布") { Task { await store.validatePublication() } }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(AppButtonLayout.controlSize)
+                    .disabled(store.snapshot.processedConversationIDs.count < store.snapshot.selectedConversationIDs.count)
+            }
+        case .validating:
+            actionBar {
+                Spacer()
+                Button("修复后重试") { Task { await store.finalizePublication() } }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(AppButtonLayout.controlSize)
+                    .disabled(store.snapshot.validationIssues.isEmpty || store.isWorking)
+            }
+        case .preview:
+            actionBar {
+                Button("返回修复") { store.advance(to: .validating) }
+                    .controlSize(AppButtonLayout.controlSize)
+            }
+        case .conflict:
+            actionBar {
+                Spacer()
+                Button("重新检索并继续") { store.resume() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(AppButtonLayout.controlSize)
+            }
+        case .completed:
+            actionBar {
+                Spacer()
+                Button("创建新的发布") {
+                    store.reset()
+                    draft = .init()
+                }
+                .controlSize(AppButtonLayout.controlSize)
+            }
+        case .cancelled:
+            actionBar {
+                Label("发布已取消；未提交的 Run 可由后端 abandon。", systemImage: "xmark.circle")
+                Spacer()
+                Button("重新开始") {
+                    store.reset()
+                    draft = .init()
+                }
+                .controlSize(AppButtonLayout.controlSize)
+            }
+        }
     }
 
     private func actionBar<Content: View>(@ViewBuilder content: () -> Content) -> some View {
