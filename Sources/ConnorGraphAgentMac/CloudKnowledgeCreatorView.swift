@@ -616,10 +616,32 @@ struct CloudKnowledgeCreatorView: View {
         store.currentPublicationStatusLabel == "published" ? "checkmark.circle.fill" : "circle.dashed"
     }
 
+    /// 只有用户可感知的向导步骤才计入进度；paused/conflict 是运行状态，
+    /// 沿用其发生时所在步骤的序号，completed/cancelled 是终态不显示“步骤 x / n”。
+    private static let userVisibleStages: [CloudKnowledgeCreatorStage] = [
+        .configure, .conversations, .confirm, .generating, .validating, .preview
+    ]
+
     private var stageProgressLabel: String {
-        let stages = CloudKnowledgeCreatorStage.allCases
-        let current = stages.firstIndex(of: store.snapshot.stage).map { $0 + 1 } ?? 1
-        return "步骤 \(current) / \(stages.count)"
+        switch store.snapshot.stage {
+        case .completed, .cancelled:
+            return ""
+        default:
+            let current = Self.userVisibleStageIndex(store.snapshot.stage)
+            return "步骤 \(current) / \(Self.userVisibleStages.count)"
+        }
+    }
+
+    private static func userVisibleStageIndex(_ stage: CloudKnowledgeCreatorStage) -> Int {
+        switch stage {
+        case .configure: 1
+        case .conversations: 2
+        case .confirm: 3
+        case .generating, .paused: 4
+        case .validating, .conflict: 5
+        case .preview: 6
+        case .completed, .cancelled: 6
+        }
     }
 
     private var stageTitle: String {
