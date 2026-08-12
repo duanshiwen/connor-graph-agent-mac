@@ -192,7 +192,8 @@ public enum AppCloudKnowledgeCLIRouter {
             guard let backendURL = URL(string: backendURLString) else {
                 return try encode(["error": "invalid_backend_url", "value": backendURLString], encoder: encoder)
             }
-            let provider = live.factory.makeAgentModelProvider(sessionLLMOverride: live.sessionLLMOverride)
+            // 知识提取是公共任务，固定用默认模型，不跟随目标会话的覆盖。
+            let provider = live.factory.makeAgentModelProvider()
             let accountCredentials = AppConnorAccountCredentialStore()
             let authenticatedSession = ConnorBackendAuthenticatedSession(
                 api: ConnorBackendAPIClient(baseURL: backendURL),
