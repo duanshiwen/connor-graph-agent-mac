@@ -15,13 +15,18 @@ struct PersonRelationshipPresentationTests {
             customKindLabel: "妈妈"
         )
 
-        let rows = PersonRelationshipPresentation.rows(
+        let rows = PersonRelationshipPresentation.detailRows(
             for: zhangXia,
+            personDisplayName: "张霞",
             relationships: [relationship],
             displayTitle: { endpoint in endpoint.isCurrentUser ? "我（当前用户）" : endpoint.fallbackDisplayTitle }
         )
 
-        #expect(rows == [PersonRelationshipPresentation.Row(label: "妈妈", value: "我（当前用户）")])
+        #expect(rows == [PersonRelationshipPresentation.DetailRow(
+            relationship: relationship,
+            kindTitle: "妈妈",
+            directionText: "张霞 → 我（当前用户）"
+        )])
     }
 
     @Test func presentationIncludesRelationshipsWhereSelectedPersonIsTarget() {
@@ -32,16 +37,23 @@ struct PersonRelationshipPresentationTests {
             source: .personProfile(zhangXia),
             target: .personProfile(shiwen),
             kind: .parentOf,
-            customKindLabel: "妈妈"
+            customKindLabel: "妈妈",
+            note: "从小带我长大"
         )
 
-        let rows = PersonRelationshipPresentation.rows(
+        let rows = PersonRelationshipPresentation.detailRows(
             for: shiwen,
+            personDisplayName: "诗闻",
             relationships: [relationship],
             displayTitle: { endpoint in endpoint.personID == zhangXia ? "张霞" : endpoint.fallbackDisplayTitle }
         )
 
-        #expect(rows == [PersonRelationshipPresentation.Row(label: "妈妈", value: "张霞")])
+        #expect(rows == [PersonRelationshipPresentation.DetailRow(
+            relationship: relationship,
+            kindTitle: "妈妈",
+            directionText: "张霞 → 诗闻",
+            note: "从小带我长大"
+        )])
     }
 
     @Test func presentationSkipsUnrelatedAndInactiveRelationships() {
@@ -50,13 +62,15 @@ struct PersonRelationshipPresentationTests {
         let archived = PersonRelationship(id: "archived", source: .personProfile(selected), target: .currentUser(), kind: .friendOf, status: .archived)
         let unrelated = PersonRelationship(id: "unrelated", source: .personProfile(ContactID(rawValue: "person-a")), target: .personProfile(ContactID(rawValue: "person-b")), kind: .knows)
 
-        let rows = PersonRelationshipPresentation.rows(
+        let rows = PersonRelationshipPresentation.detailRows(
             for: selected,
+            personDisplayName: "我",
             relationships: [archived, unrelated, active],
             displayTitle: { $0.fallbackDisplayTitle }
         )
 
         #expect(rows.count == 1)
-        #expect(rows.first?.label == "朋友")
+        #expect(rows.first?.kindTitle == "朋友")
+        #expect(rows.first?.directionText == "我 → 我（当前用户）")
     }
 }

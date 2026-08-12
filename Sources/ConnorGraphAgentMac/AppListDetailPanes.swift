@@ -2875,17 +2875,52 @@ struct ContactsSourceSettingsView: View {
 
                         PersonProfileInfoSection(title: "人物信息", systemImage: "person.text.rectangle") {
                             VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
-                                PersonProfileMetadataLine(label: "姓名", value: selected.displayName)
-                                PersonProfileMetadataLine(label: "联系", value: selected.primaryEmail ?? selected.subtitle)
-                                if let organization = selected.organizationName, !organization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    PersonProfileMetadataLine(label: "组织", value: organization)
+                                if let profile = selectedProfile {
+                                    PersonProfileMetadataLine(label: "姓名", value: profile.displayName)
+                                    if !profile.aliases.isEmpty {
+                                        PersonProfileMetadataLine(label: "别名", value: profile.aliases.joined(separator: "、"))
+                                    }
+                                    if !profile.givenName.isEmpty || !profile.familyName.isEmpty {
+                                        PersonProfileMetadataLine(label: "名姓", value: [profile.givenName, profile.familyName].filter { !$0.isEmpty }.joined(separator: " "))
+                                    }
+                                    if let gender = profile.gender?.trimmingCharacters(in: .whitespacesAndNewlines), !gender.isEmpty {
+                                        PersonProfileMetadataLine(label: "性别 / 称谓", value: gender)
+                                    }
+                                    if !profile.emails.isEmpty {
+                                        PersonProfileMetadataLine(label: "邮箱", value: profile.emails.map(\.email).joined(separator: "\n"))
+                                    }
+                                    if !profile.phones.isEmpty {
+                                        PersonProfileMetadataLine(label: "电话", value: profile.phones.map(\.number).joined(separator: "\n"))
+                                    }
+                                    if !profile.addresses.isEmpty {
+                                        PersonProfileMetadataLine(label: "地址", value: profile.addresses.map(\.value).joined(separator: "\n"))
+                                    }
+                                    if let organization = profile.organizationName?.trimmingCharacters(in: .whitespacesAndNewlines), !organization.isEmpty {
+                                        PersonProfileMetadataLine(label: "组织", value: organization)
+                                    }
+                                    if let jobTitle = profile.jobTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !jobTitle.isEmpty {
+                                        PersonProfileMetadataLine(label: "职位", value: jobTitle)
+                                    }
+                                    if let notes = profile.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
+                                        PersonProfileMetadataLine(label: "备注", value: notes)
+                                    }
+                                    PersonProfileMetadataLine(label: "状态", value: profile.status.displayTitle)
+                                } else {
+                                    PersonProfileMetadataLine(label: "姓名", value: selected.displayName)
+                                    PersonProfileMetadataLine(label: "联系", value: selected.primaryEmail ?? selected.subtitle)
+                                    if let organization = selected.organizationName, !organization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        PersonProfileMetadataLine(label: "组织", value: organization)
+                                    }
+                                    if let status = selected.status {
+                                        PersonProfileMetadataLine(label: "状态", value: status.displayTitle)
+                                    }
                                 }
-                                PersonProfileMetadataLine(label: "状态", value: selected.status.displayTitle)
                             }
                         }
 
-                        let relationshipRows = PersonRelationshipPresentation.rows(
+                        let relationshipRows = PersonRelationshipPresentation.detailRows(
                             for: selected.id,
+                            personDisplayName: selected.displayName,
                             relationships: model.relationships,
                             displayTitle: { model.displayTitle(for: $0) }
                         )
@@ -2893,7 +2928,7 @@ struct ContactsSourceSettingsView: View {
                             PersonProfileInfoSection(title: "关系", systemImage: "person.2") {
                                 VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
                                     ForEach(relationshipRows) { row in
-                                        PersonProfileMetadataLine(label: row.label, value: row.value)
+                                        RelationshipDetailRow(row: row)
                                     }
                                 }
                             }
@@ -2985,6 +3020,11 @@ struct ContactsSourceSettingsView: View {
     private var selectedContactRow: NativeContactRowPresentation? {
         guard let id = model.selectedContactID else { return nil }
         return model.presentation.rows.first { $0.id == id }
+    }
+
+    private var selectedProfile: PersonProfile? {
+        guard let id = model.selectedContactID else { return nil }
+        return model.profiles.first { $0.id == id }
     }
 
     private var selectedFriend: ImFriend? {
@@ -3282,10 +3322,10 @@ private struct PersonProfilePhotoGallery: View {
     }
 }
 
-private extension Optional where Wrapped == PersonProfileStatus {
+private extension PersonProfileStatus {
     var displayTitle: String {
         switch self {
-        case .active, .none:
+        case .active:
             return "活跃"
         case .pending:
             return "待确认"
@@ -3294,6 +3334,52 @@ private extension Optional where Wrapped == PersonProfileStatus {
         case .deleted:
             return "已删除"
         }
+    }
+}
+
+private extension Optional where Wrapped == PersonProfileStatus {
+    var displayTitle: String {
+        self?.displayTitle ?? "活跃"
+    }
+}
+
+private struct RelationshipDetailRow: View {
+    var row: PersonRelationshipPresentation.DetailRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Text(row.kindTitle)
+                    .font(AgentChatTypography.microEmphasis)
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.10), in: Capsule())
+                if row.relationship.status == .pending {
+                    Text("待确认")
+                        .font(AgentChatTypography.microEmphasis)
+                        .foregroundStyle(.orange)
+                }
+            }
+            Text(row.directionText)
+                .font(AgentChatTypography.meta)
+                .textSelection(.enabled)
+            if let note = row.note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+                Text("备注：\(note)")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            if let evidence = row.evidenceText?.trimmingCharacters(in: .whitespacesAndNewlines), !evidence.isEmpty {
+                Text("证据：\(evidence)")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
