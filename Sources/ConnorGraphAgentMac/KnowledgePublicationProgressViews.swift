@@ -82,6 +82,47 @@ struct KnowledgePublicationToolbarProgressButton: View {
     }
 }
 
+/// 会话处理进度列表：展示知识库生成中每个选中会话的处理状态。
+/// 添加向导（CloudKnowledgeCreatorView）与右上角进度查看器共用，保证两处一致。
+struct KnowledgePublicationSessionProgressTable: View {
+    var sessions: [AgentSession]
+    var selectedConversationIDs: [String]
+    var processedConversationIDs: [String]
+    var currentConversationID: String?
+    var stage: CloudKnowledgeCreatorStage
+    var messageCounts: [String: Int] = [:]
+
+    private var selectedSessions: [AgentSession] {
+        let byID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        return selectedConversationIDs.map { id in
+            byID[id] ?? AgentSession(id: id, title: "会话 \(id.prefix(8))")
+        }
+    }
+
+    var body: some View {
+        Table(selectedSessions) {
+            TableColumn("会话") { session in Text(session.title).lineLimit(1) }
+            TableColumn("消息") { session in Text("\(messageCount(for: session.id))").foregroundStyle(.secondary) }.width(60)
+            TableColumn("状态") { session in
+                let presentation = conversationPresentation(session.id)
+                Label(presentation.title, systemImage: presentation.systemImage).foregroundStyle(presentation.color)
+            }.width(130)
+        }
+    }
+
+    private func messageCount(for id: String) -> Int {
+        if let count = messageCounts[id] { return count }
+        return selectedSessions.first { $0.id == id }?.messages.count ?? 0
+    }
+
+    private func conversationPresentation(_ id: String) -> (title: String, systemImage: String, color: Color) {
+        if processedConversationIDs.contains(id) { return ("已完成", "checkmark.circle.fill", .green) }
+        if currentConversationID == id { return ("AI 处理中", "sparkles", .accentColor) }
+        if stage == .cancelled { return ("已取消", "xmark.circle", .secondary) }
+        return ("等待处理", "clock", .secondary)
+    }
+}
+
 struct KnowledgePublicationProgressView: View {
     @ObservedObject var store: CloudKnowledgeCreatorStore
     var sessions: [AgentSession]
@@ -131,14 +172,13 @@ struct KnowledgePublicationProgressView: View {
                         .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
                 }
 
-                Table(selectedSessions) {
-                    TableColumn("会话") { session in Text(session.title).lineLimit(1) }
-                    TableColumn("消息") { session in Text("\(session.messages.count)").foregroundStyle(.secondary) }.width(60)
-                    TableColumn("状态") { session in
-                        let presentation = conversationPresentation(session.id)
-                        Label(presentation.title, systemImage: presentation.systemImage).foregroundStyle(presentation.color)
-                    }.width(130)
-                }
+                KnowledgePublicationSessionProgressTable(
+                    sessions: sessions,
+                    selectedConversationIDs: store.snapshot.selectedConversationIDs,
+                    processedConversationIDs: store.snapshot.processedConversationIDs,
+                    currentConversationID: store.currentConversationID,
+                    stage: store.snapshot.stage
+                )
 
                 if !store.snapshot.summaries.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
@@ -195,12 +235,6 @@ struct KnowledgePublicationProgressView: View {
         return selectedSessions.first { $0.id == id }
     }
 
-    private func conversationPresentation(_ id: String) -> (title: String, systemImage: String, color: Color) {
-        if store.snapshot.processedConversationIDs.contains(id) { return ("已完成", "checkmark.circle.fill", .green) }
-        if store.currentConversationID == id { return ("AI 处理中", "sparkles", .accentColor) }
-        if store.snapshot.stage == .cancelled { return ("已取消", "xmark.circle", .secondary) }
-        return ("等待处理", "clock", .secondary)
-    }
 
     private var stageTitle: String {
         switch store.snapshot.stage {
