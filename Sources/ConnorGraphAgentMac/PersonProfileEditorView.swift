@@ -152,36 +152,39 @@ struct PersonProfileEditorView: View {
 
     private var contactSection: some View {
         PersonProfileDialogSection(title: "联系方式", systemImage: "at") {
-            PersonProfileDialogRow("邮箱") {
-                TextField("name@example.com", text: firstEmailBinding)
+            PersonProfileDialogRow("邮箱", alignment: .top) {
+                TextField("每行一个邮箱，例如 name@example.com", text: emailsBinding, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
+                    .lineLimit(2...5)
             }
-            PersonProfileDialogRow("电话") {
-                TextField("可选", text: firstPhoneBinding)
+            PersonProfileDialogRow("电话", alignment: .top) {
+                TextField("每行一个电话，例如 +86 138-0000-0000", text: phonesBinding, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
+                    .lineLimit(2...5)
             }
             PersonProfileDialogRow("地址", alignment: .top) {
-                TextField("可选", text: firstAddressBinding, axis: .vertical)
+                TextField("每行一个地址", text: addressesBinding, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
-                    .lineLimit(2...4)
+                    .lineLimit(2...5)
             }
             PersonProfileDialogRow("组织") {
-                TextField("可选", text: optionalText($draft.organizationName))
+                TextField("公司 / 机构名称", text: optionalText($draft.organizationName))
                     .textFieldStyle(.roundedBorder)
             }
             PersonProfileDialogRow("职位") {
-                TextField("可选", text: optionalText($draft.jobTitle))
+                TextField("例如：产品经理", text: optionalText($draft.jobTitle))
                     .textFieldStyle(.roundedBorder)
             }
-            PersonProfileDialogHint("这些字段都是可选的；人物可以只作为关系或记忆中的独立人物存在。")
+            PersonProfileDialogHint("邮箱、电话、地址支持每行一条，多条记录会完整保存；这些字段都是可选的。")
         }
     }
 
     private var notesSection: some View {
         PersonProfileDialogSection(title: "语义与备注", systemImage: "text.quote") {
             PersonProfileDialogRow("别名") {
-                TextField("妈妈, 张阿姨", text: aliasesBinding)
+                TextField("用逗号分隔，例如 妈妈, 张阿姨", text: aliasesBinding)
                     .textFieldStyle(.roundedBorder)
+                    .help("多个别名用逗号分隔")
             }
             PersonProfileDialogRow("备注", alignment: .top) {
                 TextField("可记录关系背景、来源、记忆提示等", text: optionalText($draft.notes), axis: .vertical)
@@ -232,32 +235,41 @@ struct PersonProfileEditorView: View {
         )
     }
 
-    private var firstEmailBinding: Binding<String> {
+    private var emailsBinding: Binding<String> {
         Binding(
-            get: { draft.emails.first?.email ?? "" },
+            get: { draft.emails.map(\.email).joined(separator: "\n") },
             set: { value in
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                draft.emails = trimmed.isEmpty ? [] : [ContactEmailAddress(label: "primary", email: trimmed)]
+                draft.emails = value
+                    .split(separator: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .map { ContactEmailAddress(label: nil, email: $0) }
             }
         )
     }
 
-    private var firstPhoneBinding: Binding<String> {
+    private var phonesBinding: Binding<String> {
         Binding(
-            get: { draft.phones.first?.number ?? "" },
+            get: { draft.phones.map(\.number).joined(separator: "\n") },
             set: { value in
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                draft.phones = trimmed.isEmpty ? [] : [PersonPhoneNumber(label: "primary", number: trimmed)]
+                draft.phones = value
+                    .split(separator: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .map { PersonPhoneNumber(label: nil, number: $0) }
             }
         )
     }
 
-    private var firstAddressBinding: Binding<String> {
+    private var addressesBinding: Binding<String> {
         Binding(
-            get: { draft.addresses.first?.value ?? "" },
+            get: { draft.addresses.map(\.value).joined(separator: "\n") },
             set: { value in
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                draft.addresses = trimmed.isEmpty ? [] : [PersonPostalAddress(label: "primary", value: trimmed)]
+                draft.addresses = value
+                    .split(separator: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .map { PersonPostalAddress(label: nil, value: $0) }
             }
         )
     }
