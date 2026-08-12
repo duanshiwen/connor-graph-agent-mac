@@ -32,8 +32,13 @@ struct CloudKnowledgeCreatorView: View {
                 pendingCommitBar
             }
 
-            Divider()
-            publicationFooter
+            // 发布栏（设为公开 / 同意条款 / 发布到市场 / 下架）只在知识提交完成之后出现：
+            // 配置、选择会话、生成、验证、预览等阶段一律不显示发布按钮，
+            // 避免“还没选知识/还没生成”时就能点发布。
+            if store.snapshot.stage == .completed {
+                Divider()
+                publicationFooter
+            }
         }
         .onAppear {
             draft = store.snapshot.draft
@@ -567,7 +572,12 @@ struct CloudKnowledgeCreatorView: View {
     }
 
     private var canPublish: Bool {
-        creatorTermsAccepted
+        // 只有知识已提交完成（completed）且确实选择了会话/生成了知识才允许发布；
+        // 未选择知识或尚未提交完成的阶段，发布按钮不可用/不可见。
+        store.snapshot.stage == .completed
+            && store.snapshot.knowledgeBaseID != nil
+            && !store.snapshot.selectedConversationIDs.isEmpty
+            && creatorTermsAccepted
             && store.snapshot.latestKnowledgeBaseDetail?.visibility == "public"
             && !["deleting", "deleted"].contains(store.snapshot.latestKnowledgeBaseDetail?.lifecycleStatus ?? "")
             && store.currentEnforcementStatusLabel != "taken_down"
