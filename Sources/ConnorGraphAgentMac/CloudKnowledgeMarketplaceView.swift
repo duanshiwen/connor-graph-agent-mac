@@ -222,6 +222,8 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
     @ObservedObject var creatorStore: CloudKnowledgeCreatorStore
     @ObservedObject var connectivity: AppNetworkConnectivity = .shared
     @ObservedObject var backendConnectivity: AppBackendConnectivity = .shared
+    var sessions: [AgentSession]
+    let sessionActions: any ChatSessionCommanding
     @State private var selectedCategoryID: String?
     @State private var isPresentingEditor = false
     @State private var isConfirmingDelete = false
@@ -254,8 +256,8 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                 Divider()
                 CloudKnowledgeCreatorView(
                     store: creatorStore,
-                    sessions: [],
-                    loadSessionPage: nil
+                    sessions: sessions,
+                    loadSessionPage: { await sessionActions.loadChatSessionPickerPage(cursor: $0) }
                 ) { knowledgeBaseID in
                     isPresentingEditor = false
                     Task {
