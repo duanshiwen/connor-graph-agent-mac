@@ -1989,6 +1989,15 @@ final class AppRuntimeLifecycle {
         return provider
     }
 
+    /// 公共/后台任务（知识提取等）固定使用默认模型，与 L1 后台提取一致，
+    /// 不跟随目标会话的会话级模型覆盖，避免会话指向的连接缺 Key/不可用时整批失败。
+    private func defaultAgentModelProvider() throws -> AnyAgentModelProvider {
+        guard let provider = chatRunCoordinator.makeAgentModelProvider(sessionLLMOverride: nil) else {
+            throw OpenAICompatibleProviderError.missingAPIKey
+        }
+        return provider
+    }
+
     private func generateCloudKnowledge(conversationID: String) async throws -> CloudKnowledgeLocalGenerationResult {
         guard let knowledgeBaseID = knowledgeCreatorStore.snapshot.knowledgeBaseID,
               let publicationRunID = knowledgeCreatorStore.snapshot.runID
@@ -1996,7 +2005,7 @@ final class AppRuntimeLifecycle {
         guard let session = try chatSessionRepository?.loadSession(id: conversationID) else {
             throw AppChatSessionRepositoryError.sessionNotFound(conversationID)
         }
-        let provider = try sessionAgentModelProvider(sessionID: conversationID)
+        let provider = try defaultAgentModelProvider()
         return try await CloudKnowledgeLLMGenerationRunner().generateSinglePass(
             session: session,
             knowledgeBaseID: knowledgeBaseID,
