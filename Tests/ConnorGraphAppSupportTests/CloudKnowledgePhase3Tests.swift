@@ -735,6 +735,7 @@ private actor AmbiguousCloudKnowledgeAPI: CloudKnowledgeAPI {
     func search(knowledgeBaseID: String, channel: CloudKnowledgeSearchChannel, request: CloudKnowledgeSearchRequest) async throws -> CloudKnowledgeSearchResponse {
         .init(searchContextID: "search-\(stagedSequence)", channel: channel, baseSequence: 0, stagedSequence: stagedSequence, results: [])
     }
+    func existingStableKeys(knowledgeBaseID: String) async throws -> Set<String> { [] }
 }
 
 private actor InMemoryCloudKnowledgeAPI: CloudKnowledgeAPI {
@@ -753,4 +754,5 @@ private actor InMemoryCloudKnowledgeAPI: CloudKnowledgeAPI {
         let hits = operations.isEmpty ? [] : [CloudKnowledgeSearchHit(identityID: "staged-1", layer: .l3, kind: "reusable_knowledge", text: "Earlier staged knowledge", staged: true)]
         return .init(searchContextID: "search-\(searchViews.count)", channel: channel, baseSequence: 4, stagedSequence: stagedSequence, expiresAt: Date().addingTimeInterval(600), results: hits)
     }
+    func existingStableKeys(knowledgeBaseID: String) async throws -> Set<String> { [] }
 }
