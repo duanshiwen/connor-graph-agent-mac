@@ -205,9 +205,12 @@ struct CloudKnowledgeMarketplaceListPane: View {
 
 struct CloudKnowledgeMarketplaceDetailPane: View {
     @ObservedObject var store: CloudKnowledgeMarketplaceStore
+    @ObservedObject var creatorStore: CloudKnowledgeCreatorStore
     @ObservedObject var connectivity: AppNetworkConnectivity = .shared
     @ObservedObject var backendConnectivity: AppBackendConnectivity = .shared
     @State private var selectedCategoryID: String?
+    @State private var isPresentingEditor = false
+    @State private var isConfirmingDelete = false
 
     var body: some View {
         Group {
@@ -220,6 +223,49 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
             }
         }
         .background(AppShellColors.detailBackground)
+        .sheet(isPresented: $isPresentingEditor) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("编辑知识库").font(AppListTypography.header)
+                    Spacer()
+                    Button { isPresentingEditor = false } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.appIcon)
+                    .help("关闭")
+                    .accessibilityLabel("关闭")
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                Divider()
+                CloudKnowledgeCreatorView(
+                    store: creatorStore,
+                    sessions: [],
+                    loadSessionPage: nil
+                ) { knowledgeBaseID in
+                    isPresentingEditor = false
+                    Task {
+                        await store.load()
+                        await store.loadDetail(id: knowledgeBaseID)
+                    }
+                }
+            }
+            .frame(minWidth: 760, idealWidth: 840, minHeight: 620, idealHeight: 700)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+        .confirmationDialog("删除知识库？", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
+            Button("删除知识库", role: .destructive) {
+                guard let base = store.selected else { return }
+                Task {
+                    await creatorStore.requestDeleteKnowledgeBase(id: base.id, reason: "owner requested deletion")
+                    store.showHome()
+                    await store.load()
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("删除后知识库将进入删除流程并停止对外提供服务（已发布状态会被撤销）。此操作不可撤销。")
+        }
         .onChange(of: connectivity.isConnected) { _, isConnected in
             guard isConnected else { return }
             store.showHome()
@@ -364,10 +410,22 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                         Text("\(base.subscriberCount) 位订阅者").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    if base.owned {
+                        Button("编辑") {
+                            Task {
+                                await creatorStore.prepareForEdit(id: base.id)
+                                isPresentingEditor = true
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        Button("删除", role: .destructive) { isConfirmingDelete = true }
+                            .buttonStyle(.bordered)
+                            .help("删除知识库")
+                    }
                     if base.subscribed {
                         Button("取消订阅") { Task { await store.unsubscribe(id: base.id) } }
                             .buttonStyle(.bordered)
-                    } else {
+                    } else if !base.owned {
                         Button("订阅") { Task { await store.subscribe(id: base.id) } }
                             .buttonStyle(.borderedProminent)
                     }
