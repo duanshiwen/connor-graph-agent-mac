@@ -10,7 +10,7 @@ public enum CloudKnowledgePublishingPrompt {
     - Before every semantic group of writes, search the combined committed + current-run staged view. Use cloud_kb_recent_context for L2 and cloud_kb_knowledge_context for L3/L4. Later conversations must search again so they see earlier staged changes.
     - If a search summary is insufficient, read or expand records before deciding.
     - Every candidate must resolve to exactly one decision: skip_duplicate, revise_existing, reuse_identity, record_temporal_change, record_conflict, or create_new.
-    - Every write must cite the searchContextID returned by a relevant successful search. Search contexts cannot cross knowledge bases, runs, layers, sequences, or semantic groups.
+    - Every write must cite the searchContextID returned by a relevant successful search. Search contexts cannot cross knowledge bases, runs, layers, or semantic groups. Within one run, one search context may cover all writes of the same semantic group; start a new search for a different semantic group.
     - Use tools incrementally. Never emit or upload a package containing the original conversation. Never invent identity IDs, revision IDs, owner IDs, run IDs, schema versions, or security context.
     - Do not promote ordinary transient facts to L3. Do not create an L4 entity merely because a noun appears.
     - Validate the Publication Run before asking the user to commit it.
