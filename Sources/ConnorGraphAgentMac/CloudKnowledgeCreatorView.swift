@@ -233,6 +233,14 @@ struct CloudKnowledgeCreatorView: View {
 
     private var progress: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if let error = store.errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
             ProgressView(
                 value: Double(store.snapshot.processedConversationIDs.count),
                 total: Double(max(1, store.snapshot.selectedConversationIDs.count))
