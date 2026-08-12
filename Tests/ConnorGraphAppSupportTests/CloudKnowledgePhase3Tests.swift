@@ -427,6 +427,61 @@ struct CloudKnowledgePhase3Tests {
         #expect(await scripted.requestCount == 3)
     }
 
+    @Test func modelFinishingWithoutSearchIsGuidedAndRecovers() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let scripted = CloudKnowledgeNoSearchRetryProvider()
+        let provider = AnyAgentModelProvider(
+            modelID: "tool-model",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
+            complete: { request in try await scripted.complete(request) }
+        )
+        let session = AgentSession(id: "conversation-guided", title: "Guided", messages: [
+            AgentMessage(role: .user, content: "Connor 使用结构化知识发布流程。"),
+            AgentMessage(role: .assistant, content: "结构化发布需要检索后写入。")
+        ])
+
+        let result = try await CloudKnowledgeLLMGenerationRunner(maximumIterations: 6).generate(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider
+        )
+
+        #expect(result.summary == "已完成")
+        #expect(await scripted.requestCount == 4)
+        #expect(await scripted.sawGuidance)
+        #expect(await api.operations.count == 1)
+        #expect(await api.operations.first?.semanticTerms == ["connor"])
+    }
+
+    @Test func emptySourceSessionIsSkippedWithoutModelCall() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let scripted = CloudKnowledgeNoSearchRetryProvider()
+        let provider = AnyAgentModelProvider(
+            modelID: "tool-model",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
+            complete: { request in try await scripted.complete(request) }
+        )
+        let session = AgentSession(id: "empty", title: "空会话", messages: [
+            AgentMessage(role: .system, content: "SYSTEM_ONLY")
+        ])
+
+        let result = try await CloudKnowledgeLLMGenerationRunner().generate(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider
+        )
+
+        #expect(result.summary.contains("没有可提取的对话内容"))
+        #expect(await scripted.requestCount == 0)
+        #expect(await api.operations.isEmpty)
+    }
+
     @Test func repeatedToolErrorKeepsBoundedDiagnosticForRecovery() {
         let longMessage = String(repeating: "invalid payload ", count: 30)
         let bounded = String(longMessage.prefix(240))
@@ -501,6 +556,27 @@ private final class CloudKnowledgeTraceRecorder: @unchecked Sendable {
 
     func append(_ event: CloudKnowledgeExtractionTraceEvent) {
         lock.withLock { storage.append(event) }
+    }
+}
+
+private actor CloudKnowledgeNoSearchRetryProvider {
+    var requestCount = 0
+    var sawGuidance = false
+
+    func complete(_ request: AgentModelRequest) throws -> AgentModelResponse {
+        requestCount += 1
+        if requestCount == 1 {
+            // 模型首轮直接结束、没有检索。
+            return AgentModelResponse(text: "没有可提取的知识", finishReason: .stop)
+        }
+        if requestCount == 2 {
+            sawGuidance = request.messages.last?.content.contains("还没有检索知识库") == true
+            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "search", name: "cloud_kb_knowledge_context", argumentsJSON: #"{"query":"Connor","limit":20}"#)], finishReason: .toolCalls)
+        }
+        if requestCount == 3 {
+            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"searchContextID":"search-1","decision":"create_new","semanticTerms":["Connor"],"payload":{"kind":"reusable_knowledge","stableKey":"connor-guided","validFrom":"2026-07-16T00:00:00Z","payload":{"title":"Connor"}}}"#)], finishReason: .toolCalls)
+        }
+        return AgentModelResponse(text: "已完成", finishReason: .stop)
     }
 }
 

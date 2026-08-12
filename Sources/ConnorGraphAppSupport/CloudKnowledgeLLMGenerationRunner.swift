@@ -276,6 +276,15 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
             throw CloudKnowledgeLLMGenerationError.toolCallingUnsupported(modelID: provider.modelID)
         }
 
+        let sourceTurns = CloudKnowledgeExtractionPrompt.sourceTurns(session: session)
+        if sourceTurns.isEmpty {
+            // 会话里没有成对的“用户提问 + 助手回复”，模型没有可分析的内容。
+            // 直接标记该会话完成并说明原因，避免整个发布任务被 modelDidNotSearch 中断。
+            return CloudKnowledgeLocalGenerationResult(
+                summary: "该会话没有可提取的对话内容（缺少用户提问与助手回复的成对记录），已跳过。"
+            )
+        }
+
         let run = try await api.publicationRun(id: publicationRunID)
         let context = CloudKnowledgePublishingContext(
             knowledgeBaseID: knowledgeBaseID,
@@ -284,7 +293,6 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
             clientRunID: clientRunID
         )
         let coordinator = CloudKnowledgePublicationCoordinator(api: api, context: context, run: run)
-        let sourceTurns = CloudKnowledgeExtractionPrompt.sourceTurns(session: session)
         let sourceTexts = sourceTurns.flatMap { [$0.userMessage, $0.assistantFinalResponse] }
         let executor = CloudKnowledgeToolExecutor(coordinator: coordinator, sourceTexts: sourceTexts)
         var registry = AgentToolRegistry()
@@ -298,6 +306,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         let agentRunID = "cloud-kb-\(UUID().uuidString)"
         var searchCount = 0
         var decisionCount = 0
+        var noSearchRetryCount = 0
         var consecutiveErrors = 0
         var totalToolErrors = 0
         var lastSignature: String?
@@ -362,7 +371,17 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
             ))
             let calls = Array(response.toolCalls.prefix(maximumToolCallsPerIteration))
             if calls.isEmpty {
-                guard searchCount > 0 else { throw CloudKnowledgeLLMGenerationError.modelDidNotSearch }
+                guard searchCount > 0 else {
+                    // 模型首轮可能因为输入简单/提示理解偏差而直接结束。给它最多 2 次引导机会，
+                    // 明确要求先检索再写入；连续 3 次仍不检索才判为 modelDidNotSearch。
+                    guard noSearchRetryCount < 2 else { throw CloudKnowledgeLLMGenerationError.modelDidNotSearch }
+                    noSearchRetryCount += 1
+                    messages.append(AgentModelMessage(
+                        role: .user,
+                        content: "你还没有检索知识库就结束了。处理契约要求：先调用 cloud_kb_recent_context（L2）或 cloud_kb_knowledge_context（L3/L4）搜索，再为每个候选写入一个决策；即使你认为没有可提取的知识，也必须先搜索并记录 skip_duplicate 决策。请重新开始处理，不要直接结束。"
+                    ))
+                    continue
+                }
                 let finalText = response.text?.trimmingCharacters(in: .whitespacesAndNewlines)
                 switch response.finishReason {
                 case .stop:
