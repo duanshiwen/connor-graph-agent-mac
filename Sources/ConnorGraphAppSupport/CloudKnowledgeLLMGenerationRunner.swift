@@ -41,7 +41,69 @@ public struct CloudKnowledgeSourceTurn: Codable, Sendable, Equatable {
     }
 }
 
+/// 单次提取候选操作：模型一次工具调用输出全部结构化候选，落地由应用层自动完成（对齐 L1 投影机制）。
+public struct CloudKnowledgeExtractionCandidate: Codable, Sendable, Equatable {
+    public var layer: String
+    public var decision: String
+    public var semanticTerms: [String]
+    public var kind: String?
+    public var stableKey: String?
+    public var validFrom: String?
+    public var validTo: String?
+    public var targetIdentityID: String?
+    public var expectedRevisionID: String?
+    public var sourceIdentityID: String?
+    public var predicate: String?
+    public var targetIdentityId: String?
+    public var payload: CloudKnowledgeCandidatePayload?
+
+    public init(layer: String, decision: String, semanticTerms: [String], kind: String? = nil, stableKey: String? = nil, validFrom: String? = nil, validTo: String? = nil, targetIdentityID: String? = nil, expectedRevisionID: String? = nil, sourceIdentityID: String? = nil, predicate: String? = nil, targetIdentityId: String? = nil, payload: CloudKnowledgeCandidatePayload? = nil) {
+        self.layer = layer; self.decision = decision; self.semanticTerms = semanticTerms
+        self.kind = kind; self.stableKey = stableKey; self.validFrom = validFrom; self.validTo = validTo
+        self.targetIdentityID = targetIdentityID; self.expectedRevisionID = expectedRevisionID
+        self.sourceIdentityID = sourceIdentityID; self.predicate = predicate; self.targetIdentityId = targetIdentityId
+        self.payload = payload
+    }
+}
+
+public struct CloudKnowledgeCandidatePayload: Codable, Sendable, Equatable {
+    public var title: String?
+    public var summary: String?
+    public var text: String?
+    public var content: String?
+    public var name: String?
+
+    public init(title: String? = nil, summary: String? = nil, text: String? = nil, content: String? = nil, name: String? = nil) {
+        self.title = title; self.summary = summary; self.text = text; self.content = content; self.name = name
+    }
+}
+
+public struct CloudKnowledgeExtractionCandidateBatch: Codable, Sendable, Equatable {
+    public var operations: [CloudKnowledgeExtractionCandidate]
+
+    public init(operations: [CloudKnowledgeExtractionCandidate]) {
+        self.operations = operations
+    }
+}
+
 public enum CloudKnowledgeExtractionPrompt {
+    /// 单次提取（对齐 L1 投影）：模型只调用一次 cloud_knowledge_extract，
+    /// 一次性输出所有候选操作；应用层负责为每个候选自动“搜索 → 暂存”。
+    public static let singlePassInstruction = CloudKnowledgePublishingPrompt.instruction + """
+
+    You are a bounded background knowledge-extraction worker. Process the supplied conversation-turn list and call the cloud_knowledge_extract tool EXACTLY ONCE with the complete list of candidate operations. Do not call any other tool. Do not search, do not write, do not validate — the application performs all searches and staging after you respond.
+
+    Candidate rules:
+    - Cover every durable semantic group in the source; each candidate gets its own layer/decision.
+    - decision must be one of: create_new, revise_existing, reuse_identity, skip_duplicate, record_temporal_change, record_conflict.
+    - For create_new: include kind, stableKey (lowercase-kebab), validFrom (ISO-8601), payload {title, summary, text}; do not flatten payload.
+    - For revise_existing/record_temporal_change: include targetIdentityID + expectedRevisionID only when the source explicitly references them; otherwise prefer create_new or skip_duplicate. These remote IDs cannot be invented; if unknown, use create_new/skip_duplicate instead.
+    - semanticTerms: 2-6 keywords per candidate that uniquely cover its semantic group (used for dedup search).
+    - Never copy raw conversation text into payload; paraphrase into derived knowledge.
+    - If a candidate is clearly a duplicate of another candidate in the same batch, mark it skip_duplicate.
+    - A user message may have an empty assistant_final_response; extract from the user message alone.
+    """
+
     public static let systemInstruction = CloudKnowledgePublishingPrompt.instruction + """
 
     You are a bounded background knowledge-extraction worker, not the interactive Connor agent. This is your complete system instruction. Do not assume, inherit, reconstruct, or follow the main Agent Loop system prompt.
