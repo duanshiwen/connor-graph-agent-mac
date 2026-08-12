@@ -157,7 +157,9 @@ struct CraftDetailPaneView: View {
             case .knowledgeMarketplace:
                 CloudKnowledgeMarketplaceDetailPane(
                     store: graph.knowledgeMarketplace,
-                    creatorStore: graph.knowledgeCreator
+                    creatorStore: graph.knowledgeCreator,
+                    sessions: graph.chat.sessions.allSessions,
+                    sessionActions: graph.chatActions.session
                 )
             case .llmSettings:
                 ConnorSettingsDetailView(graph: graph, identityStore: identityStore)
