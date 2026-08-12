@@ -138,7 +138,7 @@ struct CloudKnowledgePhase3Tests {
         #expect(validation.stagedSequence == 3)
     }
 
-    @Test func toolExecutorNormalizesModelConfidenceVariants() async throws {
+    @Test func toolExecutorIgnoresModelConfidenceField() async throws {
         let api = InMemoryCloudKnowledgeAPI()
         let context = CloudKnowledgePublishingContext(knowledgeBaseID: "kb", publicationRunID: "run", ownerUserID: "u", clientRunID: "client")
         let coordinator = CloudKnowledgePublicationCoordinator(api: api, context: context, run: .init(id: "run", knowledgeBaseID: "kb", clientRunID: "client", expectedBaseSequence: 4))
@@ -151,29 +151,16 @@ struct CloudKnowledgePhase3Tests {
             _ = try await executor.execute(toolName: "cloud_kb_l3_update_knowledge", arguments: try AgentToolArguments(json: #"{"searchContextID":"\#(response.searchContextID)","decision":"create_new","semanticTerms":["Connor"],"payload":{"kind":"reusable_knowledge","stableKey":"\#(key)","validFrom":"2026-07-13T10:00:00Z",\#(confidenceJSON),"payload":{"title":"Connor"}}}"#), context: executionContext)
         }
 
-        // 模型常见错误：0-100 分制 → 客户端归一化到 0-1，后端不再拒绝。
+        // 客户端不再使用 confidence：模型传 0-100 / 小数 / 百分比 / 越界值，一律忽略、不转发后端。
         try await write(key: "connor-scale", confidenceJSON: #""confidence":85"#)
-        // 0-1 小数保持原样。
         try await write(key: "connor-decimal", confidenceJSON: #""confidence":0.9"#)
-        // 字符串百分比 → 归一化。
         try await write(key: "connor-percent", confidenceJSON: #""confidence":"85%""#)
+        try await write(key: "connor-invalid", confidenceJSON: #""confidence":150"#)
 
         let operations = await api.operations
-        #expect(operations.count == 3)
-        let byKey = Dictionary(uniqueKeysWithValues: operations.compactMap { op -> (String, CloudKnowledgeJSONValue?)? in
-            guard case .string(let key)? = op.payload["stable_key"] else { return nil }
-            return (key, op.payload["confidence"])
-        })
-        #expect(byKey["connor-scale"] == .double(0.85))
-        #expect(byKey["connor-decimal"] == .double(0.9))
-        #expect(byKey["connor-percent"] == .double(0.85))
-
-        // 越界值给出清晰错误，而不是把 150 原样发给后端。
-        let search = try await executor.execute(toolName: "cloud_kb_knowledge_context", arguments: try AgentToolArguments(json: #"{"query":"Connor","limit":20}"#), context: executionContext)
-        let searchData = try #require(search.contentJSON?.data(using: String.Encoding.utf8))
-        let response = try JSONDecoder.cloudContract.decode(CloudKnowledgeSearchResponse.self, from: searchData)
-        await #expect(throws: AgentToolError.self) {
-            _ = try await executor.execute(toolName: "cloud_kb_l3_update_knowledge", arguments: try AgentToolArguments(json: #"{"searchContextID":"\#(response.searchContextID)","decision":"create_new","semanticTerms":["Connor"],"payload":{"kind":"reusable_knowledge","stableKey":"connor-invalid","validFrom":"2026-07-13T10:00:00Z","confidence":150,"payload":{"title":"Connor"}}}"#), context: executionContext)
+        #expect(operations.count == 4)
+        for operation in operations {
+            #expect(operation.payload["confidence"] == nil)
         }
     }
 
