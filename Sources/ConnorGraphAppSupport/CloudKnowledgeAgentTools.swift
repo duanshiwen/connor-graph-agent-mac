@@ -13,7 +13,6 @@ public enum CloudKnowledgePublishingPrompt {
     - Every write must cite the searchContextID returned by a relevant successful search. Search contexts cannot cross knowledge bases, runs, layers, sequences, or semantic groups.
     - Use tools incrementally. Never emit or upload a package containing the original conversation. Never invent identity IDs, revision IDs, owner IDs, run IDs, schema versions, or security context.
     - Do not promote ordinary transient facts to L3. Do not create an L4 entity merely because a noun appears.
-    - confidence, when provided, must be a decimal between 0 and 1 (for example 0.85). Never use 0-100 scores, percentages, or text.
     - Validate the Publication Run before asking the user to commit it.
     """
 }
@@ -93,9 +92,6 @@ public actor CloudKnowledgeToolExecutor {
                   let knowledgePayload = candidatePayload["payload"]
             else { throw AgentToolError.invalidArguments("create_new payload requires kind, stableKey, validFrom and payload") }
             var timeline: [String: CloudKnowledgeJSONValue] = ["layer": .string(layer.rawValue), "kind": .string(kind), "stable_key": .string(stableKey), "valid_from": .string(validFrom), "payload": knowledgePayload]
-            if let confidence = candidatePayload["confidence"] {
-                timeline["confidence"] = try normalizedConfidence(confidence)
-            }
             for (modelKey, backendKey) in [("validTo", "valid_to"), ("sourceIdentityID", "source_identity_id"), ("predicate", "predicate"), ("targetIdentityID", "target_identity_id")] {
                 if let value = candidatePayload[modelKey] ?? candidatePayload[backendKey] { timeline[backendKey] = value }
             }
@@ -104,9 +100,6 @@ public actor CloudKnowledgeToolExecutor {
             guard let targetIdentityID, !targetIdentityID.isEmpty, let expectedRevisionID, !expectedRevisionID.isEmpty else { throw AgentToolError.invalidArguments("revise requires targetIdentityID and expectedRevisionID") }
             guard case .string(let validFrom)? = candidatePayload["validFrom"] ?? candidatePayload["valid_from"], !validFrom.isEmpty, let knowledgePayload = candidatePayload["payload"] else { throw AgentToolError.invalidArguments("revise payload requires validFrom and payload") }
             var timeline: [String: CloudKnowledgeJSONValue] = ["expected_revision_id": .string(expectedRevisionID), "valid_from": .string(validFrom), "payload": knowledgePayload]
-            if let confidence = candidatePayload["confidence"] {
-                timeline["confidence"] = try normalizedConfidence(confidence)
-            }
             for (modelKey, backendKey) in [("validTo", "valid_to"), ("sourceIdentityID", "source_identity_id"), ("predicate", "predicate"), ("targetIdentityID", "target_identity_id")] {
                 if let value = candidatePayload[modelKey] ?? candidatePayload[backendKey] { timeline[backendKey] = value }
             }
@@ -124,31 +117,6 @@ public actor CloudKnowledgeToolExecutor {
             "expected_revision_id": "expectedRevisionID"
         ]
         return Dictionary(uniqueKeysWithValues: payload.map { key, value in (names[key] ?? key, value) })
-    }
-    /// 模型经常把 confidence 写成 0-100 分制、百分比或字符串；后端只接受 0-1 的小数。
-    /// 这里统一宽容规范化：字符串可解析成数字，>1 且 <=100 视为百分制除以 100，其余越界直接报清晰错误。
-    private static func normalizedConfidence(_ value: CloudKnowledgeJSONValue) throws -> CloudKnowledgeJSONValue {
-        let raw: Double
-        switch value {
-        case .int(let number): raw = Double(number)
-        case .double(let number): raw = number
-        case .string(let text):
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.hasSuffix("%"), let percent = Double(trimmed.dropLast()) {
-                raw = percent / 100
-            } else if let number = Double(trimmed) {
-                raw = number
-            } else {
-                throw AgentToolError.invalidArguments("confidence 必须是 0 到 1 之间的小数（例如 0.85），当前值 \"\(text)\" 无法解析")
-            }
-        default:
-            throw AgentToolError.invalidArguments("confidence 必须是 0 到 1 之间的小数（例如 0.85）")
-        }
-        let normalized = raw > 1 && raw <= 100 ? raw / 100 : raw
-        guard normalized >= 0, normalized <= 1 else {
-            throw AgentToolError.invalidArguments("confidence 必须是 0 到 1 之间的小数（例如 0.85），当前值 \(raw) 无效")
-        }
-        return .double(normalized)
     }
     private static func cloudValue(_ value: SendableJSONValue) throws -> CloudKnowledgeJSONValue {
         switch value { case .string(let v): .string(v); case .int(let v): .int(v); case .double(let v): .double(v); case .bool(let v): .bool(v); case .object(let v): .object(try v.mapValues(cloudValue)); case .array(let v): .array(try v.map(cloudValue)); case .null: .null }
@@ -189,12 +157,11 @@ public struct CloudKnowledgeAgentTool: AgentTool {
 public extension AgentToolRegistry {
     mutating func registerCloudKnowledgePublicationTools(executor: CloudKnowledgeToolExecutor, includeValidation: Bool = true) {
         let searchSchema = AgentToolInputSchema.closedObject(properties: ["query": .string(description: "Semantic query for existing committed and staged knowledge."), "limit": .integer(description: "Maximum results, 1 through 100.")], required: ["query", "limit"])
-        let candidatePayloadSchema = AgentToolInputSchema.closedObject(properties: [
+        let candidatePayloadSchema = AgentToolInputSchema.object(properties: [
             "kind": .string(description: "Required for create_new. Canonical durable kind, for example reusable_knowledge, entity, or relation."),
             "stableKey": .string(description: "Required for create_new. Deterministic lowercase kebab-case identity key derived from the knowledge, never a UUID."),
             "validFrom": .string(description: "Required for create_new, revise_existing, and record_temporal_change. ISO-8601 timestamp."),
             "validTo": .string(description: "Optional ISO-8601 timestamp when the knowledge stops being valid."),
-            "confidence": .number(description: "Optional confidence as a decimal from 0 through 1, for example 0.85. Never use 0-100 scores, percentages, or text."),
             "sourceIdentityID": .string(description: "Optional existing source identity returned by search."),
             "predicate": .string(description: "Optional relation predicate."),
             "targetIdentityID": .string(description: "Optional existing relation target identity returned by search."),
