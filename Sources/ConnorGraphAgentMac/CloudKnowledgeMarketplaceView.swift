@@ -37,40 +37,32 @@ struct CloudKnowledgeMarketplaceListPane: View {
             if canUseMarketplace {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
-                        marketplaceSectionHeader("知识市场")
-                        if store.searchResults.isEmpty {
-                            emptyRow("暂无可用知识库")
-                        } else {
-                            ForEach(store.searchResults, id: \.id) { base in
-                                libraryRow(base, caption: base.subscribed ? "市场 · 已订阅" : "市场")
-                                    .onAppear {
-                                        Task { await store.loadMoreSearchResultsIfNeeded(currentID: base.id) }
-                                    }
-                            }
+                        marketplaceSection(
+                            "知识市场",
+                            bases: store.searchResults,
+                            emptyTitle: "暂无可用知识库",
+                            caption: { base in base.subscribed ? "市场 · 已订阅" : "市场" }
+                        ) { base in
+                            Task { await store.loadMoreSearchResultsIfNeeded(currentID: base.id) }
                         }
 
-                        marketplaceSectionHeader("已订阅")
-                        if store.library.subscribed.isEmpty {
-                            emptyRow("暂未订阅知识库")
-                        } else {
-                            ForEach(store.library.subscribed, id: \.id) { base in
-                                libraryRow(base, caption: base.owned ? "我发布的 · 已订阅" : "已订阅")
-                            }
-                        }
+                        marketplaceSection(
+                            "已订阅",
+                            bases: store.library.subscribed,
+                            emptyTitle: "暂未订阅知识库",
+                            caption: { base in base.owned ? "我发布的 · 已订阅" : "已订阅" }
+                        )
 
-                        marketplaceSectionHeader("我发布的")
-                        if store.library.owned.isEmpty {
-                            emptyRow("暂未发布知识库")
-                        } else {
-                            ForEach(store.library.owned, id: \.id) { base in
-                                libraryRow(
-                                    base,
-                                    caption: base.subscribed
-                                        ? "\(publicationLabel(base)) · 已订阅"
-                                        : publicationLabel(base)
-                                )
+                        marketplaceSection(
+                            "我发布的",
+                            bases: store.library.owned,
+                            emptyTitle: "暂未发布知识库",
+                            caption: { base in
+                                base.subscribed
+                                    ? "\(publicationLabel(base)) · 已订阅"
+                                    : publicationLabel(base)
                             }
-                        }
+                        )
                     }
                     .padding(.horizontal, AppListCardLayout.horizontalInset)
                     .padding(.top, 6)
@@ -182,6 +174,28 @@ struct CloudKnowledgeMarketplaceListPane: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 每个市场分组独立成 VStack：同一 LazyVStack 内多个 ForEach 若包含相同 base.id
+    /// （例如自己发布并订阅的知识库同时出现在三个分组）会导致 macOS 惰性容器渲染空洞/大片空白。
+    private func marketplaceSection(
+        _ title: String,
+        bases: [CloudMarketplaceKnowledgeBase],
+        emptyTitle: String,
+        caption: @escaping (CloudMarketplaceKnowledgeBase) -> String,
+        onRowAppear: ((CloudMarketplaceKnowledgeBase) -> Void)? = nil
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            marketplaceSectionHeader(title)
+            if bases.isEmpty {
+                emptyRow(emptyTitle)
+            } else {
+                ForEach(bases) { base in
+                    libraryRow(base, caption: caption(base))
+                        .onAppear { onRowAppear?(base) }
+                }
+            }
+        }
     }
 
     private func marketplaceSectionHeader(_ title: String) -> some View {
