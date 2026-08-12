@@ -167,6 +167,7 @@ public protocol CloudKnowledgeCreatorAPI: Sendable {
     func publishKnowledgeBase(id: String, request: CloudKnowledgePublishRequest) async throws -> CloudKnowledgeBaseDetail
     func unpublishKnowledgeBase(id: String, request: CloudKnowledgeUnpublishRequest) async throws -> CloudKnowledgeBaseDetail
     func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail
+    func deleteKnowledgeBase(id: String, reason: String) async throws
     func preview(runID: String) async throws -> CloudKnowledgePreview
     func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary]
     func revisionPage(knowledgeBaseID: String, page: Int, pageSize: Int) async throws -> CloudKnowledgeRevisionPage
@@ -209,6 +210,9 @@ public struct CloudKnowledgeCreatorAPIClient: CloudKnowledgeCreatorAPI, Sendable
     public func publishKnowledgeBase(id: String, request: CloudKnowledgePublishRequest) async throws -> CloudKnowledgeBaseDetail { try await send("knowledge-bases/\(id)/publish", method: "POST", body: request) }
     public func unpublishKnowledgeBase(id: String, request: CloudKnowledgeUnpublishRequest) async throws -> CloudKnowledgeBaseDetail { try await send("knowledge-bases/\(id)/publish", method: "DELETE", body: request) }
     public func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail { try await send("knowledge-bases/\(id)/appeals", method: "POST", body: AppealRequest(statement: statement, governanceActionID: governanceActionID)) }
+    public func deleteKnowledgeBase(id: String, reason: String) async throws {
+        let _: DeleteKnowledgeBaseResponse = try await send("knowledge-bases/\(id)/delete", method: "POST", body: DeleteKnowledgeBaseRequest(reason: reason))
+    }
     public func preview(runID: String) async throws -> CloudKnowledgePreview { try await send("publication-runs/\(runID)/preview") }
     public func revisions(knowledgeBaseID: String, limit: Int = 100) async throws -> [CloudKnowledgeRevisionSummary] {
         try await revisionPage(knowledgeBaseID: knowledgeBaseID, page: 1, pageSize: limit).revisions
@@ -224,6 +228,8 @@ public struct CloudKnowledgeCreatorAPIClient: CloudKnowledgeCreatorAPI, Sendable
     }
     private struct Envelope<T: Decodable>: Decodable { var data: T }
     private struct AppealRequest: Encodable { let statement: String; let governanceActionID: String }
+    private struct DeleteKnowledgeBaseRequest: Encodable { let reason: String }
+    private struct DeleteKnowledgeBaseResponse: Decodable, Sendable { var jobId: String?; var status: String? }
     private func send<T: Decodable>(_ path: String, method: String = "GET") async throws -> T { try await send(path, method: method, bodyData: nil) }
     private func send<T: Decodable, B: Encodable>(_ path: String, method: String, body: B) async throws -> T { try await send(path, method: method, bodyData: try encoder.encode(body)) }
     private func send<T: Decodable>(_ path: String, method: String, bodyData: Data?) async throws -> T {
@@ -535,6 +541,41 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         try? publicationHistoryRepository.save(publicationHistory)
         if snapshot.clientRunID == id { reset() }
     }
+    /// 用已有知识库打开创作向导（编辑模式）：加载详情并进入 configure 阶段。
+    public func prepareForEdit(id: String) async {
+        guard let creatorAPI else { errorMessage = "知识库服务不可用"; return }
+        await perform {
+            let detail = try await creatorAPI.knowledgeBase(id: id)
+            self.generationTask?.cancel()
+            self.currentConversationID = nil
+            self.snapshot = CloudKnowledgeCreatorSnapshot(
+                stage: .configure,
+                knowledgeBaseID: id,
+                draft: CloudKnowledgeBaseDraft(
+                    name: detail.name,
+                    slug: detail.slug,
+                    description: detail.description ?? "",
+                    visibility: detail.visibility,
+                    defaultLocale: "zh-CN"
+                ),
+                latestKnowledgeBaseDetail: detail
+            )
+            self.history = []
+            self.nextHistoryPage = nil
+            self.errorMessage = nil
+            self.persist()
+        }
+    }
+
+    /// 所有者请求删除知识库（发布态也可删除；删除为异步任务，先置 deleting/unpublished）。
+    public func requestDeleteKnowledgeBase(id: String, reason: String) async {
+        guard let creatorAPI else { errorMessage = "知识库服务不可用"; return }
+        await perform {
+            try await creatorAPI.deleteKnowledgeBase(id: id, reason: reason)
+            self.reset()
+        }
+    }
+
     public func reset() { generationTask?.cancel(); currentConversationID = nil; snapshot = .init(); history = []; nextHistoryPage = nil; errorMessage = nil; try? repository.clear() }
     private func persist() { snapshot.updatedAt = Date(); try? repository.save(snapshot); recordCurrentSnapshotInHistory() }
     private func recordCurrentSnapshotInHistory() {
