@@ -12,6 +12,7 @@ struct CloudKnowledgeCreatorView: View {
     @State private var creatorTermsAccepted = false
     @State private var isPresentingPublishingAgreement = false
     @State private var pickerSessions: [AgentSession] = []
+    @State private var sessionMessageCounts: [String: Int] = [:]
     @State private var nextSessionPageCursor: String?
     @State private var isLoadingSessionPage = false
 
@@ -101,17 +102,19 @@ struct CloudKnowledgeCreatorView: View {
         VStack(alignment: .leading, spacing: 16) {
             Form {
                 TextField("知识库名称", text: $draft.name)
+                    .textFieldStyle(.roundedBorder)
                 TextField("Slug", text: $draft.slug)
+                    .textFieldStyle(.roundedBorder)
                 TextField("描述", text: $draft.description, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
                     .lineLimit(3...5)
                 Picker("可见性", selection: $draft.visibility) {
                     Text("私有").tag("private")
                     Text("不公开列出").tag("unlisted")
                     Text("公开").tag("public")
                 }
-                .pickerStyle(.segmented)
             }
-            .formStyle(.grouped)
+            .formStyle(.columns)
 
             actionBar {
                 Spacer()
@@ -149,7 +152,7 @@ struct CloudKnowledgeCreatorView: View {
                             Text(session.title)
                                 .font(.body)
                                 .lineLimit(1)
-                            Text("\(session.messages.count) 条消息")
+                            Text("\(messageCount(for: session.id)) 条消息")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -192,6 +195,7 @@ struct CloudKnowledgeCreatorView: View {
         defer { isLoadingSessionPage = false }
         guard let page = await loadSessionPage(nil) else { return }
         pickerSessions = page.sessions
+        sessionMessageCounts.merge(page.messageCounts) { _, new in new }
         nextSessionPageCursor = page.nextCursor
     }
 
@@ -204,6 +208,7 @@ struct CloudKnowledgeCreatorView: View {
         guard let page = await loadSessionPage(cursor) else { return }
         let existingIDs = Set(pickerSessions.map(\.id))
         pickerSessions.append(contentsOf: page.sessions.filter { !existingIDs.contains($0.id) })
+        sessionMessageCounts.merge(page.messageCounts) { _, new in new }
         nextSessionPageCursor = page.nextCursor
     }
 
@@ -514,6 +519,11 @@ struct CloudKnowledgeCreatorView: View {
         }
         .frame(minWidth: 640, idealWidth: 720, minHeight: 560, idealHeight: 680)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func messageCount(for sessionID: String) -> Int {
+        if let count = sessionMessageCounts[sessionID] { return count }
+        return pickerSessions.first(where: { $0.id == sessionID })?.messages.count ?? 0
     }
 
     private func conversationSelection(for id: String) -> Binding<Bool> {
