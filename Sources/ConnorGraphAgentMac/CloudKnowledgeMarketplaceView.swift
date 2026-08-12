@@ -41,7 +41,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
                         if store.searchResults.isEmpty {
                             emptyRow("暂无可用知识库")
                         } else {
-                            ForEach(store.searchResults) { base in
+                            ForEach(store.searchResults, id: \.id) { base in
                                 libraryRow(base, caption: base.subscribed ? "市场 · 已订阅" : "市场")
                                     .onAppear {
                                         Task { await store.loadMoreSearchResultsIfNeeded(currentID: base.id) }
@@ -53,7 +53,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
                         if store.library.subscribed.isEmpty {
                             emptyRow("暂未订阅知识库")
                         } else {
-                            ForEach(store.library.subscribed) { base in
+                            ForEach(store.library.subscribed, id: \.id) { base in
                                 libraryRow(base, caption: base.owned ? "我发布的 · 已订阅" : "已订阅")
                             }
                         }
@@ -62,7 +62,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
                         if store.library.owned.isEmpty {
                             emptyRow("暂未发布知识库")
                         } else {
-                            ForEach(store.library.owned) { base in
+                            ForEach(store.library.owned, id: \.id) { base in
                                 libraryRow(
                                     base,
                                     caption: base.subscribed
@@ -160,7 +160,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
-                    Text(title)
+                    Text(title.isEmpty ? "未命名知识库" : title)
                         .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                         .lineLimit(AppListCardLayout.titleLineLimit)
                     Text(caption)
