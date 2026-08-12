@@ -402,6 +402,7 @@ private actor PagedRevisionCreatorAPI: CloudKnowledgeCreatorAPI {
     func publishKnowledgeBase(id: String, request: CloudKnowledgePublishRequest) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
     func unpublishKnowledgeBase(id: String, request: CloudKnowledgeUnpublishRequest) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
     func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func deleteKnowledgeBase(id: String, reason: String) async throws {}
     func preview(runID: String) async throws -> CloudKnowledgePreview { throw CloudKnowledgeError.invalidResponse }
     func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary] { Array(values.prefix(limit)) }
     func revisionPage(knowledgeBaseID: String, page: Int, pageSize: Int) async throws -> CloudKnowledgeRevisionPage {
@@ -433,6 +434,7 @@ private actor DetailTrackingCreatorAPI: CloudKnowledgeCreatorAPI {
     func publishKnowledgeBase(id: String, request: CloudKnowledgePublishRequest) async throws -> CloudKnowledgeBaseDetail { detail = .init(id: id, name: "Connor", slug: "connor", visibility: "public", currentSequence: 0, lifecycleStatus: "active", publicationStatus: "published", enforcementStatus: "clear", governanceVersion: request.expectedGovernanceVersion + 1); return detail }
     func unpublishKnowledgeBase(id: String, request: CloudKnowledgeUnpublishRequest) async throws -> CloudKnowledgeBaseDetail { detail = .init(id: id, name: "Connor", slug: "connor", visibility: "public", currentSequence: 0, lifecycleStatus: "active", publicationStatus: "unpublished", enforcementStatus: "clear", governanceVersion: request.expectedGovernanceVersion + 1); return detail }
     func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail { detail }
+    func deleteKnowledgeBase(id: String, reason: String) async throws {}
     func preview(runID: String) async throws -> CloudKnowledgePreview { .init(runID: runID, stagedSequence: 0, operations: [], summaries: []) }
     func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary] { [] }
 }
@@ -453,6 +455,7 @@ private actor CreatorPublicationFakeAPI: CloudKnowledgeAPI, CloudKnowledgeCreato
     func publishKnowledgeBase(id: String, request: CloudKnowledgePublishRequest) async throws -> CloudKnowledgeBaseDetail { .init(id: id, name: "Connor", slug: "connor", visibility: "public", currentSequence: 0, lifecycleStatus: "active", publicationStatus: "published", enforcementStatus: "clear", governanceVersion: request.expectedGovernanceVersion + 1) }
     func unpublishKnowledgeBase(id: String, request: CloudKnowledgeUnpublishRequest) async throws -> CloudKnowledgeBaseDetail { .init(id: id, name: "Connor", slug: "connor", visibility: "public", currentSequence: 0, lifecycleStatus: "active", publicationStatus: "unpublished", enforcementStatus: "clear", governanceVersion: request.expectedGovernanceVersion + 1) }
     func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail { .init(id: id, name: "Connor", slug: "connor", visibility: "public", currentSequence: 0, lifecycleStatus: "active", publicationStatus: "published", enforcementStatus: "clear", governanceVersion: 9, appealCount: 1) }
+    func deleteKnowledgeBase(id: String, reason: String) async throws {}
     func preview(runID: String) async throws -> CloudKnowledgePreview { previewCount += 1; return .init(runID: runID, stagedSequence: 1, operations: [], summaries: ["新增 1 项知识变更"]) }
     func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary] { [] }
 }

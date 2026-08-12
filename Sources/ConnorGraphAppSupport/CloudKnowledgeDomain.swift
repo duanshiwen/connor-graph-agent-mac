@@ -113,8 +113,40 @@ public struct CloudKnowledgeOperation: Codable, Sendable, Equatable, Identifiabl
     public var targetIdentityID: String?; public var expectedRevisionID: String?; public var decision: CloudKnowledgeDecision
     public var searchContextID: String; public var semanticTerms: [String]; public var payload: [String: CloudKnowledgeJSONValue]
     public var id: String { operationID }
-    public init(operationID: String = UUID().uuidString, operationType: String, layer: CloudKnowledgeLayer, targetIdentityID: String? = nil, expectedRevisionID: String? = nil, decision: CloudKnowledgeDecision, searchContextID: String, semanticTerms: [String], payload: [String: CloudKnowledgeJSONValue]) {
+    public init(operationID: String = UUID().uuidString, operationType: String, layer: CloudKnowledgeLayer, targetIdentityID: String? = nil, expectedRevisionID: String? = nil, decision: CloudKnowledgeDecision, searchContextID: String = "", semanticTerms: [String], payload: [String: CloudKnowledgeJSONValue]) {
         self.operationID = operationID; self.operationType = operationType; self.layer = layer; self.targetIdentityID = targetIdentityID; self.expectedRevisionID = expectedRevisionID; self.decision = decision; self.searchContextID = searchContextID; self.semanticTerms = semanticTerms; self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case operationID, operationType, layer, targetIdentityID, expectedRevisionID, decision, searchContextID, semanticTerms, payload
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        operationID = try container.decode(String.self, forKey: .operationID)
+        operationType = try container.decode(String.self, forKey: .operationType)
+        layer = try container.decode(CloudKnowledgeLayer.self, forKey: .layer)
+        targetIdentityID = try container.decodeIfPresent(String.self, forKey: .targetIdentityID)
+        expectedRevisionID = try container.decodeIfPresent(String.self, forKey: .expectedRevisionID)
+        decision = try container.decode(CloudKnowledgeDecision.self, forKey: .decision)
+        // 搜索上下文可选：服务端可能不返回该字段。
+        searchContextID = try container.decodeIfPresent(String.self, forKey: .searchContextID) ?? ""
+        semanticTerms = try container.decodeIfPresent([String].self, forKey: .semanticTerms) ?? []
+        payload = try container.decodeIfPresent([String: CloudKnowledgeJSONValue].self, forKey: .payload) ?? [:]
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(operationID, forKey: .operationID)
+        try container.encode(operationType, forKey: .operationType)
+        try container.encode(layer, forKey: .layer)
+        try container.encodeIfPresent(targetIdentityID, forKey: .targetIdentityID)
+        try container.encodeIfPresent(expectedRevisionID, forKey: .expectedRevisionID)
+        try container.encode(decision, forKey: .decision)
+        // 空 searchContextID 不序列化：服务端将其视为“无搜索上下文”，直接允许写入。
+        if !searchContextID.isEmpty { try container.encode(searchContextID, forKey: .searchContextID) }
+        try container.encode(semanticTerms, forKey: .semanticTerms)
+        try container.encode(payload, forKey: .payload)
     }
 }
 

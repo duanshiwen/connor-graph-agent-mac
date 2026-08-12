@@ -210,7 +210,7 @@ public enum AppCloudKnowledgeCLIRouter {
                 maximumToolCallsPerIteration: intOption("--max-tool-calls", in: args, default: 4),
                 maximumTotalToolErrors: intOption("--max-tool-errors", in: args, default: 8)
             )
-            let result = try await runner.generate(
+            let result = try await runner.generateSinglePass(
                 session: live.session,
                 knowledgeBaseID: knowledgeBaseID,
                 publicationRunID: publicationRunID,
