@@ -126,6 +126,7 @@ struct KnowledgePublicationSessionProgressTable: View {
 struct KnowledgePublicationProgressView: View {
     @ObservedObject var store: CloudKnowledgeCreatorStore
     var sessions: [AgentSession]
+    var messageCounts: [String: Int] = [:]
     @State private var confirmsCancellation = false
 
     private var selectedSessions: [AgentSession] {
@@ -177,7 +178,8 @@ struct KnowledgePublicationProgressView: View {
                     selectedConversationIDs: store.snapshot.selectedConversationIDs,
                     processedConversationIDs: store.snapshot.processedConversationIDs,
                     currentConversationID: store.currentConversationID,
-                    stage: store.snapshot.stage
+                    stage: store.snapshot.stage,
+                    messageCounts: messageCounts
                 )
 
                 if !store.snapshot.summaries.isEmpty {
