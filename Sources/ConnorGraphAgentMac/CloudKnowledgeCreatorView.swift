@@ -240,6 +240,15 @@ struct CloudKnowledgeCreatorView: View {
             Text("已处理 \(store.snapshot.processedConversationIDs.count) / \(store.snapshot.selectedConversationIDs.count) 个对话")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            KnowledgePublicationSessionProgressTable(
+                sessions: pickerSessions,
+                selectedConversationIDs: store.snapshot.selectedConversationIDs,
+                processedConversationIDs: store.snapshot.processedConversationIDs,
+                currentConversationID: store.currentConversationID,
+                stage: store.snapshot.stage,
+                messageCounts: sessionMessageCounts
+            )
+            .frame(minHeight: 180)
             ForEach(Array(store.snapshot.summaries.enumerated()), id: \.offset) { _, summary in
                 Label(summary, systemImage: "checkmark.circle")
             }
