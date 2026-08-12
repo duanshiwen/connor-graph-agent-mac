@@ -12,7 +12,7 @@ struct PersonRelationshipEditorView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("添加关系")
                 .font(AppTypography.pageTitle)
-            Text("为 \(sourceDisplayName) 添加结构化人际关系。当前用户不会出现在 @ 人物选择中；如关系目标是你本人，请选择“当前用户”。")
+            Text("为 \(sourceDisplayName) 添加结构化人际关系：谁和谁、是什么关系、有没有备注或证据。当前用户不会出现在 @ 人物选择中；如关系目标是你本人，请选择“当前用户”。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -32,8 +32,10 @@ struct PersonRelationshipEditorView: View {
                         }
                     }
                 } else {
-                    Text("目标：我（当前用户）")
-                        .foregroundStyle(.secondary)
+                    LabeledContent("目标人物") {
+                        Text("我（当前用户）")
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Picker("关系类型", selection: $draft.kind) {
@@ -42,15 +44,31 @@ struct PersonRelationshipEditorView: View {
                     }
                 }
 
-                TextField("显示标签（例如：妈妈、同事、朋友）", text: $draft.customKindLabel)
-                TextField("备注", text: $draft.note, axis: .vertical)
-                    .lineLimit(2...4)
-                TextField("证据 / 原始表述", text: $draft.evidenceText, axis: .vertical)
-                    .lineLimit(2...4)
+                LabeledContent("关系名称") {
+                    TextField(draft.kind == .custom ? "必填，例如 师父、干妈" : "自定义名称，例如 妈妈、师父（不填则用关系类型）", text: $draft.customKindLabel)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                LabeledContent("备注") {
+                    TextField("关系背景、认识时间地点等（可选）", text: $draft.note, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...4)
+                }
+
+                LabeledContent("证据 / 原始表述") {
+                    TextField("当初是怎么提到这段关系的，例如“她是我妈妈”（可选）", text: $draft.evidenceText, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...4)
+                }
             }
             .formStyle(.grouped)
 
             HStack {
+                if draft.kind == .custom && draft.customKindLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("选择“关系”类型时需要填写关系名称")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.orange)
+                }
                 Spacer()
                 Button("取消", action: onCancel)
                 Button("保存") { onSave(draft) }
@@ -71,6 +89,8 @@ struct PersonRelationshipEditorView: View {
     }
 
     private var saveDisabled: Bool {
-        draft.targetMode == .personProfile && draft.targetPersonID == nil
+        if draft.targetMode == .personProfile && draft.targetPersonID == nil { return true }
+        if draft.kind == .custom && draft.customKindLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        return false
     }
 }
