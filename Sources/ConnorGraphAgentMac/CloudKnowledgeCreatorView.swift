@@ -182,7 +182,10 @@ struct CloudKnowledgeCreatorView: View {
                     .controlSize(AppButtonLayout.controlSize)
                     .disabled(store.snapshot.selectedConversationIDs.isEmpty)
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
         }
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func loadInitialSessionPageIfNeeded() async {
