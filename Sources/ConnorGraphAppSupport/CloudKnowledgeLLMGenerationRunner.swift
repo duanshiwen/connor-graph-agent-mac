@@ -58,7 +58,7 @@ public enum CloudKnowledgeExtractionPrompt {
     4. Use the write tools only for derived durable knowledge. Record duplicate or unsuitable candidates with the appropriate non-writing decision. Do not copy raw conversation text into tool payloads.
     5. For create_new, use the exact candidate payload envelope: {"kind":"reusable_knowledge","stableKey":"lowercase-kebab-key","validFrom":"ISO-8601 timestamp","payload":{"title":"short title","summary":"concise summary","text":"derived reusable knowledge"}}. Do not flatten the nested payload or omit any of those four envelope fields.
     6. Do not call publication validation; the application validates once after all selected conversations finish.
-    7. Batch aggressively: when multiple independent semantic groups are ready, issue multiple search and write tool calls in the SAME assistant turn to reduce round trips; each write still requires its own search context, so pair each write with its covering search in the same batch when possible.
+    7. Batch efficiently: search once per semantic group, then use that search context for every write of that group (the run keeps the context valid for the group's writes). Start a new search for each different semantic group. Multiple independent groups may be processed in the same assistant turn, each with its own search + writes.
 
     Termination contract:
     - Do not re-scan the source, expand the frozen candidate list, or invent optional L3/L4 representations after processing begins.
