@@ -1989,8 +1989,10 @@ final class AppRuntimeLifecycle {
         return provider
     }
 
-    /// 公共/后台任务（知识提取等）固定使用默认模型，与 L1 后台提取一致，
-    /// 不跟随目标会话的会话级模型覆盖，避免会话指向的连接缺 Key/不可用时整批失败。
+    /// 公共/后台任务（知识提取、会话摘要、会话标题等）固定使用“用户当前设置的默认模型”，
+    /// 与 L1 后台提取一致，不跟随目标会话的会话级模型覆盖。
+    /// 注意：每次调用都会重新读取 UserDefaults 里的默认连接/模型（无缓存），
+    /// 用户随时更换默认模型后，下一个新任务立即使用新默认模型。
     private func defaultAgentModelProvider() throws -> AnyAgentModelProvider {
         guard let provider = chatRunCoordinator.makeAgentModelProvider(sessionLLMOverride: nil) else {
             throw OpenAICompatibleProviderError.missingAPIKey
@@ -2017,7 +2019,8 @@ final class AppRuntimeLifecycle {
     }
 
     private func sessionLLMProvider(sessionID: String) throws -> AnyLLMProvider {
-        let provider = try sessionAgentModelProvider(sessionID: sessionID)
+        // 后台公共任务（会话摘要）固定使用用户当前设置的默认模型（每次执行重新读取），不跟随会话级覆盖。
+        let provider = try defaultAgentModelProvider()
         return AnyLLMProvider { prompt, _ in
             let response = try await provider.complete(AgentModelRequest(messages: [
                 AgentModelMessage(role: .system, content: AgentInstructionSection.runtimeConnorInstruction),
@@ -2557,7 +2560,8 @@ final class AppRuntimeLifecycle {
     }
 
     private func generateTitleFromUserPrompts(_ prompts: [String], sessionID: String) async throws -> String {
-        let provider = try sessionAgentModelProvider(sessionID: sessionID)
+        // 后台公共任务（会话标题）固定使用用户当前设置的默认模型（每次执行重新读取），不跟随会话级覆盖。
+        let provider = try defaultAgentModelProvider()
         let response = try await provider.complete(AgentModelRequest(
             messages: [
                 AgentModelMessage(role: .system, content: ChatSessionTitleGenerationPrompt.systemInstruction),
