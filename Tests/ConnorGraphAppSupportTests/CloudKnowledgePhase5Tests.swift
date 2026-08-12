@@ -449,6 +449,7 @@ private actor CreatorPublicationFakeAPI: CloudKnowledgeAPI, CloudKnowledgeCreato
     func commit(runID: String) async throws -> CloudKnowledgeCommitResult { commitCount += 1; return .init(publicationRunID: runID, knowledgeSequence: 10) }
     func abandon(runID: String) async throws {}
     func search(knowledgeBaseID: String, channel: CloudKnowledgeSearchChannel, request: CloudKnowledgeSearchRequest) async throws -> CloudKnowledgeSearchResponse { .init(searchContextID: "s", channel: channel, baseSequence: 0, stagedSequence: 0) }
+    func existingStableKeys(knowledgeBaseID: String) async throws -> Set<String> { [] }
     func createKnowledgeBase(_ draft: CloudKnowledgeBaseDraft) async throws -> CloudKnowledgeBaseDetail { .init(id: "kb-1", name: draft.name, slug: draft.slug, description: draft.description, visibility: draft.visibility, currentSequence: 0, lifecycleStatus: "active", publicationStatus: "unpublished") }
     func updateKnowledgeBase(id: String, draft: CloudKnowledgeBaseDraft) async throws -> CloudKnowledgeBaseDetail { .init(id: id, name: draft.name, slug: draft.slug, description: draft.description, visibility: draft.visibility, currentSequence: 0, lifecycleStatus: "active", publicationStatus: "unpublished") }
     func knowledgeBase(id: String) async throws -> CloudKnowledgeBaseDetail { .init(id: id, name: "Connor", slug: "connor", visibility: "public", currentSequence: 0, lifecycleStatus: "active", publicationStatus: "unpublished", enforcementStatus: "clear", governanceVersion: 6) }

@@ -43,6 +43,8 @@ public protocol CloudKnowledgeAPI: Sendable {
     func commit(runID: String) async throws -> CloudKnowledgeCommitResult
     func abandon(runID: String) async throws
     func search(knowledgeBaseID: String, channel: CloudKnowledgeSearchChannel, request: CloudKnowledgeSearchRequest) async throws -> CloudKnowledgeSearchResponse
+    /// 知识库已提交（committed）identity 的 stable_key 集合，用于单次提取时跳过重复创建。
+    func existingStableKeys(knowledgeBaseID: String) async throws -> Set<String>
 }
 
 public struct CloudKnowledgeAPIClient: CloudKnowledgeAPI, Sendable {
@@ -80,6 +82,11 @@ public struct CloudKnowledgeAPIClient: CloudKnowledgeAPI, Sendable {
     public func commit(runID: String) async throws -> CloudKnowledgeCommitResult { try await send(Route.commit(runID).path, method: "POST", body: EmptyBody()) }
     public func abandon(runID: String) async throws { let _: EmptyResponse = try await send(Route.abandon(runID).path, method: "POST", body: EmptyBody()) }
     public func search(knowledgeBaseID: String, channel: CloudKnowledgeSearchChannel, request: CloudKnowledgeSearchRequest) async throws -> CloudKnowledgeSearchResponse { try await send(Route.search(knowledgeBaseID, channel).path, method: "POST", body: request) }
+    public func existingStableKeys(knowledgeBaseID: String) async throws -> Set<String> {
+        struct RevisionKey: Decodable { let stableKey: String? }
+        let revisions: [RevisionKey] = try await send("knowledge-bases/\(knowledgeBaseID)/revisions?limit=200")
+        return Set(revisions.compactMap(\.stableKey))
+    }
 
     private enum Route {
         case createRun(String), run(String), operations(String), validate(String), rebase(String), commit(String), abandon(String), search(String, CloudKnowledgeSearchChannel)

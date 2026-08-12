@@ -592,6 +592,9 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         let executor = CloudKnowledgeToolExecutor(coordinator: coordinator, sourceTexts: sourceTexts)
         var registry = AgentToolRegistry()
         registry.registerCloudKnowledgePublicationTools(executor: executor, includeValidation: false)
+        // 单次提取不做“搜索→去重”，模型可能重复创建已提交的 stable_key（commit 会因唯一
+        // 约束失败）。预先拉取知识库已提交的 stable_key 集合，create_new 命中时按重复跳过。
+        let existingStableKeys = (try? await api.existingStableKeys(knowledgeBaseID: knowledgeBaseID)) ?? []
         let policy = AgentPolicyEngine(permissionMode: .allowAll)
         let agentRunID = "cloud-kb-\(UUID().uuidString)"
         let executionContext = AgentToolExecutionContext(
@@ -655,6 +658,10 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                 }
                 let isWrite = decision == .createNew || decision == .reviseExisting || decision == .recordTemporalChange
                 guard isWrite else {
+                    skipped += 1
+                    continue
+                }
+                if decision == .createNew, let stableKey = candidate.stableKey, existingStableKeys.contains(stableKey) {
                     skipped += 1
                     continue
                 }
