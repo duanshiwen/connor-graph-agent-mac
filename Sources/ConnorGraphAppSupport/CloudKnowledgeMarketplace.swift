@@ -5,7 +5,7 @@ public struct CloudMarketplaceCategory: Decodable, Sendable, Equatable, Identifi
     public var id: String; public var name: String; public var parentID: String?; public var icon: String?
     public init(id: String, name: String, parentID: String? = nil, icon: String? = nil) { self.id = id; self.name = name; self.parentID = parentID; self.icon = icon }
     private enum CodingKeys: String, CodingKey { case id, name, parentID, icon, slug, localizedNames }
-    public init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: CodingKeys.self); id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString; parentID = try c.decodeIfPresent(String.self, forKey: .parentID); icon = try c.decodeIfPresent(String.self, forKey: .icon); let names = try c.decodeIfPresent([String: String].self, forKey: .localizedNames) ?? [:]; name = try c.decodeIfPresent(String.self, forKey: .name) ?? Self.localized(names) ?? c.decodeIfPresent(String.self, forKey: .slug) ?? id }
+    public init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: CodingKeys.self); id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? UUID().uuidString; parentID = try? c.decodeIfPresent(String.self, forKey: .parentID); icon = try? c.decodeIfPresent(String.self, forKey: .icon); let names = (try? c.decodeIfPresent([String: String].self, forKey: .localizedNames)) ?? [:]; name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? Self.localized(names) ?? (try? c.decodeIfPresent(String.self, forKey: .slug)) ?? id }
     private static func localized(_ names: [String: String]) -> String? { let locale = Locale.current.identifier.replacingOccurrences(of: "_", with: "-"); return names[locale] ?? names[String(locale.prefix(2))] ?? names["zh-CN"] ?? names["en"] ?? names.values.first }
 }
 public struct CloudMarketplaceBanner: Codable, Sendable, Equatable, Identifiable { public var id: String; public var title: String; public var subtitle: String?; public var imageURL: String?; public var actionURL: String?; public init(id: String, title: String, subtitle: String? = nil, imageURL: String? = nil, actionURL: String? = nil) { self.id = id; self.title = title; self.subtitle = subtitle; self.imageURL = imageURL; self.actionURL = actionURL } }
@@ -28,23 +28,37 @@ public struct CloudMarketplaceKnowledgeBase: Codable, Sendable, Equatable, Ident
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, description, categoryID, subscriberCount, subscribed, owned, ownerID, ownerName, publicationStatus
+        case id, name, description, categoryID, category_id, subscriberCount, subscribed, owned, ownerID, owner_id, ownerName, publicationStatus, publication_status
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        // 单条记录字段异常（后端历史脏数据/配置占位）不应让整个首页解码失败：
-        // id/name 缺失时给占位值，UI 可据此过滤或展示“未命名知识库”。
-        id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
-        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "未命名知识库"
-        description = try container.decodeIfPresent(String.self, forKey: .description)
-        categoryID = try container.decodeIfPresent(String.self, forKey: .categoryID)
-        subscriberCount = try container.decodeIfPresent(Int.self, forKey: .subscriberCount) ?? 0
-        subscribed = try container.decodeIfPresent(Bool.self, forKey: .subscribed) ?? false
-        owned = try container.decodeIfPresent(Bool.self, forKey: .owned) ?? false
-        ownerID = try container.decodeIfPresent(UInt.self, forKey: .ownerID)
-        ownerName = try container.decodeIfPresent(String.self, forKey: .ownerName)
-        publicationStatus = try container.decodeIfPresent(String.self, forKey: .publicationStatus)
+        // 单条记录任何字段异常（null/缺失/类型不匹配）都不应让整个首页解码失败：
+        // 逐字段 try? 容错，id/name 兜底占位，UI 可据此过滤或展示“未命名知识库”。
+        id = (try? container.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        name = (try? container.decodeIfPresent(String.self, forKey: .name)) ?? "未命名知识库"
+        description = try? container.decodeIfPresent(String.self, forKey: .description)
+        categoryID = (try? container.decodeIfPresent(String.self, forKey: .categoryID)) ?? (try? container.decodeIfPresent(String.self, forKey: .category_id))
+        subscriberCount = (try? container.decodeIfPresent(Int.self, forKey: .subscriberCount)) ?? 0
+        subscribed = (try? container.decodeIfPresent(Bool.self, forKey: .subscribed)) ?? false
+        owned = (try? container.decodeIfPresent(Bool.self, forKey: .owned)) ?? false
+        ownerID = (try? container.decodeIfPresent(UInt.self, forKey: .ownerID)) ?? (try? container.decodeIfPresent(UInt.self, forKey: .owner_id))
+        ownerName = try? container.decodeIfPresent(String.self, forKey: .ownerName)
+        publicationStatus = (try? container.decodeIfPresent(String.self, forKey: .publicationStatus)) ?? (try? container.decodeIfPresent(String.self, forKey: .publication_status))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(categoryID, forKey: .categoryID)
+        try container.encode(subscriberCount, forKey: .subscriberCount)
+        try container.encode(subscribed, forKey: .subscribed)
+        try container.encode(owned, forKey: .owned)
+        try container.encodeIfPresent(ownerID, forKey: .ownerID)
+        try container.encodeIfPresent(ownerName, forKey: .ownerName)
+        try container.encodeIfPresent(publicationStatus, forKey: .publicationStatus)
     }
 }
 public struct CloudMarketplaceLibrary: Codable, Sendable, Equatable {
