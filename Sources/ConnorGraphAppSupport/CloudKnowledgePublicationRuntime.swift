@@ -23,7 +23,9 @@ public struct CloudKnowledgePublishingTraceValidator: Sendable {
         guard let trace else { throw CloudKnowledgeError.searchBeforeWriteRequired }
         guard trace.knowledgeBaseID == context.knowledgeBaseID, trace.publicationRunID == context.publicationRunID, trace.layers.contains(operation.layer) else { throw CloudKnowledgeError.searchContextNotRelevant }
         if let expiresAt = trace.expiresAt, expiresAt <= now { throw CloudKnowledgeError.searchContextStale }
-        guard trace.baseSequence == currentBaseSequence, trace.stagedSequence == currentStagedSequence else { throw CloudKnowledgeError.searchContextStale }
+        // 同一 Publication Run 内 base 未变时，搜索后发生的写入会使 stagedSequence 递增，
+        // 但不让该语义组后续写入失效（与后端 validateSearchContext 对齐：stagedSequence <= current）。
+        guard trace.baseSequence == currentBaseSequence, trace.stagedSequence <= currentStagedSequence else { throw CloudKnowledgeError.searchContextStale }
         let operationTerms = Set(operation.semanticTerms.flatMap(Self.normalizedTerms))
         guard !operationTerms.isEmpty, !trace.queryTerms.isDisjoint(with: operationTerms) else { throw CloudKnowledgeError.searchContextNotRelevant }
         switch operation.layer {
