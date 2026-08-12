@@ -169,8 +169,17 @@ public struct InteractiveWebRemoteProject: Codable, Sendable, Equatable {
 	public var status: String
 	public var accessMode: String
 	public var currentDeploymentId: String?
+	public var publishedURL: String?
 	public var createdAt: String
 	public var updatedAt: String
+
+	enum CodingKeys: String, CodingKey {
+		case id, name, siteId = "siteId", status, accessMode
+		case currentDeploymentId = "currentDeploymentId"
+		case publishedURL = "publishedURL"
+		case createdAt = "createdAt"
+		case updatedAt = "updatedAt"
+	}
 }
 
 public struct InteractiveWebRemoteDeployment: Codable, Sendable, Equatable {

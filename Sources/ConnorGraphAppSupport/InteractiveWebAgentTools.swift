@@ -338,7 +338,15 @@ public actor InteractiveWebToolRuntime {
     }
 
 	public func remoteProjects(limit: Int, page: Int = 1) async throws -> [InteractiveWebRemoteProject] {
-		try await requireAPI().projects(limit: limit, page: page)
+		let api = try requireAPI()
+		let projects = try await api.projects(limit: limit, page: page)
+		return projects.map { project in
+			var project = project
+			if project.publishedURL == nil, !project.siteId.isEmpty {
+				project.publishedURL = api.publicSiteURL(siteID: project.siteId).absoluteString
+			}
+			return project
+		}
 	}
 
 	public func remoteProject(id: String) async throws -> InteractiveWebRemoteProjectDetail {
@@ -445,6 +453,17 @@ public actor InteractiveWebToolRuntime {
             throw AgentToolError.invalidArguments("approved manifestHash no longer matches the current draft; read the draft again before editing. Current manifestHash=\(currentManifestHash)")
         }
         let api = try requireAPI()
+        if project.remoteProjectID == nil {
+            // 防“改版误建新链接”：本地 draft 还没有对应线上项目，但账号下已有同名已发布网页时，
+            // 提示先下载原项目再修改，而不是静默创建一个新项目/新链接。
+            let remoteProjects = (try? await api.projects(limit: 100)) ?? []
+            if let existing = remoteProjects.first(where: { $0.name == project.name && $0.status == "active" }) {
+                let url = existing.publishedURL ?? api.publicSiteURL(siteID: existing.siteId).absoluteString
+                throw AgentToolError.invalidArguments(
+                    "检测到同名已发布网页“\(existing.name)”（\(url)）。如果是要修改这个已发布的网页，请先调用 interactive_web_download_project(remoteProjectID: \"\(existing.id)\") 下载原项目，修改后用返回的同一 projectID 发布（链接保持不变）；只有确认要发布一个全新的网页时才继续新建项目。"
+                )
+            }
+        }
         let published = try await api.publish(project: project, manifest: manifest)
         if let siteID = published.remoteSiteID {
             try await api.updateAccessPolicy(siteID: siteID, mode: accessMode, password: password)
@@ -753,14 +772,14 @@ public struct InteractiveWebAgentTool: AgentTool {
     public var description: String {
         switch operation {
 		case .sdkUsage: "Request the interactive-web guide: the complete SDK v1 specification — backend-provided script path (/api/v1/sdk/v1.js), window.platform API surface, form and event conventions, submission feedback and already-submitted states, login gating rules, data-access rules, aggregate statistics scope, and a minimal example. You MUST call this before using any interactive-web functionality; generate or edit webpage drafts strictly per the returned specification and never reconstruct page interactions from memory."
-		case .listProjects: "List the signed-in user's published interactive webpage projects, one page at a time (default 50 per page, max 100). Continue with page until fewer than limit items are returned."
+		case .listProjects: "List the signed-in user's published interactive webpage projects, one page at a time (default 50 per page, max 100). Each project includes its publishedURL. Continue with page until fewer than limit items are returned. When the user asks to MODIFY an existing webpage (for example by pasting its link or naming it), you MUST first list projects and match the exact publishedURL or name; then download that project with interactive_web_download_project(remoteProjectID=its id), edit the downloaded draft with interactive_web_create_draft(projectID=...) or interactive_web_edit_draft, and publish the SAME projectID — the URL and collected data stay with the project. NEVER create a new project to revise an existing webpage: a new project gets a new URL while the old link keeps serving the old content."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
         case .createDraft: "Create a new local interactive webpage draft, or update an existing one. Two write modes: (1) Complete mode — omit projectID and pass the complete name/html/css/javascript/collections (or update with the SAME projectID and full edited files; files you do not pass, such as css, stay unchanged). (2) Chunked mode from the very start — pass fileName (default index.html), content (the current chunk), offset (default 0) and final (default false); chunks are concatenated locally in order, continue with offset=nextOffset from each result, and set final=true on the last chunk so the file is validated and marked complete. A draft is NOT created successfully until every chunked file has final=true: get_status shows incompleteWrites and publish rejects incomplete drafts; never compress or cut page content to fit a shorter output. Before any interactive-web use (creating or updating), call interactive_web_sdk_usage in this session to get the complete SDK contract and example; updates often happen in a separate session, so never skip the guide. Every page must load the backend-provided absolute SDK path /api/v1/sdk/v1.js and use window.platform instead of constructing API URLs; put all page JavaScript in the javascript parameter (app.js) and never write inline <script> blocks (CSP blocks them); drafts without the SDK script or with inline scripts are rejected with step-by-step fix guidance. If you pass CSS (saved as style.css), index.html must link it with a stylesheet link; the runtime auto-injects a missing link and reports a css-link-injected change. Keep form controls (input/select/textarea/button) at consistent heights with matching font-size. The tool writes files into the app-managed user-data sandbox and does not publish anything."
         case .editDraft: "Edit one source file of an app-managed interactive webpage draft. Two modes (choose one): targeted edit — pass the exact oldText (must occur exactly once in the current file; read it first with interactive_web_get_draft) and newText (empty string deletes the oldText); or full-file replacement — pass content with the complete new file. For very large files, write content in chunks: start with offset=0 and content=first chunk, continue with offset=nextOffset from each result, and set final=true on the last chunk (the tool then truncates the old tail and validates the complete file). The tool applies each change atomically and returns the new revision, manifestHash, file hashes, the applied offset/nextOffset, and a plain-text unified diff. Edits to index.html must keep the SDK script tag (/api/v1/sdk/v1.js)."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft; the result includes availableFiles so you can see which files exist in the draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash. Large files are paginated by character offset: the result reports totalCharacters and, when truncated, nextOffset — continue with offset=nextOffset to read the rest."
         case .getStatus: "Read the current local and published status of an interactive webpage project, including the list of draft files."
-        case .publish: "Publish the exact current webpage revision to the internet and return its URL. Always requires native human approval; copy manifestHash exactly from interactive_web_create_draft (create or update) or interactive_web_get_status output. Publishing rejects drafts whose index.html omits the SDK script tag."
+        case .publish: "Publish the exact current webpage revision to the internet and return its URL. Always requires native human approval; copy manifestHash exactly from interactive_web_create_draft (create or update) or interactive_web_get_status output. Publishing rejects drafts whose index.html omits the SDK script tag. Publishing a draft that came from interactive_web_download_project or was previously published keeps the SAME URL (the project's site is reused); only a brand-new draft (no remote project yet) gets a new URL. To revise an already-published webpage, download the original project and publish the same projectID — never create a new draft for that purpose."
         case .rollback: "Rollback a published webpage to a specific deployment. Always requires native human approval."
         case .setAccess: "Change who can access a published webpage. Always requires native human approval."
         case .offline: "Take a published webpage offline. Always requires native human approval."
