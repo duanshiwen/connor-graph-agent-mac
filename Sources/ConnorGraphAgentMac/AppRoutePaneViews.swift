@@ -155,7 +155,10 @@ struct CraftDetailPaneView: View {
             case .skills:
                 SkillRuntimePanelView(model: graph.skills)
             case .knowledgeMarketplace:
-                CloudKnowledgeMarketplaceDetailPane(store: graph.knowledgeMarketplace)
+                CloudKnowledgeMarketplaceDetailPane(
+                    store: graph.knowledgeMarketplace,
+                    creatorStore: graph.knowledgeCreator
+                )
             case .llmSettings:
                 ConnorSettingsDetailView(graph: graph, identityStore: identityStore)
             }
