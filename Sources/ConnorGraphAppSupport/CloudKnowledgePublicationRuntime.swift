@@ -20,7 +20,11 @@ public actor CloudKnowledgePublishingTraceStore {
 public struct CloudKnowledgePublishingTraceValidator: Sendable {
     public init() {}
     public func validate(operation: CloudKnowledgeOperation, trace: CloudKnowledgeSearchTrace?, context: CloudKnowledgePublishingContext, currentBaseSequence: Int, currentStagedSequence: Int, now: Date = Date()) throws {
-        guard let trace else { throw CloudKnowledgeError.searchBeforeWriteRequired }
+        guard let trace else {
+            // 搜索上下文可选：未提供 searchContextID 时允许直接写入（后端同规则）。
+            if operation.searchContextID.isEmpty { return }
+            throw CloudKnowledgeError.searchBeforeWriteRequired
+        }
         guard trace.knowledgeBaseID == context.knowledgeBaseID, trace.publicationRunID == context.publicationRunID, trace.layers.contains(operation.layer) else { throw CloudKnowledgeError.searchContextNotRelevant }
         if let expiresAt = trace.expiresAt, expiresAt <= now { throw CloudKnowledgeError.searchContextStale }
         // 同一 Publication Run 内 base 未变时，搜索后发生的写入会使 stagedSequence 递增，

@@ -52,7 +52,8 @@ public actor CloudKnowledgeToolExecutor {
     }
 
     private func write(_ arguments: AgentToolArguments, operationType: String, layer: CloudKnowledgeLayer, toolName: String, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let searchContextID = arguments.string("searchContextID") ?? arguments.string("search_context_id"), !searchContextID.isEmpty else { throw AgentToolError.invalidArguments("searchContextID is required") }
+        // 搜索上下文可选：对齐“LLM 输出即知识、直接落地”的简化机制；空则后端视为无搜索上下文。
+        let searchContextID = arguments.string("searchContextID") ?? arguments.string("search_context_id") ?? ""
         guard let decisionRaw = arguments.string("decision"), let decision = CloudKnowledgeDecision(rawValue: decisionRaw) else { throw AgentToolError.invalidArguments("decision is required") }
         guard let terms = (arguments.array("semanticTerms") ?? arguments.array("semantic_terms"))?.compactMap(\.stringValue), !terms.isEmpty else { throw AgentToolError.invalidArguments("semanticTerms is required") }
         guard case .object(let payloadValue) = arguments.values["payload"] else { throw AgentToolError.invalidArguments("payload object is required") }
@@ -172,13 +173,13 @@ public extension AgentToolRegistry {
             ], required: [])
         ], required: [])
         let writeSchema = AgentToolInputSchema.closedObject(properties: [
-            "searchContextID": .string(description: "Exact searchContextID returned by a preceding cloud search; copy it without renaming."),
+            "searchContextID": .string(description: "Optional searchContextID from a preceding cloud search; omit for direct writes."),
             "decision": .stringEnumeration(values: CloudKnowledgeDecision.allCases.map(\.rawValue), description: "Required post-search decision."),
             "semanticTerms": .array(items: .string(description: "Term covered by the search."), description: "Semantic terms for trace validation."),
             "targetIdentityID": .string(description: "Exact identityID returned by search, when applicable; copy it without renaming."),
             "expectedRevisionID": .string(description: "Exact revisionID returned by search, when applicable; copy it without renaming."),
             "payload": candidatePayloadSchema
-        ], required: ["searchContextID", "decision", "semanticTerms", "payload"])
+        ], required: ["decision", "semanticTerms", "payload"])
         register(CloudKnowledgeAgentTool(name: "cloud_kb_recent_context", description: "Search combined committed and current-run staged L2 recent operational knowledge. Returns a mandatory searchContextID for covered L2 writes.", inputSchema: searchSchema, executor: executor))
         register(CloudKnowledgeAgentTool(name: "cloud_kb_knowledge_context", description: "Search combined committed and current-run staged L3/L4 durable knowledge and entities. Returns a mandatory searchContextID.", inputSchema: searchSchema, executor: executor))
         register(CloudKnowledgeAgentTool(name: "cloud_kb_read_record", description: "Read more detail for a knowledge record through write-assist search without exposing provenance or raw conversations.", inputSchema: searchSchema, executor: executor))

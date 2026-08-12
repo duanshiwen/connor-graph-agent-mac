@@ -481,6 +481,38 @@ struct CloudKnowledgePhase3Tests {
         #expect(await api.operations.isEmpty)
     }
 
+    @Test func singlePassExtractionStagesCandidatesWithoutSearchContext() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let scripted = CloudKnowledgeSinglePassProvider()
+        let provider = AnyAgentModelProvider(
+            modelID: "single-pass-model",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: true, supportsVision: false),
+            complete: { request in try await scripted.complete(request) }
+        )
+        let session = AgentSession(id: "conversation-single", title: "Single", messages: [
+            AgentMessage(role: .user, content: "Connor 是知识库助手，Alice 是同事。"),
+            AgentMessage(role: .assistant, content: "好的。")
+        ])
+
+        let result = try await CloudKnowledgeLLMGenerationRunner().generateSinglePass(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider
+        )
+
+        #expect(await scripted.requestCount == 1)
+        #expect(result.summary.contains("候选 2 项"))
+        #expect(result.summary.contains("落地 2 项"))
+        let operations = await api.operations
+        #expect(operations.count == 2)
+        // 单次提取直接落地：不携带搜索上下文。
+        #expect(operations.allSatisfy { $0.searchContextID.isEmpty })
+        #expect(operations.map(\.payload["stable_key"]) == [.string("connor-single"), .string("alice")])
+    }
+
     @Test func repeatedToolErrorKeepsBoundedDiagnosticForRecovery() {
         let longMessage = String(repeating: "invalid payload ", count: 30)
         let bounded = String(longMessage.prefix(240))
@@ -555,6 +587,25 @@ private final class CloudKnowledgeTraceRecorder: @unchecked Sendable {
 
     func append(_ event: CloudKnowledgeExtractionTraceEvent) {
         lock.withLock { storage.append(event) }
+    }
+}
+
+private actor CloudKnowledgeSinglePassProvider {
+    var requestCount = 0
+
+    func complete(_ request: AgentModelRequest) throws -> AgentModelResponse {
+        requestCount += 1
+        return AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(
+                    id: "extract",
+                    name: "cloud_knowledge_extract",
+                    argumentsJSON: #"{"operations":[{"layer":"L3","decision":"create_new","semanticTerms":["Connor"],"kind":"reusable_knowledge","stableKey":"connor-single","validFrom":"2026-07-16T00:00:00Z","payload":{"title":"Connor","summary":"s","text":"t"}},{"layer":"L4","decision":"create_new","semanticTerms":["Alice"],"kind":"entity","stableKey":"alice","validFrom":"2026-07-16T00:00:00Z","payload":{"name":"Alice"}}]}"#
+                )
+            ],
+            finishReason: .toolCalls
+        )
     }
 }
 

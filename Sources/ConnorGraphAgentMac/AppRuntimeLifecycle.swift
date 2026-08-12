@@ -1997,7 +1997,7 @@ final class AppRuntimeLifecycle {
             throw AppChatSessionRepositoryError.sessionNotFound(conversationID)
         }
         let provider = try sessionAgentModelProvider(sessionID: conversationID)
-        return try await CloudKnowledgeLLMGenerationRunner().generate(
+        return try await CloudKnowledgeLLMGenerationRunner().generateSinglePass(
             session: session,
             knowledgeBaseID: knowledgeBaseID,
             publicationRunID: publicationRunID,

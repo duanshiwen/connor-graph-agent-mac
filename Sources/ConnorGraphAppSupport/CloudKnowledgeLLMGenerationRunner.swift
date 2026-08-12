@@ -558,6 +558,204 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         throw CloudKnowledgeLLMGenerationError.maximumIterationsReached
     }
 
+    /// 单次提取 + 直接落地（对齐 L1 投影机制）：
+    /// 模型只调用一次 cloud_knowledge_extract 输出全部候选，应用层把候选直接暂存，
+    /// 不再依赖模型多轮“搜索→写入”工具循环，也无需逐候选搜索（后端 searchContext 已可选）。
+    public func generateSinglePass(
+        session: AgentSession,
+        knowledgeBaseID: String,
+        publicationRunID: String,
+        clientRunID: String,
+        api: any CloudKnowledgeAPI,
+        provider: AnyAgentModelProvider,
+        trace: CloudKnowledgeExtractionTraceHandler? = nil
+    ) async throws -> CloudKnowledgeLocalGenerationResult {
+        guard provider.capabilities.supportsToolCalling else {
+            throw CloudKnowledgeLLMGenerationError.toolCallingUnsupported(modelID: provider.modelID)
+        }
+        let sourceTurns = CloudKnowledgeExtractionPrompt.sourceTurns(session: session)
+        if sourceTurns.isEmpty {
+            return CloudKnowledgeLocalGenerationResult(
+                summary: "该会话没有可提取的对话内容（缺少用户提问与助手回复的成对记录），已跳过。"
+            )
+        }
+
+        let run = try await api.publicationRun(id: publicationRunID)
+        let context = CloudKnowledgePublishingContext(
+            knowledgeBaseID: knowledgeBaseID,
+            publicationRunID: publicationRunID,
+            ownerUserID: "current-user",
+            clientRunID: clientRunID
+        )
+        let coordinator = CloudKnowledgePublicationCoordinator(api: api, context: context, run: run)
+        let sourceTexts = sourceTurns.flatMap { [$0.userMessage, $0.assistantFinalResponse] }
+        let executor = CloudKnowledgeToolExecutor(coordinator: coordinator, sourceTexts: sourceTexts)
+        var registry = AgentToolRegistry()
+        registry.registerCloudKnowledgePublicationTools(executor: executor, includeValidation: false)
+        let policy = AgentPolicyEngine(permissionMode: .allowAll)
+        let agentRunID = "cloud-kb-\(UUID().uuidString)"
+        let executionContext = AgentToolExecutionContext(
+            runID: agentRunID,
+            sessionID: session.id,
+            groupID: publicationRunID,
+            userPrompt: "Extract cloud knowledge in a single pass",
+            toolCallID: "single-pass",
+            policyEngine: policy
+        )
+
+        var messages = [
+            AgentModelMessage(role: .system, content: CloudKnowledgeExtractionPrompt.singlePassInstruction),
+            AgentModelMessage(role: .user, content: CloudKnowledgeExtractionPrompt.sourcePrompt(session: session))
+        ]
+        var noExtractRetry = 0
+        var iteration = 0
+        while iteration < 3 {
+            iteration += 1
+            let request = AgentModelRequest(
+                messages: messages,
+                tools: registry.definitions + [Self.extractToolDefinition],
+                temperature: 0.1,
+                auditContext: AgentLLMRequestAuditContext(
+                    requestKind: .cloudKnowledgeGeneration,
+                    sessionID: session.id,
+                    runID: publicationRunID,
+                    correlationID: clientRunID,
+                    iteration: iteration,
+                    operation: "CloudKnowledgeLLMGenerationRunner.generateSinglePass",
+                    initiator: .background
+                )
+            )
+            let response = try await provider.complete(request)
+            guard let call = response.toolCalls.first(where: { $0.name == Self.extractToolName }) else {
+                guard noExtractRetry < 2 else {
+                    throw CloudKnowledgeLLMGenerationError.modelResponseIncomplete(
+                        reason: "模型未调用一次性的 cloud_knowledge_extract"
+                    )
+                }
+                noExtractRetry += 1
+                messages.append(AgentModelMessage(
+                    role: .user,
+                    content: "你还没有调用 cloud_knowledge_extract。请只调用该工具一次，输出全部候选操作，然后自然结束。"
+                ))
+                continue
+            }
+            let batch = try JSONDecoder().decode(
+                CloudKnowledgeExtractionCandidateBatch.self,
+                from: Data(call.argumentsJSON.utf8)
+            )
+            var staged = 0
+            var skipped = 0
+            var failed = 0
+            var lastError = ""
+            for candidate in batch.operations {
+                try Task.checkCancellation()
+                guard let decision = CloudKnowledgeDecision(rawValue: candidate.decision) else {
+                    skipped += 1
+                    continue
+                }
+                let isWrite = decision == .createNew || decision == .reviseExisting || decision == .recordTemporalChange
+                guard isWrite else {
+                    skipped += 1
+                    continue
+                }
+                do {
+                    try await stageSinglePassCandidate(candidate, executor: executor, context: executionContext)
+                    staged += 1
+                } catch {
+                    failed += 1
+                    lastError = String(((error as? AgentToolError)?.description ?? error.localizedDescription).prefix(240))
+                    if failed >= 8 {
+                        throw CloudKnowledgeLLMGenerationError.tooManyToolErrors(lastError: lastError)
+                    }
+                }
+            }
+            let summary = "已完成《\(session.title)》的知识提取：候选 \(batch.operations.count) 项，落地 \(staged) 项，跳过 \(skipped) 项，失败 \(failed) 项。"
+            return CloudKnowledgeLocalGenerationResult(summary: summary)
+        }
+        throw CloudKnowledgeLLMGenerationError.maximumIterationsReached
+    }
+
+    private static let extractToolName = "cloud_knowledge_extract"
+
+    private static var extractToolDefinition: AgentToolDefinition {
+        let candidateSchema = AgentToolInputSchema.closedObject(properties: [
+            "layer": .string(description: "L2 / L3 / L4."),
+            "decision": .stringEnumeration(values: CloudKnowledgeDecision.allCases.map(\.rawValue), description: "Decision for this candidate."),
+            "semanticTerms": .array(items: .string(description: "Keyword."), description: "2-6 keywords uniquely covering this semantic group."),
+            "kind": .string(description: "Required for create_new, e.g. reusable_knowledge / entity / relation."),
+            "stableKey": .string(description: "Required for create_new; lowercase-kebab, never a UUID."),
+            "validFrom": .string(description: "Required for create_new; ISO-8601."),
+            "validTo": .string(description: "Optional ISO-8601."),
+            "targetIdentityID": .string(description: "Only when the source explicitly references it; never invent."),
+            "expectedRevisionID": .string(description: "Only when the source explicitly references it; never invent."),
+            "sourceIdentityID": .string(description: "Optional existing source identity."),
+            "predicate": .string(description: "Optional relation predicate."),
+            "targetIdentityId": .string(description: "Optional relation target identity."),
+            "payload": .closedObject(properties: [
+                "title": .string(description: "Short derived title."),
+                "summary": .string(description: "Concise derived summary."),
+                "text": .string(description: "Reusable knowledge text, paraphrased."),
+                "content": .string(description: "Optional raw-ish content for L2."),
+                "name": .string(description: "Optional entity name for L4.")
+            ], required: [])
+        ], required: ["layer", "decision", "semanticTerms"])
+        return AgentToolDefinition(
+            name: extractToolName,
+            description: "Output the complete list of candidate knowledge operations derived from the source conversation. Call this tool exactly once and make no other tool calls.",
+            inputSchema: .closedObject(
+                properties: ["operations": .array(items: candidateSchema, description: "All candidate operations.")],
+                required: ["operations"]
+            )
+        )
+    }
+
+    private func stageSinglePassCandidate(
+        _ candidate: CloudKnowledgeExtractionCandidate,
+        executor: CloudKnowledgeToolExecutor,
+        context: AgentToolExecutionContext
+    ) async throws {
+        let layer = CloudKnowledgeLayer(rawValue: candidate.layer) ?? .l3
+        let writeTool: String
+        switch layer {
+        case .l2:
+            writeTool = "cloud_kb_l2_update_entities"
+        case .l3:
+            writeTool = "cloud_kb_l3_update_knowledge"
+        case .l4:
+            writeTool = (candidate.predicate != nil || candidate.targetIdentityId != nil)
+                ? "cloud_kb_update_relations"
+                : "cloud_kb_l4_update_entities"
+        }
+        var payload: [String: SendableJSONValue] = [:]
+        if let kind = candidate.kind { payload["kind"] = .string(kind) }
+        if let stableKey = candidate.stableKey { payload["stableKey"] = .string(stableKey) }
+        if let validFrom = candidate.validFrom { payload["validFrom"] = .string(validFrom) }
+        if let validTo = candidate.validTo { payload["validTo"] = .string(validTo) }
+        if let sourceIdentityID = candidate.sourceIdentityID { payload["sourceIdentityID"] = .string(sourceIdentityID) }
+        if let predicate = candidate.predicate { payload["predicate"] = .string(predicate) }
+        if let targetIdentityId = candidate.targetIdentityId { payload["targetIdentityID"] = .string(targetIdentityId) }
+        var inner: [String: SendableJSONValue] = [:]
+        if let title = candidate.payload?.title { inner["title"] = .string(title) }
+        if let summary = candidate.payload?.summary { inner["summary"] = .string(summary) }
+        if let text = candidate.payload?.text { inner["text"] = .string(text) }
+        if let content = candidate.payload?.content { inner["content"] = .string(content) }
+        if let name = candidate.payload?.name { inner["name"] = .string(name) }
+        if !inner.isEmpty { payload["payload"] = .object(inner) }
+
+        var values: [String: SendableJSONValue] = [
+            "decision": .string(candidate.decision),
+            "semanticTerms": .array(candidate.semanticTerms.map { .string($0) }),
+            "payload": .object(payload)
+        ]
+        if let targetIdentityID = candidate.targetIdentityID { values["targetIdentityID"] = .string(targetIdentityID) }
+        if let expectedRevisionID = candidate.expectedRevisionID { values["expectedRevisionID"] = .string(expectedRevisionID) }
+        _ = try await executor.execute(
+            toolName: writeTool,
+            arguments: AgentToolArguments(values: values),
+            context: context
+        )
+    }
+
     private func recordSearchMetadata(
         call: AgentToolCall,
         result: AgentToolResult,
