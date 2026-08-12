@@ -33,7 +33,9 @@ Interactive-web guide — SDK v1 usage (window.platform):
 
 1. SDK script: add <script src="/api/v1/sdk/v1.js"></script> inside <head> before any other script. This is the backend-provided absolute path on the same domain as the published page; copy it exactly. Never construct apiBase, projectId, or endpoint URLs yourself, and do not rewrite it as a relative path.
 
-   Stylesheet link check: if you pass CSS through the css parameter (saved as style.css), index.html MUST link it inside <head> with <link rel="stylesheet" href="style.css">. Before creating or updating the draft, double-check that the link tag is actually present in the returned index.html — a missing or mistyped stylesheet link is the most common reason a page publishes without its styles.
+   Stylesheet link check: if you pass CSS through the css parameter (saved as style.css), index.html MUST link it inside <head> with <link rel="stylesheet" href="style.css">. Before creating or updating the draft, double-check that the link tag is actually present in the returned index.html — a missing or mistyped stylesheet link is the most common reason a page publishes without its styles. The runtime also auto-checks: when style.css exists but index.html does not link it, the missing <link> is injected into <head> automatically and reported as a "css-link-injected" change — still link it yourself in the source you generate, and do not rely on the auto-fix.
+
+   Native control height consistency: text inputs (input[type=text]), textareas, and selects (select) have different native heights across browsers/OSes, so side-by-side form controls end up misaligned. Set the same height on input, select, textarea, and button (for example height + box-sizing: border-box, or consistent padding/border/font-size), keep the same font-size on select and input (some browsers scale selects below 16px), and use appearance: none to fully style selects when needed so all form controls align visually.
 
 2. window.platform API surface:
    - data.create(name, value), data.updateMine(name, recordId, value), data.deleteMine(name, recordId), data.list(name, query)
@@ -174,17 +176,21 @@ public actor InteractiveWebToolRuntime {
             project.incompleteWrites = incomplete
             project.revision = (project.revision ?? 1) + 1
             try await store.save(project: project)
+            var chunkChanges = [InteractiveWebDraftFileChange(
+                fileName: chunkFileName,
+                operation: exists ? "chunk-appended" : "created",
+                beforeHash: beforeHash,
+                afterHash: afterHash,
+                beforeSizeBytes: before.utf8.count,
+                afterSizeBytes: after.utf8.count,
+                diff: Self.unifiedDiff(before: before, after: after, filePath: chunkFileName)
+            )]
+            if final, let cssLinkChange = try ensureCssLinked(in: root) {
+                chunkChanges.append(cssLinkChange)
+            }
             return InteractiveWebDraftSaveResult(
                 status: try status(project),
-                changes: [InteractiveWebDraftFileChange(
-                    fileName: chunkFileName,
-                    operation: exists ? "chunk-appended" : "created",
-                    beforeHash: beforeHash,
-                    afterHash: afterHash,
-                    beforeSizeBytes: before.utf8.count,
-                    afterSizeBytes: after.utf8.count,
-                    diff: Self.unifiedDiff(before: before, after: after, filePath: chunkFileName)
-                )],
+                changes: chunkChanges,
                 offset: max(offset, 0),
                 nextOffset: final ? nil : (max(offset, 0) + content.count)
             )
@@ -208,6 +214,11 @@ public actor InteractiveWebToolRuntime {
                 content: InteractiveWebPackager.configurationJSON(collections: collections),
                 in: root
             ))
+        }
+        // 样式链接兜底：本次提供了 css 或项目里已有 style.css 时，index.html 必须链接它；
+        // 缺失则自动注入，并以 css-link-injected 变更报告给模型。
+        if let cssLinkChange = try ensureCssLinked(in: root) {
+            changes.append(cssLinkChange)
         }
         // 完整写入的文件视为已完成，清除未完成标记
         var incomplete = project.incompleteWrites ?? []
@@ -292,12 +303,22 @@ public actor InteractiveWebToolRuntime {
                 resultTotalCharacters: before.count
             )
         }
+        var finalAfter = after
+        if name == "index.html",
+           fileManager.fileExists(atPath: target.deletingLastPathComponent().appendingPathComponent("style.css").path),
+           !hasStylesheetLink(finalAfter) {
+            finalAfter = injectStylesheetLink(finalAfter)
+        }
         let originalData = try Data(contentsOf: target)
         do {
-            try Data(after.utf8).write(to: target, options: .atomic)
+            try Data(finalAfter.utf8).write(to: target, options: .atomic)
         } catch {
             try? originalData.write(to: target, options: .atomic)
             throw error
+        }
+        if name == "style.css" {
+            // 补上 style.css 后，若 index.html 尚未链接，自动注入（不额外报变更，避免编辑结果语义混乱）。
+            _ = try ensureCssLinked(in: target.deletingLastPathComponent())
         }
         project.revision = (project.revision ?? 1) + 1
         try await store.save(project: project)
@@ -306,13 +327,13 @@ public actor InteractiveWebToolRuntime {
             status: afterStatus,
             fileName: name,
             beforeHash: Self.sha256(before),
-            afterHash: Self.sha256(after),
+            afterHash: Self.sha256(finalAfter),
             beforeSizeBytes: before.utf8.count,
-            afterSizeBytes: after.utf8.count,
-            diff: Self.unifiedDiff(before: before, after: after, filePath: name),
+            afterSizeBytes: finalAfter.utf8.count,
+            diff: Self.unifiedDiff(before: before, after: finalAfter, filePath: name),
             offset: appliedOffset,
             nextOffset: nextOffset,
-            resultTotalCharacters: after.count
+            resultTotalCharacters: finalAfter.count
         )
     }
 
@@ -578,6 +599,57 @@ public actor InteractiveWebToolRuntime {
         }
     }
 
+    /// index.html 是否已链接 style.css（大小写不敏感，兼容单双引号与 ./style.css）。
+    private func hasStylesheetLink(_ html: String) -> Bool {
+        let lower = html.lowercased()
+        var cursor = lower.startIndex
+        while let open = lower.range(of: "<link", range: cursor..<lower.endIndex) {
+            guard let close = lower.range(of: ">", range: open.upperBound..<lower.endIndex) else { return false }
+            let tag = lower[open.lowerBound..<close.upperBound]
+            if (tag.contains("rel=\"stylesheet\"") || tag.contains("rel='stylesheet'")), tag.contains("style.css") {
+                return true
+            }
+            cursor = close.upperBound
+        }
+        return false
+    }
+
+    /// 在 <head> 开头（或 </head> 前）注入 style.css 链接；无 head 时放在文档最前面。
+    private func injectStylesheetLink(_ html: String) -> String {
+        let link = "<link rel=\"stylesheet\" href=\"style.css\">"
+        let lower = html.lowercased()
+        if let headOpen = lower.range(of: "<head") {
+            if let headEnd = lower.range(of: ">", range: headOpen.upperBound..<lower.endIndex) {
+                let insertAt = headEnd.upperBound
+                return String(html[..<insertAt]) + "\n    " + link + String(html[insertAt...])
+            }
+        }
+        if let headClose = lower.range(of: "</head>") {
+            return String(html[..<headClose.lowerBound]) + "    " + link + "\n" + String(html[headClose.lowerBound...])
+        }
+        return link + "\n" + html
+    }
+
+    /// 若 style.css 存在而 index.html 未链接它，自动注入 <link> 并返回变更记录（供结果向模型报告）。
+    private func ensureCssLinked(in root: URL) throws -> InteractiveWebDraftFileChange? {
+        let indexURL = root.appendingPathComponent("index.html")
+        let cssURL = root.appendingPathComponent("style.css")
+        guard fileManager.fileExists(atPath: indexURL.path), fileManager.fileExists(atPath: cssURL.path) else { return nil }
+        let before = try String(contentsOf: indexURL, encoding: .utf8)
+        guard !hasStylesheetLink(before) else { return nil }
+        let after = injectStylesheetLink(before)
+        try Data(after.utf8).write(to: indexURL, options: .atomic)
+        return InteractiveWebDraftFileChange(
+            fileName: "index.html",
+            operation: "css-link-injected",
+            beforeHash: Self.sha256(before),
+            afterHash: Self.sha256(after),
+            beforeSizeBytes: before.utf8.count,
+            afterSizeBytes: after.utf8.count,
+            diff: Self.unifiedDiff(before: before, after: after, filePath: "index.html")
+        )
+    }
+
     private func containsInlineScript(_ html: String) -> Bool {
         let lower = html.lowercased()
         var cursor = lower.startIndex
@@ -684,7 +756,7 @@ public struct InteractiveWebAgentTool: AgentTool {
 		case .listProjects: "List the signed-in user's published interactive webpage projects, one page at a time (default 50 per page, max 100). Continue with page until fewer than limit items are returned."
 		case .getProject: "Read an owned online webpage project's details, deployments, file manifest, and data collection names."
 		case .downloadProject: "Download an owned online webpage's current files into Connor's user data directory and register an editable local draft."
-        case .createDraft: "Create a new local interactive webpage draft, or update an existing one. Two write modes: (1) Complete mode — omit projectID and pass the complete name/html/css/javascript/collections (or update with the SAME projectID and full edited files; files you do not pass, such as css, stay unchanged). (2) Chunked mode from the very start — pass fileName (default index.html), content (the current chunk), offset (default 0) and final (default false); chunks are concatenated locally in order, continue with offset=nextOffset from each result, and set final=true on the last chunk so the file is validated and marked complete. A draft is NOT created successfully until every chunked file has final=true: get_status shows incompleteWrites and publish rejects incomplete drafts; never compress or cut page content to fit a shorter output. Before any interactive-web use (creating or updating), call interactive_web_sdk_usage in this session to get the complete SDK contract and example; updates often happen in a separate session, so never skip the guide. Every page must load the backend-provided absolute SDK path /api/v1/sdk/v1.js and use window.platform instead of constructing API URLs; put all page JavaScript in the javascript parameter (app.js) and never write inline <script> blocks (CSP blocks them); drafts without the SDK script or with inline scripts are rejected with step-by-step fix guidance. The tool writes files into the app-managed user-data sandbox and does not publish anything."
+        case .createDraft: "Create a new local interactive webpage draft, or update an existing one. Two write modes: (1) Complete mode — omit projectID and pass the complete name/html/css/javascript/collections (or update with the SAME projectID and full edited files; files you do not pass, such as css, stay unchanged). (2) Chunked mode from the very start — pass fileName (default index.html), content (the current chunk), offset (default 0) and final (default false); chunks are concatenated locally in order, continue with offset=nextOffset from each result, and set final=true on the last chunk so the file is validated and marked complete. A draft is NOT created successfully until every chunked file has final=true: get_status shows incompleteWrites and publish rejects incomplete drafts; never compress or cut page content to fit a shorter output. Before any interactive-web use (creating or updating), call interactive_web_sdk_usage in this session to get the complete SDK contract and example; updates often happen in a separate session, so never skip the guide. Every page must load the backend-provided absolute SDK path /api/v1/sdk/v1.js and use window.platform instead of constructing API URLs; put all page JavaScript in the javascript parameter (app.js) and never write inline <script> blocks (CSP blocks them); drafts without the SDK script or with inline scripts are rejected with step-by-step fix guidance. If you pass CSS (saved as style.css), index.html must link it with a stylesheet link; the runtime auto-injects a missing link and reports a css-link-injected change. Keep form controls (input/select/textarea/button) at consistent heights with matching font-size. The tool writes files into the app-managed user-data sandbox and does not publish anything."
         case .editDraft: "Edit one source file of an app-managed interactive webpage draft. Two modes (choose one): targeted edit — pass the exact oldText (must occur exactly once in the current file; read it first with interactive_web_get_draft) and newText (empty string deletes the oldText); or full-file replacement — pass content with the complete new file. For very large files, write content in chunks: start with offset=0 and content=first chunk, continue with offset=nextOffset from each result, and set final=true on the last chunk (the tool then truncates the old tail and validates the complete file). The tool applies each change atomically and returns the new revision, manifestHash, file hashes, the applied offset/nextOffset, and a plain-text unified diff. Edits to index.html must keep the SDK script tag (/api/v1/sdk/v1.js)."
         case .getDraft: "Read one source file from an app-managed interactive webpage draft; the result includes availableFiles so you can see which files exist in the draft. Use this before revising an existing draft so edits are based on the exact current source and manifest hash. Large files are paginated by character offset: the result reports totalCharacters and, when truncated, nextOffset — continue with offset=nextOffset to read the rest."
         case .getStatus: "Read the current local and published status of an interactive webpage project, including the list of draft files."

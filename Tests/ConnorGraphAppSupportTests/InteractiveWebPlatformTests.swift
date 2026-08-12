@@ -546,7 +546,7 @@ struct InteractiveWebPlatformTests {
             javascript: "console.log('v1')"
         )
         let projectID = created.status.projectID
-        let updatedHTML = "<head><script src=\"/api/v1/sdk/v1.js\"></script></head>\n<body>\n<p>new</p>\n</body>"
+        let updatedHTML = "<head><script src=\"/api/v1/sdk/v1.js\"></script>\n    <link rel=\"stylesheet\" href=\"style.css\"></head>\n<body>\n<p>new</p>\n</body>"
 
         let updated = try await runtime.createDraft(
             sessionID: "session-1",
@@ -674,6 +674,20 @@ struct InteractiveWebPlatformTests {
         #expect(source.revision == 2)
     }
 
+    @Test func createDraftAutoInjectsMissingStylesheetLink() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runtime = InteractiveWebToolRuntime(storagePaths: fixture.paths, accountID: "account", api: nil)
+        let html = "<head><script src=\"/api/v1/sdk/v1.js\"></script></head>\n<body><p>hi</p></body>"
+        let created = try await runtime.createDraft(sessionID: "session-1", name: "Styled", html: html, css: "body {}", javascript: nil)
+
+        #expect(created.changes.contains { $0.operation == "css-link-injected" })
+        let source = try await runtime.draftSource(projectID: created.status.projectID, fileName: "index.html")
+        #expect(source.content.contains("<link rel=\"stylesheet\" href=\"style.css\">"))
+        let css = try await runtime.draftSource(projectID: created.status.projectID, fileName: "style.css")
+        #expect(css.content == "body {}")
+    }
+
     @Test func editDraftSupportsWholeFileReplacement() async throws {
         let fixture = try makeRuntimeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
@@ -681,7 +695,7 @@ struct InteractiveWebPlatformTests {
         let html = "<head><script src=\"/api/v1/sdk/v1.js\"></script></head>\n<body>\n<p>old</p>\n</body>"
         let created = try await runtime.createDraft(sessionID: "session-1", name: "Result", html: html, css: "body {}", javascript: nil)
 
-        let replacement = "<head><script src=\"/api/v1/sdk/v1.js\"></script></head>\n<body>\n<p>brand new</p>\n</body>"
+        let replacement = "<head><script src=\"/api/v1/sdk/v1.js\"></script>\n    <link rel=\"stylesheet\" href=\"style.css\"></head>\n<body>\n<p>brand new</p>\n</body>"
         let edit = try await runtime.editDraft(
             projectID: created.status.projectID,
             fileName: "index.html",
