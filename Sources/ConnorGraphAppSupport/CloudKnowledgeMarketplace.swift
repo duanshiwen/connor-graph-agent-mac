@@ -313,7 +313,19 @@ public actor CloudKnowledgeAuthorizationCache {
         guard requireNetwork() else { return }
         showsPublisher = false
         if selected?.id != id, let cached = cachedKnowledgeBase(id: id) { selected = cached }
-        await perform { self.selected = try await self.api.detail(id: id) }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            self.selected = try await self.api.detail(id: id)
+        } catch let CloudKnowledgeError.server(status, _, _) where status == 404 {
+            // 知识库已下架/删除/未发布：清除残留缓存并回到首页，避免“未找到 404”反复出现。
+            self.selected = nil
+            self.errorMessage = "该知识库已不可用（可能已下架、删除或未发布）。"
+            await self.load()
+        } catch {
+            self.errorMessage = error.localizedDescription
+        }
     }
     public func subscribe(id: String) async { guard requireNetwork() else { return }; await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true }; self.library = try await self.api.library(); self.onLibraryChanged?() } }
     public func unsubscribe(id: String) async { guard requireNetwork() else { return }; await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id); library = try await api.library(); onLibraryChanged?() } catch { errorMessage = error.localizedDescription } }
