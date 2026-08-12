@@ -158,7 +158,8 @@ struct ConnorGraphAgentMacApp: App {
         Window("知识库发布进度", id: AppMenuPresentation.knowledgePublicationProgressWindowID) {
             KnowledgePublicationProgressView(
                 store: root.graph.knowledgeCreator,
-                sessions: root.graph.chat.sessions.allSessions
+                sessions: root.graph.chat.sessions.allSessions,
+                messageCounts: root.graph.chat.sessions.messageCountsBySessionID
             )
             .appFormTheme()
         }
