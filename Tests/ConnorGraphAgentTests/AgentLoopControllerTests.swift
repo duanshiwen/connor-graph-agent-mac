@@ -432,7 +432,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(direct.reservedOutputTokens == 1)
 }
 
-@Test func progressPromptAndToolStayAlignedForNonGPTModels() async throws {
+@Test func progressToolIsDirectlyVisibleWhenRegisteredAndAlignedWithPrompt() async throws {
     let providerWithTool = CapturingFinalAnswerProvider()
     var registry = AgentToolRegistry()
     registry.registerShareProgressUpdateTool()
@@ -445,7 +445,8 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 
     let requestWithTool = try #require(await providerWithTool.lastRequest)
     let promptWithTool = requestWithTool.messages.map(\.content).joined(separator: "\n")
-    #expect(!requestWithTool.tools.contains { $0.name == ShareProgressUpdateTool.toolName })
+    // share_progress_update 必须对模型直接可见（否则中间消息不会产生）。
+    #expect(requestWithTool.tools.contains { $0.name == ShareProgressUpdateTool.toolName })
     #expect(promptWithTool.contains("## Tool Discovery"))
     #expect(promptWithTool.contains("- share: tools in the share namespace; 1 tools"))
 
