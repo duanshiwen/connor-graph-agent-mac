@@ -54,3 +54,38 @@ struct CloudKnowledgeMarketplaceListTests {
         #expect(list.map(\.id) == ["pub", "draft"])
     }
 }
+
+extension CloudKnowledgeMarketplaceListTests {
+    @Test func unifiedListFilterSwitchesAllSubscribedAndOwned() {
+        let library = CloudMarketplaceLibrary(
+            subscribed: [
+                .init(id: "sub", name: "已订阅", subscribed: true, ownerName: "Alice"),
+            ],
+            owned: [
+                .init(id: "own", name: "我创建的", owned: true, publicationStatus: "published"),
+            ]
+        )
+        let searchResults: [CloudMarketplaceKnowledgeBase] = [
+            .init(id: "market", name: "市场"),
+        ]
+
+        #expect(library.unifiedList(searchResults: searchResults, filter: .all).map(\.id) == ["own", "sub", "market"])
+        #expect(library.unifiedList(searchResults: searchResults, filter: .subscribed).map(\.id) == ["sub"])
+        #expect(library.unifiedList(searchResults: searchResults, filter: .owned).map(\.id) == ["own"])
+    }
+
+    @Test func unifiedListOwnedFilterKeepsDraftAndPublishedAndMergedOwned() {
+        let library = CloudMarketplaceLibrary(
+            subscribed: [
+                .init(id: "own", name: "我创建并订阅", subscribed: true, owned: true, publicationStatus: "published"),
+            ],
+            owned: [
+                .init(id: "own", name: "我创建并订阅", owned: true, publicationStatus: "published"),
+                .init(id: "draft", name: "草稿", owned: true, publicationStatus: nil),
+            ]
+        )
+        let list = library.unifiedList(searchResults: [], filter: .owned)
+        #expect(list.map(\.id) == ["own", "draft"])
+        #expect(list.first?.subscribed == true)
+    }
+}

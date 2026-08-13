@@ -98,6 +98,23 @@ public extension CloudMarketplaceKnowledgeBase {
     }
 }
 
+/// 知识市场主列表头部的筛选维度。
+public enum MarketplaceListFilter: String, Sendable, CaseIterable, Identifiable {
+    case all
+    case subscribed
+    case owned
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .all: "全部知识库"
+        case .subscribed: "我订阅的"
+        case .owned: "我创建的"
+        }
+    }
+}
+
 public struct CloudMarketplaceLibrary: Codable, Sendable, Equatable {
     public var subscribed: [CloudMarketplaceKnowledgeBase]
     public var owned: [CloudMarketplaceKnowledgeBase]
@@ -184,7 +201,10 @@ public extension CloudMarketplaceLibrary {
     /// 顺序：我发布的（已发布 → 未发布）→ 已订阅（非我发布）→ 市场搜索结果，同组保持原顺序。
     /// 同一知识库出现在多个来源时按 id 合并字段（subscribed/owned 取并集，空字段互补），
     /// 保证卡片上的状态与详情字段完整。
-    func unifiedList(searchResults: [CloudMarketplaceKnowledgeBase]) -> [CloudMarketplaceKnowledgeBase] {
+    func unifiedList(
+        searchResults: [CloudMarketplaceKnowledgeBase],
+        filter: MarketplaceListFilter = .all
+    ) -> [CloudMarketplaceKnowledgeBase] {
         var valuesByID: [String: CloudMarketplaceKnowledgeBase] = [:]
         var orderedIDs: [String] = []
 
@@ -198,7 +218,12 @@ public extension CloudMarketplaceLibrary {
         for base in subscribed where !base.owned { ingest(base) }
         for base in searchResults { ingest(base) }
 
-        return orderedIDs.compactMap { valuesByID[$0] }
+        let merged = orderedIDs.compactMap { valuesByID[$0] }
+        return switch filter {
+        case .all: merged
+        case .subscribed: merged.filter(\.subscribed)
+        case .owned: merged.filter(\.owned)
+        }
     }
 }
 
@@ -307,6 +332,11 @@ public actor CloudKnowledgeAuthorizationCache {
     /// 单一列表视图数据源：合并「我发布的 / 已订阅 / 市场搜索结果」，去重并按状态排序。
     public var unifiedBases: [CloudMarketplaceKnowledgeBase] {
         library.unifiedList(searchResults: searchResults)
+    }
+
+    /// 按主列表头筛选（全部 / 我订阅的 / 我创建的）返回单一列表。
+    public func unifiedBases(filter: MarketplaceListFilter) -> [CloudMarketplaceKnowledgeBase] {
+        library.unifiedList(searchResults: searchResults, filter: filter)
     }
     @Published public private(set) var isLoading = false
     @Published public private(set) var isLoadingNextPage = false
