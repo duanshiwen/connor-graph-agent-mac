@@ -481,6 +481,41 @@ struct CloudKnowledgePhase3Tests {
         #expect(await api.operations.isEmpty)
     }
 
+    @Test func singlePassExtractionEmitsModelAndToolTraceEvents() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let recorder = CloudKnowledgeTraceRecorder()
+        let provider = AnyAgentModelProvider(
+            modelID: "single-pass-trace",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: true, supportsVision: false),
+            complete: { request in try await CloudKnowledgeSinglePassProvider().complete(request) }
+        )
+        let session = AgentSession(id: "conversation-trace", title: "Trace", messages: [
+            AgentMessage(role: .user, content: "Connor 是知识库助手，Alice 是同事。"),
+            AgentMessage(role: .assistant, content: "好的。")
+        ])
+
+        let result = try await CloudKnowledgeLLMGenerationRunner().generateSinglePass(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider,
+            trace: { event in recorder.append(event) }
+        )
+
+        #expect(result.summary.contains("落地 2 项"))
+        let kinds = recorder.events.map(\.kind)
+        #expect(kinds.contains(.modelRequest))
+        #expect(kinds.contains(.modelResponse))
+        #expect(kinds.filter { $0 == .toolExecution }.count == 2)
+        #expect(kinds.filter { $0 == .toolResult }.count == 2)
+        // 序号严格递增且唯一，供面板按序渲染。
+        let sequences = recorder.events.map(\.sequence)
+        #expect(sequences == sequences.sorted())
+        #expect(Set(sequences).count == sequences.count)
+    }
+
     @Test func singlePassExtractionStagesCandidatesWithoutSearchContext() async throws {
         let api = InMemoryCloudKnowledgeAPI()
         let scripted = CloudKnowledgeSinglePassProvider()
