@@ -1536,6 +1536,8 @@ final class AppRuntimeLifecycle {
         async let contacts: Void = contactsFeatureModel.reload()
         async let mail: Void = mailFeatureModel.reload()
         _ = await (rss, calendar, contacts, mail)
+        // 启动后补拉本地缓存中缺少正文的邮件（仅文本），让搜索能按正文命中已发送等文件夹。
+        mailFeatureModel.enqueueBodyBackfill()
     }
 
     func reloadKnowledgeMarketplace() async {

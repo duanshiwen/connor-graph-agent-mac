@@ -73,6 +73,9 @@ final class MailFeatureModel {
     @ObservationIgnored private let credentialStore: AppMailCredentialStore
     @ObservationIgnored private let draftStore: (any MailDraftRepository)?
     @ObservationIgnored private let syncServiceFactory: SyncServiceFactory
+    @ObservationIgnored private let bodyBackfillService: MailBodyBackfillService
+    @ObservationIgnored private var isBodyBackfillRunning = false
+    @ObservationIgnored private var bodyBackfillTask: Task<Void, Never>?
     @ObservationIgnored private var cacheObserver: NSObjectProtocol?
     @ObservationIgnored private var reloadGeneration: UInt64 = 0
     @ObservationIgnored private let listPageSize = 50
@@ -93,6 +96,7 @@ final class MailFeatureModel {
         credentialStore: AppMailCredentialStore = AppMailCredentialStore(),
         draftStore: (any MailDraftRepository)? = nil,
         syncServiceFactory: @escaping SyncServiceFactory = { MailIMAPInitialSyncService(messageLimit: 0) },
+        bodyBackfillService: MailBodyBackfillService = MailBodyBackfillService(),
         notificationCenter: NotificationCenter = .default
     ) {
         self.store = store
@@ -100,6 +104,7 @@ final class MailFeatureModel {
         self.credentialStore = credentialStore
         self.draftStore = draftStore
         self.syncServiceFactory = syncServiceFactory
+        self.bodyBackfillService = bodyBackfillService
         cacheObserver = notificationCenter.addObserver(forName: .connorMailCacheDidChange, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in await self?.reload() }
         }
@@ -317,9 +322,38 @@ final class MailFeatureModel {
             if !result.messages.isEmpty { try await store.saveMessagesBatch(result.messages) }
             count += result.messages.count; summaries.append("\(result.account.displayName)：\(result.account.health.summary)")
         }
-        await reload(); let summary = summaries.joined(separator: "；")
+        await reload()
+        enqueueBodyBackfill()
+        let summary = summaries.joined(separator: "；")
         if let sourceInstanceID, !sourceInstanceID.isEmpty { return "Mail refreshed account \(sourceInstanceID); synced \(count) message(s). \(summary)" }
         return "Mail refreshed \(accounts.count) account(s); synced \(count) message(s). \(summary)"
+    }
+
+    /// 同步完成后，排队在后台拉取本地缓存中缺少正文的邮件（仅文本，不落盘附件），
+    /// 写回缓存并更新搜索索引，让聚合搜索可以按正文命中已发送等文件夹的邮件。
+    /// 在 detached utility 任务中执行，避免占用主线程/主 actor；同一时间只允许一个
+    /// 回填任务运行，应用关闭或取消时会取消当前任务。
+    func enqueueBodyBackfill() {
+        guard !isShutdown, !isBodyBackfillRunning, let store else { return }
+        isBodyBackfillRunning = true
+        let service = bodyBackfillService
+        bodyBackfillTask = Task.detached(priority: .utility) {
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.isBodyBackfillRunning = false
+                    self?.bodyBackfillTask = nil
+                }
+            }
+            do {
+                let saved = try await service.backfillMissingBodies(store: store)
+                if saved > 0 {
+                    NSLog("[Connor.Mail] body backfill saved %d message body(s)", saved)
+                }
+            } catch is CancellationError {
+            } catch {
+                NSLog("[Connor.Mail] body backfill failed: %@", error.localizedDescription)
+            }
+        }
     }
 
     func waitForPendingOperations() async { while !ownedTasks.isEmpty { for task in Array(ownedTasks.values) { await task.value } } }
@@ -327,6 +361,8 @@ final class MailFeatureModel {
         guard !isShutdown else { return }; isShutdown = true; reloadGeneration &+= 1
         if let cacheObserver { notificationCenter.removeObserver(cacheObserver); self.cacheObserver = nil }
         for task in ownedTasks.values { task.cancel() }; ownedTasks.removeAll()
+        bodyBackfillTask?.cancel()
+        bodyBackfillTask = nil
         bodyDisplayCache.removeAll()
         bodyDisplayCacheOrder.removeAll()
         preparedHTMLCache.removeAll()
@@ -349,6 +385,7 @@ final class MailFeatureModel {
         do {
             let summary = try await performFullSync(accountID: accountID)
             syncMessage = summary
+            enqueueBodyBackfill()
         } catch {
             let message = error.localizedDescription
             syncMessage = "邮箱已添加，但同步失败：\(message)"

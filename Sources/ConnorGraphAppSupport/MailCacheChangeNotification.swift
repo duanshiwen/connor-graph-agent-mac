@@ -3,6 +3,7 @@ import Foundation
 public enum MailCacheChangeReason: String, Sendable, Equatable {
     case sentMessageSaved
     case readStateUpdated
+    case bodyBackfilled
 }
 
 public enum MailCacheChangeNotificationUserInfoKey {

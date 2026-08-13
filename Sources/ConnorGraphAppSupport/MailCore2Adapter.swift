@@ -190,6 +190,43 @@ public struct MailCore2MailBackend: MailProtocolBackend {
         }
     }
 
+    /// 批量拉取正文：同一账户同一文件夹只建立一个 IMAP 会话，按顺序拉取每封邮件的完整
+    /// 内容并解析出纯文本/HTML 正文（附件等二进制不落盘）。返回数组与 `uids` 顺序一致，
+    /// 单封解析失败时对应元素为 nil。批量失败会抛出，由调用方退回逐封拉取。
+    public func fetchMessageBodies(account: MailAccount, credential: String, mailbox: RemoteIMAPMailbox, uids: [String], fallbackRecipient: MailAddress, snippet: String) async throws -> [MailMessageDetail?] {
+        try ensureAvailable()
+        #if canImport(MailCore)
+        guard let endpoint = account.incoming, endpoint.protocolKind == .imap else { return [] }
+        guard let email = account.identities.first?.address.email, !email.isEmpty else { return [] }
+        let numericUIDs = uids.compactMap { UInt32($0) }
+        guard !numericUIDs.isEmpty else { return [] }
+        var lastError: Error?
+        for username in MailIMAPInitialSyncService.candidateUsernames(email: email, provider: account.provider) {
+            let session = makeIMAPSession(hostname: endpoint.host, port: UInt32(endpoint.port), username: username, password: credential)
+            var results: [MailMessageDetail?] = []
+            results.reserveCapacity(numericUIDs.count)
+            var failed = false
+            for uid in numericUIDs {
+                do {
+                    let rawData = try await fetchParsedMessageData(session: session, folder: mailbox.path, uid: uid)
+                    let detail = try? detail(fromRawData: rawData, account: account, uid: String(uid), mailbox: mailbox, fallbackRecipient: fallbackRecipient, snippet: snippet)
+                    results.append(detail)
+                } catch {
+                    lastError = error
+                    failed = true
+                    break
+                }
+            }
+            if !failed { return results }
+        }
+        if let lastError { throw lastError }
+        return []
+        #else
+        throw MailProtocolBackendError.unavailable("MailCore framework cannot be imported")
+        #endif
+    }
+
+
     #if canImport(MailCore)
     public func makeIMAPSession(hostname: String, port: UInt32, username: String, password: String) -> MCOIMAPSession {
         let session = MCOIMAPSession()
