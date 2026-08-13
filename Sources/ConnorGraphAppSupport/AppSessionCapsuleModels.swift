@@ -1,5 +1,6 @@
 import Foundation
 import ConnorGraphAgent
+import ConnorGraphCore
 
 public struct AppSessionManifest: Codable, Equatable, Sendable {
     public var schemaVersion: Int
@@ -48,6 +49,8 @@ public struct AppSessionStateSnapshot: Codable, Equatable, Sendable {
     public var llmOverride: SessionLLMOverride?
     public var remoteKnowledgeBaseIDs: [String]?
     public var allowedMCPToolNames: [String]?
+    /// 会话级权限覆盖；nil 表示跟随全局默认权限。
+    public var permissionMode: AgentPermissionMode?
 
     public init(
         schemaVersion: Int = 1,
@@ -61,7 +64,8 @@ public struct AppSessionStateSnapshot: Codable, Equatable, Sendable {
         attachmentSummary: AppSessionAttachmentSummary? = nil,
         llmOverride: SessionLLMOverride? = nil,
         remoteKnowledgeBaseIDs: [String]? = nil,
-        allowedMCPToolNames: [String]? = nil
+        allowedMCPToolNames: [String]? = nil,
+        permissionMode: AgentPermissionMode? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.sessionID = sessionID
@@ -75,6 +79,7 @@ public struct AppSessionStateSnapshot: Codable, Equatable, Sendable {
         self.llmOverride = llmOverride
         self.remoteKnowledgeBaseIDs = remoteKnowledgeBaseIDs
         self.allowedMCPToolNames = allowedMCPToolNames
+        self.permissionMode = permissionMode
     }
 }
 
