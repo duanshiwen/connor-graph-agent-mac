@@ -61,6 +61,43 @@ public struct CloudMarketplaceKnowledgeBase: Codable, Sendable, Equatable, Ident
         try container.encodeIfPresent(publicationStatus, forKey: .publicationStatus)
     }
 }
+public extension CloudMarketplaceKnowledgeBase {
+    /// 是否已上架（发布到知识市场）。
+    var isPublished: Bool { publicationStatus == "published" }
+}
+
+/// 知识市场统一列表中一张卡片的“主状态”。一个知识库同时可能兼具多个属性
+/// （例如自己发布并订阅了自己的知识库），主状态用于优先展示所有权信息，
+/// “已订阅”作为可叠加的次要状态由 UI 单独展示。
+public enum MarketplaceCardStatus: String, Sendable, Equatable {
+    /// 我创建的且已发布到知识市场
+    case published
+    /// 我创建的但尚未发布（草稿 / 未上架）
+    case unpublished
+    /// 已订阅（非我发布）
+    case subscribed
+    /// 市场默认（未订阅且非我发布）
+    case market
+
+    public var title: String {
+        switch self {
+        case .published: "我发布的"
+        case .unpublished: "未发布"
+        case .subscribed: "已订阅"
+        case .market: "市场"
+        }
+    }
+}
+
+public extension CloudMarketplaceKnowledgeBase {
+    /// 卡片主状态：所有权优先（已发布 > 未发布），其次订阅，最后为市场默认。
+    var marketplaceCardStatus: MarketplaceCardStatus {
+        if owned { return isPublished ? .published : .unpublished }
+        if subscribed { return .subscribed }
+        return .market
+    }
+}
+
 public struct CloudMarketplaceLibrary: Codable, Sendable, Equatable {
     public var subscribed: [CloudMarketplaceKnowledgeBase]
     public var owned: [CloudMarketplaceKnowledgeBase]
@@ -141,6 +178,30 @@ public struct CloudMarketplaceLibrary: Codable, Sendable, Equatable {
         return current
     }
 }
+public extension CloudMarketplaceLibrary {
+    /// 知识市场“单一列表”数据源：把「我发布的」「已订阅」「市场搜索结果」合并成一个去重列表。
+    ///
+    /// 顺序：我发布的（已发布 → 未发布）→ 已订阅（非我发布）→ 市场搜索结果，同组保持原顺序。
+    /// 同一知识库出现在多个来源时按 id 合并字段（subscribed/owned 取并集，空字段互补），
+    /// 保证卡片上的状态与详情字段完整。
+    func unifiedList(searchResults: [CloudMarketplaceKnowledgeBase]) -> [CloudMarketplaceKnowledgeBase] {
+        var valuesByID: [String: CloudMarketplaceKnowledgeBase] = [:]
+        var orderedIDs: [String] = []
+
+        func ingest(_ base: CloudMarketplaceKnowledgeBase) {
+            if valuesByID[base.id] == nil { orderedIDs.append(base.id) }
+            valuesByID[base.id] = CloudMarketplaceLibrary.merge(valuesByID[base.id], with: base)
+        }
+
+        for base in owned.filter({ $0.publicationStatus == "published" }) { ingest(base) }
+        for base in owned.filter({ $0.publicationStatus != "published" }) { ingest(base) }
+        for base in subscribed where !base.owned { ingest(base) }
+        for base in searchResults { ingest(base) }
+
+        return orderedIDs.compactMap { valuesByID[$0] }
+    }
+}
+
 public struct CloudMarketplaceSection: Decodable, Sendable, Equatable, Identifiable {
     public var id: String; public var title: String; public var layout: String; public var knowledgeBases: [CloudMarketplaceKnowledgeBase]
     public init(id: String, title: String, layout: String, knowledgeBases: [CloudMarketplaceKnowledgeBase]) { self.id = id; self.title = title; self.layout = layout; self.knowledgeBases = knowledgeBases }
@@ -243,6 +304,10 @@ public actor CloudKnowledgeAuthorizationCache {
     @Published public private(set) var searchResults: [CloudMarketplaceKnowledgeBase] = []
     @Published public private(set) var selected: CloudMarketplaceKnowledgeBase?
     @Published public private(set) var showsPublisher = false
+    /// 单一列表视图数据源：合并「我发布的 / 已订阅 / 市场搜索结果」，去重并按状态排序。
+    public var unifiedBases: [CloudMarketplaceKnowledgeBase] {
+        library.unifiedList(searchResults: searchResults)
+    }
     @Published public private(set) var isLoading = false
     @Published public private(set) var isLoadingNextPage = false
     @Published public private(set) var errorMessage: String?
