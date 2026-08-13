@@ -25,6 +25,35 @@ struct KnowledgePublicationProgressTests {
         #expect(summary.presentationState == .paused)
     }
 
+    @Test func aiTracePanelStoresEventsAndClearsOnReset() {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("knowledge-trace-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = CloudKnowledgeCreatorStore(repository: .init(fileURL: root.appendingPathComponent("snapshot.json")))
+        let event = CloudKnowledgeExtractionTraceEvent(sequence: 1, iteration: 1, kind: .toolExecution, modelID: "test-model")
+        store.recordTraceEvent(event)
+        #expect(store.traceEvents.count == 1)
+        #expect(store.traceEvents.first?.kind == .toolExecution)
+        #expect(store.traceEvents.first?.modelID == "test-model")
+
+        store.clearTraceEvents()
+        #expect(store.traceEvents.isEmpty)
+    }
+
+    @Test func aiTracePanelRenderedBetweenTableAndButtonsWithDefaultExpanded() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let creatorSource = try String(contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/CloudKnowledgeCreatorView.swift"), encoding: .utf8)
+        #expect(creatorSource.contains("isAITraceExpanded = true"))
+        #expect(creatorSource.contains("KnowledgePublicationAITracePanel("))
+        #expect(creatorSource.contains("isExpanded: $isAITraceExpanded"))
+
+        let panelSource = try String(contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/KnowledgePublicationProgressViews.swift"), encoding: .utf8)
+        #expect(panelSource.contains("struct KnowledgePublicationAITracePanel"))
+        #expect(panelSource.contains("DisclosureGroup(isExpanded: $isExpanded)"))
+    }
+
     @Test func pendingPublicationHasVisibleAutomaticCommitFallback() throws {
         let sourceURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
