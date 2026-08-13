@@ -326,6 +326,8 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
     @Published public private(set) var snapshot: CloudKnowledgeCreatorSnapshot; @Published public private(set) var history: [CloudKnowledgeRevisionSummary] = []; @Published public private(set) var isWorking = false; @Published public private(set) var errorMessage: String?
     @Published public private(set) var publicationHistory: [CloudKnowledgePublicationHistoryEntry]
     @Published public private(set) var currentConversationID: String?
+    /// AI 处理过程事件（提交请求/模型返回/工具调用与结果），仅用于实时 UI 展示，不落库。
+    @Published public private(set) var traceEvents: [CloudKnowledgeExtractionTraceEvent] = []
     private let repository: CloudKnowledgeCreatorSnapshotRepository; private let publicationHistoryRepository: CloudKnowledgePublicationHistoryRepository; private let creatorAPI: (any CloudKnowledgeCreatorAPI)?; private let publicationAPI: (any CloudKnowledgeAPI)?; private var generationTask: Task<Void, Never>?; private var generationDriverID: UUID?; private var localGeneration: CloudKnowledgeLocalGenerationCallback?; private var nextHistoryPage: Int?
     private static let historyPageSize = 50
     public init(repository: CloudKnowledgeCreatorSnapshotRepository = .init(), historyRepository: CloudKnowledgePublicationHistoryRepository? = nil, creatorAPI: (any CloudKnowledgeCreatorAPI)? = nil, publicationAPI: (any CloudKnowledgeAPI)? = nil) {
@@ -406,6 +408,7 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         }
     }
     public func beginPublication() async {
+        clearTraceEvents()
         guard let knowledgeBaseID = snapshot.knowledgeBaseID, let publicationAPI else { snapshot.stage = .generating; persist(); return }
         await perform {
             let detail = try await self.creatorAPI?.knowledgeBase(id: knowledgeBaseID)
@@ -416,6 +419,11 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         }
     }
     public func noteProcessed(conversationID: String, summary: String) { if !snapshot.processedConversationIDs.contains(conversationID) { snapshot.processedConversationIDs.append(conversationID) }; snapshot.summaries.append(summary); persist() }
+    public func recordTraceEvent(_ event: CloudKnowledgeExtractionTraceEvent) {
+        traceEvents.append(event)
+        if traceEvents.count > 300 { traceEvents.removeFirst(traceEvents.count - 300) }
+    }
+    public func clearTraceEvents() { traceEvents.removeAll() }
     public func startGeneration(using callback: @escaping CloudKnowledgeLocalGenerationCallback) {
         guard !snapshot.selectedConversationIDs.isEmpty else { errorMessage = "请至少选择一个本地对话。"; return }
         localGeneration = callback; snapshot.stage = .generating; persist(); runRemainingGeneration()
@@ -576,7 +584,7 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         }
     }
 
-    public func reset() { generationTask?.cancel(); currentConversationID = nil; snapshot = .init(); history = []; nextHistoryPage = nil; errorMessage = nil; try? repository.clear() }
+    public func reset() { generationTask?.cancel(); currentConversationID = nil; traceEvents.removeAll(); snapshot = .init(); history = []; nextHistoryPage = nil; errorMessage = nil; try? repository.clear() }
     private func persist() { snapshot.updatedAt = Date(); try? repository.save(snapshot); recordCurrentSnapshotInHistory() }
     private func recordCurrentSnapshotInHistory() {
         let hasMeaningfulState = snapshot.knowledgeBaseID != nil || snapshot.runID != nil || !snapshot.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

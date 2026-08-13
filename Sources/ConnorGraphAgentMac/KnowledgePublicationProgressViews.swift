@@ -523,3 +523,166 @@ struct KnowledgePublicationHistoryView: View {
         }
     }
 }
+
+/// “AI 处理信息”面板：展示知识生成过程中提交给模型的内容、模型返回、
+/// 工具调用与结果，以及当前所处阶段。可折叠，默认展开。
+/// 用于知识库编辑/发布向导的表格下方与按钮栏之间。
+struct KnowledgePublicationAITracePanel: View {
+    @ObservedObject var store: CloudKnowledgeCreatorStore
+    var currentConversationID: String?
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 2) {
+                if store.traceEvents.isEmpty {
+                    Text("暂无 AI 处理信息")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 6)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(store.traceEvents, id: \.sequence) { event in
+                                CloudKnowledgeAITraceRow(event: event)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("AI 处理信息")
+                        .font(.callout.weight(.medium))
+                    Text(headerSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if store.isWorking {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+            }
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var headerSubtitle: String {
+        var parts: [String] = ["阶段：\(stageLabel)"]
+        if let currentConversationID, store.snapshot.stage == .generating {
+            parts.append("正在处理会话 \(currentConversationID.prefix(8))…")
+        }
+        parts.append("事件 \(store.traceEvents.count) 条")
+        return parts.joined(separator: " · ")
+    }
+
+    private var stageLabel: String {
+        switch store.snapshot.stage {
+        case .configure: return "配置"
+        case .conversations: return "选择会话"
+        case .confirm: return "确认生成"
+        case .generating: return "生成知识"
+        case .paused: return "已暂停"
+        case .validating: return "验证中"
+        case .preview: return "待提交"
+        case .conflict: return "冲突处理"
+        case .completed: return "已完成"
+        case .cancelled: return "已取消"
+        }
+    }
+}
+
+private struct CloudKnowledgeAITraceRow: View {
+    let event: CloudKnowledgeExtractionTraceEvent
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 14)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary)
+                if let detail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var icon: String {
+        switch event.kind {
+        case .modelRequest: return "paperplane.fill"
+        case .modelResponse: return "arrow.down.circle"
+        case .modelError: return "exclamationmark.octagon"
+        case .toolExecution: return "wrench.and.screwdriver"
+        case .toolResult: return "checkmark.circle"
+        case .toolError: return "exclamationmark.triangle"
+        }
+    }
+
+    private var color: Color {
+        switch event.kind {
+        case .modelRequest, .toolExecution: return .blue
+        case .modelResponse, .toolResult: return .green
+        case .modelError, .toolError: return .red
+        }
+    }
+
+    private var title: String {
+        switch event.kind {
+        case .modelRequest: return "提交请求 · 第 \(event.iteration) 轮"
+        case .modelResponse: return "模型返回 · 第 \(event.iteration) 轮"
+        case .modelError: return "模型错误 · 第 \(event.iteration) 轮"
+        case .toolExecution: return "调用工具：\(event.toolCall?.name ?? "未知")"
+        case .toolResult: return "工具返回：\(event.toolResult?.toolName ?? event.toolCall?.name ?? "未知")"
+        case .toolError: return "工具错误：\(event.toolCall?.name ?? "未知")"
+        }
+    }
+
+    private var detail: String? {
+        switch event.kind {
+        case .modelRequest:
+            let tools = event.tools?.map(\.name).joined(separator: "、") ?? "—"
+            return "消息 \(event.messageCharacterCount ?? 0) 字符 · 工具定义 \(event.toolDefinitionCharacterCount ?? 0) 字符 · 工具：\(tools)"
+        case .modelResponse:
+            let response = event.response
+            var parts = ["输出 \(response?.textCharacterCount ?? 0) 字符"]
+            if let text = response?.text, !text.isEmpty {
+                parts.append("“\(Self.preview(text))”")
+            }
+            return parts.joined(separator: " · ")
+        case .modelError:
+            return event.error
+        case .toolExecution:
+            return Self.preview(event.toolCall?.argumentsJSON)
+        case .toolResult:
+            return Self.preview(event.toolResult?.contentText)
+        case .toolError:
+            return event.error
+        }
+    }
+
+    private static func preview(_ text: String?) -> String {
+        guard let text else { return "" }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let limited = String(trimmed.prefix(160))
+        return limited.count < trimmed.count ? "\(limited)…" : limited
+    }
+}

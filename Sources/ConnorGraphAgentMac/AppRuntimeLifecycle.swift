@@ -2017,7 +2017,13 @@ final class AppRuntimeLifecycle {
             publicationRunID: publicationRunID,
             clientRunID: knowledgeCreatorStore.snapshot.clientRunID,
             api: cloudKnowledgeAPI,
-            provider: provider
+            provider: provider,
+            trace: { [weak self] event in
+                // AI 处理过程事件转交主线程 store，供“AI 处理信息”面板实时展示。
+                Task { @MainActor [weak self] in
+                    self?.knowledgeCreatorStore.recordTraceEvent(event)
+                }
+            }
         )
     }
 

@@ -15,6 +15,7 @@ struct CloudKnowledgeCreatorView: View {
     @State private var sessionMessageCounts: [String: Int] = [:]
     @State private var nextSessionPageCursor: String?
     @State private var isLoadingSessionPage = false
+    @State private var isAITraceExpanded = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -233,6 +234,11 @@ struct CloudKnowledgeCreatorView: View {
                 messageCounts: sessionMessageCounts
             )
             .frame(minHeight: 180)
+            KnowledgePublicationAITracePanel(
+                store: store,
+                currentConversationID: store.currentConversationID,
+                isExpanded: $isAITraceExpanded
+            )
             ForEach(Array(store.snapshot.summaries.enumerated()), id: \.offset) { _, summary in
                 Label(summary, systemImage: "checkmark.circle")
             }
