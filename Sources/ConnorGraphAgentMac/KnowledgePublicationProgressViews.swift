@@ -659,15 +659,15 @@ private struct CloudKnowledgeAITraceRow: View {
     private var detail: String? {
         switch event.kind {
         case .modelRequest:
+            // 不展示字符统计，只展示本轮模型可用的工具。
             let tools = event.tools?.map(\.name).joined(separator: "、") ?? "—"
-            return "消息 \(event.messageCharacterCount ?? 0) 字符 · 工具定义 \(event.toolDefinitionCharacterCount ?? 0) 字符 · 工具：\(tools)"
+            return "工具：\(tools)"
         case .modelResponse:
             let response = event.response
-            var parts = ["输出 \(response?.textCharacterCount ?? 0) 字符"]
             if let text = response?.text, !text.isEmpty {
-                parts.append("“\(Self.preview(text))”")
+                return "“\(Self.preview(text))”"
             }
-            return parts.joined(separator: " · ")
+            return nil
         case .modelError:
             return event.error
         case .toolExecution:
