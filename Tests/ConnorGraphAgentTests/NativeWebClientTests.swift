@@ -367,6 +367,16 @@ private extension NativeWebHTTPResponse {
         )
     }
 
+    static func status(_ code: Int, url: String = "https://example.com/status") -> NativeWebHTTPResponse {
+        NativeWebHTTPResponse(
+            data: Data(),
+            statusCode: code,
+            mimeType: "text/html",
+            finalURL: URL(string: url),
+            textEncodingName: "utf-8"
+        )
+    }
+
     static func json(_ json: String, url: String = "https://api.openverse.org/v1/images/") -> NativeWebHTTPResponse {
         NativeWebHTTPResponse(
             data: Data(json.utf8),
@@ -375,5 +385,96 @@ private extension NativeWebHTTPResponse {
             finalURL: URL(string: url),
             textEncodingName: "utf-8"
         )
+    }
+}
+
+@Suite("Native Web Fetch Retry Tests")
+struct NativeWebFetchRetryTests {
+    private var noDelayPolicy: NativeWebRetryPolicy {
+        NativeWebRetryPolicy(retryCount: 5, initialDelay: 0, maximumDelay: 0, delayMultiplier: 2)
+    }
+
+    @Test func webFetchRetriesTransientHTTPStatusThenSucceeds() async throws {
+        let httpClient = ScriptedNativeWebHTTPClient([
+            .success(.status(503)),
+            .success(.html("<html><head><title>Retried</title></head><body><p>ok</p></body></html>", url: "https://example.com/retried")),
+        ])
+        let client = NativeWebFetchClient(httpClient: httpClient, retryPolicy: noDelayPolicy)
+
+        let result = try await client.fetch(
+            urlString: "https://example.com/retried",
+            extractMode: "markdown",
+            timeoutMilliseconds: 30_000
+        )
+
+        #expect(result.statusCode == 200)
+        #expect(result.contentText.contains("ok"))
+        #expect(await httpClient.attemptCount == 2)
+    }
+
+    @Test func webFetchRetriesTransientNetworkErrorThenSucceeds() async throws {
+        let httpClient = ScriptedNativeWebHTTPClient([
+            .failure(URLError(.timedOut)),
+            .success(.html("<html><head><title>Back</title></head><body><p>recovered</p></body></html>", url: "https://example.com/recovered")),
+        ])
+        let client = NativeWebFetchClient(httpClient: httpClient, retryPolicy: noDelayPolicy)
+
+        let result = try await client.fetch(
+            urlString: "https://example.com/recovered",
+            extractMode: "text",
+            timeoutMilliseconds: 30_000
+        )
+
+        #expect(result.contentText.contains("recovered"))
+        #expect(await httpClient.attemptCount == 2)
+    }
+
+    @Test func webFetchDoesNotRetryPermanentHTTPError() async throws {
+        let httpClient = ScriptedNativeWebHTTPClient([
+            .success(.status(404)),
+        ])
+        let client = NativeWebFetchClient(httpClient: httpClient, retryPolicy: noDelayPolicy)
+
+        await #expect(throws: AgentToolError.self) {
+            _ = try await client.fetch(
+                urlString: "https://example.com/missing",
+                extractMode: "markdown",
+                timeoutMilliseconds: 30_000
+            )
+        }
+        #expect(await httpClient.attemptCount == 1)
+    }
+
+    @Test func webFetchGivesUpAfterFiveRetries() async throws {
+        let httpClient = ScriptedNativeWebHTTPClient([
+            .success(.status(503)),
+        ])
+        let client = NativeWebFetchClient(httpClient: httpClient, retryPolicy: noDelayPolicy)
+
+        await #expect(throws: AgentToolError.self) {
+            _ = try await client.fetch(
+                urlString: "https://example.com/down",
+                extractMode: "markdown",
+                timeoutMilliseconds: 30_000
+            )
+        }
+        #expect(await httpClient.attemptCount == 6)
+    }
+}
+
+private actor ScriptedNativeWebHTTPClient: NativeWebHTTPClient {
+    private let responses: [Result<NativeWebHTTPResponse, URLError>]
+    private var index = 0
+
+    init(_ responses: [Result<NativeWebHTTPResponse, URLError>]) {
+        self.responses = responses
+    }
+
+    var attemptCount: Int { index }
+
+    func data(for request: URLRequest) async throws -> NativeWebHTTPResponse {
+        let current = min(index, responses.count - 1)
+        index += 1
+        return try responses[current].get()
     }
 }
