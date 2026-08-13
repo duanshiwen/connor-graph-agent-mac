@@ -129,6 +129,8 @@ struct AgentChatTurnProcessRow: View {
     @State private var preparedDetailProcessID: String?
     @State private var preparedSummary: AgentTurnActivitySummaryPresentation?
     @State private var preparedSummaryProcessID: String?
+    @State private var summaryBuildGeneration = 0
+    @State private var detailBuildGeneration = 0
     @State private var startedAt: Date = Date()
     @State private var isHoveringHeader = false
 
@@ -186,20 +188,17 @@ struct AgentChatTurnProcessRow: View {
                 events = await loadEvents()
             }
             guard !Task.isCancelled else { return }
-            do {
-                try await Task.sleep(for: .milliseconds(40))
-            } catch {
-                return
-            }
+            // 事件每 ~50ms 合并刷新一次；构建较慢（事件很多）时不能被下一次刷新取消，
+            // 否则运行中的摘要/明细会一直停留在“正在处理”。这里让每次构建自然完成，
+            // 只在“仍是最新一代”时才应用结果，保证最新一次构建一定生效。
+            detailBuildGeneration += 1
+            let generation = detailBuildGeneration
             let preparationTask = Task.detached(priority: .userInitiated) {
                 AgentTurnActivityDetailBuilder.build(process: process, events: events)
             }
-            let detail = await withTaskCancellationHandler {
-                await preparationTask.value
-            } onCancel: {
-                preparationTask.cancel()
-            }
-            guard !Task.isCancelled, let detail else { return }
+            guard let detail = await preparationTask.value,
+                  generation == detailBuildGeneration,
+                  !Task.isCancelled else { return }
             preparedDetail = detail
             preparedDetailProcessID = process.id
             preparedSummary = detail.summary
@@ -218,20 +217,14 @@ struct AgentChatTurnProcessRow: View {
                 events = await loadEvents()
             }
             guard !Task.isCancelled else { return }
-            do {
-                try await Task.sleep(for: .milliseconds(40))
-            } catch {
-                return
-            }
+            // 同上：不取消进行中的构建，最新一代结果才应用，避免运行中表头卡在“正在处理”。
+            summaryBuildGeneration += 1
+            let generation = summaryBuildGeneration
             let summaryTask = Task.detached(priority: .utility) {
                 AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
             }
-            let summary = await withTaskCancellationHandler {
-                await summaryTask.value
-            } onCancel: {
-                summaryTask.cancel()
-            }
-            guard !Task.isCancelled else { return }
+            let summary = await summaryTask.value
+            guard generation == summaryBuildGeneration, !Task.isCancelled else { return }
             preparedSummary = summary
             preparedSummaryProcessID = process.id
         }

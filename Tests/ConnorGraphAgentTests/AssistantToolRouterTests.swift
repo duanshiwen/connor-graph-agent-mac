@@ -47,6 +47,18 @@ import Testing
     #expect(route.discoverableDefinitions.contains { $0.name == "interactive_web_offline" })
 }
 
+@Test func toolRouterKeepsProgressUpdateDirectlyVisibleToTheModel() {
+    let definitions = [
+        AgentToolDefinition(name: "Shell", description: "Run shell", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: ShareProgressUpdateTool.toolName, description: "Progress update", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let route = AssistantToolRouter().route(definitions: definitions)
+
+    #expect(route.modelVisibleDefinitions.contains { $0.name == ShareProgressUpdateTool.toolName })
+    #expect(route.discoverableDefinitions.contains { $0.name == ShareProgressUpdateTool.toolName })
+}
+
 @Test func toolRouterKeepsTheCompleteCatalogDiscoverableWithoutExpandingTheStableSurface() {
     let exposedDefinitions = [
         AgentToolDefinition(name: "Shell", description: "Run shell", inputSchema: .object(properties: [:], required: []))

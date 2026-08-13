@@ -104,8 +104,12 @@ public struct AssistantToolRouter: Sendable, Equatable {
         }
         let direct = publicExposedDefinitions.filter { Self.directToolNames.contains($0.name) }
         let discoverable = publicCatalogDefinitions.filter { !Self.directToolNames.contains($0.name) }
+        // 中间过程消息由模型自主调用 share_progress_update 产生：该工具必须对模型直接可见，
+        // 不能只放在可发现目录里（否则模型几乎不会发现并调用，中间消息会完全消失）。
+        let progressUpdateDefinition = publicCatalogDefinitions.first { $0.name == ShareProgressUpdateTool.toolName }
+        let conversationVisible = direct + (progressUpdateDefinition.map { [$0] } ?? [])
         return AssistantToolRoute(
-            modelVisibleDefinitions: (AssistantDecisionToolContract.definitions + direct).sorted { $0.name < $1.name },
+            modelVisibleDefinitions: (AssistantDecisionToolContract.definitions + conversationVisible).sorted { $0.name < $1.name },
             discoverableDefinitions: discoverable.sorted { $0.name < $1.name }
         )
     }
