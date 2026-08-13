@@ -258,24 +258,46 @@ final class RSSFeatureModel {
     func refreshForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
         let sessionID = sessionIDProvider()
         if let sourceInstanceID, !sourceInstanceID.isEmpty {
-            let result = try await runtime.syncSource(
-                sourceID: RSSSourceID(rawValue: sourceInstanceID),
-                runID: runID,
-                sessionID: sessionID
-            )
-            await reload(runID: runID, sessionID: sessionID)
-            return "RSS refreshed source \(sourceInstanceID); inserted \(result.insertedCount), duplicates \(result.duplicateCount)"
+            do {
+                let result = try await runtime.syncSource(
+                    sourceID: RSSSourceID(rawValue: sourceInstanceID),
+                    runID: runID,
+                    sessionID: sessionID
+                )
+                await reload(runID: runID, sessionID: sessionID)
+                return "RSS refreshed source \(sourceInstanceID); inserted \(result.insertedCount), duplicates \(result.duplicateCount)"
+            } catch let error as RSSRuntimeError where error.isPermanentHTTPFailure {
+                // 订阅源永久失效（404/403/410）：自动删除源并联动清除定时刷新任务。
+                try? await runtime.deleteSource(
+                    sourceID: RSSSourceID(rawValue: sourceInstanceID),
+                    runID: runID,
+                    sessionID: sessionID
+                )
+                try? await sourceSetChanged(.rssOnly)
+                throw error
+            }
         }
 
         let sources = try await runtime.listSources(runID: runID, sessionID: sessionID)
         var inserted = 0
         var duplicates = 0
+        var removed = 0
         for source in sources {
-            let result = try await runtime.syncSource(sourceID: source.id, runID: runID, sessionID: sessionID)
-            inserted += result.insertedCount
-            duplicates += result.duplicateCount
+            do {
+                let result = try await runtime.syncSource(sourceID: source.id, runID: runID, sessionID: sessionID)
+                inserted += result.insertedCount
+                duplicates += result.duplicateCount
+            } catch let error as RSSRuntimeError where error.isPermanentHTTPFailure {
+                // 永久失效的源自动删除，其余源继续刷新，不再让一个 404 中断整批。
+                try? await runtime.deleteSource(sourceID: source.id, runID: runID, sessionID: sessionID)
+                try? await sourceSetChanged(.rssOnly)
+                removed += 1
+            }
         }
         await reload(runID: runID, sessionID: sessionID)
+        if removed > 0 {
+            return "RSS refreshed \(sources.count - removed) sources; removed \(removed) dead source(s); inserted \(inserted), duplicates \(duplicates)"
+        }
         return "RSS refreshed \(sources.count) sources; inserted \(inserted), duplicates \(duplicates)"
     }
 

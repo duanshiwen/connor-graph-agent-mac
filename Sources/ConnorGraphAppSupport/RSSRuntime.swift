@@ -20,6 +20,14 @@ public enum RSSRuntimeError: Error, LocalizedError, Equatable {
         case .invalidCursor: "Invalid RSS pagination cursor"
         }
     }
+
+    /// 永久性 HTTP 失败（404/403/410）：订阅源已失效，应自动清理该源及其定时任务，
+    /// 而不是反复重试污染调度器。
+    public var isPermanentHTTPFailure: Bool {
+        guard case .unsupportedFeed(let detail) = self else { return false }
+        guard let status = detail.split(separator: " ").compactMap({ Int($0) }).first else { return false }
+        return status == 404 || status == 403 || status == 410
+    }
 }
 
 public protocol RSSSourceRepository: Sendable {
