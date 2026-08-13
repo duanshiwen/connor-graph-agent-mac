@@ -699,6 +699,8 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
             var skipped = 0
             var failed = 0
             var lastError = ""
+            // 持续系统只追加：同一 run 内 stable_key 去重，避免后端校验报“重复 stable_key”卡住提交流程。
+            var stagedStableKeys: Set<String> = existingStableKeys
             for candidate in batch.operations {
                 try Task.checkCancellation()
                 guard let decision = CloudKnowledgeDecision(rawValue: candidate.decision) else {
@@ -710,7 +712,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     skipped += 1
                     continue
                 }
-                if decision == .createNew, let stableKey = candidate.stableKey, existingStableKeys.contains(stableKey) {
+                if decision == .createNew, let stableKey = candidate.stableKey, stagedStableKeys.contains(stableKey) {
                     skipped += 1
                     continue
                 }
@@ -724,6 +726,9 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                         emit: emit
                     ) {
                         staged += 1
+                        if decision == .createNew, let stableKey = candidate.stableKey {
+                            stagedStableKeys.insert(stableKey)
+                        }
                     } else {
                         skipped += 1
                     }
