@@ -306,9 +306,15 @@ struct CloudKnowledgeCreatorView: View {
 
     private var completed: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("已新增 \(store.snapshot.preview?.operations.count ?? 0) 项知识并提交成功", systemImage: "checkmark.seal.fill")
-                .font(.headline)
-                .foregroundStyle(.green)
+            if (store.snapshot.preview?.operations.count ?? 0) == 0 {
+                Label("本次没有新增知识", systemImage: "checkmark.seal.fill")
+                    .font(.headline)
+                    .foregroundStyle(.green)
+            } else {
+                Label("已新增 \(store.snapshot.preview?.operations.count ?? 0) 项知识并提交成功", systemImage: "checkmark.seal.fill")
+                    .font(.headline)
+                    .foregroundStyle(.green)
+            }
             Button("浏览修订历史") { Task { await store.loadHistory() } }
             LazyVStack(alignment: .leading, spacing: 10) {
                 ForEach(store.history) { revision in

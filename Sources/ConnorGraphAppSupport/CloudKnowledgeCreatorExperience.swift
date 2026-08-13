@@ -476,7 +476,23 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         guard errorMessage == nil, snapshot.preview != nil else { return }
         await commitPublication()
     }
-    public func applyValidation(_ result: CloudKnowledgeValidationResult) { snapshot.validationIssues = result.issues; snapshot.stage = result.valid ? .preview : .validating; persist() }
+    public func applyValidation(_ result: CloudKnowledgeValidationResult) {
+        // 持续系统只追加：本次没有任何可新增内容（空发布）时不再卡在“正在检查”，
+        // 直接以“本次没有新增知识”结束并放弃空 run，不尝试提交。
+        if !result.valid, !result.issues.isEmpty, result.issues.allSatisfy({ $0.code == "empty_publication" }) {
+            snapshot.validationIssues = []
+            snapshot.preview = CloudKnowledgePreview(runID: snapshot.runID ?? "", stagedSequence: result.stagedSequence, operations: [], summaries: [])
+            snapshot.stage = .completed
+            persist()
+            if let runID = snapshot.runID, let publicationAPI {
+                Task { try? await publicationAPI.abandon(runID: runID) }
+            }
+            return
+        }
+        snapshot.validationIssues = result.issues
+        snapshot.stage = result.valid ? .preview : .validating
+        persist()
+    }
     public func markConflict() { snapshot.stage = .conflict; persist() }
     public func recoverConflict(using callback: @escaping CloudKnowledgeConflictRecoveryCallback) async {
         guard let runID = snapshot.runID, let publicationAPI else { return }

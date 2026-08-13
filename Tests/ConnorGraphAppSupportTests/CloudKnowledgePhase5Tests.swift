@@ -193,6 +193,21 @@ struct CloudKnowledgePhase5Tests {
         #expect(await recorder.ids == ["one", "two", "three"])
     }
 
+    @Test @MainActor func emptyPublicationFinishesWithoutCommit() async {
+        let api = CreatorPublicationFakeAPI()
+        await api.setEmptyValidation(true)
+        let store = CloudKnowledgeCreatorStore(publicationAPI: api)
+        store.attachRun(id: "run")
+        store.startGeneration { id in .init(summary: id) }
+        await store.waitForGenerationCompletion()
+
+        // 空发布（没有任何可新增内容）：直接以“本次没有新增知识”结束，不尝试提交。
+        #expect(store.snapshot.stage == .completed)
+        #expect(store.snapshot.validationIssues.isEmpty)
+        #expect(store.snapshot.preview?.operations.count == 0)
+        #expect(await api.commitCount == 0)
+    }
+
     @Test @MainActor func completedGenerationAutomaticallyValidatesPreviewsAndCommits() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-auto-commit-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -440,11 +455,19 @@ private actor DetailTrackingCreatorAPI: CloudKnowledgeCreatorAPI {
 }
 
 private actor CreatorPublicationFakeAPI: CloudKnowledgeAPI, CloudKnowledgeCreatorAPI {
-    var rebasedSequence: Int?; var validationCount = 0; var previewCount = 0; var commitCount = 0
+    var rebasedSequence: Int?; var validationCount = 0; var previewCount = 0; var commitCount = 0; var emptyValidation = false
+
+    func setEmptyValidation(_ value: Bool) { emptyValidation = value }
     func createPublicationRun(knowledgeBaseID: String, request: CloudKnowledgeCreateRunRequest) async throws -> CloudKnowledgePublicationRun { .init(id: "run", knowledgeBaseID: knowledgeBaseID, clientRunID: request.clientRunID, expectedBaseSequence: request.expectedBaseSequence) }
     func publicationRun(id: String) async throws -> CloudKnowledgePublicationRun { .init(id: id, knowledgeBaseID: "kb", clientRunID: "client", expectedBaseSequence: 0) }
     func appendOperations(runID: String, request: CloudKnowledgeOperationBatchRequest) async throws -> CloudKnowledgeOperationBatchResponse { .init(acceptedOperationIDs: [], stagedSequence: 0) }
-    func validate(runID: String) async throws -> CloudKnowledgeValidationResult { validationCount += 1; return .init(valid: true, issues: [], stagedSequence: 0) }
+    func validate(runID: String) async throws -> CloudKnowledgeValidationResult {
+        validationCount += 1
+        if emptyValidation {
+            return .init(valid: false, issues: [.init(code: "empty_publication", message: "publication run has no operations", repairable: true)], stagedSequence: 0)
+        }
+        return .init(valid: true, issues: [], stagedSequence: 0)
+    }
     func rebase(runID: String, request: CloudKnowledgeRebaseRequest) async throws -> CloudKnowledgePublicationRun { rebasedSequence = request.expectedBaseSequence; return .init(id: runID, knowledgeBaseID: "kb", clientRunID: "client", expectedBaseSequence: request.expectedBaseSequence) }
     func commit(runID: String) async throws -> CloudKnowledgeCommitResult { commitCount += 1; return .init(publicationRunID: runID, knowledgeSequence: 10) }
     func abandon(runID: String) async throws {}
