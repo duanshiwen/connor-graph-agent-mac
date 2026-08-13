@@ -315,7 +315,6 @@ struct CloudKnowledgeCreatorView: View {
                     .font(.headline)
                     .foregroundStyle(.green)
             }
-            Button("浏览修订历史") { Task { await store.loadHistory() } }
             LazyVStack(alignment: .leading, spacing: 10) {
                 ForEach(store.history) { revision in
                     VStack(alignment: .leading, spacing: 3) {

@@ -426,24 +426,42 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                         Text("\(base.subscriberCount) 位订阅者").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if base.owned {
-                        Button("编辑") {
-                            Task {
-                                await creatorStore.prepareForEdit(id: base.id)
-                                isPresentingEditor = true
+                    VStack(alignment: .trailing, spacing: 10) {
+                        // 订阅类主操作：未订阅且非自己创建时用强调色“订阅”；已订阅（含自己订阅自己）显示“取消订阅”。
+                        if base.subscribed {
+                            Button("取消订阅") { Task { await store.unsubscribe(id: base.id) } }
+                                .buttonStyle(.bordered)
+                        } else if !base.owned {
+                            Button("订阅") { Task { await store.subscribe(id: base.id) } }
+                                .buttonStyle(.borderedProminent)
+                        }
+                        // 所有者管理组：编辑 · 下架（仅已发布） · 删除，次要操作成组、破坏性操作放组尾并需确认。
+                        if base.owned {
+                            HStack(spacing: 8) {
+                                Button("编辑") {
+                                    Task {
+                                        await creatorStore.prepareForEdit(id: base.id)
+                                        isPresentingEditor = true
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                if base.publicationStatus == "published" {
+                                    Button("下架") {
+                                        Task {
+                                            await creatorStore.prepareForEdit(id: base.id)
+                                            await creatorStore.unpublishKnowledgeBase()
+                                            await store.load()
+                                            await store.loadDetail(id: base.id)
+                                        }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .help("下架后知识库不再对外提供服务")
+                                }
+                                Button("删除", role: .destructive) { isConfirmingDelete = true }
+                                    .buttonStyle(.bordered)
+                                    .help("删除知识库")
                             }
                         }
-                        .buttonStyle(.bordered)
-                        Button("删除", role: .destructive) { isConfirmingDelete = true }
-                            .buttonStyle(.bordered)
-                            .help("删除知识库")
-                    }
-                    if base.subscribed {
-                        Button("取消订阅") { Task { await store.unsubscribe(id: base.id) } }
-                            .buttonStyle(.bordered)
-                    } else if !base.owned {
-                        Button("订阅") { Task { await store.subscribe(id: base.id) } }
-                            .buttonStyle(.borderedProminent)
                     }
                 }
                 Divider()
