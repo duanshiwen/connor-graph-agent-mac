@@ -37,32 +37,19 @@ struct CloudKnowledgeMarketplaceListPane: View {
             if canUseMarketplace {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
-                        marketplaceSection(
-                            "知识市场",
-                            bases: store.searchResults,
-                            emptyTitle: "暂无可用知识库",
-                            caption: { base in base.subscribed ? "市场 · 已订阅" : "市场" }
-                        ) { base in
-                            Task { await store.loadMoreSearchResultsIfNeeded(currentID: base.id) }
-                        }
-
-                        marketplaceSection(
-                            "已订阅",
-                            bases: store.library.subscribed,
-                            emptyTitle: "暂未订阅知识库",
-                            caption: { base in base.owned ? "我发布的 · 已订阅" : "已订阅" }
-                        )
-
-                        marketplaceSection(
-                            "我发布的",
-                            bases: store.library.owned,
-                            emptyTitle: "暂未发布知识库",
-                            caption: { base in
-                                base.subscribed
-                                    ? "\(publicationLabel(base)) · 已订阅"
-                                    : publicationLabel(base)
+                        if unifiedBases.isEmpty {
+                            emptyRow("暂无可用知识库")
+                        } else {
+                            ForEach(unifiedBases) { base in
+                                libraryRow(base)
+                                    .onAppear {
+                                        // 分页由“市场搜索结果”驱动：滚到当前搜索结果最后一条时加载下一页。
+                                        if store.searchResults.last?.id == base.id {
+                                            Task { await store.loadMoreSearchResultsIfNeeded(currentID: base.id) }
+                                        }
+                                    }
                             }
-                        )
+                        }
                     }
                     .padding(.horizontal, AppListCardLayout.horizontalInset)
                     .padding(.top, 6)
@@ -127,44 +114,49 @@ struct CloudKnowledgeMarketplaceListPane: View {
         }
     }
 
-    private func libraryRow(_ base: CloudMarketplaceKnowledgeBase, caption: String) -> some View {
-        marketplaceRow(
-            title: base.name,
-            caption: caption,
-            systemImage: "books.vertical",
-            isSelected: store.selected?.id == base.id
-        ) {
+    private func libraryRow(_ base: CloudMarketplaceKnowledgeBase) -> some View {
+        marketplaceRow(base: base, isSelected: store.selected?.id == base.id) {
             Task { await store.loadDetail(id: base.id) }
         }
     }
 
+    /// 单一列表行：标题 + 元信息副标题，右侧用彩色胶囊徽标标记状态
+    /// （我发布的 / 未发布 / 已订阅，市场默认无徽标）。
     private func marketplaceRow(
-        title: String,
-        caption: String,
-        systemImage: String,
+        base: CloudMarketplaceKnowledgeBase,
         isSelected: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: systemImage)
+                Image(systemName: "books.vertical")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
-                    Text(title.isEmpty ? "未命名知识库" : title)
+                    Text(base.name.isEmpty ? "未命名知识库" : base.name)
                         .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                         .lineLimit(AppListCardLayout.titleLineLimit)
-                    Text(caption)
+                    Text(marketplaceCaption(base))
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
+                MarketplaceRowStatusBadges(base: base)
             }
             .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
+    }
+
+    /// 卡片副标题：订阅者数、发布者等元信息；状态由徽标承载，避免文字重复。
+    private func marketplaceCaption(_ base: CloudMarketplaceKnowledgeBase) -> String {
+        var parts: [String] = []
+        if base.subscriberCount > 0 { parts.append("\(base.subscriberCount) 位订阅者") }
+        if !base.owned, let owner = base.ownerName, !owner.isEmpty { parts.append("由 \(owner) 发布") }
+        if base.owned, !base.isPublished { parts.append("尚未发布到知识市场") }
+        return parts.isEmpty ? "知识库" : parts.joined(separator: " · ")
     }
 
     private func emptyRow(_ title: String) -> some View {
@@ -176,41 +168,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// 每个市场分组独立成 VStack：同一 LazyVStack 内多个 ForEach 若包含相同 base.id
-    /// （例如自己发布并订阅的知识库同时出现在三个分组）会导致 macOS 惰性容器渲染空洞/大片空白。
-    private func marketplaceSection(
-        _ title: String,
-        bases: [CloudMarketplaceKnowledgeBase],
-        emptyTitle: String,
-        caption: @escaping (CloudMarketplaceKnowledgeBase) -> String,
-        onRowAppear: ((CloudMarketplaceKnowledgeBase) -> Void)? = nil
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            marketplaceSectionHeader(title)
-            if bases.isEmpty {
-                emptyRow(emptyTitle)
-            } else {
-                ForEach(bases) { base in
-                    libraryRow(base, caption: caption(base))
-                        .onAppear { onRowAppear?(base) }
-                }
-            }
-        }
-    }
-
-    private func marketplaceSectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func publicationLabel(_ base: CloudMarketplaceKnowledgeBase) -> String {
-        base.publicationStatus == "published" ? "已发布" : "未发布"
-    }
+    private var unifiedBases: [CloudMarketplaceKnowledgeBase] { store.unifiedBases }
 
     private var canUseMarketplace: Bool { connectivity.isConnected && backendConnectivity.state != .unreachable }
     private var marketplaceUnavailableTitle: String { connectivity.isConnected ? "当前无法连接到康纳服务器" : "当前没有网络连接" }
@@ -483,20 +441,61 @@ struct MarketplaceStatusBadge: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            if base.owned { badge("我发布的", emphasized: true) }
+            // 所有权优先：已发布/未发布；订阅作为可叠加的次要状态。
+            if base.owned {
+                badge(
+                    base.isPublished ? "我发布的" : "未发布",
+                    color: base.isPublished ? Color.accentColor : .orange
+                )
+            }
             if base.subscribed {
-                badge("已订阅", emphasized: true)
+                badge("已订阅", color: .green)
             } else if !base.owned {
-                badge("未订阅", emphasized: false)
+                badge("未订阅", color: .secondary)
             }
         }
     }
 
-    private func badge(_ title: String, emphasized: Bool) -> some View {
+    private func badge(_ title: String, color: Color) -> some View {
         Text(title)
             .font(.caption.weight(.medium))
-            .foregroundStyle(emphasized ? Color.accentColor : Color.secondary)
+            .foregroundStyle(color)
             .padding(.horizontal, 7).padding(.vertical, 3)
-            .background((emphasized ? Color.accentColor : Color.secondary).opacity(0.1), in: Capsule())
+            .background(color.opacity(0.12), in: Capsule())
+    }
+}
+
+/// 列表卡片右侧的状态徽标组：所有权徽标（我发布的 / 未发布）与“已订阅”可叠加；
+/// 市场默认（未订阅且非我发布）不显示徽标，保持列表干净。
+private struct MarketplaceRowStatusBadges: View {
+    var base: CloudMarketplaceKnowledgeBase
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if base.owned {
+                MarketplaceRowStatusBadge(
+                    title: base.isPublished ? "我发布的" : "未发布",
+                    color: base.isPublished ? Color.accentColor : .orange
+                )
+            }
+            if base.subscribed {
+                MarketplaceRowStatusBadge(title: "已订阅", color: .green)
+            }
+        }
+    }
+}
+
+private struct MarketplaceRowStatusBadge: View {
+    var title: String
+    var color: Color
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12), in: Capsule())
+            .lineLimit(1)
     }
 }
