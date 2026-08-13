@@ -103,6 +103,14 @@ public struct AgentEventPresenter: Sendable {
                 severity: .info,
                 toolActivity: AgentToolActivityClassifier().activity(forStartedCall: call)
             )
+        case .toolProgress(let progress):
+            return item(
+                event,
+                title: "正在重试：\(progress.toolName)",
+                detail: progress.message,
+                severity: .warning,
+                toolActivity: AgentToolActivityClassifier().activity(forProgress: progress)
+            )
         case .toolFinished(let result):
             return item(
                 event,

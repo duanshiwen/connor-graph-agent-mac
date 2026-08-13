@@ -445,6 +445,27 @@ struct NativeWebFetchRetryTests {
         #expect(await httpClient.attemptCount == 1)
     }
 
+    @Test func webFetchReportsRetryProgressToCaller() async throws {
+        let httpClient = ScriptedNativeWebHTTPClient([
+            .success(.status(503)),
+            .success(.html("<html><head><title>Back</title></head><body><p>ok</p></body></html>", url: "https://example.com/recovered")),
+        ])
+        let collector = MessageCollector()
+        let client = NativeWebFetchClient(httpClient: httpClient, retryPolicy: noDelayPolicy)
+
+        let result = try await client.fetch(
+            urlString: "https://example.com/recovered",
+            extractMode: "markdown",
+            timeoutMilliseconds: 30_000,
+            onRetryProgress: { message in collector.append(message) }
+        )
+
+        #expect(result.statusCode == 200)
+        let messages = collector.messages
+        #expect(messages.count == 1)
+        #expect(messages.first?.contains("1/5") == true)
+    }
+
     @Test func webFetchGivesUpAfterFiveRetries() async throws {
         let httpClient = ScriptedNativeWebHTTPClient([
             .success(.status(503)),
@@ -459,6 +480,23 @@ struct NativeWebFetchRetryTests {
             )
         }
         #expect(await httpClient.attemptCount == 6)
+    }
+}
+
+private final class MessageCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+
+    func append(_ message: String) {
+        lock.lock()
+        storage.append(message)
+        lock.unlock()
+    }
+
+    var messages: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
     }
 }
 

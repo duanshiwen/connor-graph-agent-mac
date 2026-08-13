@@ -1654,6 +1654,33 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         return results
     }
 
+
+    /// 构造工具执行上下文并挂接实时进度回调：web_fetch 等工具重试时
+    /// 通过 toolProgress 事件推送给 UI（不落库，仅实时展示）。
+    private static func makeToolContext(
+        run: AgentRun,
+        groupID: String,
+        userPrompt: String,
+        toolCallID: String,
+        policy: AgentPolicyEngine,
+        currentUserMessageID: String?,
+        continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
+    ) -> AgentToolExecutionContext {
+        var context = AgentToolExecutionContext(
+            runID: run.id,
+            sessionID: run.sessionID,
+            groupID: groupID,
+            userPrompt: userPrompt,
+            toolCallID: toolCallID,
+            policyEngine: policy,
+            currentUserMessageID: currentUserMessageID
+        )
+        context.toolProgressHandler = { [continuation] progress in
+            continuation.yield(.toolProgress(progress))
+        }
+        return context
+    }
+
     private func executeToolBatchInParallel(
         calls: [AgentToolCall],
         request: AgentChatRequest,
@@ -1669,15 +1696,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         return try await withThrowingTaskGroup(of: (Int, AgentToolBatchResult).self) { group in
             for (index, call) in calls.enumerated() {
                 group.addTask {
-                    let context = AgentToolExecutionContext(
-                        runID: run.id,
-                        sessionID: run.sessionID,
+                    let context = Self.makeToolContext(
+                        run: run,
                         groupID: request.groupID,
                         userPrompt: request.userMessage,
                         toolCallID: call.id,
-                        policyEngine: policy,
-                        currentUserMessageID: request.currentUserMessageID
-                    )
+                        policy: policy,
+                        currentUserMessageID: request.currentUserMessageID,
+                        continuation: continuation
+                        )
                     let auditCapability = toolRegistry.permission(named: call.name)
                     let auditPayload = "{\"toolCallID\":\(Self.jsonStringLiteral(call.id))}"
                     await auditLog.record(AgentAuditEvent(
@@ -1759,14 +1786,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     ) async throws -> AgentToolResult {
         yield(.toolRequested(call), to: continuation, recorder: eventRecorder)
         yield(.toolStarted(call), to: continuation, recorder: eventRecorder)
-        let context = AgentToolExecutionContext(
-            runID: run.id,
-            sessionID: run.sessionID,
+        let context = Self.makeToolContext(
+            run: run,
             groupID: request.groupID,
             userPrompt: request.userMessage,
             toolCallID: call.id,
-            policyEngine: policy,
-            currentUserMessageID: request.currentUserMessageID
+            policy: policy,
+            currentUserMessageID: request.currentUserMessageID,
+            continuation: continuation
         )
         let auditCapability: AgentPermissionCapability? = switch call.name {
         case AgentPhaseToolContract.memoryQueryName, AgentPhaseToolContract.prepareFinalOutputName:
@@ -2052,14 +2079,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         do {
                             let result = try await executeToolWithApprovalIfNeeded(
                                 call: nestedCall,
-                                context: AgentToolExecutionContext(
-                                    runID: run.id,
-                                    sessionID: run.sessionID,
+                                context: Self.makeToolContext(
+                                    run: run,
                                     groupID: context.groupID,
                                     userPrompt: context.userPrompt,
                                     toolCallID: nestedCall.id,
-                                    policyEngine: context.policyEngine,
-                                    currentUserMessageID: context.currentUserMessageID
+                                    policy: context.policyEngine,
+                                    currentUserMessageID: context.currentUserMessageID,
+                                    continuation: continuation
                                 ),
                                 run: &run,
                                 continuation: continuation,
@@ -2106,15 +2133,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     do {
                         let result = try await executeToolWithApprovalIfNeeded(
                             call: nestedCall,
-                            context: AgentToolExecutionContext(
-                                runID: run.id,
-                                sessionID: run.sessionID,
+                            context: Self.makeToolContext(
+                                run: run,
                                 groupID: context.groupID,
                                 userPrompt: context.userPrompt,
                                 toolCallID: nestedCall.id,
-                                policyEngine: context.policyEngine,
-                                currentUserMessageID: context.currentUserMessageID
-                            ),
+                                policy: context.policyEngine,
+                                currentUserMessageID: context.currentUserMessageID,
+                                continuation: continuation
+                                ),
                             run: &run,
                             continuation: continuation
                         )

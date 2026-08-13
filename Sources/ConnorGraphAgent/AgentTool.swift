@@ -596,6 +596,23 @@ public struct AgentToolFailure: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+
+public struct AgentToolProgressEvent: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var toolCallID: String
+    public var toolName: String
+    public var message: String
+
+    public init(runID: String, sessionID: String, toolCallID: String, toolName: String, message: String) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.toolCallID = toolCallID
+        self.toolName = toolName
+        self.message = message
+    }
+}
+
 public struct AgentToolExecutionContext: Sendable {
     public var runID: String
     public var sessionID: String
@@ -605,6 +622,7 @@ public struct AgentToolExecutionContext: Sendable {
     public var toolCallID: String
     public var policyEngine: AgentPolicyEngine
     public var approvedCapabilities: Set<AgentPermissionCapability>
+    public var toolProgressHandler: (@Sendable (AgentToolProgressEvent) -> Void)?
 
     public init(
         runID: String,
@@ -651,6 +669,17 @@ public struct AgentToolExecutionContext: Sendable {
         var copy = self
         copy.approvedCapabilities.insert(capability)
         return copy
+    }
+
+    /// 向 UI 发布工具执行过程中的轻量进度（不落库，仅实时展示）。
+    public func publishToolProgress(toolName: String, message: String) {
+        toolProgressHandler?(AgentToolProgressEvent(
+            runID: runID,
+            sessionID: sessionID,
+            toolCallID: toolCallID,
+            toolName: toolName,
+            message: message
+        ))
     }
 }
 

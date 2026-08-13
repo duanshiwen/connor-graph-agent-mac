@@ -52,6 +52,7 @@ public enum AgentEventKind: String, Codable, Sendable, Equatable {
     case toolRequested
     case toolApproved
     case toolStarted
+    case toolProgress
     case toolFinished
     case toolFailed
     case permissionRequested

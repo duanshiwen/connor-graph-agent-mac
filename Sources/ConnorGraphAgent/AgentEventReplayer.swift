@@ -42,6 +42,8 @@ public struct AgentEventReplayer: Sendable {
             return .toolApproved(try decoder.decode(AgentToolCall.self, from: data))
         case .toolStarted:
             return .toolStarted(try decoder.decode(AgentToolCall.self, from: data))
+        case .toolProgress:
+            return .toolProgress(try decoder.decode(AgentToolProgressEvent.self, from: data))
         case .toolFinished:
             return .toolFinished(try decoder.decode(AgentToolResult.self, from: data))
         case .toolFailed:
