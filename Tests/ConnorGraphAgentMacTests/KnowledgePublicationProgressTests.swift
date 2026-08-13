@@ -54,6 +54,17 @@ struct KnowledgePublicationProgressTests {
         #expect(panelSource.contains("DisclosureGroup(isExpanded: $isExpanded)"))
     }
 
+    @Test func completedStageNoLongerOffersDestructiveResetButton() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let creatorSource = try String(contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/CloudKnowledgeCreatorView.swift"), encoding: .utf8)
+        // 完成态不应再有“创建新的发布”直接 reset 的按钮，避免误触丢失进度。
+        #expect(!creatorSource.contains("Button(\"创建新的发布\")"))
+        #expect(creatorSource.contains("可在“发布历史”中查看或恢复"))
+    }
+
     @Test func pendingPublicationHasVisibleAutomaticCommitFallback() throws {
         let sourceURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
