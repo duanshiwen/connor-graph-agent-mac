@@ -91,7 +91,8 @@ public struct CloudKnowledgePreview: Codable, Sendable, Equatable {
         case "delete": "删除"
         default: operation
         }
-        return "\(label) \(count) 项知识变更"
+        // 持续系统只追加：统一表述为“新增 N 项知识”。
+        return "\(label) \(count) 项知识"
     }
 }
 

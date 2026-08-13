@@ -481,6 +481,35 @@ struct CloudKnowledgePhase3Tests {
         #expect(await api.operations.isEmpty)
     }
 
+    @Test func singlePassSkipsDuplicateStableKeyWithinRun() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let provider = AnyAgentModelProvider(
+            modelID: "single-pass-dedupe",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: true, supportsVision: false),
+            complete: { request in try await CloudKnowledgeSinglePassCandidateProvider(
+                extractJSON: #"{"operations":[{"layer":"L3","decision":"create_new","semanticTerms":["Connor"],"kind":"reusable_knowledge","stableKey":"dup","validFrom":"2026-07-16T00:00:00Z","payload":{"title":"A","text":"a"}},{"layer":"L3","decision":"create_new","semanticTerms":["Connor"],"kind":"reusable_knowledge","stableKey":"dup","validFrom":"2026-07-16T00:00:00Z","payload":{"title":"B","text":"b"}}]}"#
+            ).complete(request) }
+        )
+        let session = AgentSession(id: "conversation-dedupe", title: "Dedupe", messages: [
+            AgentMessage(role: .user, content: "Connor 是知识库助手。"),
+            AgentMessage(role: .assistant, content: "好的。")
+        ])
+
+        let result = try await CloudKnowledgeLLMGenerationRunner().generateSinglePass(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider
+        )
+
+        // 同一 run 内重复 stable_key：只落地 1 项、跳过 1 项，避免后端校验报重复卡住提交。
+        #expect(result.summary.contains("落地 1 项"))
+        #expect(result.summary.contains("跳过 1 项"))
+        #expect(await api.operations.count == 1)
+    }
+
     @Test func singlePassExtractionEmitsModelAndToolTraceEvents() async throws {
         let api = InMemoryCloudKnowledgeAPI()
         let recorder = CloudKnowledgeTraceRecorder()

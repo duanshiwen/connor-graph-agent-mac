@@ -247,8 +247,15 @@ struct CloudKnowledgeCreatorView: View {
 
     private var validation: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if store.snapshot.validationIssues.isEmpty {
-                summaryRow("正在检查知识变更", systemImage: "checkmark.shield")
+            if let error = store.errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            } else if store.snapshot.validationIssues.isEmpty {
+                summaryRow("正在向后端确认本次新增…", systemImage: "checkmark.shield")
             } else {
                 ForEach(store.snapshot.validationIssues) { issue in
                     Label(issue.message, systemImage: issue.repairable ? "wrench.and.screwdriver" : "exclamationmark.octagon")
@@ -260,19 +267,11 @@ struct CloudKnowledgeCreatorView: View {
 
     private var preview: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("\(store.snapshot.preview?.operations.count ?? 0) 项知识变更")
+            // 持续系统只追加：只展示本次新增数量，不再逐项说明“修改了哪些知识”。
+            Text("本次共新增 \(store.snapshot.preview?.operations.count ?? 0) 项知识")
                 .font(.headline)
             ForEach(store.snapshot.preview?.summaries ?? store.snapshot.summaries, id: \.self) { summary in
                 Label(summary, systemImage: "doc.text.magnifyingglass")
-            }
-            ForEach(store.snapshot.preview?.operations ?? []) { operation in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(operation.layer.rawValue) · \(operation.operationType) · \(operation.decision.rawValue)")
-                        .fontWeight(.medium)
-                    Text(operation.semanticTerms.joined(separator: "、"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
         }
     }
@@ -280,7 +279,7 @@ struct CloudKnowledgeCreatorView: View {
     private var pendingCommitBar: some View {
         HStack(spacing: 12) {
             Label(
-                store.snapshot.stage == .preview ? "知识变更待提交" : "正在检查知识变更",
+                store.snapshot.stage == .preview ? "新增知识待提交" : "正在确认本次新增",
                 systemImage: store.snapshot.stage == .preview ? "tray.and.arrow.down" : "checkmark.shield"
             )
             .font(.callout.weight(.medium))
@@ -307,7 +306,7 @@ struct CloudKnowledgeCreatorView: View {
 
     private var completed: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("知识已成功提交", systemImage: "checkmark.seal.fill")
+            Label("已新增 \(store.snapshot.preview?.operations.count ?? 0) 项知识并提交成功", systemImage: "checkmark.seal.fill")
                 .font(.headline)
                 .foregroundStyle(.green)
             Button("浏览修订历史") { Task { await store.loadHistory() } }
@@ -657,10 +656,10 @@ struct CloudKnowledgeCreatorView: View {
         case .confirm: "确认生成配置"
         case .generating: "正在生成知识"
         case .paused: "生成已暂停"
-        case .validating: "正在检查并提交"
-        case .preview: "变更预览"
+        case .validating: "正在确认新增"
+        case .preview: "新增知识预览"
         case .conflict: "并发冲突"
-        case .completed: "知识已提交"
+        case .completed: "新增完成"
         case .cancelled: "发布已取消"
         }
     }

@@ -15,7 +15,7 @@ struct CloudKnowledgePhase5Tests {
 
         #expect(preview.publicationRunID == "run-1")
         #expect(preview.stagedSequence == 12)
-        #expect(preview.summaries == ["新增 12 项知识变更"])
+        #expect(preview.summaries == ["新增 12 项知识"])
         #expect(preview.operations.first?.operationID == "operation-1")
         #expect(preview.operations.first?.searchContextID == "search-1")
     }
@@ -209,7 +209,7 @@ struct CloudKnowledgePhase5Tests {
         await store.waitForGenerationCompletion()
 
         #expect(store.snapshot.stage == .completed)
-        #expect(store.snapshot.preview?.summaries == ["新增 1 项知识变更"])
+        #expect(store.snapshot.preview?.summaries == ["新增 1 项知识"])
         #expect(await api.validationCount == 1)
         #expect(await api.previewCount == 1)
         #expect(await api.commitCount == 1)
@@ -457,6 +457,6 @@ private actor CreatorPublicationFakeAPI: CloudKnowledgeAPI, CloudKnowledgeCreato
     func unpublishKnowledgeBase(id: String, request: CloudKnowledgeUnpublishRequest) async throws -> CloudKnowledgeBaseDetail { .init(id: id, name: "Connor", slug: "connor", visibility: "public", currentSequence: 0, lifecycleStatus: "active", publicationStatus: "unpublished", enforcementStatus: "clear", governanceVersion: request.expectedGovernanceVersion + 1) }
     func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail { .init(id: id, name: "Connor", slug: "connor", visibility: "public", currentSequence: 0, lifecycleStatus: "active", publicationStatus: "published", enforcementStatus: "clear", governanceVersion: 9, appealCount: 1) }
     func deleteKnowledgeBase(id: String, reason: String) async throws {}
-    func preview(runID: String) async throws -> CloudKnowledgePreview { previewCount += 1; return .init(runID: runID, stagedSequence: 1, operations: [], summaries: ["新增 1 项知识变更"]) }
+    func preview(runID: String) async throws -> CloudKnowledgePreview { previewCount += 1; return .init(runID: runID, stagedSequence: 1, operations: [], summaries: ["新增 1 项知识"]) }
     func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary] { [] }
 }
