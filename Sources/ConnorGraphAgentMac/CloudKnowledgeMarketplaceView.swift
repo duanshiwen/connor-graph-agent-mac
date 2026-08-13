@@ -229,8 +229,7 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
     @State private var isPresentingEditor = false
     @State private var isConfirmingDelete = false
     @State private var isPresentingPublishingAgreement = false
-    @State private var publishErrorMessage: String?
-    @State private var deleteErrorMessage: String?
+    @State private var actionErrorMessage: String?
 
     var body: some View {
         Group {
@@ -277,11 +276,11 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
             KnowledgeBasePublishingAgreementSheet {
                 Task {
                     if let id = await creatorStore.publishKnowledgeBase(termsAccepted: true) {
-                        publishErrorMessage = nil
+                        actionErrorMessage = nil
                         await store.load()
                         await store.loadDetail(id: id)
                     } else {
-                        publishErrorMessage = creatorStore.errorMessage ?? "发布失败，请稍后重试"
+                        actionErrorMessage = creatorStore.errorMessage ?? "发布失败，请稍后重试"
                     }
                 }
             }
@@ -290,11 +289,11 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
             Button("删除知识库", role: .destructive) {
                 guard let base = store.selected else { return }
                 Task {
-                    deleteErrorMessage = nil
+                    actionErrorMessage = nil
                     await creatorStore.requestDeleteKnowledgeBase(id: base.id, reason: "owner requested deletion")
                     if let error = creatorStore.errorMessage {
-                        // 删除请求失败（无权限/后端异常等）：留在详情页并提示原因，不再假删除。
-                        deleteErrorMessage = error
+                        // 删除请求失败（有订阅者/无权限/后端异常等）：留在详情页并提示原因，不再假删除。
+                        actionErrorMessage = error
                     } else {
                         store.showHome()
                         await store.load()
@@ -465,7 +464,7 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                                 if base.publicationStatus != "published" {
                                     Button("发布到市场") {
                                         Task {
-                                            publishErrorMessage = nil
+                                            actionErrorMessage = nil
                                             await creatorStore.prepareForEdit(id: base.id)
                                             isPresentingPublishingAgreement = true
                                         }
@@ -483,26 +482,30 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                                 if base.publicationStatus == "published" {
                                     Button("下架") {
                                         Task {
+                                            actionErrorMessage = nil
                                             await creatorStore.prepareForEdit(id: base.id)
                                             await creatorStore.unpublishKnowledgeBase()
-                                            await store.load()
-                                            await store.loadDetail(id: base.id)
+                                            if let error = creatorStore.errorMessage {
+                                                // 后端拒绝（如已有订阅者）时留在详情页并提示原因。
+                                                actionErrorMessage = error
+                                                await store.loadDetail(id: base.id)
+                                            } else {
+                                                await store.load()
+                                                await store.loadDetail(id: base.id)
+                                            }
                                         }
                                     }
                                     .buttonStyle(.bordered)
-                                    .help("下架后知识库不再对外提供服务")
+                                    .disabled(base.subscriberCount > 0)
+                                    .help(base.subscriberCount > 0 ? "有 \(base.subscriberCount) 位订阅者，暂不能下架；知识库是持续系统，只能持续更新" : "下架后知识库不再对外提供服务")
                                 }
                                 Button("删除", role: .destructive) { isConfirmingDelete = true }
                                     .buttonStyle(.bordered)
-                                    .help("删除知识库")
+                                    .disabled(base.subscriberCount > 0)
+                                    .help(base.subscriberCount > 0 ? "有 \(base.subscriberCount) 位订阅者，暂不能删除；知识库是持续系统，只能持续更新" : "删除知识库")
                             }
-                            if let publishErrorMessage {
-                                Label(publishErrorMessage, systemImage: "exclamationmark.triangle")
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                            }
-                            if let deleteErrorMessage {
-                                Label(deleteErrorMessage, systemImage: "exclamationmark.triangle")
+                            if let actionErrorMessage {
+                                Label(actionErrorMessage, systemImage: "exclamationmark.triangle")
                                     .font(.caption)
                                     .foregroundStyle(.red)
                             }

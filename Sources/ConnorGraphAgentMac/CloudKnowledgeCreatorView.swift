@@ -113,6 +113,19 @@ struct CloudKnowledgeCreatorView: View {
 
     private var configure: some View {
         VStack(alignment: .leading, spacing: 16) {
+            // 持续系统说明：仅编辑已有知识库时展示。知识库没有“删除/修改”，
+            // 只有通过新增修订持续覆盖内容；有订阅者时也不能下架或删除。
+            if store.snapshot.knowledgeBaseID != nil {
+                Label(
+                    "知识库是持续系统：没有删除和修改，只有用更新的记录去覆盖。有订阅者时不能下架或删除，只能持续更新。",
+                    systemImage: "arrow.triangle.2.circlepath"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            }
             Form {
                 TextField("知识库名称", text: $draft.name)
                     .textFieldStyle(.roundedBorder)
