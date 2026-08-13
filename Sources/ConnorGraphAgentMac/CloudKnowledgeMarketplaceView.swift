@@ -427,11 +427,12 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 10) {
-                        // 订阅类主操作：未订阅且非自己创建时用强调色“订阅”；已订阅（含自己订阅自己）显示“取消订阅”。
+                        // 订阅类主操作：已订阅（含自己订阅自己）显示“取消订阅”；未订阅且可订阅（已发布）时显示强调色“订阅”。
+                        // 自己创建并已发布的知识库同样可以订阅自己（后端 v2 仅校验 published/active/clear，不限制所有者）。
                         if base.subscribed {
                             Button("取消订阅") { Task { await store.unsubscribe(id: base.id) } }
                                 .buttonStyle(.bordered)
-                        } else if !base.owned {
+                        } else if !base.owned || base.publicationStatus == "published" {
                             Button("订阅") { Task { await store.subscribe(id: base.id) } }
                                 .buttonStyle(.borderedProminent)
                         }
