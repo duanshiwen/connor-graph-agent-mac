@@ -366,10 +366,10 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(configuration.preflightMode == .contextual)
     #expect(configuration.toolExposureMode == .contextual)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
-    #expect(configuration.promptMaxEstimatedTokens == 64_000)
+    #expect(configuration.promptMaxEstimatedTokens == 128_000)
     #expect(configuration.maxToolResultBytes == 32 * 1_024)
     #expect(configuration.toolExecutionTimeoutSeconds == 300)
-    #expect(configuration.budget.maxTotalTokens == 80_000)
+    #expect(configuration.budget.maxTotalTokens == 120_000)
 }
 
 @Test func agentLoopConfigurationDecodesMissingToolIterationLimitWithCurrentDefault() throws {
@@ -398,7 +398,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 
     #expect(configuration.maxToolIterations == 32)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
-    #expect(configuration.promptMaxEstimatedTokens == 64_000)
+    #expect(configuration.promptMaxEstimatedTokens == 128_000)
     #expect(configuration.maxToolResultBytes == 4096)
     #expect(configuration.budget.maxTotalTokens == 10_000)
     #expect(configuration.maxConsecutiveToolResultErrors == 3)

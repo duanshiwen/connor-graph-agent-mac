@@ -21,6 +21,9 @@ public struct AgentEventRecorder: Sendable {
     }
 
     public func record(_ event: AgentEvent, sequence: Int? = nil) throws {
+        // textDelta 是逐 token 的瞬态事件，最终由 textComplete / assistantMessageCreated 落库。
+        // 跳过可避免模型流式请求期间每个 token 都写一次数据库（CPU 高企的主要来源之一）。
+        if case .textDelta = event { return }
         guard let runID = event.runID, let sessionID = event.sessionID else { return }
         let payload = try payloadJSON(for: event)
         try repository?.append(agentEvent: PersistedAgentEvent(

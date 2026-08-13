@@ -116,7 +116,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.preflightMode = try container.decodeIfPresent(AgentPreflightMode.self, forKey: .preflightMode) ?? .contextual
         self.toolExposureMode = try container.decodeIfPresent(AgentToolExposureMode.self, forKey: .toolExposureMode) ?? .contextual
         self.promptProjectionMode = try container.decodeIfPresent(AgentPromptProjectionMode.self, forKey: .promptProjectionMode) ?? .legacySingleUserMessage
-        self.promptMaxEstimatedTokens = max(1, try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 64_000)
+        self.promptMaxEstimatedTokens = max(1, try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 128_000)
         self.modelContextWindowTokens = try container.decodeIfPresent(Int.self, forKey: .modelContextWindowTokens).map { max(1, $0) }
         self.reservedOutputTokens = max(1, try container.decodeIfPresent(Int.self, forKey: .reservedOutputTokens) ?? 8_192)
         self.permissionMode = try container.decodeIfPresent(AgentPermissionMode.self, forKey: .permissionMode) ?? .askToWrite

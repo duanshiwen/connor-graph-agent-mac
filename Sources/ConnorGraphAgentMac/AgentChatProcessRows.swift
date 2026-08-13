@@ -366,47 +366,16 @@ struct AgentChatTurnProcessRow: View {
 }
 
 private struct AgentRunningActivityShimmerText: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var text: String
     var baseColor: Color
 
+    /// 静态运行态标题：不再使用 30fps TimelineView 流光（模型请求期间会持续推高 CPU）。
     var body: some View {
         Text(text)
             .font(AgentChatTypography.micro.weight(.medium))
             .foregroundStyle(baseColor)
             .lineLimit(1)
             .truncationMode(.tail)
-            .overlay {
-                if !reduceMotion {
-                    GeometryReader { geometry in
-                        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-                            let duration = 1.8
-                            let progress = context.date.timeIntervalSinceReferenceDate
-                                .truncatingRemainder(dividingBy: duration) / duration
-                            let highlightWidth = max(36, geometry.size.width * 0.24)
-                            LinearGradient(
-                                colors: [
-                                    .clear,
-                                    ConnorCraftPalette.accent.opacity(0.28),
-                                    Color.primary.opacity(0.72),
-                                    ConnorCraftPalette.accent.opacity(0.34),
-                                    .clear
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                            .frame(width: highlightWidth)
-                            .offset(x: -highlightWidth + progress * (geometry.size.width + highlightWidth))
-                        }
-                    }
-                }
-            }
-            .mask {
-                Text(text)
-                    .font(AgentChatTypography.micro.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
             .allowsHitTesting(false)
     }
 }
