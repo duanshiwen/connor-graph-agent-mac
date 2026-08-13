@@ -646,10 +646,11 @@ private struct CloudKnowledgeAITraceRow: View {
     }
 
     private var title: String {
+        let pagePrefix = event.page.map { "第 \($0) 页 · " } ?? ""
         switch event.kind {
-        case .modelRequest: return "提交请求 · 第 \(event.iteration) 轮"
-        case .modelResponse: return "模型返回 · 第 \(event.iteration) 轮"
-        case .modelError: return "模型错误 · 第 \(event.iteration) 轮"
+        case .modelRequest: return "\(pagePrefix)提交请求 · 第 \(event.iteration) 轮"
+        case .modelResponse: return "\(pagePrefix)模型返回 · 第 \(event.iteration) 轮"
+        case .modelError: return "\(pagePrefix)模型错误 · 第 \(event.iteration) 轮"
         case .toolExecution: return "调用工具：\(event.toolCall?.name ?? "未知")"
         case .toolResult: return "工具返回：\(event.toolResult?.toolName ?? event.toolCall?.name ?? "未知")"
         case .toolError: return "工具错误：\(event.toolCall?.name ?? "未知")"

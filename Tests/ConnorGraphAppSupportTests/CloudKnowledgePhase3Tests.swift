@@ -702,6 +702,57 @@ private actor CloudKnowledgeScriptedProvider {
     }
 }
 
+    @Test func singlePassPaginatesOversizedSessionAcrossModelContextWindow() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let provider = CloudKnowledgePagedSinglePassProvider()
+        let wrapped = AnyAgentModelProvider(
+            modelID: "glm-4v-flash", // 16k 小窗口，强制分页
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: true, supportsVision: false),
+            complete: { request in try await provider.complete(request) }
+        )
+        var messages: [AgentMessage] = []
+        for index in 1...24 {
+            messages.append(AgentMessage(role: .user, content: "第 \(index) 轮用户消息：" + String(repeating: "知识要点\(index) ", count: 40)))
+            messages.append(AgentMessage(role: .assistant, content: "第 \(index) 轮回复：" + String(repeating: "结论\(index) ", count: 20)))
+        }
+        let session = AgentSession(id: "conversation-huge", title: "Huge", messages: messages)
+
+        let result = try await CloudKnowledgeLLMGenerationRunner().generateSinglePass(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: wrapped
+        )
+
+        let requestCount = await provider.requestCount
+        #expect(requestCount > 1)
+        #expect(result.summary.contains("分 \(requestCount) 页处理"))
+        #expect(result.summary.contains("落地 \(requestCount) 项"))
+        #expect(await api.operations.count == requestCount)
+    }
+
+private actor CloudKnowledgePagedSinglePassProvider {
+    var requestCount = 0
+
+    func complete(_ request: AgentModelRequest) throws -> AgentModelResponse {
+        requestCount += 1
+        let n = requestCount
+        return AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(
+                    id: "extract-\(n)",
+                    name: "cloud_knowledge_extract",
+                    argumentsJSON: "{\"operations\":[{\"layer\":\"L3\",\"decision\":\"create_new\",\"semanticTerms\":[\"page-\(n)\"],\"kind\":\"reusable_knowledge\",\"stableKey\":\"page-\(n)\",\"validFrom\":\"2026-07-16T00:00:00Z\",\"payload\":{\"title\":\"Page \(n)\",\"text\":\"Page \(n) knowledge\"}}]}"
+                )
+            ],
+            finishReason: .toolCalls
+        )
+    }
+}
+
 private final class CloudKnowledgeTraceRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [CloudKnowledgeExtractionTraceEvent] = []

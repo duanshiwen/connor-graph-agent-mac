@@ -171,20 +171,39 @@ public enum CloudKnowledgeExtractionPrompt {
         return turns
     }
 
-    public static func sourcePrompt(session: AgentSession, processingTime: Date = Date()) -> String {
-        let turns = sourceTurns(session: session)
+    /// 把会话轮次序列化为 source JSON（分页估算与提示词共用同一编码，保证估算一致）。
+    public static func sourceTurnsJSON(_ turns: [CloudKnowledgeSourceTurn]) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        let sourceJSON = (try? encoder.encode(turns)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        return """
-        Extract and publish durable knowledge from the following completed conversation-turn list under the system processing and termination contracts.
-        Conversation title: \(session.title)
-        Processing time: \(ISO8601DateFormatter().string(from: processingTime))
+        return (try? encoder.encode(turns)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+    }
 
-        <source-conversation-turns-json>
-        \(sourceJSON)
-        </source-conversation-turns-json>
-        """
+    /// 构造传给模型的 source 提示词；分页时通过 pageNumber/pageCount 告知当前页。
+    public static func sourcePrompt(
+        turns: [CloudKnowledgeSourceTurn],
+        title: String,
+        processingTime: Date = Date(),
+        pageNumber: Int? = nil,
+        pageCount: Int? = nil
+    ) -> String {
+        let sourceJSON = sourceTurnsJSON(turns)
+        var lines = [
+            "Extract and publish durable knowledge from the following completed conversation-turn list under the system processing and termination contracts.",
+            "Conversation title: \(title)",
+            "Processing time: \(ISO8601DateFormatter().string(from: processingTime))"
+        ]
+        if let pageNumber, let pageCount, pageCount > 1 {
+            lines.append("This is page \(pageNumber) of \(pageCount) of the source conversation. Extract knowledge only from the turns in this page; other pages are processed in separate requests.")
+        }
+        lines.append("")
+        lines.append("<source-conversation-turns-json>")
+        lines.append(sourceJSON)
+        lines.append("</source-conversation-turns-json>")
+        return lines.joined(separator: "\n")
+    }
+
+    public static func sourcePrompt(session: AgentSession, processingTime: Date = Date()) -> String {
+        sourcePrompt(turns: sourceTurns(session: session), title: session.title, processingTime: processingTime)
     }
 }
 
@@ -273,6 +292,7 @@ public struct CloudKnowledgeExtractionModelResponseTrace: Codable, Sendable, Equ
 public struct CloudKnowledgeExtractionTraceEvent: Codable, Sendable, Equatable {
     public var sequence: Int
     public var iteration: Int
+    public var page: Int?
     public var kind: CloudKnowledgeExtractionTraceEventKind
     public var modelID: String
     public var messages: [AgentModelMessage]?
@@ -288,6 +308,7 @@ public struct CloudKnowledgeExtractionTraceEvent: Codable, Sendable, Equatable {
     public init(
         sequence: Int,
         iteration: Int,
+        page: Int? = nil,
         kind: CloudKnowledgeExtractionTraceEventKind,
         modelID: String,
         messages: [AgentModelMessage]? = nil,
@@ -302,6 +323,7 @@ public struct CloudKnowledgeExtractionTraceEvent: Codable, Sendable, Equatable {
     ) {
         self.sequence = sequence
         self.iteration = iteration
+        self.page = page
         self.kind = kind
         self.modelID = modelID
         self.messages = messages
@@ -316,7 +338,7 @@ public struct CloudKnowledgeExtractionTraceEvent: Codable, Sendable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case sequence, iteration, kind
+        case sequence, iteration, page, kind
         case modelID = "model_id"
         case messages, tools, temperature
         case messageCharacterCount = "message_character_count"
@@ -573,6 +595,9 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
     /// 单次提取 + 直接落地（对齐 L1 投影机制）：
     /// 模型只调用一次 cloud_knowledge_extract 输出全部候选，应用层把候选直接暂存，
     /// 不再依赖模型多轮“搜索→写入”工具循环，也无需逐候选搜索（后端 searchContext 已可选）。
+    /// 单次提取 + 直接落地（对齐 L1 分批处理思想）：
+    /// 模型只调用一次 cloud_knowledge_extract 输出候选；当会话消息超过模型上下文窗口时，
+    /// 自动按窗口分页，逐页调用模型提取，再统一去重暂存，保证超长会话依然可用。
     public func generateSinglePass(
         session: AgentSession,
         knowledgeBaseID: String,
@@ -604,11 +629,15 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         let executor = CloudKnowledgeToolExecutor(coordinator: coordinator, sourceTexts: sourceTexts)
         var registry = AgentToolRegistry()
         registry.registerCloudKnowledgePublicationTools(executor: executor, includeValidation: false)
-        // 单次提取不做“搜索→去重”，模型可能重复创建已提交的 stable_key（commit 会因唯一
-        // 约束失败）。预先拉取知识库已提交的 stable_key 集合，create_new 命中时按重复跳过。
-        // 已提交 + 本 run 已暂存（跨会话/跨次尝试）的 stable_key 一起去重，避免校验报重复卡住提交。
-        var existingStableKeys = (try? await api.existingStableKeys(knowledgeBaseID: knowledgeBaseID)) ?? []
-        existingStableKeys.formUnion((try? await api.stagedStableKeys(runID: publicationRunID)) ?? [])
+        let tools = registry.definitions + [Self.extractToolDefinition]
+        // 会话消息超过模型上下文窗口时自动分页（对齐 L1 分批处理思想）：
+        // 每页的 source 都保证放得进上下文，逐页调用模型提取，再统一去重落地。
+        let pages = Self.paginateSourceTurns(
+            sourceTurns,
+            provider: provider,
+            systemInstruction: CloudKnowledgeExtractionPrompt.singlePassInstruction,
+            tools: tools
+        )
         let policy = AgentPolicyEngine(permissionMode: .allowAll)
         let agentRunID = "cloud-kb-\(UUID().uuidString)"
         let executionContext = AgentToolExecutionContext(
@@ -619,24 +648,111 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
             toolCallID: "single-pass",
             policyEngine: policy
         )
-
-        var messages = [
-            AgentModelMessage(role: .system, content: CloudKnowledgeExtractionPrompt.singlePassInstruction),
-            AgentModelMessage(role: .user, content: CloudKnowledgeExtractionPrompt.sourcePrompt(session: session))
-        ]
-        var noExtractRetry = 0
-        var iteration = 0
+        // 已提交 + 本 run 已暂存（跨会话/跨页/跨次尝试）的 stable_key 一起去重，避免校验报重复卡住提交。
+        var stagedStableKeys = (try? await api.existingStableKeys(knowledgeBaseID: knowledgeBaseID)) ?? []
+        stagedStableKeys.formUnion((try? await api.stagedStableKeys(runID: publicationRunID)) ?? [])
         let traceSequence = CloudKnowledgeTraceSequence()
         let emit: @Sendable (CloudKnowledgeExtractionTraceEvent) -> Void = { [trace, traceSequence] base in
             var event = base
             event.sequence = traceSequence.next()
             trace?(event)
         }
+
+        var totalCandidates = 0
+        var totalStaged = 0
+        var totalSkipped = 0
+        var totalFailed = 0
+        var lastError = ""
+        for (pageIndex, pageTurns) in pages.enumerated() {
+            let pageNumber = pageIndex + 1
+            let visiblePage = pages.count > 1 ? pageNumber : nil
+            let batch = try await runSinglePageExtraction(
+                turns: pageTurns,
+                pageNumber: pageNumber,
+                totalPageCount: pages.count,
+                visiblePage: visiblePage,
+                session: session,
+                publicationRunID: publicationRunID,
+                clientRunID: clientRunID,
+                provider: provider,
+                tools: tools,
+                emit: emit
+            )
+            totalCandidates += batch.operations.count
+            for candidate in batch.operations {
+                try Task.checkCancellation()
+                guard let decision = CloudKnowledgeDecision(rawValue: candidate.decision) else {
+                    totalSkipped += 1
+                    continue
+                }
+                let isWrite = decision == .createNew || decision == .reviseExisting || decision == .recordTemporalChange
+                guard isWrite else {
+                    totalSkipped += 1
+                    continue
+                }
+                if decision == .createNew, let stableKey = candidate.stableKey, stagedStableKeys.contains(stableKey) {
+                    totalSkipped += 1
+                    continue
+                }
+                do {
+                    if try await stageSinglePassCandidate(
+                        candidate,
+                        executor: executor,
+                        context: executionContext,
+                        modelID: provider.modelID,
+                        iteration: 1,
+                        emit: emit
+                    ) {
+                        totalStaged += 1
+                        if decision == .createNew, let stableKey = candidate.stableKey {
+                            stagedStableKeys.insert(stableKey)
+                        }
+                    } else {
+                        totalSkipped += 1
+                    }
+                } catch {
+                    totalFailed += 1
+                    lastError = String(((error as? AgentToolError)?.description ?? error.localizedDescription).prefix(240))
+                    if totalFailed >= 8 {
+                        throw CloudKnowledgeLLMGenerationError.tooManyToolErrors(lastError: lastError)
+                    }
+                }
+            }
+        }
+        let pageSummary = pages.count > 1 ? "（分 \(pages.count) 页处理）" : ""
+        let summary = "已完成《\(session.title)》的知识提取\(pageSummary)：候选 \(totalCandidates) 项，落地 \(totalStaged) 项，跳过 \(totalSkipped) 项，失败 \(totalFailed) 项。"
+        return CloudKnowledgeLocalGenerationResult(summary: summary)
+    }
+
+    /// 提取单页：只把当前页的轮次发给模型，最多重试 3 次直到模型调用一次 cloud_knowledge_extract。
+    private func runSinglePageExtraction(
+        turns: [CloudKnowledgeSourceTurn],
+        pageNumber: Int,
+        totalPageCount: Int,
+        visiblePage: Int?,
+        session: AgentSession,
+        publicationRunID: String,
+        clientRunID: String,
+        provider: AnyAgentModelProvider,
+        tools: [AgentToolDefinition],
+        emit: @Sendable (CloudKnowledgeExtractionTraceEvent) -> Void
+    ) async throws -> CloudKnowledgeExtractionCandidateBatch {
+        var messages = [
+            AgentModelMessage(role: .system, content: CloudKnowledgeExtractionPrompt.singlePassInstruction),
+            AgentModelMessage(role: .user, content: CloudKnowledgeExtractionPrompt.sourcePrompt(
+                turns: turns,
+                title: session.title,
+                pageNumber: pageNumber,
+                pageCount: totalPageCount
+            ))
+        ]
+        var noExtractRetry = 0
+        var iteration = 0
         while iteration < 3 {
             iteration += 1
             let request = AgentModelRequest(
                 messages: messages,
-                tools: registry.definitions + [Self.extractToolDefinition],
+                tools: tools,
                 temperature: 0.1,
                 auditContext: AgentLLMRequestAuditContext(
                     requestKind: .cloudKnowledgeGeneration,
@@ -652,6 +768,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
             emit(CloudKnowledgeExtractionTraceEvent(
                 sequence: 0,
                 iteration: iteration,
+                page: visiblePage,
                 kind: .modelRequest,
                 modelID: provider.modelID,
                 messages: request.messages,
@@ -667,6 +784,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                 emit(CloudKnowledgeExtractionTraceEvent(
                     sequence: 0,
                     iteration: iteration,
+                    page: visiblePage,
                     kind: .modelError,
                     modelID: provider.modelID,
                     error: error.localizedDescription
@@ -676,6 +794,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
             emit(CloudKnowledgeExtractionTraceEvent(
                 sequence: 0,
                 iteration: iteration,
+                page: visiblePage,
                 kind: .modelResponse,
                 modelID: provider.modelID,
                 response: CloudKnowledgeExtractionModelResponseTrace(response: response)
@@ -683,70 +802,70 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
             guard let call = response.toolCalls.first(where: { $0.name == Self.extractToolName }) else {
                 guard noExtractRetry < 2 else {
                     throw CloudKnowledgeLLMGenerationError.modelResponseIncomplete(
-                        reason: "模型未调用一次性的 cloud_knowledge_extract"
+                        reason: "模型未调用一次性的 cloud_knowledge_extract（第 \(pageNumber) 页）"
                     )
                 }
                 noExtractRetry += 1
                 messages.append(AgentModelMessage(
                     role: .user,
-                    content: "你还没有调用 cloud_knowledge_extract。请只调用该工具一次，输出全部候选操作，然后自然结束。"
+                    content: "你还没有调用 cloud_knowledge_extract。请只调用该工具一次，输出这一页的全部候选操作，然后自然结束。"
                 ))
                 continue
             }
-            let batch = try JSONDecoder().decode(
+            return try JSONDecoder().decode(
                 CloudKnowledgeExtractionCandidateBatch.self,
                 from: Data(call.argumentsJSON.utf8)
             )
-            var staged = 0
-            var skipped = 0
-            var failed = 0
-            var lastError = ""
-            // 持续系统只追加：同一 run 内 stable_key 去重，避免后端校验报“重复 stable_key”卡住提交流程。
-            var stagedStableKeys: Set<String> = existingStableKeys
-            for candidate in batch.operations {
-                try Task.checkCancellation()
-                guard let decision = CloudKnowledgeDecision(rawValue: candidate.decision) else {
-                    skipped += 1
-                    continue
-                }
-                let isWrite = decision == .createNew || decision == .reviseExisting || decision == .recordTemporalChange
-                guard isWrite else {
-                    skipped += 1
-                    continue
-                }
-                if decision == .createNew, let stableKey = candidate.stableKey, stagedStableKeys.contains(stableKey) {
-                    skipped += 1
-                    continue
-                }
-                do {
-                    if try await stageSinglePassCandidate(
-                        candidate,
-                        executor: executor,
-                        context: executionContext,
-                        modelID: provider.modelID,
-                        iteration: iteration,
-                        emit: emit
-                    ) {
-                        staged += 1
-                        if decision == .createNew, let stableKey = candidate.stableKey {
-                            stagedStableKeys.insert(stableKey)
-                        }
-                    } else {
-                        skipped += 1
-                    }
-                } catch {
-                    failed += 1
-                    lastError = String(((error as? AgentToolError)?.description ?? error.localizedDescription).prefix(240))
-                    if failed >= 8 {
-                        throw CloudKnowledgeLLMGenerationError.tooManyToolErrors(lastError: lastError)
-                    }
-                }
-            }
-            let summary = "已完成《\(session.title)》的知识提取：候选 \(batch.operations.count) 项，落地 \(staged) 项，跳过 \(skipped) 项，失败 \(failed) 项。"
-            return CloudKnowledgeLocalGenerationResult(summary: summary)
         }
         throw CloudKnowledgeLLMGenerationError.maximumIterationsReached
     }
+
+    /// 按模型上下文窗口把会话轮次切分成多页：每页 source JSON 都保证落在输入预算内。
+    /// 估算用 AgentModelContextGuard（字符级估算），并预留输出与安全余量；单轮本身超大时
+    /// 仍独立成页（尽力而为，超出部分依赖模型侧处理）。
+    private static func paginateSourceTurns(
+        _ turns: [CloudKnowledgeSourceTurn],
+        provider: AnyAgentModelProvider,
+        systemInstruction: String,
+        tools: [AgentToolDefinition]
+    ) -> [[CloudKnowledgeSourceTurn]] {
+        guard turns.count > 1 else { return [turns] }
+        let contextGuard = AgentModelContextGuard()
+        let contextWindow = SessionContextBudget.inferContextWindowSize(modelID: provider.modelID)
+        let inputBudget = max(2_048, contextWindow - reservedOutputTokens)
+        let baseTokens = contextGuard.estimatedInputTokens(AgentModelRequest(
+            messages: [
+                AgentModelMessage(role: .system, content: systemInstruction),
+                AgentModelMessage(role: .user, content: "")
+            ],
+            tools: tools
+        ))
+        let sourceBudget = max(1_024, inputBudget - baseTokens - safetyMarginTokens)
+        let fullSource = CloudKnowledgeExtractionPrompt.sourceTurnsJSON(turns)
+        let fullTokens = contextGuard.estimatedInputTokens(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: fullSource)]))
+        guard fullTokens > sourceBudget else { return [turns] }
+
+        var pages: [[CloudKnowledgeSourceTurn]] = []
+        var current: [CloudKnowledgeSourceTurn] = []
+        var currentTokens = 0
+        for turn in turns {
+            let turnJSON = CloudKnowledgeExtractionPrompt.sourceTurnsJSON([turn])
+            let tokens = contextGuard.estimatedInputTokens(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: turnJSON)])) + perTurnOverheadTokens
+            if !current.isEmpty, currentTokens + tokens > sourceBudget {
+                pages.append(current)
+                current = []
+                currentTokens = 0
+            }
+            current.append(turn)
+            currentTokens += tokens
+        }
+        if !current.isEmpty { pages.append(current) }
+        return pages.isEmpty ? [turns] : pages
+    }
+
+    private static let reservedOutputTokens = 8_192
+    private static let safetyMarginTokens = 2_048
+    private static let perTurnOverheadTokens = 16
 
     private static let extractToolName = "cloud_knowledge_extract"
 
