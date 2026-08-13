@@ -33,6 +33,6 @@ struct ComposerPlaceholderPresentationTests {
             sendHint: "Shift + Return 换行"
         )
 
-        #expect(placeholder == "写下你的笔记...")
+        #expect(placeholder == "写下你的笔记... 回车换行，发送请点击右侧按钮")
     }
 }

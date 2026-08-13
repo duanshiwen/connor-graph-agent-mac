@@ -39,6 +39,10 @@ final class ComposerInputCommandRouter {
             configuration.onPersonMentionPickerKeyCommand?(.confirm)
             return true
         }
+        if configuration.isNoteMode {
+            // 笔记创建阶段（第一条消息）：回车只换行、不发送；发送必须点击界面上的发送按钮。
+            return false
+        }
         switch configuration.sendShortcut {
         case "cmd-return":
             guard flags.contains(.command) else { return false }
