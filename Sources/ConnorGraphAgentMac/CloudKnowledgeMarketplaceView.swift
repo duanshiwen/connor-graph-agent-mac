@@ -542,3 +542,80 @@ private struct MarketplaceRowStatusBadge: View {
             .lineLimit(1)
     }
 }
+
+/// 详情页直接发布前的协议确认对话框：展示《知识库发布协议》，
+/// 勾选“我已阅读并同意”后“同意并发布”才可用。
+private struct KnowledgeBasePublishingAgreementSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var onAgree: () -> Void
+    @State private var termsAccepted = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(CloudKnowledgePublishingAgreement.title)
+                        .font(AppTypography.pageTitle)
+                    Text("版本 \(CloudKnowledgePublishingAgreement.version) · \(CloudKnowledgePublishingAgreement.effectiveDate)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .help("关闭")
+                .accessibilityLabel("关闭发布协议")
+            }
+            .padding(20)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Label(CloudKnowledgePublishingAgreement.operatorName, systemImage: "building.2")
+                        .font(.headline)
+
+                    ForEach(CloudKnowledgePublishingAgreement.sections) { section in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(section.title)
+                                .font(.headline)
+                            Text(section.body)
+                                .font(.body)
+                                .lineSpacing(5)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(24)
+            }
+
+            Divider()
+
+            HStack {
+                Toggle("", isOn: $termsAccepted)
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .accessibilityLabel("我已阅读并同意知识库发布协议")
+                Text("我已阅读并同意《\(CloudKnowledgePublishingAgreement.title)》")
+                    .font(.callout)
+                Spacer()
+                Button("取消") { dismiss() }
+                    .buttonStyle(.bordered)
+                Button("同意并发布") {
+                    onAgree()
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!termsAccepted)
+            }
+            .padding(16)
+        }
+        .frame(minWidth: 640, idealWidth: 720, minHeight: 560, idealHeight: 680)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
