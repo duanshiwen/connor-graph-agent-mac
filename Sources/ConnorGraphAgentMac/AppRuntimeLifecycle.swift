@@ -243,8 +243,30 @@ final class AppRuntimeLifecycle {
     func setAgentPermissionMode(_ mode: AgentPermissionMode) {
         guard mode != .allowAll else { return }
         agentPermissionMode = mode
+        persistPermissionMode(mode)
         chatRunCoordinator.mutateManager { $0.permissionMode = mode }
         chatApprovalCoordinator.permissionModeDidChange()
+    }
+
+    /// 将会话权限写入当前会话的状态快照并持久化，切换会话后仍能恢复。
+    private func persistPermissionMode(_ mode: AgentPermissionMode) {
+        guard let sessionID = chatFeatureModel.sessions.selectedSessionID else { return }
+        var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
+            ?? AppSessionStateSnapshot(sessionID: sessionID)
+        state.permissionMode = mode
+        state.updatedAt = Date()
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
+        try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+    }
+
+    /// 当前会话的有效权限：优先该会话已保存的权限，否则回退全局默认（allowAll 归一化为 askToWrite）。
+    private func effectivePermissionMode(for sessionID: String?) -> AgentPermissionMode {
+        if let sessionID,
+           let stored = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.permissionMode {
+            return stored == .allowAll ? .askToWrite : stored
+        }
+        let fallback = effectiveLoopConfiguration.permissionMode
+        return fallback == .allowAll ? .askToWrite : fallback
     }
 
     func isChatSessionSubmitting(_ sessionID: String) -> Bool {
@@ -1280,6 +1302,7 @@ final class AppRuntimeLifecycle {
         chatApprovalCoordinator.onAlwaysAllow = { [weak self] in
             guard let self else { return }
             self.agentPermissionMode = .trustedWrite
+            self.persistPermissionMode(.trustedWrite)
             self.chatRunCoordinator.mutateManager { $0.permissionMode = .trustedWrite }
         }
         chatApprovalCoordinator.onError = { [weak self] message in self?.errorMessage = message }
@@ -1954,7 +1977,7 @@ final class AppRuntimeLifecycle {
         let configuration = effectiveLoopConfiguration
         return chatRunCoordinator.makeManager(
             for: session,
-            permissionMode: agentPermissionMode,
+            permissionMode: effectivePermissionMode(for: session.id),
             configuration: configuration,
             sessionWorkspace: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.workspace,
             sessionLLMOverride: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.llmOverride,
@@ -2415,7 +2438,7 @@ final class AppRuntimeLifecycle {
 
         let runtimeFactory = chatRunCoordinator.runtimeFactory
         let configuration = effectiveLoopConfiguration
-        let permissionMode = configuration.permissionMode
+        let permissionMode = effectivePermissionMode(for: session.id)
         if isVisible {
             agentPermissionMode = permissionMode
         }
@@ -2747,7 +2770,7 @@ final class AppRuntimeLifecycle {
         rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession(title: browserHistorySessionTitle(for: record))
-            agentPermissionMode = effectiveLoopConfiguration.permissionMode
+            agentPermissionMode = effectivePermissionMode(for: session.id)
             chatSessionCoordinator.adoptDirectSelection(session.id)
             chatRunCoordinator.clearProcessTimelines()
             browserFeatureModel.resetWorkspaceBinding()
@@ -2997,7 +3020,7 @@ final class AppRuntimeLifecycle {
         )
         let runtimeFactory = chatRunCoordinator.runtimeFactory
         let configuration = effectiveLoopConfiguration
-        let permissionMode = configuration.permissionMode
+        let permissionMode = effectivePermissionMode(for: session.id)
         agentPermissionMode = permissionMode
         let runtimeState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
         let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)

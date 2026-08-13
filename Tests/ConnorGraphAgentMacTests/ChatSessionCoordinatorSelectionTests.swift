@@ -373,6 +373,36 @@ struct ChatSessionRuntimeIntegrationTests {
         #expect(fixture.runtime.chatFeatureModel.run.transcriptRevision > revisionAfterSecondSelection)
     }
 
+    @Test func sessionPermissionModeSurvivesSwitchingAwayAndBack() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        var sessionA = try fixture.repository.createSession(title: "A", now: Date(timeIntervalSince1970: 2_000))
+        sessionA.messages = [AgentMessage(role: .user, content: "A transcript")]
+        sessionA = try fixture.repository.saveSession(sessionA)
+        var sessionB = try fixture.repository.createSession(title: "B", now: Date(timeIntervalSince1970: 3_000))
+        sessionB.messages = [AgentMessage(role: .user, content: "B transcript")]
+        sessionB = try fixture.repository.saveSession(sessionB)
+
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.selectChatSession(sessionA.id)
+        try await waitForTranscript(fixture.runtime, expectedContents: ["A transcript"])
+
+        // 用户把会话 A 的权限改成“执行”（trustedWrite）
+        fixture.runtime.setAgentPermissionMode(.trustedWrite)
+        #expect(fixture.runtime.agentPermissionMode == .trustedWrite)
+
+        // 切到 B：显示默认（询问）
+        fixture.runtime.selectChatSession(sessionB.id)
+        try await waitForTranscript(fixture.runtime, expectedContents: ["B transcript"])
+        #expect(fixture.runtime.agentPermissionMode == .askToWrite)
+
+        // 切回 A：权限应恢复为“执行”，而不是默认
+        fixture.runtime.selectChatSession(sessionA.id)
+        try await waitForTranscript(fixture.runtime, expectedContents: ["A transcript"])
+        #expect(fixture.runtime.agentPermissionMode == .trustedWrite)
+    }
+
     private func waitForTranscript(_ runtime: AppRuntimeLifecycle, expectedContents: [String]) async throws {
         for _ in 0..<100 {
             if runtime.chatFeatureModel.run.transcript.map(\.content) == expectedContents { return }
