@@ -140,7 +140,12 @@ public struct NativeWebFetchClient: Sendable {
         self.retryPolicy = retryPolicy
     }
 
-    public func fetch(urlString: String, extractMode: String, timeoutMilliseconds: Int) async throws -> NativeWebFetchResult {
+    public func fetch(
+        urlString: String,
+        extractMode: String,
+        timeoutMilliseconds: Int,
+        onRetryProgress: (@Sendable (String) -> Void)? = nil
+    ) async throws -> NativeWebFetchResult {
         guard let url = URL(string: urlString), ["http", "https"].contains(url.scheme?.lowercased()) else {
             throw AgentToolError.invalidArguments("web_fetch requires an absolute http/https url")
         }
@@ -191,8 +196,10 @@ public struct NativeWebFetchClient: Sendable {
                 lastTransientError = error
             }
             try Task.checkCancellation()
+            let retryMessage = "连接失败，正在重试 \(attempt)/\(retryPolicy.retryCount)…"
+            onRetryProgress?(retryMessage)
             let delay = retryPolicy.delay(afterAttempt: attempt)
-            logger.warning("web_fetch retrying \(url.absoluteString) attempt \(attempt)/\(totalAttempts) after \(String(format: "%.2f", delay))s: \(String(describing: lastTransientError))")
+            logger.warning("web_fetch retrying \(url.absoluteString) \(retryMessage) after \(String(format: "%.2f", delay))s: \(String(describing: lastTransientError))")
             try await Task.sleep(for: .seconds(delay))
         }
         throw lastTransientError ?? AgentToolError.invalidArguments("web_fetch failed after \(totalAttempts) attempts")

@@ -43,6 +43,7 @@ public struct AgentEventRecorder: Sendable {
         case .textComplete(let payload): data = try encoder.encode(payload)
         case .assistantMessageCreated(let payload): data = try encoder.encode(payload)
         case .toolRequested(let payload), .toolApproved(let payload), .toolStarted(let payload): data = try encoder.encode(payload)
+        case .toolProgress(let payload): data = try encoder.encode(payload)
         case .toolFinished(let payload): data = try encoder.encode(payload)
         case .toolFailed(let payload): data = try encoder.encode(payload)
         case .permissionRequested(let payload): data = try encoder.encode(payload)

@@ -12,6 +12,7 @@ public enum AgentEvent: Sendable, Equatable {
     case toolRequested(AgentToolCall)
     case toolApproved(AgentToolCall)
     case toolStarted(AgentToolCall)
+    case toolProgress(AgentToolProgressEvent)
     case toolFinished(AgentToolResult)
     case toolFailed(AgentToolFailure)
     case permissionRequested(AgentPermissionRequest)
@@ -46,6 +47,7 @@ public enum AgentEvent: Sendable, Equatable {
         case .toolRequested: return .toolRequested
         case .toolApproved: return .toolApproved
         case .toolStarted: return .toolStarted
+        case .toolProgress: return .toolProgress
         case .toolFinished: return .toolFinished
         case .toolFailed: return .toolFailed
         case .permissionRequested: return .permissionRequested
@@ -80,6 +82,7 @@ public enum AgentEvent: Sendable, Equatable {
         case .textComplete(let event): return event.runID
         case .assistantMessageCreated(let message): return message.runID
         case .toolRequested(let call), .toolApproved(let call), .toolStarted(let call): return call.runID
+        case .toolProgress(let progress): return progress.runID
         case .toolFinished(let result): return result.runID
         case .toolFailed(let failure): return failure.runID
         case .permissionRequested(let request): return request.runID
@@ -108,6 +111,7 @@ public enum AgentEvent: Sendable, Equatable {
         case .textComplete(let event): return event.sessionID
         case .assistantMessageCreated(let message): return message.sessionID
         case .toolRequested(let call), .toolApproved(let call), .toolStarted(let call): return call.sessionID
+        case .toolProgress(let progress): return progress.sessionID
         case .toolFinished(let result): return result.sessionID
         case .toolFailed(let failure): return failure.sessionID
         case .permissionRequested(let request): return request.sessionID

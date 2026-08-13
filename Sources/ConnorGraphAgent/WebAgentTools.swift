@@ -707,7 +707,10 @@ public struct NativeWebFetchTool: AgentTool {
             nativeResult = try await nativeFetchClient.fetch(
                 urlString: url,
                 extractMode: extractMode,
-                timeoutMilliseconds: timeoutMilliseconds
+                timeoutMilliseconds: timeoutMilliseconds,
+                onRetryProgress: { [context] message in
+                    context.publishToolProgress(toolName: name, message: message)
+                }
             )
         } catch {
             if renderMode == "auto", let result = try await executeBrowserAssistedFetch(

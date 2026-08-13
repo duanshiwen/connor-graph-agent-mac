@@ -237,6 +237,7 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
     }
 
     private func parseToolEvent(_ event: AgentEventPresentation) -> (name: String, phase: ToolPhase)? {
+        guard event.kind != "toolProgress" else { return nil }
         guard !event.title.localizedCaseInsensitiveContains("share_progress_update") else { return nil }
         if let activity = event.toolActivity {
             let name = AgentToolDisplayNameResolver.displayName(

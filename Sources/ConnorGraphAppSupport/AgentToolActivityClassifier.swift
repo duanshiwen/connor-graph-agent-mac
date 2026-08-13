@@ -52,6 +52,21 @@ public struct AgentToolActivityClassifier: Sendable {
         )
     }
 
+    public func activity(forProgress progress: AgentToolProgressEvent) -> AgentToolActivityPresentation? {
+        var activity = activity(
+            callID: progress.toolCallID,
+            rawToolName: progress.toolName,
+            phase: .running,
+            severity: .warning,
+            argumentsJSON: nil,
+            resultJSON: nil,
+            fallbackDetail: progress.message
+        )
+        activity?.subtitle = progress.message
+        activity?.detail = progress.message
+        return activity
+    }
+
     public func activity(forFailure failure: AgentToolFailure) -> AgentToolActivityPresentation? {
         var activity = activity(
             callID: failure.toolCallID,
