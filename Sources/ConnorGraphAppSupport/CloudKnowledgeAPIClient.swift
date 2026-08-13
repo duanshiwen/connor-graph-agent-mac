@@ -45,6 +45,12 @@ public protocol CloudKnowledgeAPI: Sendable {
     func search(knowledgeBaseID: String, channel: CloudKnowledgeSearchChannel, request: CloudKnowledgeSearchRequest) async throws -> CloudKnowledgeSearchResponse
     /// 知识库已提交（committed）identity 的 stable_key 集合，用于单次提取时跳过重复创建。
     func existingStableKeys(knowledgeBaseID: String) async throws -> Set<String>
+    /// 本 publication run 已暂存（staged）操作的 stable_key 集合，用于跨会话/跨次尝试去重。
+    func stagedStableKeys(runID: String) async throws -> Set<String>
+}
+
+public extension CloudKnowledgeAPI {
+    func stagedStableKeys(runID: String) async throws -> Set<String> { [] }
 }
 
 public struct CloudKnowledgeAPIClient: CloudKnowledgeAPI, Sendable {
@@ -86,6 +92,15 @@ public struct CloudKnowledgeAPIClient: CloudKnowledgeAPI, Sendable {
         struct RevisionKey: Decodable { let stableKey: String? }
         let revisions: [RevisionKey] = try await send("knowledge-bases/\(knowledgeBaseID)/revisions?limit=200")
         return Set(revisions.compactMap(\.stableKey))
+    }
+
+    public func stagedStableKeys(runID: String) async throws -> Set<String> {
+        struct StagedOperation: Decodable {
+            struct Payload: Decodable { let stableKey: String? }
+            let payload: Payload?
+        }
+        let operations: [StagedOperation] = try await send("publication-runs/\(runID)/staged")
+        return Set(operations.compactMap { $0.payload?.stableKey }.filter { !$0.isEmpty })
     }
 
     private enum Route {
