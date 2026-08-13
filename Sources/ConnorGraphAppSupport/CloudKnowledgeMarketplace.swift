@@ -329,11 +329,6 @@ public actor CloudKnowledgeAuthorizationCache {
     @Published public private(set) var searchResults: [CloudMarketplaceKnowledgeBase] = []
     @Published public private(set) var selected: CloudMarketplaceKnowledgeBase?
     @Published public private(set) var showsPublisher = false
-    /// 单一列表视图数据源：合并「我发布的 / 已订阅 / 市场搜索结果」，去重并按状态排序。
-    public var unifiedBases: [CloudMarketplaceKnowledgeBase] {
-        library.unifiedList(searchResults: searchResults)
-    }
-
     /// 按主列表头筛选（全部 / 我订阅的 / 我创建的）返回单一列表。
     public func unifiedBases(filter: MarketplaceListFilter) -> [CloudMarketplaceKnowledgeBase] {
         library.unifiedList(searchResults: searchResults, filter: filter)

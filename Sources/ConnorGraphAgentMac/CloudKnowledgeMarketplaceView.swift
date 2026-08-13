@@ -11,28 +11,41 @@ struct CloudKnowledgeMarketplaceListPane: View {
     let sessionActions: any ChatSessionCommanding
     @State private var isPresentingCreator = false
     @State private var isPresentingPublicationHistory = false
+    /// 主列表头筛选：全部知识库 / 我订阅的 / 我创建的。
+    @State private var listFilter: MarketplaceListFilter = .all
 
     var body: some View {
         VStack(spacing: 0) {
-            AppListPaneHeader(title: "知识市场") {
-                Button { isPresentingPublicationHistory = true } label: {
-                    Image(systemName: "clock.arrow.circlepath")
+            ZStack {
+                Text("知识市场")
+                    .font(AppListTypography.header)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                HStack(spacing: AppShellLayout.spaceS) {
+                    filterMenu
+                    Spacer(minLength: 0)
+                    Button { isPresentingPublicationHistory = true } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                    }
+                    .buttonStyle(.appIcon)
+                    .help("发布历史")
+                    .accessibilityLabel("发布历史")
+                    .disabled(!canUseMarketplace)
+                    Button {
+                        creatorStore.prepareForNewKnowledgeBase()
+                        isPresentingCreator = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.appIcon)
+                    .help("添加知识库")
+                    .accessibilityLabel("添加知识库")
+                    .disabled(!canUseMarketplace)
                 }
-                .buttonStyle(.appIcon)
-                .help("发布历史")
-                .accessibilityLabel("发布历史")
-                .disabled(!canUseMarketplace)
-                Button {
-                    creatorStore.prepareForNewKnowledgeBase()
-                    isPresentingCreator = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(.appIcon)
-                .help("添加知识库")
-                .accessibilityLabel("添加知识库")
-                .disabled(!canUseMarketplace)
             }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, AppShellLayout.paneHeaderHorizontalPadding)
+            .padding(.vertical, AppShellLayout.paneHeaderVerticalPadding)
 
             if canUseMarketplace {
                 ScrollView {
@@ -168,7 +181,37 @@ struct CloudKnowledgeMarketplaceListPane: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var unifiedBases: [CloudMarketplaceKnowledgeBase] { store.unifiedBases }
+    private var unifiedBases: [CloudMarketplaceKnowledgeBase] { store.unifiedBases(filter: listFilter) }
+
+    /// 主列表头左侧筛选按钮：切换「全部知识库 / 我订阅的 / 我创建的」。
+    /// 视觉与“发布历史 / 添加知识库”图标按钮保持一致（同字号、同圆形背景、隐藏菜单指示器）。
+    private var filterMenu: some View {
+        Menu {
+            ForEach(MarketplaceListFilter.allCases) { option in
+                Button {
+                    listFilter = option
+                } label: {
+                    if option == listFilter {
+                        Label(option.title, systemImage: "checkmark")
+                    } else {
+                        Text(option.title)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.system(size: AppButtonLayout.iconSize, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
+                .contentShape(Circle())
+                .background(Color.secondary.opacity(0.08), in: Circle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("筛选知识库：\(listFilter.title)")
+        .accessibilityLabel("筛选知识库")
+    }
 
     private var canUseMarketplace: Bool { connectivity.isConnected && backendConnectivity.state != .unreachable }
     private var marketplaceUnavailableTitle: String { connectivity.isConnected ? "当前无法连接到康纳服务器" : "当前没有网络连接" }
