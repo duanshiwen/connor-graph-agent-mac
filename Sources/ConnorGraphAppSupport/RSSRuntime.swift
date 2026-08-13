@@ -9,6 +9,7 @@ public enum RSSRuntimeError: Error, LocalizedError, Equatable {
     case unsupportedFeed(String)
     case parseFailed(String)
     case invalidCursor
+    case invalidFeed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -18,6 +19,7 @@ public enum RSSRuntimeError: Error, LocalizedError, Equatable {
         case .unsupportedFeed(let detail): "Unsupported feed: \(detail)"
         case .parseFailed(let detail): "Failed to parse feed: \(detail)"
         case .invalidCursor: "Invalid RSS pagination cursor"
+        case .invalidFeed(let detail): "该 RSS 源无效：\(detail)"
         }
     }
 
@@ -491,6 +493,21 @@ public struct RSSRuntime: Sendable {
     }
 
     public func addSource(feedURL: URL, displayName: String? = nil, runID: String? = nil, sessionID: String? = nil) async throws -> RSSSource {
+        // 无效源不入库：添加前先抓取并解析，任何失败（404/403/TLS/网络/解析）都拒绝添加，
+        // 用户或 AI 都不会看到“已添加但抓不到”的半成品源。
+        do {
+            let data = try await fetcher.fetch(url: feedURL, timeoutSeconds: 10)
+            let previewSource = RSSSource(
+                id: RSSIdentity.sourceID(feedURL: feedURL),
+                feedURL: feedURL,
+                displayName: feedURL.host ?? feedURL.absoluteString
+            )
+            _ = try parser.parse(data: data, source: previewSource)
+        } catch let error as RSSRuntimeError {
+            throw RSSRuntimeError.invalidFeed(error.localizedDescription)
+        } catch {
+            throw RSSRuntimeError.invalidFeed(String(describing: error))
+        }
         let source = RSSSource(id: RSSIdentity.sourceID(feedURL: feedURL), feedURL: feedURL, displayName: displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? displayName! : (feedURL.host ?? feedURL.absoluteString), health: RSSSourceHealth(status: .unknown, summary: "Not synced"))
         try await repository.saveSource(source)
         try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: source.id, kind: .sourceAdded, riskClass: .sourceManagement, redactedSummary: "Added RSS source \(source.displayName)", payloadHash: RSSHash.sha256(feedURL.absoluteString)))
@@ -614,10 +631,21 @@ public struct RSSRuntime: Sendable {
 
     public func importOPML(_ xml: String, runID: String? = nil, sessionID: String? = nil) async throws -> OPMLDocument {
         let document = try opmlService.parse(xml)
+        var added = 0
+        var skipped = 0
         for outline in document.outlines {
-            _ = try await addSource(feedURL: outline.xmlURL, displayName: outline.title, runID: runID, sessionID: sessionID)
+            do {
+                _ = try await addSource(feedURL: outline.xmlURL, displayName: outline.title, runID: runID, sessionID: sessionID)
+                added += 1
+            } catch {
+                // 无效源（404/403/无法解析等）跳过，不中断整批导入。
+                skipped += 1
+            }
         }
-        try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, kind: .opmlImported, riskClass: .importExport, redactedSummary: "Imported OPML with \(document.outlines.count) subscriptions"))
+        let summary = skipped > 0
+            ? "Imported OPML with \(added) subscriptions; skipped \(skipped) invalid"
+            : "Imported OPML with \(added) subscriptions"
+        try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, kind: .opmlImported, riskClass: .importExport, redactedSummary: summary))
         return document
     }
 

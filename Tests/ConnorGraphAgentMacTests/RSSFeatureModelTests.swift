@@ -226,26 +226,50 @@ private func waitUntil(
 }
 
 @MainActor
-@Test func rssFeatureAddKeepsSourceWhenInitialSyncFailsAndEmitsChange() async throws {
+@Test func rssFeatureAddRejectsInvalidSourceWithoutPersisting() async throws {
     let repository = InMemoryRSSSourceRepository()
     let runtime = RSSRuntime(
         repository: repository,
         cache: InMemoryRSSSourceCache(),
-        fetcher: RSSStaticFetcher(result: .failure(RSSFeatureTestError.fetchFailed))
+        fetcher: RSSStaticFetcher(result: .failure(RSSRuntimeError.unsupportedFeed("HTTP 404")))
     )
     let model = RSSFeatureModel(runtime: runtime)
     var sourceChangeScopes: [RSSFeatureModel.SourceSetChangeScope] = []
     model.sourceSetChanged = { sourceChangeScopes.append($0) }
 
-    try await model.addSourceAndSync(
-        feedURL: URL(string: "https://example.com/feed.xml")!,
-        displayName: "Fixture"
-    )
+    await #expect(throws: RSSRuntimeError.self) {
+        try await model.addSourceAndSync(
+            feedURL: URL(string: "https://example.com/feed.xml")!,
+            displayName: "Fixture"
+        )
+    }
 
-    #expect(try await repository.listSources().count == 1)
-    #expect(model.presentation.sources.count == 1)
-    #expect(model.errorMessage == "RSS 订阅源已添加，但首次抓取失败：fixture fetch failed")
-    #expect(sourceChangeScopes == [.rssOnly])
+    #expect(try await repository.listSources().isEmpty)
+    #expect(model.presentation.sources.isEmpty)
+    #expect(sourceChangeScopes.isEmpty)
+}
+
+@MainActor
+@Test func rssFeatureAddInvalidSourceErrorAdvisesNotToRetry() async throws {
+    let repository = InMemoryRSSSourceRepository()
+    let runtime = RSSRuntime(
+        repository: repository,
+        cache: InMemoryRSSSourceCache(),
+        fetcher: RSSStaticFetcher(result: .failure(RSSRuntimeError.unsupportedFeed("HTTP 404")))
+    )
+    let model = RSSFeatureModel(runtime: runtime)
+
+    do {
+        try await model.addSourceAndSync(
+            feedURL: URL(string: "https://example.com/feed.xml")!,
+            displayName: "Fixture"
+        )
+        Issue.record("添加无效源应当抛错")
+    } catch {
+        let message = error.localizedDescription
+        #expect(message.contains("HTTP 404"))
+        #expect(message.contains("请勿反复重试同一链接"))
+    }
 }
 
 @MainActor
