@@ -21,11 +21,47 @@ public struct TaskSchedulerRunnerService: Sendable {
     public var repository: AppTaskManagementRepository
     public var scheduler: TaskSchedulerService
     public var runner: TaskTargetRunner
+    /// 源刷新类任务（RSS/邮件/日历）的单次执行超时；超时按失败处理并继续后续任务，
+    /// 避免一个卡死的刷新阻塞整轮定时调度（简报等会话任务因此永远排不上）。
+    public var refreshTaskTimeoutSeconds: TimeInterval
+    /// 其余任务（新建会话/记忆管道等）的超时；新建会话类任务创建后即返回，通常用不到。
+    public var generationTaskTimeoutSeconds: TimeInterval
 
-    public init(repository: AppTaskManagementRepository, scheduler: TaskSchedulerService = TaskSchedulerService(), runner: TaskTargetRunner) {
+    public init(
+        repository: AppTaskManagementRepository,
+        scheduler: TaskSchedulerService = TaskSchedulerService(),
+        runner: TaskTargetRunner,
+        refreshTaskTimeoutSeconds: TimeInterval = 120,
+        generationTaskTimeoutSeconds: TimeInterval = 600
+    ) {
         self.repository = repository
         self.scheduler = scheduler
         self.runner = runner
+        self.refreshTaskTimeoutSeconds = refreshTaskTimeoutSeconds
+        self.generationTaskTimeoutSeconds = generationTaskTimeoutSeconds
+    }
+
+    private func timeoutSeconds(for task: ConnorTaskDefinition) -> TimeInterval {
+        if task.target.targetKind == "source.runtime" { return refreshTaskTimeoutSeconds }
+        return generationTaskTimeoutSeconds
+    }
+
+    /// 带超时执行单个任务。worker 用非结构化 Task 运行，超时后调度器立即返回并继续下一项，
+    /// 后台任务即使不响应取消也不会拖住调度轮次。
+    private func runTaskWithTimeout(task: ConnorTaskDefinition, runID: String) async throws -> TaskTargetRunResult {
+        let worker = Task { try await runner.run(task: task, runID: runID) }
+        return try await withThrowingTaskGroup(of: TaskTargetRunResult.self) { group in
+            group.addTask { try await worker.value }
+            group.addTask {
+                try await Task.sleep(for: .seconds(timeoutSeconds(for: task)))
+                throw TaskTargetRunnerError.taskTimedOut
+            }
+            guard let first = try await group.next() else {
+                throw TaskTargetRunnerError.taskTimedOut
+            }
+            group.cancelAll()
+            return first
+        }
     }
 
     public func runDueTasks(now: Date = Date()) async throws -> [TaskSchedulerRunOutcome] {
@@ -40,7 +76,7 @@ public struct TaskSchedulerRunnerService: Sendable {
             try repository.saveTask(started)
             try repository.appendRunRecord(ConnorTaskRunRecord(id: "\(runID)-running", taskID: task.id, status: .running, startedAt: startedAt, outputSummary: "Task started", externalRunID: runID))
             do {
-                let result = try await runner.run(task: task, runID: runID)
+                let result = try await runTaskWithTimeout(task: task, runID: runID)
                 let finishedAt = now
                 let succeeded = scheduler.markRunSucceeded(task: task, startedAt: startedAt, finishedAt: finishedAt)
                 try repository.saveTask(succeeded)

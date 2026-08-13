@@ -1730,7 +1730,10 @@ final class AppRuntimeLifecycle {
             reloadChatSessions()
             chatSessionCoordinator.adoptDirectSelection(session.id)
             chatRunCoordinator.installManager(makeNativeSessionManager(for: session), fallbackSession: session)
-            try await submitScheduledTaskMessage(request.message)
+            // 新建会话类任务（如每日简报）在“创建会话”后即视为成功：
+            // 消息在后台异步提交，不阻塞调度器等待整轮 LLM 执行（执行何时完成无从得知，
+            // 也不应让一个长任务卡住整轮定时调度）。
+            Task { try? await self.submitScheduledTaskMessage(request.message) }
             return "created session \(session.id) and sent task message"
         }
         guard let sessionID = request.sessionID else {
