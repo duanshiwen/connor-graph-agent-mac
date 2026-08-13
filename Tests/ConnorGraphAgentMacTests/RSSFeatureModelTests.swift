@@ -329,6 +329,99 @@ private func waitUntil(
     #expect(model.presentation.items.count == 1)
 }
 
+@Test func rssRuntimeErrorClassifiesPermanentHTTPFailures() {
+    #expect(RSSRuntimeError.unsupportedFeed("HTTP 404").isPermanentHTTPFailure == true)
+    #expect(RSSRuntimeError.unsupportedFeed("HTTP 403").isPermanentHTTPFailure == true)
+    #expect(RSSRuntimeError.unsupportedFeed("HTTP 410").isPermanentHTTPFailure == true)
+    #expect(RSSRuntimeError.unsupportedFeed("HTTP 500").isPermanentHTTPFailure == false)
+    #expect(RSSRuntimeError.unsupportedFeed("not json feed").isPermanentHTTPFailure == false)
+}
+
+@MainActor
+@Test func rssFeatureScheduledRefreshAutoRemovesPermanentHTTPFailureSource() async throws {
+    let dead = RSSSource(
+        id: RSSSourceID(rawValue: "dead-404"),
+        feedURL: URL(string: "https://dead.example.com/feed.xml")!,
+        displayName: "Dead 404"
+    )
+    let repository = InMemoryRSSSourceRepository(sources: [dead])
+    let runtime = RSSRuntime(
+        repository: repository,
+        cache: InMemoryRSSSourceCache(),
+        fetcher: RSSStaticFetcher(result: .failure(RSSRuntimeError.unsupportedFeed("HTTP 404")))
+    )
+    let model = RSSFeatureModel(runtime: runtime)
+
+    await #expect(throws: RSSRuntimeError.self) {
+        try await model.refreshForScheduledTask(sourceInstanceID: dead.id.rawValue, runID: "run-1")
+    }
+    let remaining = try await repository.source(id: dead.id)
+    #expect(remaining == nil)
+}
+
+@MainActor
+@Test func rssFeatureRefreshAllRemovesAllPermanentFailureSources() async throws {
+    let dead = RSSSource(
+        id: RSSSourceID(rawValue: "dead-403"),
+        feedURL: URL(string: "https://dead.example.com/feed.xml")!,
+        displayName: "Dead 403"
+    )
+    let healthy = RSSSource(
+        id: RSSSourceID(rawValue: "healthy"),
+        feedURL: URL(string: "https://ok.example.com/feed.xml")!,
+        displayName: "Healthy"
+    )
+    let repository = InMemoryRSSSourceRepository(sources: [dead, healthy])
+    let runtime = RSSRuntime(
+        repository: repository,
+        cache: InMemoryRSSSourceCache(),
+        fetcher: RSSStaticFetcher(result: .failure(RSSRuntimeError.unsupportedFeed("HTTP 403")))
+    )
+    let model = RSSFeatureModel(runtime: runtime)
+    // 全部刷新时两个源都会失败（fetch 按 URL 区分：dead 403、healthy 也 403，这里验证
+    // 404/403 自动删除；健康源场景由下面的 URL 分流 fetcher 覆盖）
+    _ = model
+    let summary = try await model.refreshForScheduledTask(sourceInstanceID: nil, runID: "run-2")
+    #expect(summary.contains("removed 2 dead source(s)"))
+    #expect(try await repository.source(id: dead.id) == nil)
+    #expect(try await repository.source(id: healthy.id) == nil)
+}
+
+@MainActor
+@Test func rssFeatureRefreshAllSkipsOnlyDeadSourcesAndKeepsHealthy() async throws {
+    struct URLSwitchingRSSFetcher: RSSFetchAdapter {
+        let failingURL: String
+        let successData: Data
+        func fetch(url: URL, timeoutSeconds: Int) async throws -> Data {
+            if url.absoluteString == failingURL {
+                throw RSSRuntimeError.unsupportedFeed("HTTP 404")
+            }
+            return successData
+        }
+    }
+    let dead = RSSSource(
+        id: RSSSourceID(rawValue: "dead-404"),
+        feedURL: URL(string: "https://dead.example.com/feed.xml")!,
+        displayName: "Dead 404"
+    )
+    let healthy = RSSSource(
+        id: RSSSourceID(rawValue: "healthy"),
+        feedURL: URL(string: "https://ok.example.com/feed.xml")!,
+        displayName: "Healthy"
+    )
+    let repository = InMemoryRSSSourceRepository(sources: [dead, healthy])
+    let runtime = RSSRuntime(
+        repository: repository,
+        cache: InMemoryRSSSourceCache(),
+        fetcher: URLSwitchingRSSFetcher(failingURL: dead.feedURL.absoluteString, successData: rssFixtureXML)
+    )
+    let model = RSSFeatureModel(runtime: runtime)
+
+    let summary = try await model.refreshForScheduledTask(sourceInstanceID: nil, runID: "run-3")
+    #expect(summary.contains("removed 1 dead source(s)"))
+    #expect(try await repository.source(id: dead.id) == nil)
+    #expect(try await repository.source(id: healthy.id) != nil)
+}
 @MainActor
 @Test func rssFeatureRefreshAllNowRefreshesEverySource() async throws {
     let (source, _) = makeRSSFixture()
