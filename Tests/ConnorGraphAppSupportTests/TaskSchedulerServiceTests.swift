@@ -5,6 +5,30 @@ import ConnorGraphAppSupport
 
 @Suite("Task Scheduler Service Tests")
 struct TaskSchedulerServiceTests {
+    @Test func dailyBriefingMissedTodayIsDueAfterLaunch() throws {
+        let scheduler = TaskSchedulerService(calendar: Calendar(identifier: .gregorian))
+        let iso = ISO8601DateFormatter()
+        let runAt = iso.date(from: "2026-07-25T00:30:00Z")!
+        let lastRunAt = iso.date(from: "2026-08-12T00:30:24Z")!
+        let nextRunAt = iso.date(from: "2026-08-13T00:30:00Z")!
+        let now = iso.date(from: "2026-08-13T06:17:52Z")!
+        let briefing = ConnorTaskDefinition(
+            id: "ai.task.83f1523a",
+            name: "每日简报",
+            origin: .ai,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: runAt, recurrence: .daily),
+            target: .createSessionAndSendMessage(message: "简报"),
+            lifecycle: ConnorTaskLifecycle(
+                status: .active,
+                nextRunAt: nextRunAt,
+                lastRunAt: lastRunAt,
+                lastFinishedAt: lastRunAt
+            ),
+            metadata: ConnorTaskMetadata()
+        )
+        #expect(scheduler.dueTasks([briefing], now: now).map(\.id) == [briefing.id])
+    }
+
     @Test func intervalTaskBecomesDueAndSkipsRunningTasks() throws {
         let scheduler = TaskSchedulerService()
         let now = Date(timeIntervalSince1970: 1_000)

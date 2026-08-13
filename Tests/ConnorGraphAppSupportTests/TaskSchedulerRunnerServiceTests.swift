@@ -266,6 +266,42 @@ struct TaskSchedulerRunnerServiceTests {
         #expect(try repository.loadRunHistory(taskID: oneTime.id, limit: 2).map(\.status) == [.cancelled, .running])
     }
 
+
+    @Test func serviceTimesOutHangingRefreshAndRecordsFailure() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        try saveSystemDefaultsAsNotDue(repository: repository, now: Date(timeIntervalSince1970: 2_000))
+        var task = makeRSSRefreshTask(sourceID: "feed-hang", intervalSeconds: 1_800, now: Date(timeIntervalSince1970: 0))
+        task.lifecycle.lastFinishedAt = Date(timeIntervalSince1970: 0)
+        try repository.saveTask(task)
+        let runner = TaskTargetRunner(
+            mailRefresher: { _ in "mail" },
+            calendarRefresher: { _ in "calendar" },
+            rssRefresher: { _ in
+                try await Task.sleep(for: .seconds(1))
+                return "late"
+            },
+            sessionMessenger: { _ in "session" }
+        )
+        let service = TaskSchedulerRunnerService(
+            repository: repository,
+            scheduler: TaskSchedulerService(),
+            runner: runner,
+            refreshTaskTimeoutSeconds: 0.2
+        )
+
+        let outcomes = try await service.runDueTasks(now: Date(timeIntervalSince1970: 2_000))
+        let reloaded = try #require(try repository.loadTask(id: task.id))
+        let history = try repository.loadRunHistory(taskID: task.id, limit: 10)
+
+        #expect(outcomes.count == 1)
+        #expect(outcomes[0].succeeded == false)
+        #expect(outcomes[0].errorMessage?.contains("taskTimedOut") == true)
+        #expect(reloaded.lifecycle.status == .failed)
+        #expect(history.map(\.status) == [.failed, .running])
+    }
+
     private func saveSystemDefaultsAsNotDue(repository: AppTaskManagementRepository, now: Date) throws {
         for var defaultTask in ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)) {
             let interval = defaultTask.trigger.intervalSeconds ?? 600

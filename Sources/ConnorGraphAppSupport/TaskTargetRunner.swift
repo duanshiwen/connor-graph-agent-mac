@@ -53,6 +53,7 @@ public enum TaskTargetRunnerError: Error, Sendable, Equatable, CustomStringConve
     case missingSessionID(String)
     case runCancelled(String)
     case submissionFailed(String)
+    case taskTimedOut
 
     public var description: String {
         switch self {
@@ -61,6 +62,7 @@ public enum TaskTargetRunnerError: Error, Sendable, Equatable, CustomStringConve
         case .missingSessionID(let taskID): "missingSessionID: \(taskID)"
         case .runCancelled(let detail): "runCancelled: \(detail)"
         case .submissionFailed(let detail): "submissionFailed: \(detail)"
+        case .taskTimedOut: "taskTimedOut: 定时任务执行超时，已按失败处理并继续后续任务"
         }
     }
 }
