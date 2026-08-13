@@ -569,13 +569,13 @@ struct CloudKnowledgeCreatorView: View {
                     .controlSize(AppButtonLayout.controlSize)
             }
         case .completed:
+            // 不提供“创建新的发布”直接重置：避免误触丢失当前进度；
+            // 新发布从入口重新发起，历史记录可在“发布历史”中查看/恢复。
             actionBar {
                 Spacer()
-                Button("创建新的发布") {
-                    store.reset()
-                    draft = .init()
-                }
-                .controlSize(AppButtonLayout.controlSize)
+                Text("本次发布已完成，可在“发布历史”中查看或恢复")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         case .cancelled:
             actionBar {
