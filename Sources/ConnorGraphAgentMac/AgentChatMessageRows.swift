@@ -457,11 +457,9 @@ private struct AgentNoteBodyEditorSheet: View {
     var onCancel: () -> Void
     var onSave: (String) async -> Bool
     var onSaved: () -> Void
-    @State private var isSaving = false
 
     private var canSave: Bool {
-        !isSaving
-            && draft != originalContent
+        draft != originalContent
             && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -484,21 +482,16 @@ private struct AgentNoteBodyEditorSheet: View {
             HStack(spacing: AgentChatLayout.spaceS) {
                 Spacer()
                 Button("取消", action: onCancel)
-                    .disabled(isSaving)
                 Button {
-                    isSaving = true
+                    // 立即关窗：不在这里等待 LLM Agent Loop 完成。
+                    onSaved()
+                    // 后台继续：先乐观更新会话首条正文，再跑“分析变化”的 LLM 请求，
+                    // 会话内会渲染正在请求/流式处理的状态。
                     Task { @MainActor in
-                        let saved = await onSave(draft)
-                        isSaving = false
-                        if saved { onSaved() }
+                        _ = await onSave(draft)
                     }
                 } label: {
-                    if isSaving {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Label("保存并分析变化", systemImage: "checkmark")
-                    }
+                    Label("保存并分析变化", systemImage: "checkmark")
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSave)

@@ -108,6 +108,62 @@ struct ComposerInputCommandRouterTests {
         #expect(personCommands.isEmpty)
     }
 
+    @Test func noteModeReturnInsertsNewlineInsteadOfSubmitting() {
+        var didSubmit = false
+        let router = ComposerInputCommandRouter()
+        router.configuration = ComposerTextInputConfiguration(
+            sendShortcut: "return",
+            isSkillPickerPresented: false,
+            onSubmit: { didSubmit = true },
+            onImportFiles: { _ in },
+            isNoteMode: true
+        )
+
+        let handled = router.handleInsertNewline(currentEvent: nil)
+
+        #expect(handled == false)
+        #expect(didSubmit == false)
+    }
+
+    @Test func noteModeCommandReturnDoesNotSubmitEither() throws {
+        var didSubmit = false
+        let router = ComposerInputCommandRouter()
+        router.configuration = ComposerTextInputConfiguration(
+            sendShortcut: "cmd-return",
+            isSkillPickerPresented: false,
+            onSubmit: { didSubmit = true },
+            onImportFiles: { _ in },
+            isNoteMode: true
+        )
+
+        let event = try #require(Self.keyEvent(keyCode: 36, modifierFlags: .command))
+        let handled = router.handleInsertNewline(currentEvent: event)
+
+        #expect(handled == false)
+        #expect(didSubmit == false)
+    }
+
+    @Test func noteModeStillConfirmsPickerWithReturn() {
+        var didSubmit = false
+        var receivedCommand: SkillPickerKeyCommand?
+        let router = ComposerInputCommandRouter()
+        router.configuration = ComposerTextInputConfiguration(
+            sendShortcut: "return",
+            isSkillPickerPresented: false,
+            isPersonMentionPickerPresented: true,
+            onSubmit: { didSubmit = true },
+            onImportFiles: { _ in },
+            onPersonMentionPickerKeyCommand: { receivedCommand = $0 },
+            isNoteMode: true
+        )
+
+        let handled = router.handleInsertNewline(currentEvent: nil)
+
+        #expect(handled == true)
+        #expect(didSubmit == false)
+        #expect(receivedCommand == .confirm)
+    }
+
     @Test func slashAtAnyPositionDoesNotConsumeTextInsertionOrInvokeSynchronously() async throws {
         var didInvokeSlashCommand = false
         let textView = NSTextView()
