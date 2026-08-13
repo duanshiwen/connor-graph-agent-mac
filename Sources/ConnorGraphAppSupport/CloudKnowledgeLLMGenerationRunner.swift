@@ -2,6 +2,18 @@ import Foundation
 import ConnorGraphAgent
 import ConnorGraphCore
 
+/// 线程安全的 trace 序号分配（single-pass 的 emit 闭包需要跨越 async 边界自增序号）。
+private final class CloudKnowledgeTraceSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    func next() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+        return value - 1
+    }
+}
+
 public enum CloudKnowledgeLLMGenerationError: Error, Sendable, Equatable, LocalizedError {
     case toolCallingUnsupported(modelID: String)
     case modelDidNotSearch
@@ -612,6 +624,12 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         ]
         var noExtractRetry = 0
         var iteration = 0
+        let traceSequence = CloudKnowledgeTraceSequence()
+        let emit: @Sendable (CloudKnowledgeExtractionTraceEvent) -> Void = { [trace, traceSequence] base in
+            var event = base
+            event.sequence = traceSequence.next()
+            trace?(event)
+        }
         while iteration < 3 {
             iteration += 1
             let request = AgentModelRequest(
@@ -628,7 +646,38 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     initiator: .background
                 )
             )
-            let response = try await provider.complete(request)
+            let tracedTools = request.tools.map(CloudKnowledgeExtractionToolDefinitionTrace.init)
+            emit(CloudKnowledgeExtractionTraceEvent(
+                sequence: 0,
+                iteration: iteration,
+                kind: .modelRequest,
+                modelID: provider.modelID,
+                messages: request.messages,
+                tools: tracedTools,
+                temperature: request.temperature,
+                messageCharacterCount: request.messages.reduce(0) { $0 + $1.content.count + ($1.toolCalls?.reduce(0) { $0 + $1.name.count + $1.argumentsJSON.count } ?? 0) },
+                toolDefinitionCharacterCount: tracedTools.reduce(0) { $0 + $1.characterCount }
+            ))
+            let response: AgentModelResponse
+            do {
+                response = try await provider.complete(request)
+            } catch {
+                emit(CloudKnowledgeExtractionTraceEvent(
+                    sequence: 0,
+                    iteration: iteration,
+                    kind: .modelError,
+                    modelID: provider.modelID,
+                    error: error.localizedDescription
+                ))
+                throw error
+            }
+            emit(CloudKnowledgeExtractionTraceEvent(
+                sequence: 0,
+                iteration: iteration,
+                kind: .modelResponse,
+                modelID: provider.modelID,
+                response: CloudKnowledgeExtractionModelResponseTrace(response: response)
+            ))
             guard let call = response.toolCalls.first(where: { $0.name == Self.extractToolName }) else {
                 guard noExtractRetry < 2 else {
                     throw CloudKnowledgeLLMGenerationError.modelResponseIncomplete(
@@ -666,7 +715,14 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     continue
                 }
                 do {
-                    if try await stageSinglePassCandidate(candidate, executor: executor, context: executionContext) {
+                    if try await stageSinglePassCandidate(
+                        candidate,
+                        executor: executor,
+                        context: executionContext,
+                        modelID: provider.modelID,
+                        iteration: iteration,
+                        emit: emit
+                    ) {
                         staged += 1
                     } else {
                         skipped += 1
@@ -723,7 +779,10 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
     private func stageSinglePassCandidate(
         _ candidate: CloudKnowledgeExtractionCandidate,
         executor: CloudKnowledgeToolExecutor,
-        context: AgentToolExecutionContext
+        context: AgentToolExecutionContext,
+        modelID: String,
+        iteration: Int,
+        emit: @Sendable (CloudKnowledgeExtractionTraceEvent) -> Void
     ) async throws -> Bool {
         let layer = CloudKnowledgeLayer(rawValue: candidate.layer) ?? .l3
         let decision = CloudKnowledgeDecision(rawValue: candidate.decision) ?? .createNew
@@ -762,7 +821,15 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         var expectedRevisionID = candidate.expectedRevisionID
         if decision == .reviseExisting || decision == .recordTemporalChange {
             if targetIdentityID == nil || expectedRevisionID == nil,
-               let resolved = try await resolveRevisionTarget(candidate, layer: layer, executor: executor, context: context) {
+               let resolved = try await resolveRevisionTarget(
+                   candidate,
+                   layer: layer,
+                   executor: executor,
+                   context: context,
+                   modelID: modelID,
+                   iteration: iteration,
+                   emit: emit
+               ) {
                 searchContextID = resolved.searchContextID
                 if targetIdentityID == nil { targetIdentityID = resolved.identityID }
                 if expectedRevisionID == nil { expectedRevisionID = resolved.revisionID }
@@ -780,12 +847,84 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         if let searchContextID { values["searchContextID"] = .string(searchContextID) }
         if let targetIdentityID { values["targetIdentityID"] = .string(targetIdentityID) }
         if let expectedRevisionID { values["expectedRevisionID"] = .string(expectedRevisionID) }
-        _ = try await executor.execute(
+        _ = try await executeTracedTool(
             toolName: writeTool,
             arguments: AgentToolArguments(values: values),
-            context: context
+            executor: executor,
+            context: context,
+            modelID: modelID,
+            iteration: iteration,
+            emit: emit
         )
         return true
+    }
+
+    /// 包装应用层（单次提取）的工具调用：搜索/写入都发布 toolExecution/toolResult/toolError trace。
+    private func executeTracedTool(
+        toolName: String,
+        arguments: AgentToolArguments,
+        executor: CloudKnowledgeToolExecutor,
+        context: AgentToolExecutionContext,
+        modelID: String,
+        iteration: Int,
+        emit: @Sendable (CloudKnowledgeExtractionTraceEvent) -> Void
+    ) async throws -> AgentToolResult {
+        let toolCall = AgentToolCall(
+            id: "app-\(UUID().uuidString)",
+            runID: context.runID,
+            sessionID: context.sessionID,
+            name: toolName,
+            argumentsJSON: Self.jsonString(fromArguments: arguments.values)
+        )
+        emit(CloudKnowledgeExtractionTraceEvent(
+            sequence: 0,
+            iteration: iteration,
+            kind: .toolExecution,
+            modelID: modelID,
+            toolCall: toolCall
+        ))
+        do {
+            let result = try await executor.execute(toolName: toolName, arguments: arguments, context: context)
+            emit(CloudKnowledgeExtractionTraceEvent(
+                sequence: 0,
+                iteration: iteration,
+                kind: .toolResult,
+                modelID: modelID,
+                toolCall: toolCall,
+                toolResult: result
+            ))
+            return result
+        } catch {
+            emit(CloudKnowledgeExtractionTraceEvent(
+                sequence: 0,
+                iteration: iteration,
+                kind: .toolError,
+                modelID: modelID,
+                toolCall: toolCall,
+                error: error.localizedDescription
+            ))
+            throw error
+        }
+    }
+
+    private static func jsonString(fromArguments values: [String: SendableJSONValue]) -> String {
+        func jsonAny(_ value: SendableJSONValue) -> Any {
+            switch value {
+            case .string(let value): return value
+            case .int(let value): return value
+            case .double(let value): return value
+            case .bool(let value): return value
+            case .null: return NSNull()
+            case .object(let dictionary): return dictionary.mapValues(jsonAny)
+            case .array(let array): return array.map(jsonAny)
+            }
+        }
+        let object = values.mapValues(jsonAny)
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return text
     }
 
     private struct ResolvedRevisionTarget: Sendable {
@@ -799,14 +938,21 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         _ candidate: CloudKnowledgeExtractionCandidate,
         layer: CloudKnowledgeLayer,
         executor: CloudKnowledgeToolExecutor,
-        context: AgentToolExecutionContext
+        context: AgentToolExecutionContext,
+        modelID: String,
+        iteration: Int,
+        emit: @Sendable (CloudKnowledgeExtractionTraceEvent) -> Void
     ) async throws -> ResolvedRevisionTarget? {
         let searchTool = layer == .l2 ? "cloud_kb_recent_context" : "cloud_kb_knowledge_context"
         let query = candidate.semanticTerms.joined(separator: " ")
-        let result = try await executor.execute(
+        let result = try await executeTracedTool(
             toolName: searchTool,
             arguments: AgentToolArguments(values: ["query": .string(query), "limit": .int(10)]),
-            context: context
+            executor: executor,
+            context: context,
+            modelID: modelID,
+            iteration: iteration,
+            emit: emit
         )
         guard let contentJSON = result.contentJSON,
               let data = contentJSON.data(using: .utf8),
