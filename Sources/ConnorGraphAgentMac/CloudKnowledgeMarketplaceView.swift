@@ -228,6 +228,8 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
     @State private var selectedCategoryID: String?
     @State private var isPresentingEditor = false
     @State private var isConfirmingDelete = false
+    @State private var isPresentingPublishingAgreement = false
+    @State private var publishErrorMessage: String?
 
     var body: some View {
         Group {
@@ -269,6 +271,19 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
             }
             .frame(minWidth: 760, idealWidth: 840, minHeight: 620, idealHeight: 700)
             .background(Color(nsColor: .windowBackgroundColor))
+        }
+        .sheet(isPresented: $isPresentingPublishingAgreement) {
+            KnowledgeBasePublishingAgreementSheet {
+                Task {
+                    if let id = await creatorStore.publishKnowledgeBase(termsAccepted: true) {
+                        publishErrorMessage = nil
+                        await store.load()
+                        await store.loadDetail(id: id)
+                    } else {
+                        publishErrorMessage = creatorStore.errorMessage ?? "发布失败，请稍后重试"
+                    }
+                }
+            }
         }
         .confirmationDialog("删除知识库？", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
             Button("删除知识库", role: .destructive) {
@@ -440,6 +455,17 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                         // 所有者管理组：编辑 · 下架（仅已发布） · 删除，次要操作成组、破坏性操作放组尾并需确认。
                         if base.owned {
                             HStack(spacing: 8) {
+                                if base.publicationStatus != "published" {
+                                    Button("发布到市场") {
+                                        Task {
+                                            publishErrorMessage = nil
+                                            await creatorStore.prepareForEdit(id: base.id)
+                                            isPresentingPublishingAgreement = true
+                                        }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .help("发布到知识市场前需同意发布协议")
+                                }
                                 Button("编辑") {
                                     Task {
                                         await creatorStore.prepareForEdit(id: base.id)
@@ -462,6 +488,11 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                                 Button("删除", role: .destructive) { isConfirmingDelete = true }
                                     .buttonStyle(.bordered)
                                     .help("删除知识库")
+                            }
+                            if let publishErrorMessage {
+                                Label(publishErrorMessage, systemImage: "exclamationmark.triangle")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
                             }
                         }
                     }
