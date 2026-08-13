@@ -19,6 +19,8 @@ final class ChatRunCoordinator {
     private var timelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
     private var isShutdown = false
     private var generation = 0
+    private var pendingTimelineFlushBySession: [String: Task<Void, Never>] = [:]
+    private let timelineFlushInterval: Duration = .milliseconds(50)
     private(set) var managerRevision = 0
 
     @ObservationIgnored var selectedSessionID: () -> String? = { nil }
@@ -230,11 +232,31 @@ final class ChatRunCoordinator {
         return pendingCancellationReasons[sessionID]
     }
 
+    /// 实时事件先入存储，再以 ~50ms 合并刷新可见时间线：避免逐 token 触发
+    /// 全量 UI 重渲染与整轮摘要/工具明细重建（模型请求期间 CPU 高企的主因之一）。
     func appendEvent(_ presentation: AgentEventPresentation, sessionID: String) {
         guard !isShutdown else { return }
         var timeline = timelinesBySessionID[sessionID] ?? []
         timeline.append(presentation)
-        setTimeline(timeline, sessionID: sessionID)
+        timelinesBySessionID[sessionID] = timeline
+        scheduleTimelineFlush(sessionID: sessionID)
+    }
+
+    private func scheduleTimelineFlush(sessionID: String) {
+        guard pendingTimelineFlushBySession[sessionID] == nil else { return }
+        let task = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: self?.timelineFlushInterval ?? .milliseconds(50))
+            guard let self, !self.isShutdown else { return }
+            self.pendingTimelineFlushBySession[sessionID] = nil
+            self.flushTimeline(sessionID: sessionID)
+        }
+        pendingTimelineFlushBySession[sessionID] = task
+    }
+
+    private func flushTimeline(sessionID: String) {
+        guard let timeline = timelinesBySessionID[sessionID] else { return }
+        if selectedSessionID() == sessionID { replaceVisibleTimeline(timeline) }
+        onTimelineChanged(sessionID, timeline)
     }
 
     func setTimeline(_ timeline: [AgentEventPresentation], sessionID: String) {
