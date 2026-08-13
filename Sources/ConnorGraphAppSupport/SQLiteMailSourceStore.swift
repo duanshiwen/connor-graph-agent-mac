@@ -335,6 +335,14 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         return rows.map { MailMessageID(rawValue: $0[0]) }
     }
 
+    /// 返回本地缓存中还没有可搜索正文的邮件（列表同步只拉取头部/摘要，正文按需或后台回填）。
+    /// 按时间倒序取最新 `limit` 封，避免一次性回填过多占用服务器与网络。
+    public func messagesMissingBody(limit: Int) async throws -> [MailMessageDetail] {
+        let capped = max(1, min(limit, 2000))
+        let rows = try querySQL("SELECT raw_json FROM mail_messages WHERE body_plain IS NULL OR body_plain = '' ORDER BY date DESC LIMIT \(capped)")
+        return try rows.map { try decoder.decode(MailMessageDetail.self, from: Data($0[0].utf8)) }
+    }
+
     public func clearCachedMailData() async throws {
         try execute("BEGIN TRANSACTION;")
         do {
