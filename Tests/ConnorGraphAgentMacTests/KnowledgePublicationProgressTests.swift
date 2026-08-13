@@ -60,9 +60,11 @@ struct KnowledgePublicationProgressTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let creatorSource = try String(contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/CloudKnowledgeCreatorView.swift"), encoding: .utf8)
-        // 完成态不应再有“创建新的发布”直接 reset 的按钮，避免误触丢失进度。
+        // 完成/取消态不应再有 reset/恢复类操作，避免误触丢失进度；发布入口只保留“同意并发布”。
         #expect(!creatorSource.contains("Button(\"创建新的发布\")"))
-        #expect(creatorSource.contains("可在“发布历史”中查看或恢复"))
+        #expect(!creatorSource.contains("Button(\"重新开始\")"))
+        #expect(!creatorSource.contains("可在“发布历史”中查看或恢复"))
+        #expect(creatorSource.contains("同意并发布"))
     }
 
     @Test func pendingPublicationHasVisibleAutomaticCommitFallback() throws {

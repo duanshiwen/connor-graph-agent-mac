@@ -380,15 +380,19 @@ struct CloudKnowledgeCreatorView: View {
                     Spacer()
                     Button("下架") { Task { await store.unpublishKnowledgeBase() } }
                         .disabled(store.currentPublicationStatusLabel != "published")
-                    Button("即时发布") {
-                        Task {
-                            if let id = await store.publishKnowledgeBase(termsAccepted: creatorTermsAccepted) {
-                                onPublished?(id)
+                    Button("同意并发布") {
+                        if !creatorTermsAccepted {
+                            isPresentingPublishingAgreement = true
+                        } else {
+                            Task {
+                                if let id = await store.publishKnowledgeBase(termsAccepted: creatorTermsAccepted) {
+                                    onPublished?(id)
+                                }
                             }
                         }
                     }
                         .buttonStyle(.borderedProminent)
-                        .disabled(!canPublish)
+                        .disabled(!canRequestPublish)
                 }
             } else {
                 Button("查看《知识库发布协议》") {
@@ -569,23 +573,15 @@ struct CloudKnowledgeCreatorView: View {
                     .controlSize(AppButtonLayout.controlSize)
             }
         case .completed:
-            // 不提供“创建新的发布”直接重置：避免误触丢失当前进度；
-            // 新发布从入口重新发起，历史记录可在“发布历史”中查看/恢复。
+            // 完成态只引导发布（见 publicationFooter），不提供“重新开始/恢复/创建新的发布”等误导操作。
             actionBar {
                 Spacer()
-                Text("本次发布已完成，可在“发布历史”中查看或恢复")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         case .cancelled:
+            // 取消态同样不提供“重新开始”重置：避免误触丢失进度，需要重新发起请从入口进入。
             actionBar {
                 Label("发布已取消；未提交的 Run 可由后端 abandon。", systemImage: "xmark.circle")
                 Spacer()
-                Button("重新开始") {
-                    store.reset()
-                    draft = .init()
-                }
-                .controlSize(AppButtonLayout.controlSize)
             }
         }
     }
@@ -603,13 +599,17 @@ struct CloudKnowledgeCreatorView: View {
             .symbolRenderingMode(.hierarchical)
     }
 
+    /// 未勾选协议也可点击“同意并发布”（点击后先弹协议）；勾选后才真正可发布。
     private var canPublish: Bool {
+        canRequestPublish && creatorTermsAccepted
+    }
+
+    private var canRequestPublish: Bool {
         // 只有知识已提交完成（completed）且确实选择了会话/生成了知识才允许发布；
         // 未选择知识或尚未提交完成的阶段，发布按钮不可用/不可见。
         store.snapshot.stage == .completed
             && store.snapshot.knowledgeBaseID != nil
             && !store.snapshot.selectedConversationIDs.isEmpty
-            && creatorTermsAccepted
             && store.snapshot.latestKnowledgeBaseDetail?.visibility == "public"
             && !["deleting", "deleted"].contains(store.snapshot.latestKnowledgeBaseDetail?.lifecycleStatus ?? "")
             && store.currentEnforcementStatusLabel != "taken_down"
