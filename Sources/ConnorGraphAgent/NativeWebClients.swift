@@ -1,5 +1,6 @@
 import Foundation
 import ConnorGraphCore
+import os.log
 
 public struct NativeWebHTTPResponse: Sendable, Equatable {
     public var data: Data
@@ -49,13 +50,94 @@ public struct NativeWebFetchResult: Sendable, Equatable {
     public var originalCharacterCount: Int
 }
 
+/// Retry policy for transient web_fetch failures.
+///
+/// Implements the industry-recommended capped exponential backoff with full
+/// jitter (Google Cloud / AWS guidance): only transient failures are retried
+/// (network errors, timeouts, 408/409/425/429/5xx); 4xx business errors fail
+/// immediately. The sleep before each retry is uniform in [0, cappedDelay],
+/// so concurrent retries spread out instead of thundering together.
+public struct NativeWebRetryPolicy: Sendable, Equatable {
+    /// Number of retries after the initial attempt (total attempts = retryCount + 1).
+    public var retryCount: Int
+    /// Base delay before the first retry.
+    public var initialDelay: TimeInterval
+    /// Upper bound for the backoff delay.
+    public var maximumDelay: TimeInterval
+    /// Exponential growth factor per retry.
+    public var delayMultiplier: Double
+
+    /// Default policy: 5 retries, 0.5s -> 1s -> 2s -> 4s -> 8s capped at 16s.
+    public static let standard = NativeWebRetryPolicy(
+        retryCount: 5,
+        initialDelay: 0.5,
+        maximumDelay: 16.0,
+        delayMultiplier: 2.0
+    )
+
+    public init(
+        retryCount: Int = 5,
+        initialDelay: TimeInterval = 0.5,
+        maximumDelay: TimeInterval = 16.0,
+        delayMultiplier: Double = 2.0
+    ) {
+        self.retryCount = max(0, retryCount)
+        self.initialDelay = max(0, initialDelay)
+        self.maximumDelay = max(0, maximumDelay)
+        self.delayMultiplier = max(1.0, delayMultiplier)
+    }
+
+    /// 408/409/425/429/5xx are transient; all other status codes are permanent.
+    public func isTransientStatus(_ status: Int) -> Bool {
+        switch status {
+        case 408, 409, 425, 429, 500...599:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Only transport-level failures are retried. Invalid URLs, unsupported
+    /// schemes and other permanent errors fail immediately.
+    public func isTransientError(_ error: any Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
+             .dnsLookupFailed, .notConnectedToInternet, .internationalRoamingOff,
+             .callIsActive, .dataNotAllowed, .secureConnectionFailed,
+             .cannotLoadFromNetwork, .resourceUnavailable, .badServerResponse,
+             .serverCertificateHasBadDate, .serverCertificateUntrusted,
+             .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid,
+             .httpTooManyRedirects, .cannotParseResponse, .cannotDecodeContentData,
+             .cannotDecodeRawData:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Full-jitter backoff: the delay is uniform in [0, cappedDelay].
+    public func delay(afterAttempt attempt: Int) -> TimeInterval {
+        let exponent = Double(max(0, attempt - 1))
+        let cap = min(maximumDelay, initialDelay * pow(delayMultiplier, exponent))
+        return Double.random(in: 0...cap)
+    }
+}
+
 public struct NativeWebFetchClient: Sendable {
     private let httpClient: any NativeWebHTTPClient
     private let maxCharacters: Int
+    private let retryPolicy: NativeWebRetryPolicy
+    private let logger = Logger(subsystem: "com.connor.agent", category: "web-fetch")
 
-    public init(httpClient: any NativeWebHTTPClient = URLSessionNativeWebHTTPClient(), maxCharacters: Int = 50_000) {
+    public init(
+        httpClient: any NativeWebHTTPClient = URLSessionNativeWebHTTPClient(),
+        maxCharacters: Int = 50_000,
+        retryPolicy: NativeWebRetryPolicy = .standard
+    ) {
         self.httpClient = httpClient
         self.maxCharacters = max(1_000, maxCharacters)
+        self.retryPolicy = retryPolicy
     }
 
     public func fetch(urlString: String, extractMode: String, timeoutMilliseconds: Int) async throws -> NativeWebFetchResult {
@@ -68,29 +150,52 @@ public struct NativeWebFetchClient: Sendable {
         request.setValue("ConnorGraphAgent/1.0 (+https://local-agent)", forHTTPHeaderField: "User-Agent")
         request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5", forHTTPHeaderField: "Accept")
 
-        let response = try await httpClient.data(for: request)
-        guard (200..<400).contains(response.statusCode) else {
-            throw AgentToolError.invalidArguments("web_fetch failed with HTTP status \(response.statusCode)")
+        // Overall operation is already bounded by WebFetchDeadline in the tool
+        // layer, so retries here can only happen while that deadline is alive.
+        let totalAttempts = 1 + retryPolicy.retryCount
+        var lastTransientError: (any Error)?
+        for attempt in 1...totalAttempts {
+            do {
+                let response = try await httpClient.data(for: request)
+                let status = response.statusCode
+                if retryPolicy.isTransientStatus(status), attempt < totalAttempts {
+                    lastTransientError = AgentToolError.invalidArguments("web_fetch failed with transient HTTP status \(status)")
+                } else {
+                    guard (200..<400).contains(status) else {
+                        throw AgentToolError.invalidArguments("web_fetch failed with HTTP status \(status)")
+                    }
+
+                    let decoded = WebPageDecodingSupport.decodeWebPageText(data: response.data, responseEncodingName: response.textEncodingName)
+                    let title = NativeWebTextExtractor.title(from: decoded.text)
+                    let markdown = NativeWebTextExtractor.markdown(from: decoded.text, baseURL: response.finalURL ?? url)
+                    let plainText = NativeWebTextExtractor.plainText(fromMarkdown: markdown)
+                    let selected = extractMode.lowercased() == "text" ? plainText : markdown
+                    let truncatedText = String(selected.prefix(maxCharacters))
+
+                    return NativeWebFetchResult(
+                        urlString: url.absoluteString,
+                        finalURLString: (response.finalURL ?? url).absoluteString,
+                        title: title,
+                        contentText: truncatedText,
+                        statusCode: response.statusCode,
+                        mimeType: response.mimeType ?? "unknown",
+                        engine: "native-urlsession",
+                        truncated: selected.count > maxCharacters,
+                        originalCharacterCount: selected.count
+                    )
+                }
+            } catch {
+                guard attempt < totalAttempts, retryPolicy.isTransientError(error) else {
+                    throw error
+                }
+                lastTransientError = error
+            }
+            try Task.checkCancellation()
+            let delay = retryPolicy.delay(afterAttempt: attempt)
+            logger.warning("web_fetch retrying \(url.absoluteString) attempt \(attempt)/\(totalAttempts) after \(String(format: "%.2f", delay))s: \(String(describing: lastTransientError))")
+            try await Task.sleep(for: .seconds(delay))
         }
-
-        let decoded = WebPageDecodingSupport.decodeWebPageText(data: response.data, responseEncodingName: response.textEncodingName)
-        let title = NativeWebTextExtractor.title(from: decoded.text)
-        let markdown = NativeWebTextExtractor.markdown(from: decoded.text, baseURL: response.finalURL ?? url)
-        let plainText = NativeWebTextExtractor.plainText(fromMarkdown: markdown)
-        let selected = extractMode.lowercased() == "text" ? plainText : markdown
-        let truncatedText = String(selected.prefix(maxCharacters))
-
-        return NativeWebFetchResult(
-            urlString: url.absoluteString,
-            finalURLString: (response.finalURL ?? url).absoluteString,
-            title: title,
-            contentText: truncatedText,
-            statusCode: response.statusCode,
-            mimeType: response.mimeType ?? "unknown",
-            engine: "native-urlsession",
-            truncated: selected.count > maxCharacters,
-            originalCharacterCount: selected.count
-        )
+        throw lastTransientError ?? AgentToolError.invalidArguments("web_fetch failed after \(totalAttempts) attempts")
     }
 }
 
