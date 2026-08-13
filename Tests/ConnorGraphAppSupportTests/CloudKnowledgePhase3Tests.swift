@@ -513,6 +513,67 @@ struct CloudKnowledgePhase3Tests {
         #expect(operations.map(\.payload["stable_key"]) == [.string("connor-single"), .string("alice")])
     }
 
+    @Test func singlePassReviseWithoutIdsAutoSearchesAndStages() async throws {
+        let api = CloudKnowledgeRevisionResolvingAPI()
+        let provider = AnyAgentModelProvider(
+            modelID: "single-pass-revise",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: true, supportsVision: false),
+            complete: { request in try await CloudKnowledgeSinglePassCandidateProvider(
+                extractJSON: #"{"operations":[{"layer":"L3","decision":"revise_existing","semanticTerms":["Connor"],"kind":"reusable_knowledge","stableKey":"connor-revise","validFrom":"2026-07-16T00:00:00Z","payload":{"title":"Connor","text":"updated"}}]}"#
+            ).complete(request) }
+        )
+        let session = AgentSession(id: "conversation-revise", title: "Revise", messages: [
+            AgentMessage(role: .user, content: "Connor 是知识库助手。"),
+            AgentMessage(role: .assistant, content: "好的。")
+        ])
+
+        let result = try await CloudKnowledgeLLMGenerationRunner().generateSinglePass(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider
+        )
+
+        #expect(result.summary.contains("落地 1 项"))
+        let operations = await api.operations
+        #expect(operations.count == 1)
+        #expect(operations.first?.searchContextID == "search-ctx-1")
+        #expect(operations.first?.targetIdentityID == "identity-1")
+        #expect(operations.first?.expectedRevisionID == "revision-1")
+        #expect(await api.searchQueries == ["Connor"])
+    }
+
+    @Test func singlePassReviseUnresolvableSkipsInsteadOfFailing() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let provider = AnyAgentModelProvider(
+            modelID: "single-pass-revise-skip",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: true, supportsVision: false),
+            complete: { request in try await CloudKnowledgeSinglePassCandidateProvider(
+                extractJSON: #"{"operations":[{"layer":"L3","decision":"revise_existing","semanticTerms":["Connor"],"kind":"reusable_knowledge","stableKey":"connor-revise","validFrom":"2026-07-16T00:00:00Z","payload":{"title":"Connor","text":"updated"}}]}"#
+            ).complete(request) }
+        )
+        let session = AgentSession(id: "conversation-revise-skip", title: "Revise Skip", messages: [
+            AgentMessage(role: .user, content: "Connor 是知识库助手。"),
+            AgentMessage(role: .assistant, content: "好的。")
+        ])
+
+        let result = try await CloudKnowledgeLLMGenerationRunner().generateSinglePass(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider
+        )
+
+        // 检索结果没有 revision 时无法修订：跳过该候选，而不是反复失败导致暂停。
+        #expect(result.summary.contains("跳过 1 项"))
+        #expect(result.summary.contains("失败 0 项"))
+        #expect(await api.operations.isEmpty)
+    }
+
     @Test func repeatedToolErrorKeepsBoundedDiagnosticForRecovery() {
         let longMessage = String(repeating: "invalid payload ", count: 30)
         let bounded = String(longMessage.prefix(240))
@@ -734,6 +795,59 @@ private actor AmbiguousCloudKnowledgeAPI: CloudKnowledgeAPI {
     func abandon(runID: String) async throws {}
     func search(knowledgeBaseID: String, channel: CloudKnowledgeSearchChannel, request: CloudKnowledgeSearchRequest) async throws -> CloudKnowledgeSearchResponse {
         .init(searchContextID: "search-\(stagedSequence)", channel: channel, baseSequence: 0, stagedSequence: stagedSequence, results: [])
+    }
+    func existingStableKeys(knowledgeBaseID: String) async throws -> Set<String> { [] }
+}
+
+private actor CloudKnowledgeSinglePassCandidateProvider {
+    var requestCount = 0
+    let extractJSON: String
+
+    init(extractJSON: String) {
+        self.extractJSON = extractJSON
+    }
+
+    func complete(_ request: AgentModelRequest) throws -> AgentModelResponse {
+        requestCount += 1
+        return AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "extract", name: "cloud_knowledge_extract", argumentsJSON: extractJSON)],
+            finishReason: .toolCalls
+        )
+    }
+}
+
+/// 检索返回带 identity/revision 的既有条目，用于验证 revise 自动搜索补齐。
+private actor CloudKnowledgeRevisionResolvingAPI: CloudKnowledgeAPI {
+    var stagedSequence = 0
+    var operations: [CloudKnowledgeOperation] = []
+    var searchQueries: [String] = []
+
+    func createPublicationRun(knowledgeBaseID: String, request: CloudKnowledgeCreateRunRequest) async throws -> CloudKnowledgePublicationRun {
+        .init(id: "run", knowledgeBaseID: knowledgeBaseID, clientRunID: request.clientRunID, expectedBaseSequence: request.expectedBaseSequence)
+    }
+    func publicationRun(id: String) async throws -> CloudKnowledgePublicationRun {
+        .init(id: id, knowledgeBaseID: "kb", clientRunID: "client", expectedBaseSequence: 4, currentStagedSequence: stagedSequence, status: .staging)
+    }
+    func appendOperations(runID: String, request: CloudKnowledgeOperationBatchRequest) async throws -> CloudKnowledgeOperationBatchResponse {
+        operations += request.operations
+        stagedSequence += 1
+        return .init(acceptedOperationIDs: request.operations.map(\.operationID), stagedSequence: stagedSequence)
+    }
+    func validate(runID: String) async throws -> CloudKnowledgeValidationResult {
+        .init(valid: true, issues: [], stagedSequence: stagedSequence)
+    }
+    func rebase(runID: String, request: CloudKnowledgeRebaseRequest) async throws -> CloudKnowledgePublicationRun {
+        .init(id: runID, knowledgeBaseID: "kb", clientRunID: "client", expectedBaseSequence: request.expectedBaseSequence, currentStagedSequence: stagedSequence)
+    }
+    func commit(runID: String) async throws -> CloudKnowledgeCommitResult {
+        .init(publicationRunID: runID, knowledgeSequence: 5, indexedSequence: 5)
+    }
+    func abandon(runID: String) async throws {}
+    func search(knowledgeBaseID: String, channel: CloudKnowledgeSearchChannel, request: CloudKnowledgeSearchRequest) async throws -> CloudKnowledgeSearchResponse {
+        searchQueries.append(request.query)
+        let hit = CloudKnowledgeSearchHit(identityID: "identity-1", revisionID: "revision-1", layer: .l3, kind: "reusable_knowledge", text: "Existing knowledge")
+        return .init(searchContextID: "search-ctx-1", channel: channel, baseSequence: 4, stagedSequence: stagedSequence, expiresAt: Date().addingTimeInterval(600), results: [hit])
     }
     func existingStableKeys(knowledgeBaseID: String) async throws -> Set<String> { [] }
 }
