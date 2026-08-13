@@ -666,8 +666,11 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     continue
                 }
                 do {
-                    try await stageSinglePassCandidate(candidate, executor: executor, context: executionContext)
-                    staged += 1
+                    if try await stageSinglePassCandidate(candidate, executor: executor, context: executionContext) {
+                        staged += 1
+                    } else {
+                        skipped += 1
+                    }
                 } catch {
                     failed += 1
                     lastError = String(((error as? AgentToolError)?.description ?? error.localizedDescription).prefix(240))
@@ -716,12 +719,14 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         )
     }
 
+    /// 返回 true 表示已落地，false 表示候选被跳过（如 revise 目标无法在知识库中解析）。
     private func stageSinglePassCandidate(
         _ candidate: CloudKnowledgeExtractionCandidate,
         executor: CloudKnowledgeToolExecutor,
         context: AgentToolExecutionContext
-    ) async throws {
+    ) async throws -> Bool {
         let layer = CloudKnowledgeLayer(rawValue: candidate.layer) ?? .l3
+        let decision = CloudKnowledgeDecision(rawValue: candidate.decision) ?? .createNew
         let writeTool: String
         switch layer {
         case .l2:
@@ -749,17 +754,72 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         if let name = candidate.payload?.name { inner["name"] = .string(name) }
         if !inner.isEmpty { payload["payload"] = .object(inner) }
 
+        // 搜索上下文可选（后端同规则）：create_new 直接落地，不需要先搜索；
+        // revise/record_temporal_change 缺少目标 ID 时，应用层自动搜索一次补齐（“有时候搜索”），
+        // 仍解析不到则跳过该候选而不是反复失败。
+        var searchContextID: String?
+        var targetIdentityID = candidate.targetIdentityID
+        var expectedRevisionID = candidate.expectedRevisionID
+        if decision == .reviseExisting || decision == .recordTemporalChange {
+            if targetIdentityID == nil || expectedRevisionID == nil,
+               let resolved = try await resolveRevisionTarget(candidate, layer: layer, executor: executor, context: context) {
+                searchContextID = resolved.searchContextID
+                if targetIdentityID == nil { targetIdentityID = resolved.identityID }
+                if expectedRevisionID == nil { expectedRevisionID = resolved.revisionID }
+            }
+            guard targetIdentityID != nil, expectedRevisionID != nil else {
+                return false
+            }
+        }
+
         var values: [String: SendableJSONValue] = [
             "decision": .string(candidate.decision),
             "semanticTerms": .array(candidate.semanticTerms.map { .string($0) }),
             "payload": .object(payload)
         ]
-        if let targetIdentityID = candidate.targetIdentityID { values["targetIdentityID"] = .string(targetIdentityID) }
-        if let expectedRevisionID = candidate.expectedRevisionID { values["expectedRevisionID"] = .string(expectedRevisionID) }
+        if let searchContextID { values["searchContextID"] = .string(searchContextID) }
+        if let targetIdentityID { values["targetIdentityID"] = .string(targetIdentityID) }
+        if let expectedRevisionID { values["expectedRevisionID"] = .string(expectedRevisionID) }
         _ = try await executor.execute(
             toolName: writeTool,
             arguments: AgentToolArguments(values: values),
             context: context
+        )
+        return true
+    }
+
+    private struct ResolvedRevisionTarget: Sendable {
+        var searchContextID: String
+        var identityID: String
+        var revisionID: String
+    }
+
+    /// 为 revise/record_temporal_change 候选自动检索目标层，解析既有 identity/revision。
+    private func resolveRevisionTarget(
+        _ candidate: CloudKnowledgeExtractionCandidate,
+        layer: CloudKnowledgeLayer,
+        executor: CloudKnowledgeToolExecutor,
+        context: AgentToolExecutionContext
+    ) async throws -> ResolvedRevisionTarget? {
+        let searchTool = layer == .l2 ? "cloud_kb_recent_context" : "cloud_kb_knowledge_context"
+        let query = candidate.semanticTerms.joined(separator: " ")
+        let result = try await executor.execute(
+            toolName: searchTool,
+            arguments: AgentToolArguments(values: ["query": .string(query), "limit": .int(10)]),
+            context: context
+        )
+        guard let contentJSON = result.contentJSON,
+              let data = contentJSON.data(using: .utf8),
+              let response = try? cloudKnowledgeDecoder().decode(CloudKnowledgeSearchResponse.self, from: data)
+        else { return nil }
+        let hit = response.results.first(where: { hit in
+            hit.identityID != nil && hit.revisionID != nil && (candidate.targetIdentityID == nil || hit.identityID == candidate.targetIdentityID)
+        }) ?? response.results.first(where: { $0.identityID != nil && $0.revisionID != nil })
+        guard let hit, let identityID = hit.identityID, let revisionID = hit.revisionID else { return nil }
+        return ResolvedRevisionTarget(
+            searchContextID: response.searchContextID,
+            identityID: identityID,
+            revisionID: revisionID
         )
     }
 
