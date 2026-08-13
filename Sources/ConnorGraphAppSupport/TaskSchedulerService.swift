@@ -18,11 +18,23 @@ public struct TaskSchedulerService: Sendable {
                 return dueDate <= now
             }
             .sorted { lhs, rhs in
+                let leftPriority = executionPriority(lhs)
+                let rightPriority = executionPriority(rhs)
+                if leftPriority != rightPriority { return leftPriority < rightPriority }
                 let left = effectiveDueDate(for: lhs, now: now) ?? .distantFuture
                 let right = effectiveDueDate(for: rhs, now: now) ?? .distantFuture
                 if left != right { return left < right }
                 return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
+    }
+
+    /// 执行优先级：会话消息/记忆管道等用户可感知任务优先于 RSS/邮件/日历等源刷新，
+    /// 避免积压的源刷新任务（可能卡死）饿死每日简报等定时任务。
+    private func executionPriority(_ task: ConnorTaskDefinition) -> Int {
+        switch task.target.targetKind {
+        case "session.ai", "memory_os.pipeline": return 0
+        default: return 1
+        }
     }
 
     public func computeNextRunAt(task: ConnorTaskDefinition, after date: Date) -> Date? {

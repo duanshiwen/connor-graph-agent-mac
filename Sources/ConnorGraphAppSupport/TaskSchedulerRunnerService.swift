@@ -23,6 +23,7 @@ public struct TaskSchedulerRunnerService: Sendable {
     public var runner: TaskTargetRunner
     /// 源刷新类任务（RSS/邮件/日历）的单次执行超时；超时按失败处理并继续后续任务，
     /// 避免一个卡死的刷新阻塞整轮定时调度（简报等会话任务因此永远排不上）。
+    /// 5 秒足够：RSS/邮件/日历正常刷新很快，长时间无响应基本就是网络卡死或源不可达。
     public var refreshTaskTimeoutSeconds: TimeInterval
     /// 其余任务（新建会话/记忆管道等）的超时；新建会话类任务创建后即返回，通常用不到。
     public var generationTaskTimeoutSeconds: TimeInterval
@@ -31,7 +32,7 @@ public struct TaskSchedulerRunnerService: Sendable {
         repository: AppTaskManagementRepository,
         scheduler: TaskSchedulerService = TaskSchedulerService(),
         runner: TaskTargetRunner,
-        refreshTaskTimeoutSeconds: TimeInterval = 120,
+        refreshTaskTimeoutSeconds: TimeInterval = 5,
         generationTaskTimeoutSeconds: TimeInterval = 600
     ) {
         self.repository = repository

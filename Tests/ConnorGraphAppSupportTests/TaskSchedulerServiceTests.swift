@@ -5,6 +5,31 @@ import ConnorGraphAppSupport
 
 @Suite("Task Scheduler Service Tests")
 struct TaskSchedulerServiceTests {
+
+    @Test func sessionMessageTaskSortsBeforeEarlierDueRefreshTasks() throws {
+        let scheduler = TaskSchedulerService()
+        let now = Date(timeIntervalSince1970: 1_000)
+        // RSS 到期更早（800），但会话消息类任务必须优先执行，避免被积压刷新饿死。
+        let rss = ConnorTaskDefinition(
+            id: "system.rss.source.feed-a.refresh",
+            name: "检查 RSS：Feed A",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: .sourceRuntimeRefresh(sourceID: "rss"),
+            lifecycle: ConnorTaskLifecycle(status: .active, nextRunAt: Date(timeIntervalSince1970: 800), lastFinishedAt: Date(timeIntervalSince1970: 200)),
+            metadata: .protectedSystem
+        )
+        let briefing = ConnorTaskDefinition(
+            id: "ai.task.briefing",
+            name: "每日简报",
+            origin: .ai,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: Date(timeIntervalSince1970: 100), recurrence: .daily),
+            target: .createSessionAndSendMessage(message: "简报"),
+            lifecycle: ConnorTaskLifecycle(status: .active, nextRunAt: Date(timeIntervalSince1970: 900), lastFinishedAt: Date(timeIntervalSince1970: 300)),
+            metadata: ConnorTaskMetadata()
+        )
+        #expect(scheduler.dueTasks([rss, briefing], now: now).map(\.id) == [briefing.id, rss.id])
+    }
     @Test func dailyBriefingMissedTodayIsDueAfterLaunch() throws {
         let scheduler = TaskSchedulerService(calendar: Calendar(identifier: .gregorian))
         let iso = ISO8601DateFormatter()
