@@ -5,6 +5,21 @@ import ConnorGraphAgent
 
 @Suite("Native Source Reference Tool Hook Tests")
 struct NativeSourceReferenceToolHookTests {
+    @Test func rssAddSourceToolReturnsInvalidFeedGuidanceWithoutThrowing() async throws {
+        var runtime = RSSRuntimeFixture(items: [], details: [:])
+        runtime.addFailure = DeadFeedError()
+        let tool = RSSAddSourceTool(runtime: runtime)
+
+        let result = try await tool.execute(
+            arguments: try AgentToolArguments(json: "{\"feedURL\":\"https://dead.example.com/feed.xml\"}"),
+            context: Self.context(toolCallID: "call-rss-add")
+        )
+
+        #expect(result.contentText.contains("该 RSS 源无效"))
+        #expect(result.contentText.contains("不要再重试"))
+        #expect(result.contentText.contains("不要修改链接"))
+    }
+
     @Test func mailGetMessageRecordsDetailReference() async throws {
         let recorder = SpyNativeSourceReferenceRecorder()
         let summary = Self.mailSummary(id: "message-1", subject: "Memory OS Mail")
@@ -212,12 +227,20 @@ private struct MailRuntimeFixture: AgentMailRuntime {
     }
 }
 
+private struct DeadFeedError: Error, LocalizedError {
+    var errorDescription: String? { "HTTP 404" }
+}
+
 private struct RSSRuntimeFixture: AgentRSSRuntime {
     var items: [RSSItemSummary]
     var details: [String: RSSItemDetail]
+    var addFailure: Error?
 
     func listSources(runID: String?, sessionID: String?) async throws -> [RSSSource] { [] }
-    func addSource(feedURL: URL, displayName: String?, runID: String?, sessionID: String?) async throws -> RSSSource { RSSSource(id: RSSSourceID(rawValue: "source-1"), feedURL: feedURL, displayName: displayName ?? "Source") }
+    func addSource(feedURL: URL, displayName: String?, runID: String?, sessionID: String?) async throws -> RSSSource {
+        if let addFailure { throw addFailure }
+        return RSSSource(id: RSSSourceID(rawValue: "source-1"), feedURL: feedURL, displayName: displayName ?? "Source")
+    }
     func updateSource(sourceID: RSSSourceID, feedURL: URL?, displayName: String?, runID: String?, sessionID: String?) async throws -> RSSSource { RSSSource(id: sourceID, feedURL: feedURL ?? URL(string: "https://example.com/feed")!, displayName: displayName ?? "Source") }
     func deleteSource(sourceID: RSSSourceID, runID: String?, sessionID: String?) async throws {}
     func syncSource(sourceID: RSSSourceID, runID: String?, sessionID: String?) async throws -> RSSFetchResult { RSSFetchResult(runID: RSSFetchRunID(rawValue: "run"), sourceID: sourceID, insertedCount: 0, duplicateCount: 0, parseReport: RSSParseReport(format: .rss, itemCount: 0)) }

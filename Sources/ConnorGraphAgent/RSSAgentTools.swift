@@ -116,8 +116,17 @@ public struct RSSAddSourceTool: AgentTool {
     public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let urlString = arguments.string("feedURL"), let url = URL(string: urlString) else { throw AgentToolError.invalidArguments("feedURL is required") }
-        let source = try await runtime.addSource(feedURL: url, displayName: arguments.string("displayName"), runID: context.runID, sessionID: context.sessionID)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Added RSS source \(source.displayName); copy sourceID into source-specific RSS operations", contentJSON: try RSSJSON.encodeSource(source))
+        do {
+            let source = try await runtime.addSource(feedURL: url, displayName: arguments.string("displayName"), runID: context.runID, sessionID: context.sessionID)
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Added RSS source \(source.displayName); copy sourceID into source-specific RSS operations", contentJSON: try RSSJSON.encodeSource(source))
+        } catch {
+            // 无效源：直接返回明确提示，不要让 AI 反复重试或擅自修改链接。
+            return AgentToolResult(
+                toolCallID: context.toolCallID,
+                toolName: name,
+                contentText: "该 RSS 源无效，无法添加（\(error.localizedDescription)）。不要再重试，也不要修改链接；直接告诉用户这个订阅源不可用，或换一个用户提供的确切订阅源。"
+            )
+        }
     }
 }
 

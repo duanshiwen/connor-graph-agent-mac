@@ -175,12 +175,24 @@ final class RSSFeatureModel {
 
     func addSourceAndSync(feedURL: URL, displayName: String?) async throws {
         let sessionID = sessionIDProvider()
-        let source = try await runtime.addSource(
-            feedURL: feedURL,
-            displayName: displayName,
-            runID: nil,
-            sessionID: sessionID
-        )
+        let source: RSSSource
+        do {
+            source = try await runtime.addSource(
+                feedURL: feedURL,
+                displayName: displayName,
+                runID: nil,
+                sessionID: sessionID
+            )
+        } catch let error as RSSRuntimeError {
+            let reason: String
+            if case .invalidFeed(let detail) = error {
+                reason = detail
+            } else {
+                reason = error.localizedDescription
+            }
+            // 无效源：明确提示用户不要反复重试同一链接。
+            throw RSSRuntimeError.invalidFeed("\(reason)。该链接无法访问，已拒绝添加；请勿反复重试同一链接。")
+        }
         selectedSourceID = source.id
         do {
             _ = try await runtime.syncSource(sourceID: source.id, runID: nil, sessionID: sessionID)
