@@ -230,6 +230,7 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
     @State private var isConfirmingDelete = false
     @State private var isPresentingPublishingAgreement = false
     @State private var publishErrorMessage: String?
+    @State private var deleteErrorMessage: String?
 
     var body: some View {
         Group {
@@ -289,9 +290,15 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
             Button("删除知识库", role: .destructive) {
                 guard let base = store.selected else { return }
                 Task {
+                    deleteErrorMessage = nil
                     await creatorStore.requestDeleteKnowledgeBase(id: base.id, reason: "owner requested deletion")
-                    store.showHome()
-                    await store.load()
+                    if let error = creatorStore.errorMessage {
+                        // 删除请求失败（无权限/后端异常等）：留在详情页并提示原因，不再假删除。
+                        deleteErrorMessage = error
+                    } else {
+                        store.showHome()
+                        await store.load()
+                    }
                 }
             }
             Button("取消", role: .cancel) {}
@@ -491,6 +498,11 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                             }
                             if let publishErrorMessage {
                                 Label(publishErrorMessage, systemImage: "exclamationmark.triangle")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                            if let deleteErrorMessage {
+                                Label(deleteErrorMessage, systemImage: "exclamationmark.triangle")
                                     .font(.caption)
                                     .foregroundStyle(.red)
                             }
