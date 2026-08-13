@@ -298,9 +298,11 @@ struct CloudKnowledgePhase5Tests {
         store.advance(to: .paused)
         store.prepareForNewKnowledgeBase()
 
-        #expect(store.snapshot.stage == .paused)
-        #expect(store.snapshot.draft.name == "Recoverable")
-        #expect(store.snapshot.selectedConversationIDs == ["active-session"])
+        // 新建知识库始终是空表单；之前可恢复的流程保留在“发布历史”中，不丢数据。
+        #expect(store.snapshot.stage == .configure)
+        #expect(store.snapshot.draft.name.isEmpty)
+        #expect(store.snapshot.selectedConversationIDs.isEmpty)
+        #expect(store.publicationHistory.contains { $0.snapshot.draft.name == "Recoverable" })
     }
 
     @Test @MainActor func completedPrivatePublicationCanBeRestoredMadePublicAndPublished() async throws {

@@ -539,7 +539,8 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         }
     }
     public func prepareForNewKnowledgeBase() {
-        guard snapshot.stage == .cancelled || snapshot.stage == .completed else { return }
+        // 新建知识库始终从空表单开始：清空草稿、所选会话与阶段。
+        // 之前未完成/已完成的流程仍保留在“发布历史”中，可随时恢复，不丢数据。
         reset()
     }
     public func canRemovePublicationHistory(id: String) -> Bool {
