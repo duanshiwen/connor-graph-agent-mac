@@ -89,6 +89,34 @@ struct CloudKnowledgePhase5Tests {
         #expect(CloudKnowledgeCreatorStore(repository: repository).snapshot.stage == .cancelled)
     }
 
+    @Test @MainActor func creatorDeleteIgnoresRemote404AndCleansLocalState() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-delete-404-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = CloudKnowledgeCreatorSnapshotRepository(fileURL: root.appendingPathComponent("snapshot.json"))
+        try repository.save(.init(stage: .completed, knowledgeBaseID: "kb-1"))
+        let store = CloudKnowledgeCreatorStore(repository: repository, creatorAPI: RemoteMissingCreatorAPI())
+
+        await store.requestDeleteKnowledgeBase(id: "kb-1", reason: "owner requested deletion")
+
+        // 远程 404 视为本地冗余数据：不报错，并完成本地删除清理（快照被重置）。
+        #expect(store.errorMessage == nil)
+        #expect(store.snapshot.knowledgeBaseID == nil)
+    }
+
+    @Test @MainActor func creatorDeleteStillSurfacesNon404RemoteErrors() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-delete-403-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = CloudKnowledgeCreatorSnapshotRepository(fileURL: root.appendingPathComponent("snapshot.json"))
+        try repository.save(.init(stage: .completed, knowledgeBaseID: "kb-1"))
+        let store = CloudKnowledgeCreatorStore(repository: repository, creatorAPI: RemoteMissingCreatorAPI(deleteError: .server(status: 403, code: "forbidden", message: "无权限删除")))
+
+        await store.requestDeleteKnowledgeBase(id: "kb-1", reason: "owner requested deletion")
+
+        // 非 404 错误仍需提示并保留本地状态，避免误删。
+        #expect(store.errorMessage != nil)
+        #expect(store.snapshot.knowledgeBaseID == "kb-1")
+    }
+
     @Test func creatorApiRoutesMatchBackendContract() async throws {
         let transport = CloudKnowledgeCreatorAPITransportRecorder()
         let api = CloudKnowledgeCreatorAPIClient(baseURL: URL(string: "http://localhost:8080")!, transport: transport, credentials: StaticCloudKnowledgeCredentialProvider(token: "token"))
@@ -453,6 +481,20 @@ private actor DetailTrackingCreatorAPI: CloudKnowledgeCreatorAPI {
     func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail { detail }
     func deleteKnowledgeBase(id: String, reason: String) async throws {}
     func preview(runID: String) async throws -> CloudKnowledgePreview { .init(runID: runID, stagedSequence: 0, operations: [], summaries: []) }
+    func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary] { [] }
+}
+
+private actor RemoteMissingCreatorAPI: CloudKnowledgeCreatorAPI {
+    private let deleteError: CloudKnowledgeError
+    init(deleteError: CloudKnowledgeError = .server(status: 404, code: "not_found", message: "知识库不存在")) { self.deleteError = deleteError }
+    func createKnowledgeBase(_ draft: CloudKnowledgeBaseDraft) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func updateKnowledgeBase(id: String, draft: CloudKnowledgeBaseDraft) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func knowledgeBase(id: String) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func publishKnowledgeBase(id: String, request: CloudKnowledgePublishRequest) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func unpublishKnowledgeBase(id: String, request: CloudKnowledgeUnpublishRequest) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func deleteKnowledgeBase(id: String, reason: String) async throws { throw deleteError }
+    func preview(runID: String) async throws -> CloudKnowledgePreview { throw CloudKnowledgeError.invalidResponse }
     func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary] { [] }
 }
 
