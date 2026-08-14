@@ -246,7 +246,7 @@ struct FlowLikeChips: View {
     var values: [String]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+        FlowLayout(spacing: AgentChatLayout.spaceS) {
             ForEach(values, id: \.self) { value in
                 Text(value)
                     .font(AgentChatTypography.micro)
@@ -255,6 +255,51 @@ struct FlowLikeChips: View {
                     .padding(.vertical, 4)
                     .background(Color.accentColor.opacity(0.12), in: Capsule())
             }
+        }
+    }
+}
+
+/// 自适应换行布局：标签/徽标过多时自动折行，保证所有条目完整展示。
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        guard !subviews.isEmpty else { return .zero }
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+        var rowWidth: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if rowWidth > 0, rowWidth + size.width > maxWidth {
+                width = max(width, rowWidth)
+                height += rowHeight + spacing
+                rowWidth = 0
+                rowHeight = 0
+            }
+            rowWidth += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        width = max(width, rowWidth)
+        height += rowHeight
+        return CGSize(width: maxWidth.isFinite ? min(maxWidth, width) : width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
         }
     }
 }
