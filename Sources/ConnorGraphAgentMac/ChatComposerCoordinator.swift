@@ -13,6 +13,8 @@ final class ChatComposerCoordinator {
     private let draftPersistence: ChatComposerDraftPersistence?
     private let speech = SessionSpeechTranscriptionCoordinator(transcriber: SessionSpeechTranscriptionController())
     private var draftsBySessionID: [String: String] = [:]
+    private var activeSkillSlugBySessionID: [String: String] = [:]
+    private var activeSkillDisplayNameBySessionID: [String: String] = [:]
     private var liveDraftSessionID: String?
     private var liveDraft = ""
     private var pendingAttachmentsBySessionID: [String: [AgentMessageAttachmentRef]] = [:]
@@ -85,6 +87,10 @@ final class ChatComposerCoordinator {
         else { draft = "" }
         setPublishedDraft(draft, sessionID: sessionID)
         model.pendingAttachmentRefs = sessionID.flatMap { pendingAttachmentsBySessionID[$0] } ?? []
+        // 技能与草稿/附件一样按会话隔离：切换会话时恢复该会话自己选中的技能，
+        // 避免上一个会话的技能“跟随”到新会话，也避免回到原会话后技能丢失。
+        model.activeSkillSlug = sessionID.flatMap { activeSkillSlugBySessionID[$0] }
+        model.activeSkillDisplayName = sessionID.flatMap { activeSkillDisplayNameBySessionID[$0] }
     }
 
     func consumeForSubmission(sessionID: String) {
@@ -102,6 +108,8 @@ final class ChatComposerCoordinator {
         draftsBySessionID.removeValue(forKey: sessionID)
         draftPersistence?.remove(sessionID: sessionID)
         pendingAttachmentsBySessionID.removeValue(forKey: sessionID)
+        activeSkillSlugBySessionID.removeValue(forKey: sessionID)
+        activeSkillDisplayNameBySessionID.removeValue(forKey: sessionID)
         if liveDraftSessionID == sessionID { liveDraftSessionID = nil; liveDraft = "" }
     }
 
@@ -114,13 +122,22 @@ final class ChatComposerCoordinator {
     }
 
     func setActiveSkill(slug: String) {
+        let displayName = skillDisplayName(slug)
         model.activeSkillSlug = slug
-        model.activeSkillDisplayName = skillDisplayName(slug)
+        model.activeSkillDisplayName = displayName
+        if let sessionID = selectedSessionID() {
+            activeSkillSlugBySessionID[sessionID] = slug
+            activeSkillDisplayNameBySessionID[sessionID] = displayName
+        }
     }
 
     func clearActiveSkill() {
         model.activeSkillSlug = nil
         model.activeSkillDisplayName = nil
+        if let sessionID = selectedSessionID() {
+            activeSkillSlugBySessionID.removeValue(forKey: sessionID)
+            activeSkillDisplayNameBySessionID.removeValue(forKey: sessionID)
+        }
     }
 
     func removePendingAttachment(id: String) {
