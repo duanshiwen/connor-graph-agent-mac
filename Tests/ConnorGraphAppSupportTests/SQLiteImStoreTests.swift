@@ -270,6 +270,44 @@ struct SQLiteImStoreTests {
         #expect(ImConversation.groupConversationID(groupId: "g-1") == "group:g-1")
     }
 
+    @Test func conversationPageLoadsAllInChunksByUpdatedAt() async throws {
+        let store = try makeStore()
+        var conversations: [ImConversation] = []
+        for i in 1...5 {
+            var conversation = makeConversation(id: "peer:\(i)", peerUserId: Int64(i), lastMessageAt: Int64(i * 10))
+            conversation.updatedAt = Int64(i * 100)
+            conversations.append(conversation)
+        }
+        try await store.upsertConversations(conversations)
+
+        let first = try await store.loadConversationPage(limit: 2, cursor: nil)
+        #expect(first.conversations.map(\.id) == ["peer:5", "peer:4"])
+        #expect(first.nextCursor != nil)
+
+        let second = try await store.loadConversationPage(limit: 2, cursor: first.nextCursor)
+        #expect(second.conversations.map(\.id) == ["peer:3", "peer:2"])
+        #expect(second.nextCursor != nil)
+
+        let third = try await store.loadConversationPage(limit: 2, cursor: second.nextCursor)
+        #expect(third.conversations.map(\.id) == ["peer:1"])
+        #expect(third.nextCursor == nil)
+    }
+
+    @Test func conversationPageTiesOrderByIdAscending() async throws {
+        let store = try makeStore()
+        var a = makeConversation(id: "peer:1", peerUserId: 1)
+        a.updatedAt = 100
+        var b = makeConversation(id: "peer:2", peerUserId: 2)
+        b.updatedAt = 100
+        var c = makeConversation(id: "peer:3", peerUserId: 3)
+        c.updatedAt = 50
+        try await store.upsertConversations([a, b, c])
+
+        let page = try await store.loadConversationPage(limit: 10, cursor: nil)
+        #expect(page.conversations.map(\.id) == ["peer:1", "peer:2", "peer:3"])
+        #expect(page.nextCursor == nil)
+    }
+
     // MARK: - Helpers
 
     private func makeStore() throws -> SQLiteImStore {

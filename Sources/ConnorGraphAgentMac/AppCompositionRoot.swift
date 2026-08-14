@@ -244,6 +244,29 @@ final class AppCompositionRoot: ObservableObject {
             generateTitle: { [weak runtime] messages, conversationID in
                 guard let runtime else { throw CancellationError() }
                 return try await runtime.generateImConversationTitle(messages: messages, conversationID: conversationID)
+            },
+            makeForwardPager: { [weak runtime] in
+                guard let runtime else { return nil }
+                let sessionsLoader = runtime.graph.chat.sessions.makeForwardSessionPageLoader()
+                return ForwardDestinationPager(
+                    sessionsLoader: sessionsLoader ?? { _, _ in ([], nil) },
+                    conversationsLoader: { cursor, limit in
+                        let page = try await imStore.loadConversationPage(limit: limit, cursor: cursor)
+                        return (
+                            page.conversations.map { conversation in
+                                ForwardDestination(
+                                    key: "im:\(conversation.id)",
+                                    targetID: conversation.id,
+                                    title: conversation.title,
+                                    subtitle: conversation.kind == .group ? "群聊" : "跟 \(conversation.participantName)",
+                                    kind: conversation.kind == .group ? .group : .peer,
+                                    updatedAt: TimeInterval(conversation.updatedAt) / 1_000
+                                )
+                            },
+                            page.nextCursor
+                        )
+                    }
+                )
             }
         )
         imAttentionCoordinator.notificationSettings = { [weak runtime] in

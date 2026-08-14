@@ -120,7 +120,7 @@ struct CraftDetailPaneView: View {
                 ObserveLogView(entries: graph.graphDiagnostics.observeLogEntries)
             case .agentChat:
                 if let im = graph.im, im.selectedConversationId != nil {
-                    ImChatDetailView(model: im, chatModel: graph.chat)
+                    ImChatDetailView(model: im)
                 } else {
                     ChatDetailRouteView(model: graph.chat, chatActions: graph.chatActions, imModel: graph.im)
                 }
@@ -188,14 +188,14 @@ private enum ListItemForwardingError: LocalizedError {
     }
 }
 
+@MainActor
 private func makeListItemForwarding(graph: AppFeatureGraph) -> ListItemForwardingContext {
-    ListItemForwardingContext(
-        destinations: {
-            forwardDestinations(
-                sessions: graph.chat.sessions.loadAllChatSessionsForForwarding(),
-                conversations: graph.im?.conversations ?? []
-            )
-        },
+    let emptyPager = ForwardDestinationPager(
+        sessionsLoader: { _, _ in ([], nil) },
+        conversationsLoader: { _, _ in ([], nil) }
+    )
+    return ListItemForwardingContext(
+        makePager: { graph.im?.makeForwardDestinationPager() ?? emptyPager },
         send: { bundle, keys in
             guard let im = graph.im else { throw ListItemForwardingError.imUnavailable }
             try await im.forward(bundle: bundle, destinationKeys: keys)

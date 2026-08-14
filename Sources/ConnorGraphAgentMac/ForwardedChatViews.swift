@@ -20,33 +20,8 @@ struct ForwardDestination: Identifiable, Hashable {
 /// 列表项（邮件 / RSS / 日历）右键菜单「转发到…」所需的运行上下文：
 /// 目标列表来自康纳会话与 IM 联系人，发送复用 IM 的转发链路。
 struct ListItemForwardingContext {
-    var destinations: @MainActor () -> [ForwardDestination]
+    var makePager: @MainActor () -> ForwardDestinationPager
     var send: @MainActor (ForwardedChatBundle, Set<String>) async throws -> Void
-}
-
-func forwardDestinations(sessions: [AgentSession], conversations: [ImConversation]) -> [ForwardDestination] {
-    let newSession = ForwardDestination(key: "agent:new", targetID: "", title: "新建与康纳的会话", subtitle: "创建后保存聊天记录", kind: .agent)
-    var existing = sessions.filter { $0.governance.kind == .chat }.map {
-        ForwardDestination(
-            key: "agent:\($0.id)",
-            targetID: $0.id,
-            title: $0.title,
-            subtitle: "与康纳的会话",
-            kind: .agent,
-            updatedAt: $0.updatedAt.timeIntervalSince1970
-        )
-    }
-    existing += conversations.map {
-        ForwardDestination(
-            key: "im:\($0.id)",
-            targetID: $0.id,
-            title: $0.title,
-            subtitle: $0.kind == .group ? "群聊" : "跟 \($0.participantName)",
-            kind: $0.kind == .group ? .group : .peer,
-            updatedAt: TimeInterval($0.updatedAt) / 1_000
-        )
-    }
-    return [newSession] + sortForwardDestinationsByRecency(existing)
 }
 
 func sortForwardDestinationsByRecency(_ destinations: [ForwardDestination]) -> [ForwardDestination] {
@@ -56,9 +31,109 @@ func sortForwardDestinationsByRecency(_ destinations: [ForwardDestination]) -> [
     }
 }
 
+
+/// 转发目标「康纳会话」分页加载器：给定游标返回一页目的地与下一个游标。
+typealias ForwardDestinationSessionPageLoader = @MainActor (String?, Int) async throws -> (items: [ForwardDestination], nextCursor: String?)
+
+/// 转发目标分页加载器：把「康纳会话 + IM 会话」两路数据源按最近活跃归并、逐页取回。
+/// 两路都取尽后 loadNextPage 返回空数组，表示已经取到全部目标。
+@MainActor
+final class ForwardDestinationPager {
+    typealias PageLoader = @MainActor (String?, Int) async throws -> (items: [ForwardDestination], nextCursor: String?)
+
+    private let sessionsLoader: PageLoader
+    private let conversationsLoader: PageLoader
+    private let pageSize: Int
+
+    private var sessionCursor: String?
+    private var conversationCursor: String?
+    private var sessionBuffer: [ForwardDestination] = []
+    private var conversationBuffer: [ForwardDestination] = []
+    private var sessionsExhausted = false
+    private var conversationsExhausted = false
+
+    init(
+        sessionsLoader: @escaping PageLoader,
+        conversationsLoader: @escaping PageLoader,
+        pageSize: Int = 50
+    ) {
+        self.sessionsLoader = sessionsLoader
+        self.conversationsLoader = conversationsLoader
+        self.pageSize = min(max(pageSize, 1), 100)
+    }
+
+    /// 是否还有未取回的目标。
+    var hasMore: Bool {
+        !sessionsExhausted || !conversationsExhausted || !sessionBuffer.isEmpty || !conversationBuffer.isEmpty
+    }
+
+    /// 取回下一页；两路数据源均取尽后返回空数组。
+    func loadNextPage() async throws -> [ForwardDestination] {
+        var page: [ForwardDestination] = []
+        page.reserveCapacity(pageSize)
+        while page.count < pageSize, let next = try await nextDestination() {
+            page.append(next)
+        }
+        return page
+    }
+
+    /// 一次性取回全部目标（搜索等需要全量匹配的场景使用）。使用独立实例，
+    /// 不影响当前分页浏览的游标状态。
+    func loadAll() async throws -> [ForwardDestination] {
+        let fresh = ForwardDestinationPager(
+            sessionsLoader: sessionsLoader,
+            conversationsLoader: conversationsLoader,
+            pageSize: pageSize
+        )
+        var all: [ForwardDestination] = []
+        while let next = try await fresh.nextDestination() {
+            all.append(next)
+        }
+        return all
+    }
+
+    private func nextDestination() async throws -> ForwardDestination? {
+        try await fillSessionBufferIfNeeded()
+        try await fillConversationBufferIfNeeded()
+        switch (sessionBuffer.first, conversationBuffer.first) {
+        case let (session?, conversation?):
+            return isMoreRecent(session, than: conversation)
+                ? sessionBuffer.removeFirst()
+                : conversationBuffer.removeFirst()
+        case (_?, nil):
+            return sessionBuffer.removeFirst()
+        case (nil, _?):
+            return conversationBuffer.removeFirst()
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    private func fillSessionBufferIfNeeded() async throws {
+        guard sessionBuffer.isEmpty, !sessionsExhausted else { return }
+        let (items, nextCursor) = try await sessionsLoader(sessionCursor, pageSize)
+        sessionBuffer = items
+        sessionCursor = nextCursor
+        if nextCursor == nil { sessionsExhausted = true }
+    }
+
+    private func fillConversationBufferIfNeeded() async throws {
+        guard conversationBuffer.isEmpty, !conversationsExhausted else { return }
+        let (items, nextCursor) = try await conversationsLoader(conversationCursor, pageSize)
+        conversationBuffer = items
+        conversationCursor = nextCursor
+        if nextCursor == nil { conversationsExhausted = true }
+    }
+
+    private func isMoreRecent(_ a: ForwardDestination, than b: ForwardDestination) -> Bool {
+        if a.updatedAt == b.updatedAt { return a.key < b.key }
+        return (a.updatedAt ?? 0) > (b.updatedAt ?? 0)
+    }
+}
+
 struct ForwardDestinationSheet: View {
     var bundle: ForwardedChatBundle
-    var destinations: [ForwardDestination]
+    var pager: ForwardDestinationPager
     var isSending: Bool
     var onCancel: () -> Void
     var onSend: (String, Set<String>) async -> Void
@@ -68,8 +143,23 @@ struct ForwardDestinationSheet: View {
     @State private var selectedKeys: Set<String> = []
     @State private var kindFilter: ForwardDestinationKind? = nil
 
+    @State private var loadedDestinations: [ForwardDestination] = []
+    @State private var isLoadingPage = false
+    @State private var hasMore = true
+    @State private var loadFailed = false
+    /// 非空表示处于搜索模式：一次取回全部目标，保证匹配结果完整。
+    @State private var searchMatches: [ForwardDestination]? = nil
+
+    private static let newSessionDestination = ForwardDestination(
+        key: "agent:new",
+        targetID: "",
+        title: "新建与康纳的会话",
+        subtitle: "创建后保存聊天记录",
+        kind: .agent
+    )
+
     private var visibleDestinations: [ForwardDestination] {
-        var result = destinations
+        var result = [Self.newSessionDestination] + (searchMatches ?? loadedDestinations)
         if let kindFilter {
             result = result.filter { $0.kind == kindFilter }
         }
@@ -93,27 +183,7 @@ struct ForwardDestinationSheet: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                List(visibleDestinations, selection: $selectedKeys) { destination in
-                    HStack(spacing: 10) {
-                        Image(systemName: icon(for: destination.kind))
-                            .frame(width: 28, height: 28)
-                            .foregroundStyle(destination.kind == .agent ? Color.accentColor : .secondary)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(destination.title).lineLimit(1)
-                            Text(destination.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                        Spacer()
-                        Image(systemName: selectedKeys.contains(destination.key) ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(selectedKeys.contains(destination.key) ? Color.accentColor : Color.secondary.opacity(0.55))
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if selectedKeys.contains(destination.key) { selectedKeys.remove(destination.key) }
-                        else { selectedKeys.insert(destination.key) }
-                    }
-                    .tag(destination.key)
-                }
-                .listStyle(.inset)
+                destinationList
             }
             .padding(20)
             .frame(width: 320)
@@ -143,6 +213,110 @@ struct ForwardDestinationSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: 820, height: 580)
+        .task {
+            await loadMore()
+        }
+        .onChange(of: searchText) { _, newValue in
+            let query = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.isEmpty else {
+                searchMatches = nil
+                return
+            }
+            Task { await runSearch(query) }
+        }
+    }
+
+    @ViewBuilder
+    private var destinationList: some View {
+        if loadedDestinations.isEmpty && searchMatches == nil && isLoadingPage {
+            Spacer()
+            ProgressView("加载会话…")
+                .frame(maxWidth: .infinity)
+            Spacer()
+        } else if visibleDestinations.isEmpty && !isLoadingPage {
+            Spacer()
+            Text("暂无可转发的会话")
+                .foregroundStyle(.secondary)
+            Spacer()
+        } else {
+            List(visibleDestinations, selection: $selectedKeys) { destination in
+                HStack(spacing: 10) {
+                    Image(systemName: icon(for: destination.kind))
+                        .frame(width: 28, height: 28)
+                        .foregroundStyle(destination.kind == .agent ? Color.accentColor : .secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(destination.title).lineLimit(1)
+                        Text(destination.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: selectedKeys.contains(destination.key) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selectedKeys.contains(destination.key) ? Color.accentColor : Color.secondary.opacity(0.55))
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if selectedKeys.contains(destination.key) { selectedKeys.remove(destination.key) }
+                    else { selectedKeys.insert(destination.key) }
+                }
+                .tag(destination.key)
+            }
+            .listStyle(.inset)
+            if searchMatches == nil {
+                loadMoreFooter
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var loadMoreFooter: some View {
+        if isLoadingPage {
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+        } else if hasMore {
+            Button {
+                Task { await loadMore() }
+            } label: {
+                Text(loadFailed ? "加载失败，点此重试" : "加载更多…")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(loadFailed ? .red : Color.accentColor)
+            .padding(.vertical, 6)
+            .onAppear {
+                // 滚动到列表底部时自动加载下一页。
+                Task { await loadMore() }
+            }
+        }
+    }
+
+    private func loadMore() async {
+        guard !isLoadingPage, hasMore, searchMatches == nil else { return }
+        isLoadingPage = true
+        loadFailed = false
+        defer { isLoadingPage = false }
+        do {
+            let next = try await pager.loadNextPage()
+            loadedDestinations.append(contentsOf: next)
+            hasMore = !next.isEmpty && pager.hasMore
+        } catch {
+            loadFailed = true
+            hasMore = true
+        }
+    }
+
+    private func runSearch(_ query: String) async {
+        isLoadingPage = true
+        defer { isLoadingPage = false }
+        do {
+            let all = try await pager.loadAll()
+            let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            searchMatches = all.filter {
+                $0.title.localizedCaseInsensitiveContains(normalized) || $0.subtitle.localizedCaseInsensitiveContains(normalized)
+            }
+        } catch {
+            searchMatches = []
+        }
     }
 
     private func icon(for kind: ForwardDestinationKind) -> String {

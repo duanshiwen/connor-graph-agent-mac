@@ -9,6 +9,7 @@ import ConnorGraphCore
 public protocol ImStore: Sendable {
     // Conversations
     func loadConversations() async throws -> [ImConversation]
+    func loadConversationPage(limit: Int, cursor: String?) async throws -> ImConversationPage
     func conversation(id: String) async throws -> ImConversation?
     func upsertConversation(_ conversation: ImConversation) async throws
     func upsertConversations(_ conversations: [ImConversation]) async throws
@@ -58,6 +59,16 @@ public protocol ImStore: Sendable {
     func clearFriends() async throws
     func clearFriendRequests() async throws
     func clearForwardAliases() async throws
+}
+
+public struct ImConversationPage: Sendable, Equatable {
+    public var conversations: [ImConversation]
+    public var nextCursor: String?
+
+    public init(conversations: [ImConversation], nextCursor: String?) {
+        self.conversations = conversations
+        self.nextCursor = nextCursor
+    }
 }
 
 public struct ImConversationSearchHit: Sendable, Equatable {
@@ -131,6 +142,43 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
     public func loadConversations() async throws -> [ImConversation] {
         try queue.sync {
             try queryConversations(sql: "SELECT * FROM im_conversations ORDER BY pinned DESC, last_message_at DESC;", bindings: [])
+        }
+    }
+
+    /// 分页加载会话（按 updated_at 倒序，id 兜底稳定排序）。用于转发目标列表等
+    /// 需要「按页取回、最终取全」的场景；cursor 由 encodeConversationPageCursor 产生。
+    public func loadConversationPage(limit: Int = 50, cursor: String? = nil) async throws -> ImConversationPage {
+        try queue.sync {
+            let pageSize = min(max(limit, 1), 100)
+            let decoded = try cursor.map(Self.decodeConversationPageCursor)
+            let sql: String
+            let bindings: [Binding]
+            if let decoded {
+                sql = """
+                    SELECT * FROM im_conversations
+                    WHERE (updated_at < ? OR (updated_at = ? AND id > ?))
+                    ORDER BY updated_at DESC, id ASC
+                    LIMIT ?;
+                """
+                bindings = [
+                    .integer(decoded.updatedAt),
+                    .integer(decoded.updatedAt),
+                    .text(decoded.id),
+                    .integer(Int64(pageSize + 1))
+                ]
+            } else {
+                sql = """
+                    SELECT * FROM im_conversations
+                    ORDER BY updated_at DESC, id ASC
+                    LIMIT ?;
+                """
+                bindings = [.integer(Int64(pageSize + 1))]
+            }
+            let rows = try queryConversations(sql: sql, bindings: bindings)
+            let hasMore = rows.count > pageSize
+            let page = Array(rows.prefix(pageSize))
+            let nextCursor = hasMore ? page.last.map(Self.encodeConversationPageCursor) : nil
+            return ImConversationPage(conversations: page, nextCursor: nextCursor)
         }
     }
 
@@ -948,6 +996,26 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
             userInfo[ImStoreChangeNotificationUserInfoKey.conversationID] = conversationID
         }
         NotificationCenter.default.post(name: .connorImStoreDidChange, object: self, userInfo: userInfo)
+    }
+
+    // MARK: - Forward destination paging cursors
+
+    private struct ImConversationPageCursor: Codable {
+        var updatedAt: Int64
+        var id: String
+    }
+
+    private static func encodeConversationPageCursor(_ conversation: ImConversation) -> String {
+        let cursor = ImConversationPageCursor(updatedAt: conversation.updatedAt, id: conversation.id)
+        guard let data = try? JSONEncoder().encode(cursor) else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    private static func decodeConversationPageCursor(_ raw: String) throws -> ImConversationPageCursor {
+        guard let data = raw.data(using: .utf8) else {
+            throw SQLiteImStoreError.sqlite("invalid conversation page cursor")
+        }
+        return try JSONDecoder().decode(ImConversationPageCursor.self, from: data)
     }
 
     // MARK: - Row readers

@@ -74,8 +74,9 @@ final class ChatSessionListModel {
     var messageCountsBySessionID: [String: Int] = [:] {
         didSet { rebuildRowPresentations() }
     }
-    /// 转发对话框的全量目标会话（由 ChatSessionCoordinator 注入，走 repository 全量加载，不受分页限制）。
-    @ObservationIgnored var loadAllChatSessionsForForwarding: () -> [AgentSession] = { [] }
+    /// 转发目标里「康纳会话」的分页加载器（由 ChatSessionCoordinator 注入，走 repository
+    /// 分页加载；转发弹窗按需取回、最终取到全部会话）。
+    @ObservationIgnored var makeForwardSessionPageLoader: @MainActor () -> ForwardDestinationSessionPageLoader? = { nil }
     var selectedSessionID: String?
     var loadingSessionDetailID: String?
     var presentedSessionDetailID: String?

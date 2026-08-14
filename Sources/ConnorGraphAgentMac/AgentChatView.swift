@@ -1096,7 +1096,7 @@ private struct AgentChatConversationView: View {
             if let bundle = selectedAgentForwardBundle, let imModel {
                 ForwardDestinationSheet(
                     bundle: bundle,
-                    destinations: forwardDestinations(sessions: model.sessions.loadAllChatSessionsForForwarding(), conversations: imModel.conversations),
+                    pager: imModel.makeForwardDestinationPager(),
                     isSending: isForwarding,
                     onCancel: { isForwardSheetPresented = false },
                     onSend: { caption, destinationKeys in
@@ -1104,7 +1104,11 @@ private struct AgentChatConversationView: View {
                         var outgoing = bundle
                         outgoing.caption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
                         do {
-                            try await imModel.forward(bundle: outgoing, destinationKeys: destinationKeys)
+                            try await imModel.forward(
+                                bundle: outgoing,
+                                destinationKeys: destinationKeys,
+                                onBackgroundError: { chatActions.errors.errorMessage = $0 }
+                            )
                             isForwardSheetPresented = false
                             clearForwardSelection()
                         } catch {
