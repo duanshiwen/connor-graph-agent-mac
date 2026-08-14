@@ -183,7 +183,8 @@ import ConnorGraphAgent
     #expect(prompt.contains("must be stated in the final response even when they were already mentioned in an intermediate message"))
     #expect(prompt.contains("never refer back to an earlier message in place of restating them"))
     #expect(prompt.contains("does not need to be repeated in the final response"))
-    #expect(prompt.contains("keep the final response concise"))
+    #expect(prompt.contains("detailed and self-contained"))
+    #expect(prompt.contains("never omit substance for brevity"))
 }
 
 @Test func defaultSystemPromptDistinguishesNoteSessionsFromFileArtifacts() {
