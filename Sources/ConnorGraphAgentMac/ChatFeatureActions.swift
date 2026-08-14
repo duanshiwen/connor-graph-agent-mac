@@ -41,6 +41,7 @@ extension ChatSessionCommanding {
     func currentModelSupportsImages() -> Bool
     func setActiveSkill(slug: String)
     func clearActiveSkill()
+    func restoreDraftForFailedSubmission(sessionID: String, text: String)
     func toggleSpeechTranscriptionForSelectedSession()
     func beginSpeechTranscriptionForSelectedSession(speechInsertionRange: NSRange?)
     func finishSpeechTranscriptionForSelectedSession()
