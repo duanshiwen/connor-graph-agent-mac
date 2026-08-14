@@ -50,6 +50,9 @@ struct CloudKnowledgeMarketplaceListPane: View {
             if canUseMarketplace {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
+                        if listFilter != .all {
+                            marketplaceFilterBanner
+                        }
                         if unifiedBases.isEmpty {
                             emptyRow("暂无可用知识库")
                         } else {
@@ -211,6 +214,37 @@ struct CloudKnowledgeMarketplaceListPane: View {
         .fixedSize()
         .help("筛选知识库：\(listFilter.title)")
         .accessibilityLabel("筛选知识库")
+    }
+
+    /// 主列表顶部的筛选提示栏：仅当筛选条件不是「全部知识库」时出现，
+    /// 用一个小型胶囊提示当前筛选，并可直接一键清除恢复全部。
+    private var marketplaceFilterBanner: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text("正在筛选：")
+                .font(AppListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+            Text(listFilter.title)
+                .font(AppListTypography.rowCaptionEmphasized)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Button {
+                listFilter = .all
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("清除筛选，查看全部知识库")
+            .accessibilityLabel("清除筛选")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var canUseMarketplace: Bool { connectivity.isConnected && backendConnectivity.state != .unreachable }
