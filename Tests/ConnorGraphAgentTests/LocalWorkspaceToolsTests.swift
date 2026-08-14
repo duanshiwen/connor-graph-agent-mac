@@ -260,6 +260,62 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 10\nlet b = 2\n")
 }
 
+@Test func applyPatchToolNormalizesAddPathValueToCreate() async throws {
+    // 真实使用中模型常把整文件创建写成 op=add + path + value；归一化后应能正常建文件。
+    let workspace = try makeToolTempWorkspace()
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    var registry = AgentToolRegistry()
+    registry.register(tool)
+
+    _ = try await registry.execute(
+        AgentToolCall(
+            name: "ApplyPatch",
+            argumentsJSON: #"{"operations":[{"op":"add","path":"notes.md","value":"hello\n"}]}"#
+        ),
+        context: .localToolTestContext(toolCallID: "patch-add-value")
+    )
+
+    #expect(try String(contentsOf: workspace.appendingPathComponent("notes.md"), encoding: .utf8) == "hello\n")
+}
+
+@Test func applyPatchToolInfersMissingOpAsCreate() async throws {
+    // 模型有时漏写 op，只给 filePath + content；应按 create 处理而不是报 “op is required”。
+    let workspace = try makeToolTempWorkspace()
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    var registry = AgentToolRegistry()
+    registry.register(tool)
+
+    _ = try await registry.execute(
+        AgentToolCall(
+            name: "ApplyPatch",
+            argumentsJSON: ##"{"operations":[{"filePath":"readme.md","content":"# Hi\n"}]}"##
+        ),
+        context: .localToolTestContext(toolCallID: "patch-missing-op")
+    )
+
+    #expect(try String(contentsOf: workspace.appendingPathComponent("readme.md"), encoding: .utf8) == "# Hi\n")
+}
+
+@Test func applyPatchToolNormalizesReplaceToEdit() async throws {
+    // 模型把替换写成 op=replace + path + value 时，应归一到 edit 并完成唯一替换。
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("App.swift")
+    try "let a = 1\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    var registry = AgentToolRegistry()
+    registry.register(tool)
+
+    _ = try await registry.execute(
+        AgentToolCall(
+            name: "ApplyPatch",
+            argumentsJSON: #"{"operations":[{"op":"replace","path":"App.swift","old_string":"let a = 1","new_string":"let a = 10"}]}"#
+        ),
+        context: .localToolTestContext(toolCallID: "patch-replace-edit")
+    )
+
+    #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 10\n")
+}
+
 @Test func editToolReplacesUniqueOldText() async throws {
     let workspace = try makeToolTempWorkspace()
     let file = workspace.appendingPathComponent("App.swift")

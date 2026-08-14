@@ -556,7 +556,7 @@ public struct LocalReadManyTool: AgentTool {
 
 public struct LocalApplyPatchTool: AgentTool {
     public let name = "ApplyPatch"
-    public let description = "Apply an ordered set of structured file changes inside the workspace. Operations are create, edit, multiedit, or delete. The complete patch is validated against projected file contents before commit; a failed commit is rolled back. Use Shell to inspect files before constructing the patch."
+    public let description = "Apply an ordered set of structured file changes inside the workspace. Operations are create, edit, multiedit, or delete. The complete patch is validated against projected file contents before commit; a failed commit is rolled back. Use Shell to inspect files before constructing the patch. Example: {\"operations\":[{\"op\":\"create\",\"filePath\":\"notes/plan.md\",\"content\":\"# Plan\\n\"},{\"op\":\"edit\",\"filePath\":\"notes/plan.md\",\"oldText\":\"# Plan\",\"newText\":\"# Roadmap\"}]}. Use op create with content for new files, op edit with oldText/newText for a unique replacement, op multiedit with an edits array for several replacements in one file, and op delete to remove a file."
     public let permission: AgentPermissionCapability = .editWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "operations": .array(
@@ -578,6 +578,61 @@ public struct LocalApplyPatchTool: AgentTool {
     private let policy: LocalWorkspacePolicy
 
     public init(policy: LocalWorkspacePolicy) { self.policy = policy }
+
+    /// 在 schema 严格校验之前把模型常见的错误字段写法归一化（真实使用中模型常把
+    /// filePath 写成 path、把 create 的整文件内容写成 value、把操作写成 add/replace/remove，
+    /// 或漏写 op），让这些意图明确的调用变成合法 operations，避免 ApplyPatch 反复报参数错误。
+    public func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments {
+        guard let operations = arguments.array("operations") else { return arguments }
+        var values = arguments.values
+        values["operations"] = .array(operations.map(Self.normalizeOperation))
+        return AgentToolArguments(values: values)
+    }
+
+    private static func normalizeOperation(_ value: SendableJSONValue) -> SendableJSONValue {
+        guard case .object(var dict) = value else { return value }
+        // value -> content：模型常把 create 的整文件内容写成 value。
+        if dict["content"] == nil, let content = dict["value"] {
+            dict["content"] = content
+        }
+        dict.removeValue(forKey: "value")
+        // 缺 op 时按字段推断，避免 “operations[i].op is required”。
+        if dict["op"] == nil {
+            if dict["edits"] != nil { dict["op"] = .string("multiedit") }
+            else if dict["content"] != nil { dict["op"] = .string("create") }
+            else if dict["oldText"] != nil || dict["newText"] != nil { dict["op"] = .string("edit") }
+        }
+        // op 别名归一化：add/insert/upsert/append -> create；replace/modify/update/change -> edit；remove -> delete。
+        if case .string(let op)? = dict["op"], let canonical = Self.canonicalOperationName(op) {
+            dict["op"] = .string(canonical)
+        }
+        // 嵌套 edits 字段别名兜底（schema 别名也会归一化，这里再兜一层）。
+        if case .array(let edits)? = dict["edits"] {
+            dict["edits"] = .array(edits.map(Self.normalizeEdit))
+        }
+        return .object(dict)
+    }
+
+    private static func normalizeEdit(_ value: SendableJSONValue) -> SendableJSONValue {
+        guard case .object(var dict) = value else { return value }
+        if dict["oldText"] == nil, let old = dict["old_string"] ?? dict["old_text"] { dict["oldText"] = old }
+        if dict["newText"] == nil, let new = dict["new_string"] ?? dict["new_text"] { dict["newText"] = new }
+        dict.removeValue(forKey: "old_string")
+        dict.removeValue(forKey: "old_text")
+        dict.removeValue(forKey: "new_string")
+        dict.removeValue(forKey: "new_text")
+        return .object(dict)
+    }
+
+    private static func canonicalOperationName(_ raw: String) -> String? {
+        switch raw.lowercased() {
+        case "create", "add", "insert", "upsert", "write", "new": return "create"
+        case "edit", "replace", "modify", "update", "change", "patch": return "edit"
+        case "multiedit", "multi_edit", "multi-edit": return "multiedit"
+        case "delete", "remove": return "delete"
+        default: return nil
+        }
+    }
 
     private enum Op {
         case create(content: String)
