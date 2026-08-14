@@ -433,8 +433,8 @@ public actor CloudKnowledgeAuthorizationCache {
             self.errorMessage = error.localizedDescription
         }
     }
-    public func subscribe(id: String) async { guard requireNetwork() else { return }; await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true }; self.library = try await self.api.library(); self.onLibraryChanged?() } }
-    public func unsubscribe(id: String) async { guard requireNetwork() else { return }; await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id); library = try await api.library(); onLibraryChanged?() } catch { errorMessage = error.localizedDescription } }
+    public func subscribe(id: String) async { guard requireNetwork() else { return }; await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); self.library = try await self.api.library(); if self.selected?.id == id { self.selected = try await self.api.detail(id: id) }; self.onLibraryChanged?() } }
+    public func unsubscribe(id: String) async { guard requireNetwork() else { return }; await cache.revoke(id); do { try await api.unsubscribe(id: id); library = try await api.library(); if selected?.id == id { selected = try await api.detail(id: id) }; onLibraryChanged?() } catch { errorMessage = error.localizedDescription } }
     public func resultsForGlobalSearch(query: String) async -> [CloudMarketplaceKnowledgeBase] { guard networkIsAvailable(), serverIsReachable() else { return [] }; return (try? await api.search(.init(query: query, limit: 6))) ?? [] }
     public func clearSession() async { home = .init(categories: [], banners: [], sections: []); library = .init(); searchResults = []; nextSearchPage = nil; selected = nil; showsPublisher = false; errorMessage = nil; await cache.clear(); onLibraryChanged?() }
     private func cachedKnowledgeBase(id: String) -> CloudMarketplaceKnowledgeBase? {

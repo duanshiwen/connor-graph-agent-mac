@@ -179,6 +179,23 @@ struct CloudKnowledgePhase6Tests {
         #expect(await api.unsubscribeCount == 1)
     }
 
+    @Test @MainActor func subscribeRefreshesDetailSubscriberCountSoOwnerActionsDisable() async throws {
+        let api = StatefulSubscriptionFakeAPI()
+        let store = CloudKnowledgeMarketplaceStore(api: api)
+
+        await store.loadDetail(id: "kb-1")
+        #expect(store.selected?.subscriberCount == 0)
+
+        // 订阅后详情页刷新：订阅数 +1，已订阅状态同步（发布者视图中的下架/删除随之置灰）。
+        await store.subscribe(id: "kb-1")
+        #expect(store.selected?.subscribed == true)
+        #expect(store.selected?.subscriberCount == 1)
+
+        await store.unsubscribe(id: "kb-1")
+        #expect(store.selected?.subscribed == false)
+        #expect(store.selected?.subscriberCount == 0)
+    }
+
     @Test @MainActor func clearingSessionRemovesMarketplaceStateAuthorizationAndAnswers() async throws {
         let api = MarketplaceFakeAPI(); let cache = CloudKnowledgeAuthorizationCache(); let store = CloudKnowledgeMarketplaceStore(api: api, cache: cache)
         await store.loadHome(); await store.loadDetail(id: "kb-1")
@@ -390,3 +407,18 @@ private actor MarketplaceRefreshTransport: ConnorBackendHTTPTransport {
         )
     }
 }
+
+
+private actor StatefulSubscriptionFakeAPI: CloudKnowledgeMarketplaceAPI {
+    private var detailRow = CloudMarketplaceKnowledgeBase(id: "kb-1", name: "Connor", description: "Agent OS", categoryID: "agent", subscriberCount: 0, subscribed: false, owned: true, ownerName: "我", publicationStatus: "published")
+    func home() async throws -> CloudMarketplaceHome { .init(categories: [], banners: [], sections: []) }
+    func categories() async throws -> [CloudMarketplaceCategory] { [] }
+    func library() async throws -> CloudMarketplaceLibrary { .init(subscribed: detailRow.subscribed ? [detailRow] : [], owned: [detailRow]) }
+    func search(_ request: CloudMarketplaceSearchRequest) async throws -> [CloudMarketplaceKnowledgeBase] { [detailRow] }
+    func detail(id: String) async throws -> CloudMarketplaceKnowledgeBase { detailRow }
+    func subscribe(id: String) async throws { detailRow.subscriberCount += 1; detailRow.subscribed = true }
+    func unsubscribe(id: String) async throws { detailRow.subscriberCount = max(0, detailRow.subscriberCount - 1); detailRow.subscribed = false }
+    func answer(_ request: CloudKnowledgeAnswerRequest) async throws -> CloudKnowledgeAnswerResponse { .init(requestID: request.requestID, partitions: [], returnedBytes: 0) }
+    func context(_ request: CloudKnowledgeAnswerRequest, channel: CloudKnowledgeSearchChannel) async throws -> CloudKnowledgeAnswerResponse { try await answer(request) }
+}
+
