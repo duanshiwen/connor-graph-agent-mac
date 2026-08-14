@@ -75,7 +75,7 @@ struct AgentChatView: View {
                     .padding(.trailing, AgentChatLayout.spaceL)
             }
 
-            if let toast = model.composer.attachmentToast {
+            if let toast = model.composer.attachmentToast, !isWorkspacePreviewPresented {
                 AgentChatToastView(toast: toast) {
                     model.composer.attachmentToast = nil
                 }
@@ -123,7 +123,9 @@ struct AgentChatView: View {
                     onLoadMore: model.workspaceExplorer.loadMorePreview,
                     onCopyFullText: copyWorkspaceFileText,
                     onShare: shareWorkspaceFile,
-                    onClose: model.workspaceExplorer.closePreview
+                    onClose: model.workspaceExplorer.closePreview,
+                    copyFeedbackToast: model.composer.attachmentToast,
+                    onDismissCopyFeedback: { model.composer.attachmentToast = nil }
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 .zIndex(10)
@@ -166,6 +168,10 @@ struct AgentChatView: View {
         }
     }
 
+    private var isWorkspacePreviewPresented: Bool {
+        model.workspaceExplorer.isLoadingPreview || model.workspaceExplorer.previewModel != nil
+    }
+
     private func copyWorkspaceFileText(fileURL: URL) {
         Task {
             do {
@@ -191,7 +197,7 @@ struct AgentChatView: View {
     }
 }
 
-private struct AgentChatToastView: View {
+struct AgentChatToastView: View {
     var toast: AgentChatToast
     var onDismiss: () -> Void
 
