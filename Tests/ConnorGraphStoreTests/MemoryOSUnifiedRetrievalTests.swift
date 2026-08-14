@@ -22,16 +22,17 @@ import ConnorGraphStore
     #expect(sorted.map(\.recordID) == ["higher", "a", "b", "older", "missing"])
 }
 
-@Test func memoryOSNonEmptySearchSortsByRelevanceBeforeRecency() {
+@Test func memoryOSNonEmptySearchSortsNewestFirstThenRelevance() {
     let hits = [
         MemoryOSRetrievalHit(layer: .l2, recordID: "new-low", title: "new-low", score: 0.2, metadata: ["effective_updated_at": "2026-08-03T10:00:00Z"]),
         MemoryOSRetrievalHit(layer: .l2, recordID: "old-high", title: "old-high", score: 0.9, metadata: ["effective_updated_at": "2026-07-01T10:00:00Z"]),
         MemoryOSRetrievalHit(layer: .l2, recordID: "new-high", title: "new-high", score: 0.9, metadata: ["effective_updated_at": "2026-08-01T10:00:00Z"])
     ]
 
-    let sorted = hits.sorted(by: SQLiteMemoryOSUnifiedRetrievalService.isRelevanceOrderedBefore)
+    let sorted = hits.sorted(by: SQLiteMemoryOSUnifiedRetrievalService.isOrderedBefore)
 
-    #expect(sorted.map(\.recordID) == ["new-high", "old-high", "new-low"])
+    // 关键词命中时同样“最新优先”：最新（即使相关性低）排在前面。
+    #expect(sorted.map(\.recordID) == ["new-low", "new-high", "old-high"])
 }
 
 @Test func memoryOSRetrievalExposesTemporalStatusSemantics() {

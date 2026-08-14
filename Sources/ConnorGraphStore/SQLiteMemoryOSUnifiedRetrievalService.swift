@@ -130,24 +130,15 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             if layers.contains(.l4) { hits += try searchL4(trimmed, query: query) }
         }
         let isTimeRangeQuery = query.startDate != nil || query.endDate != nil
+        // 实时系统：无论是否带关键词，统一按“最新优先”排序（有效更新时间倒序，再以
+        // 相关性/recordID 兜底），保证命中同一主题时最新记录一定出现在列表最前面。
         return Array(hits
             .filter { $0.score >= minimumRelevanceScore }
             .sorted { lhs, rhs in
                 if isTimeRangeQuery { return Self.isOccurrenceOrderedBefore(lhs, rhs) }
-                if trimmed.isEmpty { return Self.isOrderedBefore(lhs, rhs) }
-                return Self.isRelevanceOrderedBefore(lhs, rhs)
+                return Self.isOrderedBefore(lhs, rhs)
             }
             .prefix(max(0, query.limit)))
-    }
-
-    public static func isRelevanceOrderedBefore(_ lhs: MemoryOSRetrievalHit, _ rhs: MemoryOSRetrievalHit) -> Bool {
-        if lhs.score != rhs.score { return lhs.score > rhs.score }
-        switch (lhs.effectiveUpdatedAt, rhs.effectiveUpdatedAt) {
-        case let (left?, right?) where left != right: return left > right
-        case (_?, nil): return true
-        case (nil, _?): return false
-        default: return lhs.recordID < rhs.recordID
-        }
     }
 
     public static func isOrderedBefore(_ lhs: MemoryOSRetrievalHit, _ rhs: MemoryOSRetrievalHit) -> Bool {
