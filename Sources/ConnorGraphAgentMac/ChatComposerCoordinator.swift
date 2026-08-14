@@ -140,6 +140,19 @@ final class ChatComposerCoordinator {
         }
     }
 
+    /// 提交失败后把消息回填到“发送消息的那个会话”的输入框（而不是当前选中会话），
+    /// 避免用户在失败期间切到其他会话导致回填进错误会话、上下文错乱。
+    func restoreDraftForFailedSubmission(sessionID: String, text: String) {
+        guard !isShutdown else { return }
+        if autoSaveDraftsEnabled() {
+            draftsBySessionID[sessionID] = text
+            draftPersistence?.scheduleSave(text, sessionID: sessionID)
+        }
+        if selectedSessionID() == sessionID {
+            setPublishedDraft(text, sessionID: sessionID)
+        }
+    }
+
     func removePendingAttachment(id: String) {
         model.pendingAttachmentRefs.removeAll { $0.id == id }
         if let sessionID = selectedSessionID() { pendingAttachmentsBySessionID[sessionID] = model.pendingAttachmentRefs }

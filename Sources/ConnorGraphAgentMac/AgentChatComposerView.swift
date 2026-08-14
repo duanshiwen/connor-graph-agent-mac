@@ -564,6 +564,7 @@ struct AgentChatComposerView: View {
         let submittedText = localChatInput
         let submittedMentions = composerPersonMentions
         let personReferences = ComposerPersonMentionResolver().personReferences(in: submittedText, mentions: submittedMentions)
+        let submittingSessionID = model.sessions.selectedSessionID
         localChatInput = ""
         composerPersonMentions = []
         closePersonMentionPicker()
@@ -573,7 +574,13 @@ struct AgentChatComposerView: View {
             if runID == nil, localChatInput.isEmpty {
                 localChatInput = submittedText
                 composerPersonMentions = submittedMentions
-                chatActions.composer.updateSelectedChatInputDraft(submittedText)
+                // 回填到“发送消息的那个会话”的输入框，而不是当前选中会话——
+                // 失败期间用户可能已切到其他会话，误填会污染当前会话上下文。
+                if let submittingSessionID {
+                    chatActions.composer.restoreDraftForFailedSubmission(sessionID: submittingSessionID, text: submittedText)
+                } else {
+                    chatActions.composer.updateSelectedChatInputDraft(submittedText)
+                }
             }
         }
     }
