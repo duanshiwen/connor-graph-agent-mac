@@ -358,7 +358,19 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         errorMessage = nil
         defer { isWorking = false }
         do {
-            let request = CloudKnowledgePublishRequest(expectedGovernanceVersion: current.governanceVersion, termsAccepted: termsAccepted)
+            var publishBase = current
+            if publishBase.visibility != "public" {
+                // 点击“发布到市场”时自动把可见性设为公开，用户无需先手动“设为公开”。
+                var draft = snapshot.draft
+                draft.visibility = "public"
+                let updated = try await creatorAPI.updateKnowledgeBase(id: id, draft: draft)
+                snapshot.draft = draft
+                snapshot.latestKnowledgeBaseDetail = updated
+                snapshot.knowledgeBaseID = updated.id
+                persist()
+                publishBase = updated
+            }
+            let request = CloudKnowledgePublishRequest(expectedGovernanceVersion: publishBase.governanceVersion, termsAccepted: termsAccepted)
             let detail = try await creatorAPI.publishKnowledgeBase(id: id, request: request)
             self.snapshot.latestKnowledgeBaseDetail = detail
             self.snapshot.knowledgeBaseID = detail.id
