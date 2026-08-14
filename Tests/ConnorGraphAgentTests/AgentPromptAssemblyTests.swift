@@ -187,6 +187,18 @@ import ConnorGraphAgent
     #expect(prompt.contains("never omit substance for brevity"))
 }
 
+@Test func defaultSystemPromptTreatsSystemAsRealTimeAndPrefersRecentMemory() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("This is a real-time system"))
+    #expect(prompt.contains("the latest actual user request governs the current task"))
+    #expect(prompt.contains("the most recent memory is the primary reference"))
+    #expect(prompt.contains("Memory retrieval is ordered newest-first"))
+    #expect(prompt.contains("the newest is always returned and appears first"))
+    #expect(prompt.contains("prefer the most recent one for current-state questions"))
+    #expect(prompt.contains("Resolve conflicting memory records in favor of the most recent one"))
+}
+
 @Test func defaultSystemPromptGuidesTaskCreationWithTimestampFormat() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
