@@ -597,7 +597,12 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
     public func requestDeleteKnowledgeBase(id: String, reason: String) async {
         guard let creatorAPI else { errorMessage = "知识库服务不可用"; return }
         await perform {
-            try await creatorAPI.deleteKnowledgeBase(id: id, reason: reason)
+            do {
+                try await creatorAPI.deleteKnowledgeBase(id: id, reason: reason)
+            } catch let CloudKnowledgeError.server(status, _, _) where status == 404 {
+                // 远程未找到（已删除或从未创建）：说明是本地冗余数据，
+                // 忽略远程 404，继续执行本地删除清理逻辑。
+            }
             self.reset()
         }
     }
