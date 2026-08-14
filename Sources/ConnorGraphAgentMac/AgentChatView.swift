@@ -534,7 +534,7 @@ private struct AgentChatSessionRow: View {
                     }
                 }
                 if !row.labels.isEmpty {
-                    FlowLikeChips(values: row.labels.prefix(3).map(\.id))
+                    FlowLikeChips(values: row.labels.map(\.id))
                 }
             }
             .padding(.horizontal, AgentChatLayout.spaceM)
