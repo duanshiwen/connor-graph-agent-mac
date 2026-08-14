@@ -9,7 +9,8 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     return root
 }
 
-@Test func readToolReturnsFileContentWithLineWindow() async throws {
+@Test func readToolReturnsSmallFileInFullDespiteLimit() async throws {
+    // 小文件整读：即使调用方传了很小的 offset/limit，Read 也返回全文，不截断。
     let workspace = try makeToolTempWorkspace()
     let file = workspace.appendingPathComponent("README.md")
     try "one\ntwo\nthree\nfour\n".write(to: file, atomically: true, encoding: .utf8)
@@ -17,32 +18,54 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
 
     let result = try await tool.execute(
         arguments: try AgentToolArguments(json: #"{"filePath":"README.md","offset":2,"limit":2}"#),
-        context: .localToolTestContext(toolCallID: "read-1")
+        context: .localToolTestContext(toolCallID: "read-small-full")
     )
 
     #expect(result.toolName == "Read")
-    #expect(result.contentText.contains("2: two"))
-    #expect(result.contentText.contains("3: three"))
-    #expect(!result.contentText.contains("1: one"))
-    #expect(result.contentJSON?.contains(#""truncated":true"#) == true)
-    #expect(result.contentJSON?.contains(#""nextOffset":4"#) == true)
-}
-
-@Test func readToolReportsNextOffsetWhenMoreLinesRemain() async throws {
-    let workspace = try makeToolTempWorkspace()
-    let file = workspace.appendingPathComponent("README.md")
-    try "one\ntwo\nthree\nfour\n".write(to: file, atomically: true, encoding: .utf8)
-    let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
-
-    let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"filePath":"README.md","offset":1,"limit":2}"#),
-        context: .localToolTestContext(toolCallID: "read-cursor")
-    )
-
     #expect(result.contentText.contains("1: one"))
     #expect(result.contentText.contains("2: two"))
+    #expect(result.contentText.contains("3: three"))
+    #expect(result.contentText.contains("4: four"))
+    #expect(result.contentJSON?.contains(#""truncated":false"#) == true)
+}
+
+private func makeLargeReadableFile(_ name: String = "large.txt") throws -> (URL, String) {
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent(name)
+    let content = (1...1_500).map { "line-\($0)-\(String(repeating: "x", count: 50))" }.joined(separator: "\n") + "\n"
+    try content.write(to: file, atomically: true, encoding: .utf8)
+    return (file, content)
+}
+
+@Test func readToolAutoTruncatesLargeFileAndReturnsNextOffset() async throws {
+    // 大文件整读一次：按输出预算自动截断，并返回 nextOffset 供继续翻页。
+    let (file, content) = try makeLargeReadableFile()
+    let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: file.deletingLastPathComponent()))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"filePath":"large.txt"}"#),
+        context: .localToolTestContext(toolCallID: "read-large")
+    )
+
+    #expect(result.contentText.hasPrefix("1: line-1-"))
+    #expect(!result.contentText.isEmpty)
     #expect(result.contentJSON?.contains(#""truncated":true"#) == true)
-    #expect(result.contentJSON?.contains(#""nextOffset":3"#) == true)
+    #expect(result.contentJSON?.contains("nextOffset") == true)
+    #expect(result.contentText.utf8.count <= 32 * 1_024)
+}
+
+@Test func readToolContinuesLargeFileFromNextOffset() async throws {
+    // 大文件续读：从返回的 nextOffset 继续，内容从该行号开始且仍带截断标记。
+    let (file, content) = try makeLargeReadableFile()
+    let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: file.deletingLastPathComponent()))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"filePath":"large.txt","offset":100}"#),
+        context: .localToolTestContext(toolCallID: "read-large-offset")
+    )
+
+    #expect(result.contentText.hasPrefix("100: line-100-"))
+    #expect(result.contentJSON?.contains(#""truncated":true"#) == true)
 }
 
 @Test func listDirectoryToolReturnsSortedEntries() async throws {

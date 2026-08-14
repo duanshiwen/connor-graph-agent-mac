@@ -5,12 +5,12 @@ import Darwin
 
 public struct LocalReadFileTool: AgentTool {
     public let name = "Read"
-    public let description = "Read a text file from the configured local workspace. Supports 1-based line offset and limit; when the result is truncated it returns nextOffset so you can continue reading the file in chunks. Paths must stay inside allowed workspace roots."
+    public let description = "Read a text file from the configured local workspace. A small file is returned completely in a single call. A larger file is read from the start (or from the given 1-based offset) and automatically truncated to the output budget, returning nextOffset when more lines remain so you can continue with Read(filePath, offset: nextOffset). Optional offset/limit only create an explicit window on large files; do not pass a small limit for a small file. Paths must stay inside allowed workspace roots."
     public let permission: AgentPermissionCapability = .readWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "filePath": .string(description: "Path to a file inside the workspace."),
-        "offset": .integer(description: "Optional 1-based line number to start reading from. Defaults to 1."),
-        "limit": .integer(description: "Optional maximum number of lines to return. Defaults to 2000; maximum 10000.")
+        "offset": .integer(description: "Optional 1-based line number to start reading from. Defaults to 1; use it to continue from a returned nextOffset."),
+        "limit": .integer(description: "Optional maximum number of lines for an explicit window on large files. Omit it to read as much as fits the output budget (a small file is then returned in full).")
     ], required: ["filePath"])
 
     private let policy: LocalWorkspacePolicy
@@ -28,20 +28,44 @@ public struct LocalReadFileTool: AgentTool {
         try policy.validateReadableSize(path: path)
         let text = try String(contentsOf: path, encoding: .utf8)
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let maxBytes = max(policy.maxToolOutputBytes, 1)
+        let allFormatted = lines.enumerated().map { "\($0.offset + 1): \($0.element)" }
+        let fullText = allFormatted.joined(separator: "\n")
+
+        // 小文件整读：整个文件（含行号前缀）能放进单次输出预算时直接返回全文，
+        // 即使调用方传了很小的 limit 也不截断——避免“读小文件被压缩/截断”。
+        if fullText.utf8.count <= maxBytes {
+            let jsonObject: [String: Any] = [
+                "path": path.path,
+                "lineCount": lines.count,
+                "offset": 1,
+                "limit": lines.count,
+                "truncated": false
+            ]
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: fullText, contentJSON: LocalToolJSON.encode(jsonObject))
+        }
+
+        // 大文件自动分页：默认按输出预算自动截断并返回 nextOffset；
+        // 显式 offset/limit 仍可覆盖窗口（offset 用于从 nextOffset 继续）。
         let offset = max(arguments.int("offset") ?? 1, 1)
-        let requestedLimit = arguments.int("limit") ?? min(lines.count, 2_000)
-        let limit = min(max(requestedLimit, 0), 10_000)
         let start = min(offset - 1, lines.count)
-        let end = min(start + limit, lines.count)
-        let selected = lines[start..<end].enumerated().map { index, line in
-            "\(start + index + 1): \(line)"
-        }.joined(separator: "\n")
+        let requestedLimit = arguments.int("limit")
+        var end = start
+        var usedBytes = 0
+        while end < lines.count {
+            if let requestedLimit, end - start >= requestedLimit { break }
+            let lineBytes = allFormatted[end].utf8.count + 1
+            if end > start, usedBytes + lineBytes > maxBytes { break }
+            usedBytes += lineBytes
+            end += 1
+        }
+        let selected = allFormatted[start..<end].joined(separator: "\n")
         let truncated = end < lines.count
         var jsonObject: [String: Any] = [
             "path": path.path,
             "lineCount": lines.count,
             "offset": offset,
-            "limit": limit,
+            "limit": end - start,
             "truncated": truncated
         ]
         if truncated { jsonObject["nextOffset"] = end + 1 }
