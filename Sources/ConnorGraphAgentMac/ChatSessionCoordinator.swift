@@ -35,11 +35,37 @@ final class ChatSessionCoordinator {
     init(model: ChatSessionListModel, repository: AppChatSessionRepository?) {
         self.model = model
         self.repository = repository
-        // 转发对话框使用全量会话（绕过 UI 分页），保证目标列表完整。
-        model.loadAllChatSessionsForForwarding = { [weak self] in
-            guard let self, let repository = self.repository else { return [] }
-            return (try? repository.loadSessions(filter: .all))?
-                .filter { $0.governance.kind == .chat } ?? []
+        // 转发对话框按页取回康纳会话（绕过 UI 分页限制，最终取到全部会话），
+        // 由 ForwardDestinationPager 与 IM 会话归并后分页展示。
+        model.makeForwardSessionPageLoader = { [weak self] in
+            guard let self, let repository = self.repository else { return nil }
+            return { cursor, limit in
+                var items: [ForwardDestination] = []
+                var nextCursor = cursor
+                while items.count < limit {
+                    let page = try repository.loadSessionPage(filter: .all, limit: max(limit, 50), cursor: nextCursor)
+                    items += page.sessions
+                        .filter { $0.governance.kind == .chat }
+                        .map { session in
+                            ForwardDestination(
+                                key: "agent:\(session.id)",
+                                targetID: session.id,
+                                title: session.title,
+                                subtitle: "与康纳的会话",
+                                kind: .agent,
+                                updatedAt: session.updatedAt.timeIntervalSince1970
+                            )
+                        }
+                    guard let after = page.nextCursor else {
+                        nextCursor = nil
+                        break
+                    }
+                    nextCursor = after
+                    if items.count >= limit { break }
+                    if page.sessions.isEmpty { break }
+                }
+                return (items, nextCursor)
+            }
         }
     }
 

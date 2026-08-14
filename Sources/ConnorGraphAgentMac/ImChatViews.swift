@@ -287,7 +287,6 @@ private struct ImUserAvatar: View {
 
 struct ImChatDetailView: View {
     @Bindable var model: ImFeatureModel
-    var chatModel: ChatFeatureModel
 
     @State private var composerText = ""
     @State private var voiceRecorder = ImVoiceRecorder()
@@ -313,7 +312,7 @@ struct ImChatDetailView: View {
             if let bundle = model.selectedForwardBundle() {
                 ForwardDestinationSheet(
                     bundle: bundle,
-                    destinations: forwardDestinations(sessions: chatModel.sessions.loadAllChatSessionsForForwarding(), conversations: model.conversations),
+                    pager: model.makeForwardDestinationPager(),
                     isSending: model.isForwarding,
                     onCancel: { model.isForwardSheetPresented = false },
                     onSend: { caption, destinationKeys in
@@ -1163,13 +1162,12 @@ private struct ImExpiredMediaContent: View {
 /// (new session by default), then the anonymized forward flow.
 struct ImForwardSheet: View {
     @Bindable var model: ImFeatureModel
-    var sessions: [AgentSession]
 
     var body: some View {
         if let bundle = model.selectedForwardBundle() {
             ForwardDestinationSheet(
                 bundle: bundle,
-                destinations: forwardDestinations(sessions: sessions, conversations: model.conversations),
+                pager: model.makeForwardDestinationPager(),
                 isSending: model.isForwarding,
                 onCancel: { model.isForwardSheetPresented = false },
                 onSend: { caption, keys in

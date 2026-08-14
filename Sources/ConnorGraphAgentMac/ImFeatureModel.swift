@@ -88,6 +88,8 @@ final class ImFeatureModel {
     /// Submit into an existing AI session (selecting it first); returns the session id.
     @ObservationIgnored private let forwardToExistingSession: @MainActor (String, String) async -> String?
     @ObservationIgnored private let generateTitle: @MainActor ([ImMessage], String) async throws -> String
+    /// 转发目标分页加载器工厂（由组合根注入；nil 时回退为空列表）。
+    @ObservationIgnored private let makeForwardPager: @MainActor () -> ForwardDestinationPager?
 
     @ObservationIgnored private var cancellables: Set<AnyCancellable> = []
     @ObservationIgnored private var storeObserver: NSObjectProtocol?
@@ -101,7 +103,8 @@ final class ImFeatureModel {
         forwardFacade: @escaping @MainActor () -> AppMemoryOSFacade?,
         forwardToNewSession: @escaping @MainActor (String) async -> String?,
         forwardToExistingSession: @escaping @MainActor (String, String) async -> String?,
-        generateTitle: @escaping @MainActor ([ImMessage], String) async throws -> String
+        generateTitle: @escaping @MainActor ([ImMessage], String) async throws -> String,
+        makeForwardPager: @escaping @MainActor () -> ForwardDestinationPager? = { nil }
     ) {
         self.store = store
         self.center = center
@@ -111,6 +114,7 @@ final class ImFeatureModel {
         self.forwardToNewSession = forwardToNewSession
         self.forwardToExistingSession = forwardToExistingSession
         self.generateTitle = generateTitle
+        self.makeForwardPager = makeForwardPager
     }
 
     // MARK: - Lifecycle
@@ -633,15 +637,31 @@ final class ImFeatureModel {
         }
     }
 
-    func forward(bundle: ForwardedChatBundle, destinationKeys: Set<String>) async throws {
+    /// 构建转发目标分页加载器：康纳会话 + IM 会话按最近活跃归并、分页取回，
+    /// 转发弹窗按需加载，最终取到全部目标。
+    func makeForwardDestinationPager() -> ForwardDestinationPager {
+        makeForwardPager() ?? ForwardDestinationPager(
+            sessionsLoader: { _, _ in ([], nil) },
+            conversationsLoader: { _, _ in ([], nil) }
+        )
+    }
+
+    /// 转发到 IM 会话仍等待发送完成；转发到康纳会话（agent:*）则立即把智能调用
+    /// 放到后台执行并返回，转发弹窗无需等待 LLM 完成即可关闭。
+    /// 后台调用失败时优先回传 `onBackgroundError`，缺省落到 `errorMessage`。
+    func forward(
+        bundle: ForwardedChatBundle,
+        destinationKeys: Set<String>,
+        onBackgroundError: (@MainActor @Sendable (String) -> Void)? = nil
+    ) async throws {
         let cardContent = try ForwardedChatBundleCodec.encode(bundle)
         let modelContent = try ForwardedChatBundleCodec.encodeForModel(bundle)
         for key in destinationKeys {
             if key == "agent:new" {
-                guard await forwardToNewSession(modelContent) != nil else { throw CocoaError(.fileWriteUnknown) }
+                dispatchAgentForward(modelContent: modelContent, sessionID: nil, onError: onBackgroundError)
             } else if key.hasPrefix("agent:") {
                 let id = String(key.dropFirst("agent:".count))
-                guard await forwardToExistingSession(id, modelContent) != nil else { throw CocoaError(.fileWriteUnknown) }
+                dispatchAgentForward(modelContent: modelContent, sessionID: id, onError: onBackgroundError)
             } else if key.hasPrefix("im:") {
                 let id = String(key.dropFirst("im:".count))
                 guard let target = conversations.first(where: { $0.id == id }) else { throw CocoaError(.fileNoSuchFile) }
@@ -652,6 +672,32 @@ final class ImFeatureModel {
                 case .group:
                     guard let groupID = target.groupId else { throw CocoaError(.fileNoSuchFile) }
                     try await center.sendGroupMessage(groupId: groupID, content: cardContent)
+                }
+            }
+        }
+    }
+
+    private func dispatchAgentForward(
+        modelContent: String,
+        sessionID: String?,
+        onError: (@MainActor @Sendable (String) -> Void)?
+    ) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let result: String?
+                if let sessionID {
+                    result = await self.forwardToExistingSession(sessionID, modelContent)
+                } else {
+                    result = await self.forwardToNewSession(modelContent)
+                }
+                if result == nil { throw CocoaError(.fileWriteUnknown) }
+            } catch {
+                let message = "转发失败：\(error.localizedDescription)"
+                if let onError {
+                    onError(message)
+                } else {
+                    self.errorMessage = message
                 }
             }
         }

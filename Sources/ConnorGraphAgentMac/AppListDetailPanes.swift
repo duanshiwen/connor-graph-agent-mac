@@ -176,7 +176,7 @@ struct CraftCalendarListPane: View {
         .sheet(item: $pendingForwardBundle) { bundle in
             ForwardDestinationSheet(
                 bundle: bundle,
-                destinations: forwarding.destinations(),
+                pager: forwarding.makePager(),
                 isSending: isForwardSending,
                 onCancel: { pendingForwardBundle = nil },
                 onSend: { caption, keys in
@@ -2070,7 +2070,7 @@ struct CraftMailListPane: View {
         .sheet(item: $pendingForwardBundle) { bundle in
             ForwardDestinationSheet(
                 bundle: bundle,
-                destinations: forwarding.destinations(),
+                pager: forwarding.makePager(),
                 isSending: isForwardSending,
                 onCancel: { pendingForwardBundle = nil },
                 onSend: { caption, keys in
@@ -2434,7 +2434,7 @@ struct CraftRSSListPane: View {
         .sheet(item: $pendingForwardBundle) { bundle in
             ForwardDestinationSheet(
                 bundle: bundle,
-                destinations: forwarding.destinations(),
+                pager: forwarding.makePager(),
                 isSending: isForwardSending,
                 onCancel: { pendingForwardBundle = nil },
                 onSend: { caption, keys in
