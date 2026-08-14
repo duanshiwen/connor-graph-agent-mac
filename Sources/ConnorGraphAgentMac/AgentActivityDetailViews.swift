@@ -260,7 +260,7 @@ struct FlowLikeChips: View {
 }
 
 /// 自适应换行布局：标签/徽标过多时自动折行，保证所有条目完整展示。
-private struct FlowLayout: Layout {
+struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
