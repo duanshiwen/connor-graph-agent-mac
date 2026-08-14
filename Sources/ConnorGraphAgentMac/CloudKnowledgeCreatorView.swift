@@ -223,6 +223,12 @@ struct CloudKnowledgeCreatorView: View {
 
     private var progress: some View {
         VStack(alignment: .leading, spacing: 14) {
+            Label("你可以关闭此窗口，发布会在后台自动继续执行；完成后会自动弹出进度窗口。", systemImage: "arrow.up.right.square")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
             if let error = store.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)
