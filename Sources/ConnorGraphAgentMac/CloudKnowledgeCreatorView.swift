@@ -370,7 +370,7 @@ struct CloudKnowledgeCreatorView: View {
             if store.snapshot.knowledgeBaseID != nil {
                 if store.snapshot.latestKnowledgeBaseDetail?.visibility != "public" {
                     HStack(spacing: 10) {
-                        Label("发布到知识市场前需将可见性设为公开", systemImage: "lock.open")
+                        Label("点击“同意并发布”时将自动把可见性设为公开", systemImage: "lock.open")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -619,10 +619,10 @@ struct CloudKnowledgeCreatorView: View {
     private var canRequestPublish: Bool {
         // 只有知识已提交完成（completed）且确实选择了会话/生成了知识才允许发布；
         // 未选择知识或尚未提交完成的阶段，发布按钮不可用/不可见。
+        // 可见性不必预先为公开：点击发布时会自动设为公开。
         store.snapshot.stage == .completed
             && store.snapshot.knowledgeBaseID != nil
             && !store.snapshot.selectedConversationIDs.isEmpty
-            && store.snapshot.latestKnowledgeBaseDetail?.visibility == "public"
             && !["deleting", "deleted"].contains(store.snapshot.latestKnowledgeBaseDetail?.lifecycleStatus ?? "")
             && store.currentEnforcementStatusLabel != "taken_down"
     }

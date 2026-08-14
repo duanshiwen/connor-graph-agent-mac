@@ -365,6 +365,32 @@ struct CloudKnowledgePhase5Tests {
         #expect(store.snapshot.latestKnowledgeBaseDetail?.publicationStatus == "published")
     }
 
+    @Test @MainActor func publishToMarketplaceAutomaticallyMakesKnowledgeBasePublic() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-auto-public-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let snapshotRepository = CloudKnowledgeCreatorSnapshotRepository(fileURL: root.appendingPathComponent("snapshot.json"))
+        let historyRepository = CloudKnowledgePublicationHistoryRepository(fileURL: root.appendingPathComponent("history.json"))
+        let api = CreatorPublicationFakeAPI()
+        let store = CloudKnowledgeCreatorStore(
+            repository: snapshotRepository,
+            historyRepository: historyRepository,
+            creatorAPI: api,
+            publicationAPI: api
+        )
+        store.updateDraft(.init(name: "Private", slug: "private", visibility: "private"))
+        await store.saveKnowledgeBase()
+        store.advance(to: .completed)
+        #expect(store.snapshot.latestKnowledgeBaseDetail?.visibility == "private")
+
+        // 不先手动“设为公开”，点击发布到市场时应自动把可见性设为公开。
+        let publishedID = await store.publishKnowledgeBase(termsAccepted: true)
+
+        #expect(publishedID == "kb-1")
+        #expect(store.snapshot.draft.visibility == "public")
+        #expect(store.snapshot.latestKnowledgeBaseDetail?.visibility == "public")
+        #expect(store.snapshot.latestKnowledgeBaseDetail?.publicationStatus == "published")
+    }
+
     @Test @MainActor func publicationHistoryUpsertsProgressPersistsAndProtectsActiveWorkflow() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-publication-history-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
