@@ -4126,8 +4126,8 @@ struct CraftSessionRow: View {
             }
 
             if !row.labels.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(Array(row.labels.prefix(3)), id: \.id) { label in
+                FlowLayout(spacing: 4) {
+                    ForEach(row.labels, id: \.id) { label in
                         Text(displayName(for: label))
                             .font(AppListTypography.rowCaption)
                             .foregroundStyle(labelForegroundColor)
