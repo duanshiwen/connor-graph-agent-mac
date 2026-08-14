@@ -178,7 +178,7 @@ public enum CloudKnowledgeError: Error, Sendable, Equatable, LocalizedError {
         case .invalidResponse: "云端知识服务返回了无法识别的数据。"
         case .unauthorized: "登录已失效，请重新登录。"
         case .server(_, _, let message): message
-        case .publicationConflict: "知识库已发生变化，需要重新检索并 rebase。"
+        case .publicationConflict: "知识库已更新，请重新提交。"
         case .searchBeforeWriteRequired: "写入前必须先搜索目标知识层。"
         case .searchContextNotRelevant: "搜索上下文没有覆盖本次知识写入。"
         case .searchContextStale: "搜索上下文已过期，请重新搜索。"

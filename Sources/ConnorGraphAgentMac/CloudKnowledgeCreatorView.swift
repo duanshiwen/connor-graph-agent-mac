@@ -312,7 +312,7 @@ struct CloudKnowledgeCreatorView: View {
 
     private var conflict: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("知识库在生成期间发生了变化。请重新检索受影响知识并 rebase，避免覆盖远端历史。", systemImage: "arrow.triangle.2.circlepath")
+            Label("知识库在生成期间被更新，请重新生成后再试。", systemImage: "arrow.triangle.2.circlepath")
                 .foregroundStyle(.orange)
         }
     }
