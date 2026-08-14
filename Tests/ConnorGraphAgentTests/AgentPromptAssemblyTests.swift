@@ -7,7 +7,7 @@ import ConnorGraphAgent
     let document = AgentPromptModuleCatalog.document(from: prompt)
 
     #expect(AgentPromptModuleCatalog.unclassifiedHeadings(in: prompt).isEmpty)
-    #expect(AgentPromptModuleCatalog.specifications.count == 44)
+    #expect(AgentPromptModuleCatalog.specifications.count == 45)
     #expect(document.modules.count == AgentPromptModuleCatalog.specifications.count + 1)
     #expect(Set(document.moduleIDs).count == document.moduleIDs.count)
     #expect(Set(AgentPromptModuleCatalog.specifications.map(\.title)).count == AgentPromptModuleCatalog.specifications.count)
@@ -171,6 +171,19 @@ import ConnorGraphAgent
     #expect(prompt.contains("not automatically fresh evidence"))
     #expect(prompt.contains("inspect the durable source of truth again"))
     #expect(prompt.contains("explicit user output-format requirements"))
+}
+
+@Test func defaultSystemPromptExplainsIntermediateMessagesAreDeletedAndFinalRestatesMaterialResults() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Intermediate Messages and the Final Response"))
+    #expect(prompt.contains("deleted when the run completes"))
+    #expect(prompt.contains("do not remain in the conversation history"))
+    #expect(prompt.contains("Do not treat anything shown only in an intermediate message as already known by the user"))
+    #expect(prompt.contains("must be stated in the final response even when they were already mentioned in an intermediate message"))
+    #expect(prompt.contains("never refer back to an earlier message in place of restating them"))
+    #expect(prompt.contains("does not need to be repeated in the final response"))
+    #expect(prompt.contains("keep the final response concise"))
 }
 
 @Test func defaultSystemPromptDistinguishesNoteSessionsFromFileArtifacts() {

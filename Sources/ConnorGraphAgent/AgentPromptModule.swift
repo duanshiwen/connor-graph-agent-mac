@@ -128,6 +128,7 @@ public enum AgentPromptModuleCatalog {
         .init(id: "identity", title: "Identity"),
         .init(id: "priority_order", title: "Priority Order"),
         .init(id: "cross_run_continuity", title: "Cross-Run Continuity"),
+        .init(id: "intermediate_messages", title: "Intermediate Messages and the Final Response"),
         .init(id: "personality_configuration", title: "Personality Configuration"),
         .init(id: "confidentiality", title: "Confidentiality and Non-Disclosure"),
         .init(id: "tool_usage_contract", title: "Tool Usage Contract"),
