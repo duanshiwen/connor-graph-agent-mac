@@ -16,6 +16,20 @@ struct TaskAgentToolsTests {
         var tasks: [ConnorTaskDefinition]
     }
 
+    @Test func scheduledTaskToolDocumentsTimezoneRequirement() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        let tool = TaskCreateScheduledSessionMessageTool(service: TaskCreationService(repository: repository))
+
+        let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
+        let runAt = try #require(properties["runAt"] as? [String: Any])
+        let runAtDescription = runAt["description"] as? String ?? ""
+        #expect(runAtDescription.contains("timezone"))
+        #expect(runAtDescription.contains("+08:00"))
+        #expect(tool.description.contains("timezone"))
+    }
+
     @Test func aiToolCreatesScheduledTask() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
