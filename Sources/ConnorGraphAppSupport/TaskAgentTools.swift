@@ -45,7 +45,7 @@ public struct TaskUpdateScheduledSessionMessageTool: AgentTool {
         "taskID": .string(description: "Exact taskID returned by tasks_list or a task creation/update result; copy the field without renaming it"),
         "expectedUpdatedAt": .string(description: "Optional current updatedAt ISO-8601 value for optimistic concurrency"),
         "name": .string(description: "Optional replacement task name"),
-        "runAt": .string(description: "Optional replacement first run time as ISO-8601"),
+        "runAt": .string(description: "Optional replacement first run time as RFC 3339/ISO-8601 with timezone, e.g. 2026-08-15T09:00:00+08:00"),
         "recurrence": .string(description: "Optional once, daily, weekly, or monthly"),
         "timezone": .string(description: "Optional replacement IANA timezone; empty removes it"),
         "message": .string(description: "Optional replacement message"),
@@ -119,11 +119,11 @@ public struct TaskDeleteTool: AgentTool {
 
 public struct TaskCreateScheduledSessionMessageTool: AgentTool {
     public let name = "tasks_create_scheduled_session_message"
-    public let description = "Create an AI task that creates a new session at a specific time or on a daily/weekly/monthly schedule, then sends a message to AI. This does not allow arbitrary scripts or external actions."
+    public let description = "Create an AI task that creates a new session at a specific time or on a daily/weekly/monthly schedule, then sends a message to AI. Pass `runAt` as an RFC 3339/ISO-8601 timestamp that includes a timezone (for example 2026-08-15T09:00:00+08:00). This does not allow arbitrary scripts or external actions."
     public let permission: AgentPermissionCapability = .commitGraphWrite
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "name": .string(description: "Task name"),
-        "runAt": .string(description: "First run time as ISO-8601 timestamp"),
+        "runAt": .string(description: "First run time as RFC 3339/ISO-8601 with timezone, e.g. 2026-08-15T09:00:00+08:00"),
         "recurrence": .string(description: "once, daily, weekly, or monthly"),
         "timezone": .string(description: "Optional IANA timezone, e.g. Asia/Shanghai"),
         "message": .string(description: "Message to send to AI in the new session"),

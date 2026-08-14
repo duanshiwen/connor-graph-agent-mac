@@ -187,6 +187,15 @@ import ConnorGraphAgent
     #expect(prompt.contains("never omit substance for brevity"))
 }
 
+@Test func defaultSystemPromptGuidesTaskCreationWithTimestampFormat() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("create the scheduled task with `tasks_create_scheduled_session_message`"))
+    #expect(prompt.contains("`tasks_create_session_status_message`"))
+    #expect(prompt.contains("`runAt` as an RFC 3339/ISO-8601 timestamp that includes a timezone"))
+    #expect(prompt.contains("2026-08-15T09:00:00+08:00"))
+}
+
 @Test func defaultSystemPromptDistinguishesNoteSessionsFromFileArtifacts() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
