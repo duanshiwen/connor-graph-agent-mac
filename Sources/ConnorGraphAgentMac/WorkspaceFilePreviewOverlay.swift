@@ -19,6 +19,9 @@ struct WorkspaceFilePreviewOverlay: View {
     var onCopyFullText: (URL) -> Void
     var onShare: (URL) -> Void
     var onClose: () -> Void
+    /// 复制完整文件文字后的反馈提示；在预览浮窗内渲染，确保不被遮罩层盖住。
+    var copyFeedbackToast: AgentChatToast?
+    var onDismissCopyFeedback: () -> Void
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -71,8 +74,15 @@ struct WorkspaceFilePreviewOverlay: View {
             )
             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
             .padding(AgentChatLayout.spaceXL)
+
+            if let copyFeedbackToast {
+                AgentChatToastView(toast: copyFeedbackToast, onDismiss: onDismissCopyFeedback)
+                    .padding(AgentChatLayout.spaceXL)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut(duration: 0.2), value: copyFeedbackToast)
     }
 
     private func preview(_ model: WorkspaceFilePreviewModel) -> some View {
