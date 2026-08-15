@@ -302,6 +302,51 @@ struct TaskSchedulerRunnerServiceTests {
         #expect(history.map(\.status) == [.failed, .running])
     }
 
+    @Test func mailRefreshTaskGetsLargerTimeoutWindowThanGenericSourceRefresh() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        try saveSystemDefaultsAsNotDue(repository: repository, now: Date(timeIntervalSince1970: 2_000))
+        let mailTask = ConnorTaskDefinition(
+            id: "system.mail.account.mail-slow.refresh",
+            name: "检查邮件：Mail Slow",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "mail", operationName: "refresh", parameters: ["sourceKind": "mail", "sourceInstanceID": "mail-slow"]),
+            lifecycle: ConnorTaskLifecycle(status: .active, lastFinishedAt: Date(timeIntervalSince1970: 0)),
+            metadata: .protectedSystem,
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+        try repository.saveTask(mailTask)
+        let runner = TaskTargetRunner(
+            mailRefresher: { _ in
+                try await Task.sleep(for: .seconds(0.6))
+                return "mail refreshed slowly"
+            },
+            calendarRefresher: { _ in "calendar" },
+            rssRefresher: { _ in "rss" },
+            sessionMessenger: { _ in "session" }
+        )
+        let service = TaskSchedulerRunnerService(
+            repository: repository,
+            scheduler: TaskSchedulerService(),
+            runner: runner,
+            refreshTaskTimeoutSeconds: 0.2,
+            mailRefreshTaskTimeoutSeconds: 5
+        )
+
+        let outcomes = try await service.runDueTasks(now: Date(timeIntervalSince1970: 2_000))
+        let reloaded = try #require(try repository.loadTask(id: mailTask.id))
+        let history = try repository.loadRunHistory(taskID: mailTask.id, limit: 10)
+
+        #expect(outcomes.count == 1)
+        #expect(outcomes[0].succeeded == true)
+        #expect(outcomes[0].summary == "mail refreshed slowly")
+        #expect(reloaded.lifecycle.status == .active)
+        #expect(history.map(\.status) == [.succeeded, .running])
+    }
+
     private func saveSystemDefaultsAsNotDue(repository: AppTaskManagementRepository, now: Date) throws {
         for var defaultTask in ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)) {
             let interval = defaultTask.trigger.intervalSeconds ?? 600
