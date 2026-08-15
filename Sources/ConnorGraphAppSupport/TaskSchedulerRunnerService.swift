@@ -21,10 +21,14 @@ public struct TaskSchedulerRunnerService: Sendable {
     public var repository: AppTaskManagementRepository
     public var scheduler: TaskSchedulerService
     public var runner: TaskTargetRunner
-    /// 源刷新类任务（RSS/邮件/日历）的单次执行超时；超时按失败处理并继续后续任务，
+    /// 源刷新类任务（RSS/日历）的单次执行超时；超时按失败处理并继续后续任务，
     /// 避免一个卡死的刷新阻塞整轮定时调度（简报等会话任务因此永远排不上）。
-    /// 5 秒足够：RSS/邮件/日历正常刷新很快，长时间无响应基本就是网络卡死或源不可达。
+    /// 5 秒足够：RSS/日历正常刷新很快，长时间无响应基本就是网络卡死或源不可达。
     public var refreshTaskTimeoutSeconds: TimeInterval
+    /// 邮件刷新任务的单次执行超时。IMAP 增量同步（尤其 iCloud 等多文件夹账户）经常超过
+    /// 通用源刷新窗口，手动刷新可正常完成但定时任务会被 5 秒超时误判失败；这里给邮件
+    /// 单独开更大的时间窗口，超时后同样按失败处理并继续后续任务。
+    public var mailRefreshTaskTimeoutSeconds: TimeInterval
     /// 其余任务（新建会话/记忆管道等）的超时；新建会话类任务创建后即返回，通常用不到。
     public var generationTaskTimeoutSeconds: TimeInterval
 
@@ -33,18 +37,21 @@ public struct TaskSchedulerRunnerService: Sendable {
         scheduler: TaskSchedulerService = TaskSchedulerService(),
         runner: TaskTargetRunner,
         refreshTaskTimeoutSeconds: TimeInterval = 5,
+        mailRefreshTaskTimeoutSeconds: TimeInterval = 120,
         generationTaskTimeoutSeconds: TimeInterval = 600
     ) {
         self.repository = repository
         self.scheduler = scheduler
         self.runner = runner
         self.refreshTaskTimeoutSeconds = refreshTaskTimeoutSeconds
+        self.mailRefreshTaskTimeoutSeconds = mailRefreshTaskTimeoutSeconds
         self.generationTaskTimeoutSeconds = generationTaskTimeoutSeconds
     }
 
     private func timeoutSeconds(for task: ConnorTaskDefinition) -> TimeInterval {
-        if task.target.targetKind == "source.runtime" { return refreshTaskTimeoutSeconds }
-        return generationTaskTimeoutSeconds
+        guard task.target.targetKind == "source.runtime" else { return generationTaskTimeoutSeconds }
+        if task.target.targetID == "mail" { return mailRefreshTaskTimeoutSeconds }
+        return refreshTaskTimeoutSeconds
     }
 
     /// 带超时执行单个任务。worker 用非结构化 Task 运行，超时后调度器立即返回并继续下一项，
