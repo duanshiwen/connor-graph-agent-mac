@@ -54,9 +54,8 @@ struct CloudKnowledgeMarketplaceListPane: View {
                             marketplaceFilterBanner
                         }
                         if unifiedBases.isEmpty {
-                            marketplaceEmptyPoster
                             ContentUnavailableView(marketplaceEmptyTitle, systemImage: "books.vertical", description: Text(marketplaceEmptyDescription))
-                                .padding(.top, 8)
+                                .padding(.top, 80)
                         } else {
                             ForEach(unifiedBases) { base in
                                 libraryRow(base)
@@ -178,22 +177,6 @@ struct CloudKnowledgeMarketplaceListPane: View {
     }
 
     private var unifiedBases: [CloudMarketplaceKnowledgeBase] { store.unifiedBases(filter: listFilter) }
-
-    /// 列表为空时，标题与空状态之间展示的知识市场海报图（与“连接不上知识库”首页一致）。
-    private var marketplaceEmptyPoster: some View {
-        Image("KnowledgeMarketplacePoster")
-            .resizable()
-            .scaledToFit()
-            .frame(maxWidth: 420)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            }
-            .accessibilityLabel("知识市场")
-            .padding(.top, 24)
-            .frame(maxWidth: .infinity)
-    }
 
     /// 列表为空时的统一空状态（与其它列表面板一致使用 ContentUnavailableView），
     /// 文案按当前筛选维度区分。
