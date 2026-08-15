@@ -222,6 +222,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
         let mappedPrefixes: [(prefix: String, family: String)] = [
             ("contacts_", "contact"),
             ("person_", "contact"),
+            ("tasks_", "task"),
             ("time_", "science"),
             ("get_current_environment", "environment"),
             ("environment_", "environment"),
