@@ -224,3 +224,23 @@ import Testing
     #expect(discovered.contains { $0.name == "memory_os_recent_context" })
     #expect(!discovered.contains { $0.name == "session_list_by_status" })
 }
+
+@Test func taskToolsAreDiscoverableUnderTaskNamespace() {
+    let definitions = [
+        AgentToolDefinition(name: "tasks_list", description: "List Connor task definitions", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "tasks_create_scheduled_session_message", description: "Create an AI task that creates a new session at a specific time or on a schedule, then sends a message", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "tasks_delete", description: "Delete a task", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "calendar_search_events", description: "Search calendar events", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let result = AssistantToolRouter().discovery(
+        query: "创建定时任务 scheduled task 提醒",
+        definitions: definitions
+    )
+
+    #expect(result.matchedNamespaces.contains("task"))
+    #expect(!result.unavailableNamespaces.contains("task"))
+    #expect(result.availableNamespaces.contains("task"))
+    #expect(result.tools.contains { $0.name == "tasks_create_scheduled_session_message" })
+    #expect(result.tools.contains { $0.name == "tasks_list" })
+}
