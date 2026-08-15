@@ -54,7 +54,8 @@ struct CloudKnowledgeMarketplaceListPane: View {
                             marketplaceFilterBanner
                         }
                         if unifiedBases.isEmpty {
-                            emptyRow("暂无可用知识库")
+                            ContentUnavailableView(marketplaceEmptyTitle, systemImage: "books.vertical", description: Text(marketplaceEmptyDescription))
+                                .padding(.top, 80)
                         } else {
                             ForEach(unifiedBases) { base in
                                 libraryRow(base)
@@ -175,16 +176,25 @@ struct CloudKnowledgeMarketplaceListPane: View {
         return parts.isEmpty ? "知识库" : parts.joined(separator: " · ")
     }
 
-    private func emptyRow(_ title: String) -> some View {
-        Text(title)
-            .font(AppListTypography.rowCaption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private var unifiedBases: [CloudMarketplaceKnowledgeBase] { store.unifiedBases(filter: listFilter) }
+
+    /// 列表为空时的统一空状态（与其它列表面板一致使用 ContentUnavailableView），
+    /// 文案按当前筛选维度区分。
+    private var marketplaceEmptyTitle: String {
+        switch listFilter {
+        case .subscribed: "还没有订阅知识库"
+        case .owned: "还没有创建知识库"
+        case .all: "暂无可用知识库"
+        }
     }
 
-    private var unifiedBases: [CloudMarketplaceKnowledgeBase] { store.unifiedBases(filter: listFilter) }
+    private var marketplaceEmptyDescription: String {
+        switch listFilter {
+        case .subscribed: "在知识市场浏览并订阅感兴趣的知识库后，会显示在这里。"
+        case .owned: "点击右上角 + 新建并发布知识库后，会显示在这里。"
+        case .all: "知识市场用于发现、订阅并使用社区发布的结构化知识库。"
+        }
+    }
 
     /// 主列表头左侧筛选按钮：切换「全部知识库 / 我订阅的 / 我创建的」。
     /// 视觉与“发布历史 / 添加知识库”图标按钮保持一致（同字号、同圆形背景、隐藏菜单指示器）。
