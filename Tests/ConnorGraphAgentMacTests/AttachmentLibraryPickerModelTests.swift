@@ -84,4 +84,56 @@ struct AttachmentLibraryPickerModelTests {
         #expect(model.total == 1)
         #expect(model.items.first?.originalName == "photo.png")
     }
+
+    @Test func textFilterIncludesTextLikeKinds() async throws {
+        let (paths, model) = try makeModel(pageSize: 10)
+        try register(paths, name: "note.txt", data: Data("纯文本".utf8))
+        try register(paths, name: "note.md", data: Data("# 笔记".utf8))
+        try register(paths, name: "data.json", data: Data("{}".utf8))
+        try register(paths, name: "photo.png", data: Data("png".utf8))
+        try register(paths, name: "report.pdf", data: Data("%PDF-1.4 fake".utf8))
+
+        model.kindFilter = .text
+        model.reload()
+        #expect(model.total == 3)
+        let names = model.items.map(\.originalName)
+        #expect(names.contains("note.txt"))
+        #expect(names.contains("note.md"))
+        #expect(names.contains("data.json"))
+        #expect(!names.contains("photo.png"))
+        #expect(!names.contains("report.pdf"))
+    }
+
+    @Test func loadsAllPagesViaScrollToBottom() async throws {
+        let (paths, model) = try makeModel(pageSize: 2)
+        for index in 0..<5 {
+            try register(paths, name: "file-\(index).txt", data: Data("content \(index)".utf8))
+        }
+
+        model.reload()
+        #expect(model.items.count == 2)
+        #expect(model.hasMore)
+
+        // 模拟滚动到底：最后一条出现触发下一页，直到全部加载完
+        while model.hasMore, let last = model.items.last {
+            model.loadMoreIfNeeded(current: last)
+        }
+        #expect(model.items.count == 5)
+        #expect(model.total == 5)
+        #expect(!model.hasMore)
+    }
+
+    @Test func searchEmptyResultKeepsFilter() async throws {
+        let (paths, model) = try makeModel(pageSize: 10)
+        try register(paths, name: "note.md", data: Data("# 笔记".utf8))
+
+        model.query = "不存在的关键词"
+        model.reload()
+        #expect(model.total == 0)
+        #expect(model.items.isEmpty)
+
+        model.query = ""
+        model.reload()
+        #expect(model.total == 1)
+    }
 }
