@@ -179,6 +179,36 @@ struct NotionExportNoteImportAdapterTests {
         #expect(flat.allSatisfy { $0.hierarchy.isEmpty })
     }
 
+    @Test("Rebuilds parent-child hierarchy from the whole Notion tree")
+    func rebuildsParentHierarchy() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let idA = String(repeating: "a", count: 32)
+        let idB = String(repeating: "b", count: 32)
+        let idC = String(repeating: "c", count: 32)
+        // self-folder page 笔记本：导出为 笔记本 <id>/笔记本 <id>.md
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("笔记本 \(idA)"), withIntermediateDirectories: true)
+        try "# 笔记本".write(to: root.appendingPathComponent("笔记本 \(idA)/笔记本 \(idA).md"), atomically: true, encoding: .utf8)
+        // self-folder page 子分类：笔记本 <id>/子分类 <id>/子分类 <id>.md
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("笔记本 \(idA)/子分类 \(idB)"), withIntermediateDirectories: true)
+        try "# 子分类".write(to: root.appendingPathComponent("笔记本 \(idA)/子分类 \(idB)/子分类 \(idB).md"), atomically: true, encoding: .utf8)
+        // 叶子页 子页面：笔记本 <id>/子分类 <id>/子页面 <id>.md
+        try "# 子页面".write(to: root.appendingPathComponent("笔记本 \(idA)/子分类 \(idB)/子页面 \(idC).md"), atomically: true, encoding: .utf8)
+
+        let notes = try await collect(NotionExportNoteImportAdapter(), root: root, preserveHierarchy: true)
+
+        #expect(notes.count == 3)
+        let notebook = try #require(notes.first { $0.title == "笔记本" })
+        let category = try #require(notes.first { $0.title == "子分类" })
+        let leaf = try #require(notes.first { $0.title == "子页面" })
+        #expect(notebook.hierarchy == ["笔记本"])
+        #expect(category.hierarchy == ["笔记本", "子分类"])
+        #expect(leaf.hierarchy == ["笔记本", "子分类"])
+        // 层级重建：叶子 → 子分类 → 笔记本 → 根
+        #expect(leaf.hierarchyParent == category.sourceIdentity)
+        #expect(category.hierarchyParent == notebook.sourceIdentity)
+        #expect(notebook.hierarchyParent == nil)
+    }
+
     private func makeZip(from directory: URL, to archive: URL) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
