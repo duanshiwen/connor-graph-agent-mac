@@ -101,6 +101,8 @@ struct AppShellView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var isPrimarySidebarVisible = true
     @State private var isIdentityPopoverPresented = false
+    @State private var shellContentWidth: CGFloat = 0
+    @State private var userRequestedSidebarHidden = false
 
     private var selectionBinding: Binding<SidebarItem?> {
         Binding(
@@ -150,7 +152,7 @@ struct AppShellView: View {
                 graph: graph,
                 selection: selectionBinding
             )
-                .frame(width: AppShellLayout.listColumnWidth)
+                .frame(width: widthClass == .narrow ? AppShellLayout.listColumnNarrowWidth : AppShellLayout.listColumnWidth)
                 .frame(maxHeight: .infinity)
                 .background(AppShellColors.listBackground)
                 .controlSize(AppButtonLayout.controlSize)
@@ -177,13 +179,15 @@ struct AppShellView: View {
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
+                    userRequestedSidebarHidden = isPrimarySidebarVisible
                     withAnimation(.easeInOut(duration: 0.16)) {
                         isPrimarySidebarVisible.toggle()
                     }
                 } label: {
                     Label(isPrimarySidebarVisible ? "隐藏主侧栏" : "显示主侧栏", systemImage: "sidebar.leading")
                 }
-                .help(isPrimarySidebarVisible ? "隐藏主侧栏" : "显示主侧栏")
+                .disabled(shellContentWidth < AppShellLayout.sidebarCollapseThreshold)
+                .help(shellContentWidth < AppShellLayout.sidebarCollapseThreshold ? "窗口过窄，主侧栏已自动收起" : (isPrimarySidebarVisible ? "隐藏主侧栏" : "显示主侧栏"))
             }
 
             ToolbarItem(placement: .principal) {
@@ -212,7 +216,7 @@ struct AppShellView: View {
                         onMoveDown: { graph.globalSearch.moveSelectionDown() },
                         onCancel: { graph.globalSearch.dismissOverlay() }
                     )
-                    .frame(minWidth: 220, idealWidth: 320, maxWidth: 420, minHeight: 18, idealHeight: 20, maxHeight: 22)
+                    .frame(minWidth: widthClass.isCompactOrNarrow ? 150 : 220, idealWidth: 320, maxWidth: 420, minHeight: 18, idealHeight: 20, maxHeight: 22)
                     if !graph.globalSearch.query.isEmpty {
                         Button(action: { graph.globalSearch.clear() }) {
                             Image(systemName: "xmark.circle.fill")
@@ -278,6 +282,22 @@ struct AppShellView: View {
             }
         }
         .background(WindowTitlebarConfigurator())
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear {
+                        shellContentWidth = proxy.size.width
+                        applyResponsiveSidebar(width: proxy.size.width)
+                    }
+                    .onChange(of: proxy.size.width) { _, newWidth in
+                        shellContentWidth = newWidth
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            applyResponsiveSidebar(width: newWidth)
+                        }
+                    }
+            }
+        )
+        .environment(\.windowWidthClass, widthClass)
         .frame(minWidth: AppShellLayout.shellMinWidth, minHeight: AppShellLayout.shellMinHeight)
         .onAppear {
             if graph.shell.selection == nil {
@@ -306,6 +326,20 @@ struct AppShellView: View {
             if let im = graph.im {
                 ImAddFriendSheet(model: im, isPresented: addFriendPresented)
             }
+        }
+    }
+
+    private var widthClass: AppWindowWidthClass {
+        if shellContentWidth < AppShellLayout.narrowWidthThreshold { return .narrow }
+        if shellContentWidth < AppShellLayout.sidebarCollapseThreshold { return .compact }
+        return .regular
+    }
+
+    private func applyResponsiveSidebar(width: CGFloat) {
+        if width < AppShellLayout.sidebarCollapseThreshold {
+            if isPrimarySidebarVisible { isPrimarySidebarVisible = false }
+        } else if width >= AppShellLayout.sidebarExpandThreshold, !userRequestedSidebarHidden {
+            if !isPrimarySidebarVisible { isPrimarySidebarVisible = true }
         }
     }
 
@@ -353,5 +387,13 @@ private struct WindowTitlebarConfigurator: NSViewRepresentable {
         window.titlebarAppearsTransparent = false
         window.titleVisibility = .visible
         window.isMovableByWindowBackground = false
+        let minimumSize = NSSize(
+            width: AppShellLayout.shellMinWidth,
+            height: AppShellLayout.shellMinHeight
+        )
+        if window.minSize != minimumSize {
+            window.minSize = minimumSize
+            window.contentMinSize = minimumSize
+        }
     }
 }

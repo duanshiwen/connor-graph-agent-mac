@@ -12,6 +12,7 @@ struct AgentComposerOptionBar: View {
     var hasRunningBackgroundTask: Bool
     var currentTextSelectionRange: () -> NSRange?
     var onAction: (AgentComposerAction) -> Void
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
         HStack(spacing: AgentChatLayout.spaceS) {
@@ -37,10 +38,12 @@ struct AgentComposerOptionBar: View {
 
             Spacer(minLength: AgentChatLayout.spaceS)
 
-            speechTranscriptionButton
+            // 窄窗口下省略次要控件，给输入区留出空间
+            if !windowWidthClass.isNarrow {
+                speechTranscriptionButton
 
-            backgroundTasksButton
-
+                backgroundTasksButton
+            }
         }
         .padding(.horizontal, 1)
         .padding(.bottom, 2)
