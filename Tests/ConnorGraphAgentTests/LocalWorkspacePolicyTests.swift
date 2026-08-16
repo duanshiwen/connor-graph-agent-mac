@@ -75,3 +75,27 @@ private func makeTempWorkspace(_ name: String = UUID().uuidString) throws -> URL
 
     #expect(resolved.path == file.standardizedFileURL.resolvingSymlinksInPath().path)
 }
+
+@Test func attachmentLibraryDirectoryIsDefaultAccessible() throws {
+    let workspace = try makeTempWorkspace()
+    let libraryRoot = try makeTempWorkspace("attachment-library-" + UUID().uuidString)
+    // 附件库结构：files/<fileID>/original/<name>
+    let storedFile = libraryRoot
+        .appendingPathComponent("file:abc123", isDirectory: true)
+        .appendingPathComponent("original", isDirectory: true)
+        .appendingPathComponent("report.pdf")
+    try FileManager.default.createDirectory(at: storedFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("%PDF-1.4 fake".utf8).write(to: storedFile)
+
+    let policy = LocalWorkspacePolicy(
+        workingDirectory: workspace,
+        additionalAllowedDirectories: [libraryRoot]
+    )
+
+    // 绝对路径与相对基准路径都应可解析、可读（附件库工具 file_get 依赖此边界）
+    let resolved = try policy.resolvePath(storedFile.path)
+    #expect(resolved.path == storedFile.standardizedFileURL.resolvingSymlinksInPath().path)
+    try policy.validateReadablePath(storedFile)
+    let relative = try policy.resolvePath("file:abc123/original/report.pdf", base: libraryRoot)
+    try policy.validateReadablePath(relative)
+}

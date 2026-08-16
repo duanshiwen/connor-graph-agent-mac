@@ -909,11 +909,17 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
 
     private func hiddenConnorDataAllowedDirectories(appendingTo visibleDirectories: [URL]) -> [URL] {
         guard let storagePaths else { return visibleDirectories }
-        let hiddenDirectory = storagePaths.applicationSupportDirectory
-        let hiddenPath = AppProjectWorkingDirectoryResolver.normalizedDirectoryPath(hiddenDirectory)
-        let visiblePaths = Set(visibleDirectories.map { AppProjectWorkingDirectoryResolver.normalizedDirectoryPath($0) })
-        guard !visiblePaths.contains(hiddenPath) else { return visibleDirectories }
-        return visibleDirectories + [hiddenDirectory]
+        var result = visibleDirectories
+        func appendIfMissing(_ directory: URL) {
+            let normalized = AppProjectWorkingDirectoryResolver.normalizedDirectoryPath(directory)
+            let existing = Set(result.map { AppProjectWorkingDirectoryResolver.normalizedDirectoryPath($0) })
+            if !existing.contains(normalized) { result.append(directory) }
+        }
+        // 应用私有数据目录默认可访问；附件库文件夹（filesDirectory）显式加入，
+        // 保证 file_get/file_register 等附件库工具与工作区工具都能读取附件库。
+        appendIfMissing(storagePaths.applicationSupportDirectory)
+        appendIfMissing(storagePaths.filesDirectory)
+        return result
     }
 
 }
