@@ -61,7 +61,6 @@ struct AgentChatComposerView: View {
     @State private var skillPickerSelectionIndex: Int = 0
     @State private var speechKeyboardMonitor: SpeechInputKeyboardMonitor?
     @State private var composerPersonMentions: [ComposerPersonMention] = []
-    @State private var isAttachmentLibraryPresented: Bool = false
     @State private var attachmentLibraryModel: AttachmentLibraryPickerModel?
 
     private let workspaceMenuItemMaxWidth: CGFloat = 320
@@ -1116,20 +1115,18 @@ struct AgentChatComposerView: View {
         .opacity(isNoteMode ? 0.4 : 1.0)
         .help(isNoteMode ? "笔记模式下不可用，请用格式工具栏插入图片" : "添加附件")
         .accessibilityLabel("添加附件")
-        .sheet(isPresented: $isAttachmentLibraryPresented) {
-            if let model = attachmentLibraryModel {
-                AttachmentLibraryPickerView(
-                    model: model,
-                    onPick: { urls in
-                        isAttachmentLibraryPresented = false
-                        Task { await chatActions.composer.importAttachments(urls: urls) }
-                    },
-                    onPickFromFolder: {
-                        isAttachmentLibraryPresented = false
-                        chooseAttachments()
-                    }
-                )
-            }
+        .sheet(item: $attachmentLibraryModel) { model in
+            AttachmentLibraryPickerView(
+                model: model,
+                onPick: { urls in
+                    attachmentLibraryModel = nil
+                    Task { await chatActions.composer.importAttachments(urls: urls) }
+                },
+                onPickFromFolder: {
+                    attachmentLibraryModel = nil
+                    chooseAttachments()
+                }
+            )
         }
     }
 
@@ -1143,7 +1140,6 @@ struct AgentChatComposerView: View {
             store: FileArtifactStore(paths: paths),
             allowsMultipleSelection: true
         )
-        isAttachmentLibraryPresented = true
     }
 
     private func chooseAttachments() {
