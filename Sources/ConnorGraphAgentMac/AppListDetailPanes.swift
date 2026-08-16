@@ -3031,6 +3031,7 @@ struct ContactsSourceSettingsView: View {
     @State private var pendingFriendRemoval: ImFriend?
     @State private var pendingFriendMergeTarget: PersonProfile?
     @State private var pendingFriendUnbind: ImFriend?
+    @State private var isMergeTargetPickerPresented = false
     @State private var mediaPreview: ChatMediaPreviewItem?
 
     var body: some View {
@@ -3054,7 +3055,7 @@ struct ContactsSourceSettingsView: View {
                                 { pendingFriendUnbind = friend }
                             } : nil,
                             mergeCandidates: friendMergeCandidates,
-                            onRequestMergeInto: { pendingFriendMergeTarget = $0 }
+                            onRequestMergeInto: { isMergeTargetPickerPresented = true }
                         )
 
                         let imageURLs = model.imageURLs(for: selected.id)
@@ -3227,6 +3228,16 @@ struct ContactsSourceSettingsView: View {
         } message: {
             Text("将解除“\(pendingFriendUnbind?.displayName ?? "该好友")”与当前人物的绑定，好友会重新以独立人物出现在人际关系中，之后可再次合并到其他人物。")
         }
+        .sheet(isPresented: $isMergeTargetPickerPresented) {
+            PersonMergeTargetPickerSheet(
+                model: model,
+                excludeID: model.selectedContactID,
+                onSelect: { target in
+                    isMergeTargetPickerPresented = false
+                    pendingFriendMergeTarget = target
+                }
+            )
+        }
         .fileImporter(
             isPresented: $imageImporter.isPresented,
             allowedContentTypes: [.image],
@@ -3381,6 +3392,186 @@ private struct RelationshipEditorSheet: View {
     }
 }
 
+/// 「合并到已有人物」目标选择器：可搜索，滚动到底部自动分页加载更多人物档案，
+/// 避免把大量人物一次性塞进菜单。
+private struct PersonMergeTargetPickerSheet: View {
+    @Bindable var model: ContactsFeatureModel
+    var excludeID: ContactID?
+    var onSelect: (PersonProfile) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var visibleCandidates: [PersonProfile] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.profiles.filter { profile in
+            if let excludeID, profile.id == excludeID { return false }
+            guard !needle.isEmpty else { return true }
+            return Self.matches(profile, query: needle)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            searchField
+            Divider()
+            Group {
+                if visibleCandidates.isEmpty {
+                    emptyState
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(visibleCandidates.enumerated()), id: \.element.id) { index, profile in
+                                row(profile)
+                                    .onAppear {
+                                        // 滚动到底部自动加载下一页（分页懒加载）
+                                        if index == visibleCandidates.count - 1 {
+                                            Task { await model.loadMoreProfilesIfNeeded() }
+                                        }
+                                    }
+                                Divider().padding(.leading, 16)
+                            }
+                            paginationFooter
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: 440, height: 540)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                Text("合并到已有人物")
+                    .font(AgentChatTypography.title)
+                Text("选择要把当前康纳好友并入的人物档案")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: AgentChatTypography.controlIconSize, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .frame(width: AppShellLayout.spaceL, height: AppShellLayout.spaceL)
+            }
+            .buttonStyle(.plain)
+            .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
+            .contentShape(Rectangle())
+            .help("关闭")
+        }
+        .padding(AppShellLayout.spaceL)
+        .padding(.bottom, AppShellLayout.spaceXS)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("搜索姓名、别名、邮箱、组织…", text: $query)
+                .textFieldStyle(.plain)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("清除搜索")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .padding(.horizontal, AppShellLayout.spaceL)
+        .padding(.bottom, AppShellLayout.spaceM)
+    }
+
+    private func row(_ profile: PersonProfile) -> some View {
+        Button {
+            onSelect(profile)
+            dismiss()
+        } label: {
+            HStack(spacing: AppShellLayout.spaceM) {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(profile.displayName)
+                        .font(AgentChatTypography.bodyEmphasis)
+                        .lineLimit(1)
+                    if !subtitle(for: profile).isEmpty {
+                        Text(subtitle(for: profile))
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: AppShellLayout.spaceS)
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, AppShellLayout.spaceL)
+            .padding(.vertical, AppShellLayout.spaceS)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var paginationFooter: some View {
+        HStack(spacing: 8) {
+            if model.isLoadingMoreProfiles {
+                ProgressView().controlSize(.small)
+                Text("正在加载更多人物…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if model.hasMoreProfiles {
+                Text("已显示 \(model.profiles.count) 位人物，继续滚动加载更多")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("已显示全部 \(model.profiles.count) 位人物")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, AppShellLayout.spaceM)
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView(
+            query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "暂无可合并的人物" : "没有找到匹配的人物",
+            systemImage: "person.2",
+            description: Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "当前没有其他人物档案可合并。" : "试试其他关键词。")
+        )
+    }
+
+    private func subtitle(for profile: PersonProfile) -> String {
+        var parts: [String] = []
+        if let org = profile.organizationName, !org.isEmpty { parts.append(org) }
+        if let title = profile.jobTitle, !title.isEmpty { parts.append(title) }
+        if let email = profile.emails.first?.email, !email.isEmpty { parts.append(email) }
+        if !profile.aliases.isEmpty { parts.append(profile.aliases.joined(separator: "、")) }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func matches(_ profile: PersonProfile, query: String) -> Bool {
+        profile.displayName.localizedCaseInsensitiveContains(query)
+            || profile.aliases.contains { $0.localizedCaseInsensitiveContains(query) }
+            || profile.emails.contains { $0.email.localizedCaseInsensitiveContains(query) }
+            || (profile.organizationName?.localizedCaseInsensitiveContains(query) ?? false)
+            || (profile.jobTitle?.localizedCaseInsensitiveContains(query) ?? false)
+    }
+}
+
 private struct PersonProfileDetailHero: View {
     var row: NativeContactRowPresentation
     var onEdit: () -> Void
@@ -3391,7 +3582,7 @@ private struct PersonProfileDetailHero: View {
     var onRemoveFriend: (() -> Void)?
     var onUnbindFriend: (() -> Void)?
     var mergeCandidates: [PersonProfile]
-    var onRequestMergeInto: (PersonProfile) -> Void
+    var onRequestMergeInto: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
@@ -3441,11 +3632,7 @@ private struct PersonProfileDetailHero: View {
                         .controlSize(AppButtonLayout.controlSize)
                     Menu {
                         if !mergeCandidates.isEmpty {
-                            Menu("合并到已有人物") {
-                                ForEach(mergeCandidates) { profile in
-                                    Button(profile.displayName) { onRequestMergeInto(profile) }
-                                }
-                            }
+                            Button("合并到已有人物", action: onRequestMergeInto)
                         }
                         if let onUnbindFriend {
                             Button("解除绑定", action: onUnbindFriend)
