@@ -192,7 +192,8 @@ public actor NoteImportCoordinator {
                         await sessionService.associateImportedNote(sessionID: sessionID, metadata: NoteImportProjectionMetadata(
                             itemID: current.id, sourceID: current.sourceID,
                             sourceKind: sourceKind ?? note.sourceKind.rawValue, sourceIdentity: current.sourceIdentity,
-                            externalID: current.externalID, relativePath: current.relativePath, sourceCreatedAt: note.createdAt
+                            externalID: current.externalID, relativePath: current.relativePath, sourceCreatedAt: note.createdAt,
+                            hierarchy: note.hierarchy
                         ))
                         current.sessionID = sessionID
                         current.status = .imported
@@ -226,7 +227,8 @@ public actor NoteImportCoordinator {
                         await sessionService.associateImportedNote(sessionID: boundSessionID, metadata: NoteImportProjectionMetadata(
                             itemID: current.id, sourceID: current.sourceID,
                             sourceKind: sourceKind ?? note.sourceKind.rawValue, sourceIdentity: current.sourceIdentity,
-                            externalID: current.externalID, relativePath: current.relativePath, sourceCreatedAt: note.createdAt
+                            externalID: current.externalID, relativePath: current.relativePath, sourceCreatedAt: note.createdAt,
+                            hierarchy: note.hierarchy
                         ))
                         current.status = .completed
                         current.errorCode = nil

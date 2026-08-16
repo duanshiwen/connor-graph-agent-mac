@@ -488,9 +488,11 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             relative_path TEXT,
             source_created_at TEXT,
             lease_owner TEXT,
-            lease_expires_at TEXT
+            lease_expires_at TEXT,
+            import_hierarchy TEXT
         );
         """)
+        try addColumnIfMissing(table: "notes", column: "import_hierarchy", definition: "TEXT")
         try execute("CREATE INDEX IF NOT EXISTS idx_notes_source_message ON notes(source_message_id);")
         try execute("CREATE INDEX IF NOT EXISTS idx_notes_projection_queue ON notes(projection_status, next_retry_at, lease_expires_at, updated_at);")
         try execute("CREATE INDEX IF NOT EXISTS idx_notes_index_version ON notes(index_version, indexed_at);")
@@ -1173,7 +1175,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         (id, session_id, source_message_id, title, body, content_hash, source_updated_at, created_at, updated_at,
          index_version, projection_status, indexed_at, failure_count, next_retry_at, last_error_code, origin_kind,
          import_item_id, import_source_id, source_kind, source_identity, external_id, relative_path, source_created_at,
-         lease_owner, lease_expires_at)
+         lease_owner, lease_expires_at, import_hierarchy)
         VALUES (\(quote(note.id)), \(quote(note.sessionID)), \(quote(note.sourceMessageID)), \(quote(note.title)),
          \(quote(note.body)), \(quote(note.contentHash)), \(quote(iso(note.sourceUpdatedAt))), \(quote(iso(note.createdAt))),
          \(quote(iso(note.updatedAt))), \(note.indexVersion), \(quote(note.projectionStatus.rawValue)),
@@ -1181,7 +1183,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
          \(quote(note.lastErrorCode)), \(quote(note.originKind.rawValue)), \(quote(note.importItemID)),
          \(quote(note.importSourceID)), \(quote(note.sourceKind)), \(quote(note.sourceIdentity)), \(quote(note.externalID)),
          \(quote(note.relativePath)), \(quote(note.sourceCreatedAt.map(iso))), \(quote(note.leaseOwner)),
-         \(quote(note.leaseExpiresAt.map(iso))))
+         \(quote(note.leaseExpiresAt.map(iso))), \(quote(json(note.importHierarchy))))
         ON CONFLICT(session_id) DO UPDATE SET
           source_message_id=excluded.source_message_id, title=excluded.title, body=excluded.body,
           content_hash=excluded.content_hash, source_updated_at=excluded.source_updated_at, updated_at=excluded.updated_at,
@@ -1194,7 +1196,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
           external_id=COALESCE(excluded.external_id, notes.external_id),
           relative_path=COALESCE(excluded.relative_path, notes.relative_path),
           source_created_at=COALESCE(excluded.source_created_at, notes.source_created_at),
-          lease_owner=excluded.lease_owner, lease_expires_at=excluded.lease_expires_at;
+          lease_owner=excluded.lease_owner, lease_expires_at=excluded.lease_expires_at,
+          import_hierarchy=excluded.import_hierarchy;
         DELETE FROM note_projection_tombstones WHERE session_id = \(quote(note.sessionID));
         """)
     }
@@ -1232,6 +1235,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
           import_source_id = \(quote(metadata.sourceID)), source_kind = \(quote(metadata.sourceKind)),
           source_identity = \(quote(metadata.sourceIdentity)), external_id = \(quote(metadata.externalID)),
           relative_path = \(quote(metadata.relativePath)), source_created_at = \(quote(metadata.sourceCreatedAt.map(iso))),
+          import_hierarchy = \(quote(json(metadata.hierarchy))),
           index_version = 0, indexed_at = NULL, projection_status = 'projected'
         WHERE session_id = \(quote(sessionID));
         """)
@@ -1376,13 +1380,13 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         SELECT id, session_id, source_message_id, title, body, content_hash, source_updated_at, created_at, updated_at,
                index_version, projection_status, indexed_at, failure_count, next_retry_at, last_error_code, origin_kind,
                import_item_id, import_source_id, source_kind, source_identity, external_id, relative_path,
-               source_created_at, lease_owner, lease_expires_at
+               source_created_at, lease_owner, lease_expires_at, import_hierarchy
         FROM notes WHERE \(whereClause) LIMIT \(max(limit, 0))
         """).map(decodeNote)
     }
 
     private func decodeNote(_ row: [String]) throws -> NoteRecord {
-        guard row.count == 25,
+        guard row.count == 26,
               let status = NoteProjectionStatus(rawValue: row[10]), let origin = NoteOriginKind(rawValue: row[15]) else {
             throw SQLiteGraphKernelStoreError.decodeFailed("Invalid note projection row")
         }
@@ -1394,7 +1398,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             failureCount: Int(row[12]) ?? 0, nextRetryAt: try optionalDate(row[13]), lastErrorCode: optional(14),
             originKind: origin, importItemID: optional(16), importSourceID: optional(17), sourceKind: optional(18),
             sourceIdentity: optional(19), externalID: optional(20), relativePath: optional(21),
-            sourceCreatedAt: try optionalDate(row[22]), leaseOwner: optional(23), leaseExpiresAt: try optionalDate(row[24])
+            sourceCreatedAt: try optionalDate(row[22]), leaseOwner: optional(23), leaseExpiresAt: try optionalDate(row[24]),
+            importHierarchy: try decode([String].self, row[25].isEmpty ? "[]" : row[25])
         )
     }
 
