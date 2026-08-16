@@ -57,7 +57,10 @@ final class ContactsFeatureModel {
     @ObservationIgnored private var ownedTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var isShutdown = false
     @ObservationIgnored private var nextProfilesCursor: String?
-    @ObservationIgnored private var isLoadingMoreProfiles = false
+    private(set) var isLoadingMoreProfiles = false
+
+    /// 是否还有更多人物档案可分页加载（供合并目标选择器等场景使用）。
+    var hasMoreProfiles: Bool { nextProfilesCursor != nil }
     private static let profilePageSize = 50
     @ObservationIgnored var onEvent: ((Event) -> Void)?
 
@@ -153,8 +156,13 @@ final class ContactsFeatureModel {
     }
 
     func loadMoreProfilesIfNeeded(currentProfileID: ContactID) async {
-        guard currentProfileID == profiles.last?.id,
-              !isLoadingMoreProfiles,
+        guard currentProfileID == profiles.last?.id else { return }
+        await loadMoreProfilesIfNeeded()
+    }
+
+    /// 无条件加载下一页人物档案（由合并目标选择器等场景在滚动到底部时调用）。
+    func loadMoreProfilesIfNeeded() async {
+        guard !isLoadingMoreProfiles,
               let cursor = nextProfilesCursor,
               let profileStore else { return }
         isLoadingMoreProfiles = true
