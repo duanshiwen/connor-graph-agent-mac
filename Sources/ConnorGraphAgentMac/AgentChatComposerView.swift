@@ -62,6 +62,7 @@ struct AgentChatComposerView: View {
     @State private var speechKeyboardMonitor: SpeechInputKeyboardMonitor?
     @State private var composerPersonMentions: [ComposerPersonMention] = []
     @State private var attachmentLibraryModel: AttachmentLibraryPickerModel?
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     private let workspaceMenuItemMaxWidth: CGFloat = 320
     private let supportedAttachmentContentTypes: [UTType] = [
@@ -152,41 +153,44 @@ struct AgentChatComposerView: View {
 
                     workingDirectoryMenu
 
-                    Button {
-                        model.workspaceExplorer.toggleTree(
-                            sessionID: model.sessions.selectedSessionID,
-                            workingDirectoryPath: chatActions.dependencies.workspaceSettings.defaultWorkingDirectoryPath
-                        )
-                    } label: {
-                        AgentComposerOptionBadge(
-                            title: "工作区目录树",
-                            systemImage: "list.bullet.indent",
-                            tint: model.workspaceExplorer.isTreePresented ? composerControlActiveForeground : composerControlForeground,
-                            showsChevron: false,
-                            isActive: model.workspaceExplorer.isTreePresented,
-                            style: .compact,
-                            showsBorder: false
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .help("展开或收回当前会话工作区目录树")
-                    .accessibilityLabel("切换工作区目录树")
+                    // 窄窗口下省略次要控件，给输入区留出空间
+                    if !windowWidthClass.isNarrow {
+                        Button {
+                            model.workspaceExplorer.toggleTree(
+                                sessionID: model.sessions.selectedSessionID,
+                                workingDirectoryPath: chatActions.dependencies.workspaceSettings.defaultWorkingDirectoryPath
+                            )
+                        } label: {
+                            AgentComposerOptionBadge(
+                                title: "工作区目录树",
+                                systemImage: "list.bullet.indent",
+                                tint: model.workspaceExplorer.isTreePresented ? composerControlActiveForeground : composerControlForeground,
+                                showsChevron: false,
+                                isActive: model.workspaceExplorer.isTreePresented,
+                                style: .compact,
+                                showsBorder: false
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .help("展开或收回当前会话工作区目录树")
+                        .accessibilityLabel("切换工作区目录树")
 
-                    Button(action: { sendComposerAction(.toggleBrowserWorkspaceVisibility) }) {
-                        AgentComposerOptionBadge(
-                            title: chatActions.dependencies.browser.isVisible ? "隐藏浏览器" : "浏览器",
-                            systemImage: "safari",
-                            tint: chatActions.dependencies.browser.isVisible ? composerControlActiveForeground : composerControlForeground,
-                            showsChevron: false,
-                            isActive: chatActions.dependencies.browser.isVisible,
-                            style: .prominent,
-                            fill: Color.accentColor.opacity(chatActions.dependencies.browser.isVisible ? 0.12 : 0.06),
-                            borderTint: .accentColor
-                        )
+                        Button(action: { sendComposerAction(.toggleBrowserWorkspaceVisibility) }) {
+                            AgentComposerOptionBadge(
+                                title: chatActions.dependencies.browser.isVisible ? "隐藏浏览器" : "浏览器",
+                                systemImage: "safari",
+                                tint: chatActions.dependencies.browser.isVisible ? composerControlActiveForeground : composerControlForeground,
+                                showsChevron: false,
+                                isActive: chatActions.dependencies.browser.isVisible,
+                                style: .prominent,
+                                fill: Color.accentColor.opacity(chatActions.dependencies.browser.isVisible ? 0.12 : 0.06),
+                                borderTint: .accentColor
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .help(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
+                        .accessibilityLabel(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
                     }
-                    .buttonStyle(.plain)
-                    .help(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
-                    .accessibilityLabel(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
 
                     Spacer(minLength: AgentChatLayout.spaceXS)
 

@@ -147,13 +147,43 @@ enum AppShellLayout {
     static let primarySidebarMaxWidth: CGFloat = 250
 
     static let listColumnWidth: CGFloat = 300
+    static let listColumnNarrowWidth: CGFloat = 240
 
     static let detailColumnMinWidth: CGFloat = 360
-    static let shellMinWidth: CGFloat = 860
+    static let shellMinWidth: CGFloat = 780
     static let shellMinHeight: CGFloat = 680
+
+    // 响应式断点（按窗口内容宽度）：
+    // - 小于 sidebarCollapseThreshold：自动收起主侧栏（并禁用手动展开，保证详情列宽度）
+    // - 大于 sidebarExpandThreshold：自动展开主侧栏（若用户未手动隐藏）
+    // - 小于 narrowWidthThreshold：进入窄模式，省略次要控件、压缩列表列
+    static let sidebarCollapseThreshold: CGFloat = 1120
+    static let sidebarExpandThreshold: CGFloat = 1160
+    static let narrowWidthThreshold: CGFloat = 920
 
     static let contentMaxWidth: CGFloat = 780
     static let hairlineOpacity: Double = 0.14
+}
+
+/// 主窗口宽度档位：驱动侧边栏自动收起与窄窗口下的控件省略。
+enum AppWindowWidthClass: Equatable, Sendable {
+    case regular   // 完整布局：主侧栏 + 列表 + 详情
+    case compact   // 自动收起主侧栏，保留全部控件
+    case narrow    // 窄窗口：收起主侧栏，省略次要控件
+
+    var isNarrow: Bool { self == .narrow }
+    var isCompactOrNarrow: Bool { self != .regular }
+}
+
+private struct AppWindowWidthClassKey: EnvironmentKey {
+    static let defaultValue: AppWindowWidthClass = .regular
+}
+
+extension EnvironmentValues {
+    var windowWidthClass: AppWindowWidthClass {
+        get { self[AppWindowWidthClassKey.self] }
+        set { self[AppWindowWidthClassKey.self] = newValue }
+    }
 }
 
 /// Shared button metrics for every app surface. Native text buttons use the
