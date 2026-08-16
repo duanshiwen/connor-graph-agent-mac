@@ -3989,5 +3989,12 @@ extension AppRuntimeLifecycle {
             scheduleChatSessionListRefresh(reason: "account-sync")
             chatSessionCoordinator.refreshSelectedSessionIfChanged(sessionIDs: result.appliedSessionIDs)
         }
+        // 回放跨端「好友并入人物」的合并：安卓端把好友写入人物 L4 实体的 metadata
+        // （connor_friend_* 键）随 memory_l4_entities 同步过来，本机据此把好友重新绑定到
+        // 对应人物档案并把好友的自动建档档案并入目标人物，让人际关系列表跨端一致。
+        if let im = graph.im, let memory = memoryOSStore {
+            let entities = (try? memory.listAllEntities()) ?? []
+            await im.reconcileFriendBindingsFromSync(entities: entities)
+        }
     }
 }
