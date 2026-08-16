@@ -631,7 +631,7 @@ final class ImFeatureModel {
                 let kind = message.messageType.lowercased()
                 return ForwardedChatItem(
                     id: message.id,
-                    senderName: message.senderName.isEmpty ? (message.senderId == selfUserId ? "我" : conversation.participantName) : message.senderName,
+                    senderName: senderDisplayName(for: message, conversation: conversation, selfUserID: selfUserId),
                     senderAvatar: message.senderAvatar,
                     createdAt: message.createdAt,
                     kind: kind,
@@ -641,6 +641,17 @@ final class ImFeatureModel {
                 )
             }
         )
+    }
+
+    /// 转发项的发送者展示名：优先原文 senderName；为空时解析“我/好友”，
+    /// 群聊里无法识别的发送者（如康纳 Agent）不再用群名冒充，回退友好称谓。
+    private func senderDisplayName(for message: ImMessage, conversation: ImConversation, selfUserID: Int64?) -> String {
+        if !message.senderName.isEmpty { return message.senderName }
+        if message.senderId == selfUserID { return "我" }
+        if let friend = friends.first(where: { $0.userId == message.senderId }) {
+            return friend.displayName
+        }
+        return conversation.kind == .group ? "群成员" : conversation.participantName
     }
 
     @discardableResult
