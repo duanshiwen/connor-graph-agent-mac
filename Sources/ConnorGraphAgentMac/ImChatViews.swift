@@ -294,6 +294,16 @@ struct ImChatDetailView: View {
     @State private var isConversationInfoPresented = false
     @State private var mediaPreview: ChatMediaPreviewItem?
     @State private var attachmentLibraryModel: AttachmentLibraryPickerModel?
+    @Environment(\.windowWidthClass) private var windowWidthClass
+
+    /// 标题左右留白：为右侧操作按钮预留空间，同时避免窄窗口下把标题挤成一个字。
+    private var titleHorizontalInset: CGFloat {
+        switch windowWidthClass {
+        case .regular: 220
+        case .compact: 180
+        case .narrow: 120
+        }
+    }
 
     private var conversationTitle: String {
         model.selectedConversation?.title ?? "会话"
@@ -351,7 +361,7 @@ struct ImChatDetailView: View {
                 .font(AgentChatTypography.title)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, 220)
+                .padding(.horizontal, titleHorizontalInset)
 
             HStack(spacing: AgentChatLayout.spaceS) {
                 if !model.socketConnected {
