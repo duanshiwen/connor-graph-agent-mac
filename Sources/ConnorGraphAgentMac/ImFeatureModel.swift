@@ -299,8 +299,10 @@ final class ImFeatureModel {
         guard let conversation = selectedConversation, !isSendingMedia else { return }
         isSendingMedia = true
         defer { isSendingMedia = false }
-        // 发给单聊/群聊的文件（选文件/附件库/录音等）一律登记进附件库
-        AttachmentLibraryRegistration.register(urls: [fileURL])
+        // 单聊/群聊只把文件与视频纳入附件库；图片与语音不进
+        if AttachmentLibraryRegistration.shouldRegister(imMessageType: messageType) {
+            AttachmentLibraryRegistration.register(urls: [fileURL])
+        }
         do {
             try await center.sendMediaMessage(
                 conversationId: conversation.id,

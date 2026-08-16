@@ -340,4 +340,9 @@ enum AttachmentLibraryRegistration {
             try? store.register(from: url, source: .session)
         }
     }
+
+    /// 单聊/群聊只把文件与视频纳入附件库；图片与语音不进（避免图片/录音刷屏附件库）。
+    static func shouldRegister(imMessageType: ImMessageType) -> Bool {
+        imMessageType != .image && imMessageType != .audio
+    }
 }
