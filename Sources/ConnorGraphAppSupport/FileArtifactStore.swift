@@ -223,6 +223,7 @@ public struct FileArtifactStore: Sendable {
     }
 
     /// 附件库分页查询：按「最近使用（lastSeenAt 降序）」排序，支持关键词 / 来源 / 类型筛选。
+    /// `kinds` 支持一次匹配多个类型（例如「文本」筛选包含 txt/md/json/csv/html），与 `kind` 同时给出时取交集。
     /// - Parameters:
     ///   - page: 0 起始的页码。
     ///   - pageSize: 每页条数（默认 30，上限 200）。
@@ -230,6 +231,7 @@ public struct FileArtifactStore: Sendable {
         query: String? = nil,
         source: FileArtifactSource? = nil,
         kind: AgentAttachmentKind? = nil,
+        kinds: Set<AgentAttachmentKind>? = nil,
         page: Int = 0,
         pageSize: Int = 30
     ) -> FileArtifactPage {
@@ -240,6 +242,7 @@ public struct FileArtifactStore: Sendable {
             .filter { record in
                 if let source, record.source != source { return false }
                 if let kind, record.kind != kind { return false }
+                if let kinds, !kinds.contains(record.kind) { return false }
                 if !needle.isEmpty {
                     let haystack = [
                         record.originalName,
