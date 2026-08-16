@@ -46,6 +46,21 @@ struct AttachmentLibraryPickerModelTests {
         #expect(model.localURL(for: model.items[0]).path.contains("files"))
     }
 
+    @Test func sendingRegistersFileIntoLibrary() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("connor-library-reg-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("connor-reg-src-\(UUID().uuidString).txt")
+        try "发送的附件内容".write(to: source, atomically: true, encoding: .utf8)
+
+        AttachmentLibraryRegistration.register(urls: [source], paths: paths)
+
+        let recent = FileArtifactStore(paths: paths).recent(limit: 10)
+        #expect(recent.map(\.originalName).contains(source.lastPathComponent))
+    }
+
     @Test func filtersByKind() async throws {
         let (paths, model) = try makeModel(pageSize: 10)
         try register(paths, name: "photo.png", data: Data("png".utf8))
