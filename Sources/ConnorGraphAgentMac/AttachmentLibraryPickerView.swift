@@ -25,17 +25,46 @@ final class AttachmentLibraryPickerModel: ObservableObject, Identifiable {
             case .text: return "文本"
             }
         }
-        var kind: AgentAttachmentKind? {
+        /// 该筛选命中的附件类型集合；`nil` 表示不过滤（全部）。
+        /// 「文本」覆盖 txt/md/json/csv/html 等可读文本类文件。
+        var kinds: Set<AgentAttachmentKind>? {
             switch self {
-            case .all, .text: return nil
-            case .image: return .image
-            case .video: return .video
-            case .audio: return .audio
-            case .pdf: return .pdf
-            case .document: return .document
-            case .spreadsheet: return .spreadsheet
-            case .presentation: return .presentation
-            case .archive: return .archive
+            case .all: return nil
+            case .image: return [.image]
+            case .video: return [.video]
+            case .audio: return [.audio]
+            case .pdf: return [.pdf]
+            case .document: return [.document]
+            case .spreadsheet: return [.spreadsheet]
+            case .presentation: return [.presentation]
+            case .archive: return [.archive]
+            case .text: return [.text, .markdown, .json, .csv, .html]
+            }
+        }
+
+        /// 空结果时的空状态文案与图标。
+        var emptyState: (title: String, systemImage: String, description: String) {
+            switch self {
+            case .all:
+                return ("附件库是空的", "tray", "把文件发给康纳同学或导入到附件库后，会出现在这里。")
+            case .image:
+                return ("没有找到图片附件", "photo", "把图片发给康纳同学或导入到附件库后，会出现在这里。")
+            case .video:
+                return ("没有找到视频附件", "film", "把视频发给康纳同学或导入到附件库后，会出现在这里。")
+            case .audio:
+                return ("没有找到音频附件", "waveform", "把音频发给康纳同学或导入到附件库后，会出现在这里。")
+            case .pdf:
+                return ("没有找到 PDF 附件", "doc.richtext", "把 PDF 发给康纳同学或导入到附件库后，会出现在这里。")
+            case .document:
+                return ("没有找到文档附件", "doc.text", "把文档发给康纳同学或导入到附件库后，会出现在这里。")
+            case .spreadsheet:
+                return ("没有找到表格附件", "tablecells", "把表格发给康纳同学或导入到附件库后，会出现在这里。")
+            case .presentation:
+                return ("没有找到演示附件", "chart.bar", "把演示文稿发给康纳同学或导入到附件库后，会出现在这里。")
+            case .archive:
+                return ("没有找到压缩包附件", "archivebox", "把压缩包发给康纳同学或导入到附件库后，会出现在这里。")
+            case .text:
+                return ("没有找到文本附件", "doc.plaintext", "把文本文件（txt/md/json/csv/html 等）发给康纳同学或导入到附件库后，会出现在这里。")
             }
         }
     }
@@ -83,7 +112,7 @@ final class AttachmentLibraryPickerModel: ObservableObject, Identifiable {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let result = store.list(
             query: needle.isEmpty ? nil : needle,
-            kind: kindFilter.kind,
+            kinds: kindFilter.kinds,
             page: page,
             pageSize: pageSize
         )
@@ -209,12 +238,8 @@ struct AttachmentLibraryPickerView: View {
                 if model.isLoadingMore {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ContentUnavailableView(
-                        model.hasLoadedOnce ? "附件库是空的" : "正在加载附件库…",
-                        systemImage: "tray",
-                        description: Text(model.hasLoadedOnce ? "把文件发给康纳同学或导入到附件库后，会出现在这里。" : "")
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    emptyStateView
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
                 ScrollView {
@@ -223,10 +248,46 @@ struct AttachmentLibraryPickerView: View {
                             row(record)
                             Divider().padding(.leading, 44)
                         }
+                        paginationFooter
                     }
                 }
             }
         }
+    }
+
+    /// 空结果提示：搜索无结果、按类型筛选无结果、附件库本身为空，三种情况文案不同。
+    private var emptyStateView: some View {
+        let state: (title: String, systemImage: String, description: String)
+        if !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            state = ("没有找到匹配的附件", "magnifyingglass", "试试其他关键词，或切换到其他筛选条件。")
+        } else if model.hasLoadedOnce {
+            state = model.kindFilter.emptyState
+        } else {
+            state = ("正在加载附件库…", "tray", "")
+        }
+        return ContentUnavailableView(
+            state.title,
+            systemImage: state.systemImage,
+            description: Text(state.description)
+        )
+    }
+
+    /// 列表底部分页状态：加载更多中 / 已显示部分 / 已全部加载。
+    private var paginationFooter: some View {
+        HStack(spacing: 8) {
+            if model.isLoadingMore {
+                ProgressView().controlSize(.small)
+                Text("正在加载更多…").font(.caption).foregroundStyle(.secondary)
+            } else if model.hasMore {
+                Text("已显示 \(model.items.count) / \(model.total) 项，继续滚动加载更多")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("已显示全部 \(model.total) 项")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
     }
 
     private func row(_ record: FileArtifactRecord) -> some View {
