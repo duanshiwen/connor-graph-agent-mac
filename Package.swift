@@ -56,8 +56,7 @@ let package = Package(
             exclude: ["Info.plist"],
             resources: [
                 .process("Assets.xcassets"),
-                .process("zh-Hans.lproj"),
-                .process("Resources/ThirdPartyNotices")
+                .process("zh-Hans.lproj")
             ],
             linkerSettings: [
                 .linkedFramework("WebKit"),
