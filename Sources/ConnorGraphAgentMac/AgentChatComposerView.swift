@@ -61,6 +61,8 @@ struct AgentChatComposerView: View {
     @State private var skillPickerSelectionIndex: Int = 0
     @State private var speechKeyboardMonitor: SpeechInputKeyboardMonitor?
     @State private var composerPersonMentions: [ComposerPersonMention] = []
+    @State private var isAttachmentLibraryPresented: Bool = false
+    @State private var attachmentLibraryModel: AttachmentLibraryPickerModel?
 
     private let workspaceMenuItemMaxWidth: CGFloat = 320
     private let supportedAttachmentContentTypes: [UTType] = [
@@ -1094,7 +1096,7 @@ struct AgentChatComposerView: View {
 
     private var attachmentButton: some View {
         let isNoteMode = composerState.displayMode == .note
-        return Button(action: chooseAttachments) {
+        return Button(action: openAttachmentLibrary) {
             Image(systemName: "paperclip")
                 .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
                 .symbolRenderingMode(.hierarchical)
@@ -1108,6 +1110,34 @@ struct AgentChatComposerView: View {
         .opacity(isNoteMode ? 0.4 : 1.0)
         .help(isNoteMode ? "笔记模式下不可用，请用格式工具栏插入图片" : "添加附件")
         .accessibilityLabel("添加附件")
+        .sheet(isPresented: $isAttachmentLibraryPresented) {
+            if let model = attachmentLibraryModel {
+                AttachmentLibraryPickerView(
+                    model: model,
+                    onPick: { urls in
+                        isAttachmentLibraryPresented = false
+                        Task { await chatActions.composer.importAttachments(urls: urls) }
+                    },
+                    onPickFromFolder: {
+                        isAttachmentLibraryPresented = false
+                        chooseAttachments()
+                    }
+                )
+            }
+        }
+    }
+
+    /// 发附件默认打开附件库（最近附件，可搜索/筛选/分页）；库为空或要选库外的文件时回退文件夹。
+    private func openAttachmentLibrary() {
+        guard let paths = try? AppStoragePaths.live() else {
+            chooseAttachments()
+            return
+        }
+        attachmentLibraryModel = AttachmentLibraryPickerModel(
+            store: FileArtifactStore(paths: paths),
+            allowsMultipleSelection: true
+        )
+        isAttachmentLibraryPresented = true
     }
 
     private func chooseAttachments() {

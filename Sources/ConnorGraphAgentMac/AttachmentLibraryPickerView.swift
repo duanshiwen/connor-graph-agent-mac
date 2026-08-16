@@ -1,0 +1,331 @@
+import SwiftUI
+import UniformTypeIdentifiers
+import ConnorGraphCore
+import ConnorGraphAppSupport
+
+/// 附件库选择面板的展示模型：最近附件列表 + 关键词/类型筛选 + 分页加载。
+@MainActor
+final class AttachmentLibraryPickerModel: ObservableObject {
+    enum KindFilter: String, CaseIterable, Identifiable {
+        case all, image, video, audio, pdf, document, spreadsheet, presentation, archive, text
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .all: return "全部"
+            case .image: return "图片"
+            case .video: return "视频"
+            case .audio: return "音频"
+            case .pdf: return "PDF"
+            case .document: return "文档"
+            case .spreadsheet: return "表格"
+            case .presentation: return "演示"
+            case .archive: return "压缩包"
+            case .text: return "文本"
+            }
+        }
+        var kind: AgentAttachmentKind? {
+            switch self {
+            case .all, .text: return nil
+            case .image: return .image
+            case .video: return .video
+            case .audio: return .audio
+            case .pdf: return .pdf
+            case .document: return .document
+            case .spreadsheet: return .spreadsheet
+            case .presentation: return .presentation
+            case .archive: return .archive
+            }
+        }
+    }
+
+    let store: FileArtifactStore
+    let allowsMultipleSelection: Bool
+    let pageSize: Int
+
+    @Published var query = ""
+    @Published var kindFilter: KindFilter = .all
+    @Published private(set) var items: [FileArtifactRecord] = []
+    @Published private(set) var total = 0
+    @Published private(set) var isLoadingMore = false
+    @Published private(set) var hasLoadedOnce = false
+    @Published var selectedIDs: Set<String> = []
+
+    private var page = 0
+
+    init(store: FileArtifactStore, allowsMultipleSelection: Bool, pageSize: Int = 30, presetKind: KindFilter = .all) {
+        self.store = store
+        self.allowsMultipleSelection = allowsMultipleSelection
+        self.pageSize = pageSize
+        self.kindFilter = presetKind
+    }
+
+    var hasMore: Bool { items.count < total }
+
+    func reload() {
+        page = 0
+        items = []
+        total = 0
+        selectedIDs = []
+        loadMore()
+    }
+
+    /// 滚动到底自动加载下一页（分页懒加载）。
+    func loadMoreIfNeeded(current item: FileArtifactRecord) {
+        if item.fileID == items.last?.fileID, hasMore { loadMore() }
+    }
+
+    func loadMore() {
+        guard !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = store.list(
+            query: needle.isEmpty ? nil : needle,
+            kind: kindFilter.kind,
+            page: page,
+            pageSize: pageSize
+        )
+        items.append(contentsOf: result.items)
+        total = result.total
+        page += 1
+        hasLoadedOnce = true
+    }
+
+    func localURL(for record: FileArtifactRecord) -> URL {
+        store.paths.filesDirectory.appendingPathComponent(record.storedRelativePath)
+    }
+
+    func toggle(_ record: FileArtifactRecord) {
+        if allowsMultipleSelection {
+            if selectedIDs.contains(record.fileID) { selectedIDs.remove(record.fileID) }
+            else { selectedIDs.insert(record.fileID) }
+        } else {
+            selectedIDs = [record.fileID]
+        }
+    }
+}
+
+/// 附件库选择面板：最近附件列表（可搜索/按类型筛选/分页），
+/// 底部提供「从文件夹选择…」回退。多选时点「确定」返回所选文件 URL。
+struct AttachmentLibraryPickerView: View {
+    @ObservedObject var model: AttachmentLibraryPickerModel
+    var title = "附件库"
+    var onPick: ([URL]) -> Void
+    var onPickFromFolder: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private var selectedURLs: [URL] {
+        model.items.filter { model.selectedIDs.contains($0.fileID) }.map { model.localURL(for: $0) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            searchAndFilters
+            Divider()
+            list
+            Divider()
+            footer
+        }
+        .frame(width: 580, height: 540)
+        .onAppear { if !model.hasLoadedOnce { model.reload() } }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "tray.full")
+                .font(.system(size: 20, weight: .medium)).foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                Text("最近使用的附件，按时间排序").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                if !model.allowsMultipleSelection, let first = model.selectedIDs.first,
+                   let record = model.items.first(where: { $0.fileID == first }) {
+                    onPick([model.localURL(for: record)])
+                } else {
+                    dismiss()
+                }
+            } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("关闭")
+        }
+        .padding(16)
+    }
+
+    private var searchAndFilters: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("搜索文件名、类型或说明", text: $model.query)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(model.reload)
+                if !model.query.isEmpty {
+                    Button {
+                        model.query = ""
+                        model.reload()
+                    } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    .buttonStyle(.plain)
+                }
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(AttachmentLibraryPickerModel.KindFilter.allCases) { filter in
+                        filterChip(filter)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private func filterChip(_ filter: AttachmentLibraryPickerModel.KindFilter) -> some View {
+        Button {
+            model.kindFilter = filter
+            model.reload()
+        } label: {
+            Text(filter.title)
+                .font(.caption)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(
+                    model.kindFilter == filter ? Color.accentColor : Color.secondary.opacity(0.12),
+                    in: Capsule()
+                )
+                .foregroundStyle(model.kindFilter == filter ? Color.white : Color.primary)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var list: some View {
+        Group {
+            if model.items.isEmpty {
+                if model.isLoadingMore {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView(
+                        model.hasLoadedOnce ? "附件库是空的" : "正在加载附件库…",
+                        systemImage: "tray",
+                        description: Text(model.hasLoadedOnce ? "把文件发给康纳同学或导入到附件库后，会出现在这里。" : "")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(model.items) { record in
+                            row(record)
+                            Divider().padding(.leading, 44)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func row(_ record: FileArtifactRecord) -> some View {
+        let isSelected = model.selectedIDs.contains(record.fileID)
+        return Button {
+            model.toggle(record)
+            if !model.allowsMultipleSelection {
+                onPick([model.localURL(for: record)])
+            }
+        } label: {
+            HStack(spacing: 10) {
+                if model.allowsMultipleSelection {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                }
+                Image(systemName: Self.systemImage(for: record.kind))
+                    .foregroundStyle(.tint)
+                    .frame(width: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(record.originalName).lineLimit(1).truncationMode(.middle)
+                    if let summary = record.summary, !summary.isEmpty {
+                        Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    HStack(spacing: 8) {
+                        Text(Self.byteCountText(record.byteCount))
+                        Text(Self.dateText(record.lastSeenAt))
+                        Text(record.source.title)
+                    }
+                    .font(.caption2).foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+            .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
+        }
+        .buttonStyle(.plain)
+        .onAppear { model.loadMoreIfNeeded(current: record) }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 10) {
+            if model.allowsMultipleSelection {
+                Text("已选 \(model.selectedIDs.count) 项").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("从文件夹选择…") {
+                onPickFromFolder()
+            }
+            Button("确定") {
+                if !selectedURLs.isEmpty { onPick(selectedURLs) }
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(selectedURLs.isEmpty)
+        }
+        .padding(14)
+    }
+
+    private static func systemImage(for kind: AgentAttachmentKind) -> String {
+        switch kind {
+        case .image: return "photo"
+        case .video: return "film"
+        case .audio: return "waveform"
+        case .pdf: return "doc.richtext"
+        case .document: return "doc.text"
+        case .spreadsheet: return "tablecells"
+        case .presentation: return "chart.bar"
+        case .archive: return "archivebox"
+        case .code: return "chevron.left.forwardslash.chevron.right"
+        case .markdown: return "text.document"
+        case .json: return "curlybraces"
+        case .csv: return "tablecells"
+        case .html: return "globe"
+        case .text: return "doc.plaintext"
+        default: return "doc"
+        }
+    }
+
+    private static func byteCountText(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+
+    private static func dateText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+private extension FileArtifactSource {
+    var title: String {
+        switch self {
+        case .session: return "会话"
+        case .imported: return "导入"
+        case .generated: return "生成"
+        case .forwarded: return "转发"
+        case .other: return "其他"
+        }
+    }
+}

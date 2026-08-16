@@ -293,6 +293,8 @@ struct ImChatDetailView: View {
     @State private var mediaPlayback = ImMediaPlaybackController()
     @State private var isConversationInfoPresented = false
     @State private var mediaPreview: ChatMediaPreviewItem?
+    @State private var isAttachmentLibraryPresented = false
+    @State private var attachmentLibraryModel: AttachmentLibraryPickerModel?
 
     private var conversationTitle: String {
         model.selectedConversation?.title ?? "会话"
@@ -528,6 +530,30 @@ struct ImChatDetailView: View {
             guard wasRecording, !isRecording, let recording = voiceRecorder.takeFinishedRecording() else { return }
             sendRecording(recording)
         }
+        .sheet(isPresented: $isAttachmentLibraryPresented) {
+            if let model = attachmentLibraryModel {
+                AttachmentLibraryPickerView(
+                    model: model,
+                    title: "附件库 · 发送附件",
+                    onPick: { urls in
+                        isAttachmentLibraryPresented = false
+                        guard let url = urls.first else { return }
+                        sendMedia(type: model.kindFilter == .image ? .image
+                                        : model.kindFilter == .video ? .video
+                                        : model.kindFilter == .audio ? .audio
+                                        : .file, url: url)
+                    },
+                    onPickFromFolder: {
+                        isAttachmentLibraryPresented = false
+                        let type: ImMessageType = model.kindFilter == .image ? .image
+                            : model.kindFilter == .video ? .video
+                            : model.kindFilter == .audio ? .audio
+                            : .file
+                        folderPick(type: type)
+                    }
+                )
+            }
+        }
     }
 
     private func sendCurrentMessage() {
@@ -537,7 +563,27 @@ struct ImChatDetailView: View {
         Task { await model.sendMessage(text) }
     }
 
+    /// 发附件默认打开附件库（按类型筛选的最近附件）；库为空或要选库外文件时回退文件夹。
     private func chooseMedia(type: ImMessageType) {
+        guard let paths = try? AppStoragePaths.live() else {
+            folderPick(type: type)
+            return
+        }
+        let preset: AttachmentLibraryPickerModel.KindFilter = switch type {
+        case .image: .image
+        case .video: .video
+        case .audio: .audio
+        case .file, .text, .system: .all
+        }
+        attachmentLibraryModel = AttachmentLibraryPickerModel(
+            store: FileArtifactStore(paths: paths),
+            allowsMultipleSelection: false,
+            presetKind: preset
+        )
+        isAttachmentLibraryPresented = true
+    }
+
+    private func folderPick(type: ImMessageType) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -552,6 +598,10 @@ struct ImChatDetailView: View {
         case .text, .system: []
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        sendMedia(type: type, url: url)
+    }
+
+    private func sendMedia(type: ImMessageType, url: URL) {
         Task {
             let metadata = await ImMediaInspector.metadata(for: url, type: type)
             await model.sendMedia(fileURL: url, messageType: type, metadata: metadata)
