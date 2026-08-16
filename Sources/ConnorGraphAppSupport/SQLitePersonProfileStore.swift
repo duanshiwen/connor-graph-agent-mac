@@ -210,6 +210,8 @@ public final class SQLitePersonProfileStore: PersonProfileStore, @unchecked Send
                 PersonProfileStoreChangeNotificationUserInfoKey.reason: reason.rawValue
             ]
         )
+        // 人际关系变更也要进账号同步流：触发一次 push+pull，让跨端（安卓↔Mac）及时收敛。
+        AppAccountSyncSignal.postLocalDataDidChange()
     }
 
     private static func configurePragmas(db: OpaquePointer) throws {
