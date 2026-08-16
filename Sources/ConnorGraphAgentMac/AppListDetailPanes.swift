@@ -3030,6 +3030,7 @@ struct ContactsSourceSettingsView: View {
     @State private var imageImporter = ContactImageImporterState()
     @State private var pendingFriendRemoval: ImFriend?
     @State private var pendingFriendMergeTarget: PersonProfile?
+    @State private var mediaPreview: ChatMediaPreviewItem?
 
     var body: some View {
         Group {
@@ -3055,12 +3056,20 @@ struct ContactsSourceSettingsView: View {
                         let imageURLs = model.imageURLs(for: selected.id)
                         PersonProfilePhotoGallery(
                             imageURLs: imageURLs,
-                            onAdd: { imageImporter.present(for: selected.id) }
-                        ) { imageURL in
-                            Task { @MainActor in
-                                await model.removeProfileImage(at: imageURL, for: selected.id)
+                            onAdd: { imageImporter.present(for: selected.id) },
+                            onRemove: { imageURL in
+                                Task { @MainActor in
+                                    await model.removeProfileImage(at: imageURL, for: selected.id)
+                                }
+                            },
+                            onPreview: { url in
+                                mediaPreview = ChatMediaPreviewItem(
+                                    type: .image,
+                                    url: url,
+                                    title: url.lastPathComponent
+                                )
                             }
-                        }
+                        )
 
                         PersonProfileInfoSection(title: "人物信息", systemImage: "person.text.rectangle") {
                             VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
@@ -3135,6 +3144,12 @@ struct ContactsSourceSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
+        .overlay {
+            if let mediaPreview {
+                ChatMediaPreviewOverlay(item: mediaPreview, onClose: { self.mediaPreview = nil })
+                    .transition(.opacity)
+            }
+        }
         .sheet(isPresented: $model.isPresentingProfileEditor) {
             if let initialDraft = model.editingProfileDraft {
                 ProfileEditorSheet(draft: initialDraft, model: model)
@@ -3445,6 +3460,7 @@ private struct PersonProfilePhotoGallery: View {
     var imageURLs: [URL]
     var onAdd: () -> Void
     var onRemove: (URL) -> Void
+    var onPreview: (URL) -> Void
 
     private let columns = [
         GridItem(.adaptive(minimum: 120, maximum: 180), spacing: AppShellLayout.spaceM)
@@ -3462,6 +3478,10 @@ private struct PersonProfilePhotoGallery: View {
                                     .scaledToFill()
                                     .frame(width: geometry.size.width, height: geometry.size.height)
                                     .clipped()
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        onPreview(imageURL)
+                                    }
                             } else {
                                 VStack(spacing: AppShellLayout.spaceS) {
                                     Image(systemName: "photo.badge.exclamationmark")
@@ -3476,12 +3496,14 @@ private struct PersonProfilePhotoGallery: View {
 
                             Button(role: .destructive) { onRemove(imageURL) } label: {
                                 Image(systemName: "trash")
-                                    .frame(width: 28, height: 28)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .frame(width: 22, height: 22)
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.borderedProminent)
+                            .tint(.red)
                             .controlSize(.small)
                             .help("移除这张图片")
-                            .padding(AppShellLayout.spaceS)
+                            .padding(6)
                         }
                     }
                     .aspectRatio(1, contentMode: .fit)
