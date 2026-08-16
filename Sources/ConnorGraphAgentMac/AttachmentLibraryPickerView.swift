@@ -5,7 +5,9 @@ import ConnorGraphAppSupport
 
 /// 附件库选择面板的展示模型：最近附件列表 + 关键词/类型筛选 + 分页加载。
 @MainActor
-final class AttachmentLibraryPickerModel: ObservableObject {
+final class AttachmentLibraryPickerModel: ObservableObject, Identifiable {
+    let id = UUID()
+
     enum KindFilter: String, CaseIterable, Identifiable {
         case all, image, video, audio, pdf, document, spreadsheet, presentation, archive, text
         var id: String { rawValue }
