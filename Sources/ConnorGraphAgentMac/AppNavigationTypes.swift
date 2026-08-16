@@ -12,7 +12,6 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case automation = "自动化"
     case scheduledTasks = "定时任务"
     case eventTriggeredTasks = "事件触发"
-    case productOS = "Product OS"
     case calendar = "Calendar"
     case contacts = "Contacts"
     case mail = "Mail"
