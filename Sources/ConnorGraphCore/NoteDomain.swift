@@ -40,6 +40,8 @@ public struct NoteRecord: Codable, Sendable, Equatable, Identifiable {
     public var sourceCreatedAt: Date?
     public var leaseOwner: String?
     public var leaseExpiresAt: Date?
+    /** 导入来源的树形层级（如 Notion「笔记本/子分类/子页面」），空表示未保留层级。 */
+    public var importHierarchy: [String]
 
     public init(
         id: String,
@@ -66,7 +68,8 @@ public struct NoteRecord: Codable, Sendable, Equatable, Identifiable {
         relativePath: String? = nil,
         sourceCreatedAt: Date? = nil,
         leaseOwner: String? = nil,
-        leaseExpiresAt: Date? = nil
+        leaseExpiresAt: Date? = nil,
+        importHierarchy: [String] = []
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -93,6 +96,7 @@ public struct NoteRecord: Codable, Sendable, Equatable, Identifiable {
         self.sourceCreatedAt = sourceCreatedAt
         self.leaseOwner = leaseOwner
         self.leaseExpiresAt = leaseExpiresAt
+        self.importHierarchy = importHierarchy
     }
 }
 
@@ -122,8 +126,10 @@ public struct NoteImportProjectionMetadata: Sendable, Equatable {
     public var externalID: String?
     public var relativePath: String?
     public var sourceCreatedAt: Date?
+    /** 导入来源的树形层级（如 Notion「笔记本/子分类/子页面」）。 */
+    public var hierarchy: [String]
 
-    public init(itemID: String, sourceID: String, sourceKind: String, sourceIdentity: String, externalID: String? = nil, relativePath: String? = nil, sourceCreatedAt: Date? = nil) {
+    public init(itemID: String, sourceID: String, sourceKind: String, sourceIdentity: String, externalID: String? = nil, relativePath: String? = nil, sourceCreatedAt: Date? = nil, hierarchy: [String] = []) {
         self.itemID = itemID
         self.sourceID = sourceID
         self.sourceKind = sourceKind
@@ -131,6 +137,7 @@ public struct NoteImportProjectionMetadata: Sendable, Equatable {
         self.externalID = externalID
         self.relativePath = relativePath
         self.sourceCreatedAt = sourceCreatedAt
+        self.hierarchy = hierarchy
     }
 }
 
