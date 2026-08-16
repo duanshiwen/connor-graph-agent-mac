@@ -308,6 +308,31 @@ struct SQLiteImStoreTests {
         #expect(page.nextCursor == nil)
     }
 
+    @Test func switchAccountIsolatesPerAccountData() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SQLiteImStoreTests-SwitchAccount", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let accountA = root.appendingPathComponent("im-1.sqlite")
+        let accountB = root.appendingPathComponent("im-2.sqlite")
+        let store = try SQLiteImStore(databaseURL: accountA)
+
+        try await store.upsertConversation(makeConversation(id: "peer:2", peerUserId: 2))
+        _ = try await store.upsertMessage(makeMessage(id: "m1", conversationId: "peer:2", senderId: 1, status: .sent))
+        #expect(try await store.loadConversations().count == 1)
+
+        // 切到另一个账号：看不到上一个账号的数据
+        try store.switchAccount(databaseURL: accountB)
+        #expect(try await store.loadConversations().isEmpty)
+        try await store.upsertConversation(makeConversation(id: "peer:9", peerUserId: 9))
+        #expect(try await store.loadConversations().map(\.id) == ["peer:9"])
+
+        // 切回账号 A：数据仍在（按账号隔离，互不污染）
+        try store.switchAccount(databaseURL: accountA)
+        #expect(try await store.loadConversations().map(\.id) == ["peer:2"])
+        #expect(try await store.messages(conversationId: "peer:2").map(\.id) == ["m1"])
+    }
+
     // MARK: - Helpers
 
     private func makeStore() throws -> SQLiteImStore {

@@ -43,6 +43,10 @@ final class ImFeatureModel {
     // MARK: - Contacts screen transient state
 
     private(set) var userSearchResults: [ImPublicUserDTO] = []
+    /// 搜索进行中：加好友弹窗据此显示加载态。
+    private(set) var isSearchingUsers = false
+    /// 正在发送好友申请的用户名集合：行内按钮据此显示提交态。
+    private(set) var friendRequestSubmittingUsernames: Set<String> = []
     var contactMessage: String?
 
     // MARK: - Multi-select + forward-to-AI
@@ -230,6 +234,11 @@ final class ImFeatureModel {
         case .forwardAliases:
             break
         }
+    }
+
+    /// 账号切换后（底层 IM 库已指向新账号）重新读取全部状态。
+    func reloadAfterAccountSwitch() async {
+        await reloadAll()
     }
 
     private func reloadAll() async {
@@ -468,6 +477,7 @@ final class ImFeatureModel {
     func refreshContacts() async {
         await center.refreshAll()
         friends = (try? await store.loadFriends()) ?? []
+        friendRequests = (try? await store.loadFriendRequests()) ?? []
         await reconcileFriendProfiles()
     }
 
@@ -486,8 +496,12 @@ final class ImFeatureModel {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             userSearchResults = []
+            contactMessage = nil
             return
         }
+        isSearchingUsers = true
+        contactMessage = nil
+        defer { isSearchingUsers = false }
         do {
             userSearchResults = try await center.searchUsers(query: trimmed, limit: 10)
         } catch {
@@ -496,11 +510,27 @@ final class ImFeatureModel {
         }
     }
 
+    /// 加好友搜索结果行的操作状态：已是好友 / 已发送申请 / 提交中 / 可申请。
+    func friendSearchActionState(for user: ImPublicUserDTO) -> ImFriendSearchActionState {
+        if friends.contains(where: { $0.userId == user.id }) { return .friend }
+        guard let selfUserId else { return .available }
+        let hasPendingOutgoing = friendRequests.contains {
+            $0.senderId == selfUserId && $0.status == "pending" && $0.receiverUsername == user.username
+        }
+        if hasPendingOutgoing { return .requested }
+        if friendRequestSubmittingUsernames.contains(user.username) { return .submitting }
+        return .available
+    }
+
     func clearUserSearch() {
         userSearchResults = []
     }
 
     func sendFriendRequest(username: String, message: String = "") async {
+        guard !friendRequestSubmittingUsernames.contains(username) else { return }
+        friendRequestSubmittingUsernames.insert(username)
+        contactMessage = nil
+        defer { friendRequestSubmittingUsernames.remove(username) }
         do {
             try await center.sendFriendRequest(username: username, message: message)
             contactMessage = "好友请求已发送"
@@ -702,4 +732,12 @@ final class ImFeatureModel {
             }
         }
     }
+}
+
+/// 加好友搜索结果行针对当前用户的可用操作状态。
+enum ImFriendSearchActionState {
+    case friend
+    case requested
+    case submitting
+    case available
 }

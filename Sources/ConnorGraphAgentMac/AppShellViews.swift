@@ -108,6 +108,17 @@ struct AppShellView: View {
             set: { graph.shell.selection = $0 ?? .agentChat }
         )
     }
+
+    /// 从会话列表等入口请求“添加康纳好友”时，在当前页面上方直接弹出加好友弹窗，
+    /// 不切换左侧栏到人际关系页。
+    private var addFriendPresented: Binding<Bool> {
+        Binding(
+            get: { graph.shell.addFriendRequestID != nil },
+            set: { presented in
+                if !presented { graph.shell.clearAddFriendRequest() }
+            }
+        )
+    }
     @State private var topSearchKeyMonitor: Any?
 
     var body: some View {
@@ -289,6 +300,11 @@ struct AppShellView: View {
                 Task { await graph.im?.selectConversation(conversationID) }
             } else if notification.userInfo?["openContacts"] as? Bool == true {
                 graph.shell.selection = .contacts
+            }
+        }
+        .sheet(isPresented: addFriendPresented) {
+            if let im = graph.im {
+                ImAddFriendSheet(model: im, isPresented: addFriendPresented)
             }
         }
     }

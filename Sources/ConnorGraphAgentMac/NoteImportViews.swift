@@ -95,11 +95,17 @@ final class NoteImportViewModel: ObservableObject {
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
         switch sourceKind {
-        case .markdownFolder, .obsidianVault, .notionExport:
+        case .notionExport:
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = true
+            panel.allowedContentTypes = [UTType.zip]
+            panel.prompt = "选择文件夹或 ZIP"
+            panel.message = "请选择 Notion 导出文件夹或 .zip 文件"
+        case .markdownFolder, .obsidianVault:
             panel.canChooseDirectories = true
             panel.canChooseFiles = false
             panel.prompt = "选择文件夹"
-            panel.message = sourceKind == .notionExport ? "请选择已解压的 Notion 导出文件夹" : "请选择要导入的笔记文件夹"
+            panel.message = "请选择要导入的笔记文件夹"
         case .evernoteENEX:
             panel.canChooseDirectories = false
             panel.canChooseFiles = true
@@ -108,7 +114,16 @@ final class NoteImportViewModel: ObservableObject {
             panel.message = "请选择 Evernote 或印象笔记导出的 ENEX 文件"
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        sourceURL = url
+        if sourceKind == .notionExport, url.pathExtension.lowercased() == "zip" {
+            do {
+                sourceURL = try NotionExportSourceResolver.extractIfZip(url)
+            } catch {
+                self.error = userFacing(error)
+                return
+            }
+        } else {
+            sourceURL = url
+        }
         notes = []
         step = .source
         error = nil

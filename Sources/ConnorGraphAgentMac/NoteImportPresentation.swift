@@ -64,7 +64,7 @@ enum NoteImportProgressAppearance {
 extension NoteImportSourceKind {
     var displayName: String { switch self { case .markdownFolder: "Markdown 文件夹"; case .obsidianVault: "Obsidian 仓库"; case .notionExport: "Notion 导出"; case .evernoteENEX: "Evernote / 印象笔记" } }
     var detail: String { switch self { case .markdownFolder: "递归导入 .md 与本地附件"; case .obsidianVault: "保留双链、嵌入与别名"; case .notionExport: "Markdown、HTML 与数据库 CSV"; case .evernoteENEX: "导入 ENEX 笔记、标签与资源" } }
-    var selectionHint: String { switch self { case .markdownFolder, .obsidianVault: "请选择文件夹"; case .notionExport: "请选择已解压的导出文件夹"; case .evernoteENEX: "请选择 .enex 文件" } }
+    var selectionHint: String { switch self { case .markdownFolder, .obsidianVault: "请选择文件夹"; case .notionExport: "请选择导出文件夹或 .zip 文件"; case .evernoteENEX: "请选择 .enex 文件" } }
     var systemImage: String { switch self { case .markdownFolder: "folder"; case .obsidianVault: "link"; case .notionExport: "square.grid.2x2"; case .evernoteENEX: "archivebox" } }
 }
 

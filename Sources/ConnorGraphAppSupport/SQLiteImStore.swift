@@ -111,7 +111,7 @@ public enum ImStoreChangeNotificationUserInfoKey {
 }
 
 public final class SQLiteImStore: ImStore, @unchecked Sendable {
-    private let db: OpaquePointer
+    private var db: OpaquePointer
     private let queue = DispatchQueue(label: "ConnorGraphAppSupport.SQLiteImStore")
 
     public init(databaseURL: URL) throws {
@@ -127,6 +127,26 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
         try Self.createTables(db: openedDB)
         try Self.migrateTables(db: openedDB)
         try queue.sync {
+            try rebuildSearchIndexIfNeeded()
+        }
+    }
+
+    /// 切换底层账号库（登录/切号/登出时调用）：先打开新库成功后再关闭旧库，
+    /// 失败时保持当前库可用。访问统一走串行队列，与其它读写互斥；
+    /// 切换后由调用方触发 UI 全量重载。
+    public func switchAccount(databaseURL: URL) throws {
+        try queue.sync {
+            try FileManager.default.createDirectory(at: databaseURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            var opened: OpaquePointer?
+            guard sqlite3_open(databaseURL.path, &opened) == SQLITE_OK, let opened else {
+                if opened != nil { _ = sqlite3_close(opened) }
+                throw SQLiteImStoreError.openFailed("Cannot open \(databaseURL.path)")
+            }
+            _ = sqlite3_close(db)
+            db = opened
+            try Self.configurePragmas(db: db)
+            try Self.createTables(db: db)
+            try Self.migrateTables(db: db)
             try rebuildSearchIndexIfNeeded()
         }
     }

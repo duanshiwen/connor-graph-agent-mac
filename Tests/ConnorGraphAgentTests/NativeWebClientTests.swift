@@ -93,10 +93,13 @@ struct NativeWebClientTests {
     }
 
     @Test func federatedImageSearchMergesSourceAndLicenseMetadata() async throws {
-        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(responsesByHost: [
-            "api.openverse.org": .json(openverseImageResponseJSON),
-            "commons.wikimedia.org": .json(wikimediaCommonsImageResponseJSON, url: "https://commons.wikimedia.org/w/api.php")
-        ]))
+        let client = NativeImageSearchClient(
+            httpClient: FakeNativeWebHTTPClient(responsesByHost: [
+                "api.openverse.org": .json(openverseImageResponseJSON),
+                "commons.wikimedia.org": .json(wikimediaCommonsImageResponseJSON, url: "https://commons.wikimedia.org/w/api.php")
+            ]),
+            unsplashAccessKey: nil
+        )
 
         let result = try await client.search(englishQuery: "Golden Gate Bridge", maxResults: 5, licenseFilter: .commercial)
 
@@ -114,30 +117,40 @@ struct NativeWebClientTests {
         #expect(result.markdown.contains("Source page: https://source.example.com/golden-gate"))
         #expect(result.markdown.contains("Attribution: Golden Gate Bridge by Example Photographer, CC BY 4.0"))
         #expect(result.retryAdvice == .notNeeded)
-        #expect(result.diagnostics.map(\.status) == [.succeeded, .succeeded])
+        #expect(result.diagnostics.map { $0.status } == [.succeeded, .succeeded, .failed])
     }
 
     @Test func imageSearchUsesAvailableProviderWhenTheOtherProviderFails() async throws {
-        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(
-            responsesByHost: ["commons.wikimedia.org": .json(wikimediaCommonsImageResponseJSON, url: "https://commons.wikimedia.org/w/api.php")],
-            errorsByHost: ["api.openverse.org": URLError(.cannotConnectToHost)]
-        ))
+        let client = NativeImageSearchClient(
+            httpClient: FakeNativeWebHTTPClient(
+                responsesByHost: ["commons.wikimedia.org": .json(wikimediaCommonsImageResponseJSON, url: "https://commons.wikimedia.org/w/api.php")],
+                errorsByHost: ["api.openverse.org": URLError(.cannotConnectToHost)]
+            ),
+            unsplashAccessKey: nil
+        )
 
         let result = try await client.search(englishQuery: "Golden Gate Bridge", maxResults: 3, licenseFilter: .all)
 
         #expect(result.provider == "wikimedia_commons")
         #expect(result.results.count == 1)
         #expect(result.retryAdvice == .notNeeded)
-        #expect(result.diagnostics.first?.status == .failed)
-        #expect(result.diagnostics.first?.retryAdvice == .retryLater)
-        #expect(result.diagnostics.last?.status == .succeeded)
+        #expect(result.diagnostics.count == 3)
+        #expect(result.diagnostics[0].status == .failed)
+        #expect(result.diagnostics[0].retryAdvice == .retryLater)
+        #expect(result.diagnostics[1].provider == "wikimedia_commons")
+        #expect(result.diagnostics[1].status == .succeeded)
+        #expect(result.diagnostics[2].provider == "bing_images")
+        #expect(result.diagnostics[2].status == .failed)
     }
 
     @Test func imageSearchExplainsWhenBothProvidersAreNetworkInaccessible() async throws {
-        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(errorsByHost: [
-            "api.openverse.org": URLError(.cannotConnectToHost),
-            "commons.wikimedia.org": URLError(.timedOut)
-        ]))
+        let client = NativeImageSearchClient(
+            httpClient: FakeNativeWebHTTPClient(errorsByHost: [
+                "api.openverse.org": URLError(.cannotConnectToHost),
+                "commons.wikimedia.org": URLError(.timedOut)
+            ]),
+            unsplashAccessKey: nil
+        )
 
         let result = try await client.search(englishQuery: "Golden Gate Bridge", maxResults: 3, licenseFilter: .all)
 
@@ -164,7 +177,10 @@ struct NativeWebClientTests {
     }
 
     @Test func imageSearchToolReturnsStructuredCandidatesAndSourceCitations() async throws {
-        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(response: .json(openverseImageResponseJSON)))
+        let client = NativeImageSearchClient(
+            httpClient: FakeNativeWebHTTPClient(response: .json(openverseImageResponseJSON)),
+            unsplashAccessKey: nil
+        )
         let tool = NativeImageSearchTool(client: client)
         let context = AgentToolExecutionContext(
             runID: "run-image-search",
@@ -194,9 +210,10 @@ struct NativeWebClientTests {
         #expect(payload["fallbackAction"] as? String == "use_candidates_if_relevant")
         #expect(payload["licenseFilter"] as? String == "commercial")
         let providers = try #require(payload["providers"] as? [[String: Any]])
-        #expect(providers.count == 2)
+        #expect(providers.count == 3)
         #expect(providers[0]["provider"] as? String == "openverse")
         #expect(providers[1]["provider"] as? String == "wikimedia_commons")
+        #expect(providers[2]["provider"] as? String == "bing_images")
         let candidates = try #require(payload["results"] as? [[String: Any]])
         #expect(candidates.count == 1)
         #expect(candidates[0]["imageURL"] as? String == "https://images.example.com/golden-gate.jpg")
@@ -204,7 +221,10 @@ struct NativeWebClientTests {
     }
 
     @Test func imageSearchToolAdvertisesEnglishQueryAndNormalizesLegacyArguments() async throws {
-        let tool = NativeImageSearchTool(client: NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(response: .json(openverseImageResponseJSON))))
+        let tool = NativeImageSearchTool(client: NativeImageSearchClient(
+            httpClient: FakeNativeWebHTTPClient(response: .json(openverseImageResponseJSON)),
+            unsplashAccessKey: nil
+        ))
         let schema = tool.inputSchema.jsonObject
         let properties = try #require(schema["properties"] as? [String: Any])
         let required = try #require(schema["required"] as? [String])
@@ -246,10 +266,13 @@ struct NativeWebClientTests {
     }
 
     @Test func imageSearchToolReturnsTextOnlyFallbackWhenProvidersAreInaccessible() async throws {
-        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(errorsByHost: [
-            "api.openverse.org": URLError(.cannotConnectToHost),
-            "commons.wikimedia.org": URLError(.timedOut)
-        ]))
+        let client = NativeImageSearchClient(
+            httpClient: FakeNativeWebHTTPClient(errorsByHost: [
+                "api.openverse.org": URLError(.cannotConnectToHost),
+                "commons.wikimedia.org": URLError(.timedOut)
+            ]),
+            unsplashAccessKey: nil
+        )
         let tool = NativeImageSearchTool(client: client)
         let context = AgentToolExecutionContext(
             runID: "run-image-fallback",
@@ -276,7 +299,94 @@ struct NativeWebClientTests {
         let providers = try #require(payload["providers"] as? [[String: Any]])
         #expect(providers.allSatisfy { ($0["reason"] as? String)?.contains("Network request failed") == true })
     }
+
+    @Test func unsplashImageSearchAddsCandidatesWithAttributionWhenKeyConfigured() async throws {
+        let client = NativeImageSearchClient(
+            httpClient: FakeNativeWebHTTPClient(responsesByHost: [
+                "api.openverse.org": .json(openverseImageResponseJSON),
+                "commons.wikimedia.org": .json(wikimediaCommonsImageResponseJSON, url: "https://commons.wikimedia.org/w/api.php"),
+                "api.unsplash.com": .json(unsplashImageSearchResponseJSON, url: "https://api.unsplash.com/search/photos")
+            ]),
+            unsplashAccessKey: "test-access-key"
+        )
+
+        let result = try await client.search(englishQuery: "Golden Gate Bridge", maxResults: 5, licenseFilter: .all)
+
+        #expect(result.provider.contains("unsplash"))
+        let unsplash = try #require(result.results.first { $0.creator == "Test Photographer" })
+        #expect(unsplash.imageURL == "https://images.unsplash.com/photo-123?w=1080&q=80")
+        #expect(unsplash.thumbnailURL == "https://images.unsplash.com/photo-123?w=200&q=60")
+        #expect(unsplash.sourcePageURL == "https://unsplash.com/photos/abc123")
+        #expect(unsplash.creatorURL == "https://unsplash.com/@testphotographer")
+        #expect(unsplash.license == "Unsplash License")
+        #expect(unsplash.attribution == "Photo by Test Photographer on Unsplash")
+        let unsplashDiagnostic = try #require(result.diagnostics.last)
+        #expect(unsplashDiagnostic.provider == "unsplash")
+        #expect(unsplashDiagnostic.status == .succeeded)
+        #expect(result.retryAdvice == .notNeeded)
+    }
+
+    @Test func imageSearchSkipsUnsplashWithoutAccessKey() async throws {
+        let client = NativeImageSearchClient(
+            httpClient: FakeNativeWebHTTPClient(responsesByHost: [
+                "api.openverse.org": .json(openverseImageResponseJSON),
+                "api.unsplash.com": .json(unsplashImageSearchResponseJSON, url: "https://api.unsplash.com/search/photos")
+            ]),
+            unsplashAccessKey: nil
+        )
+
+        let result = try await client.search(englishQuery: "Golden Gate Bridge", maxResults: 3, licenseFilter: .all)
+
+        #expect(result.diagnostics.allSatisfy { $0.provider != "unsplash" })
+        #expect(!result.provider.contains("unsplash"))
+    }
+
+    @Test func imageSearchHandlesUnsplashFailureGracefully() async throws {
+        let client = NativeImageSearchClient(
+            httpClient: FakeNativeWebHTTPClient(
+                responsesByHost: ["api.openverse.org": .json(openverseImageResponseJSON)],
+                errorsByHost: ["api.unsplash.com": URLError(.cannotConnectToHost)]
+            ),
+            unsplashAccessKey: "test-access-key"
+        )
+
+        let result = try await client.search(englishQuery: "Golden Gate Bridge", maxResults: 3, licenseFilter: .all)
+
+        #expect(result.provider.contains("openverse"))
+        #expect(result.results.count >= 1)
+        let unsplashDiagnostic = try #require(result.diagnostics.first { $0.provider == "unsplash" })
+        #expect(unsplashDiagnostic.status == .failed)
+        #expect(unsplashDiagnostic.retryAdvice == .retryLater)
+        #expect(result.retryAdvice == .notNeeded)
+    }
 }
+
+private let unsplashImageSearchResponseJSON = """
+{
+  "total": 1,
+  "total_pages": 1,
+  "results": [
+    {
+      "id": "abc123",
+      "alt_description": "Golden Gate Bridge at sunset",
+      "width": 4000,
+      "height": 3000,
+      "urls": {
+        "raw": "https://images.unsplash.com/photo-123?ixlib=rb-4.0.3&w=4000",
+        "full": "https://images.unsplash.com/photo-123?w=1600",
+        "regular": "https://images.unsplash.com/photo-123?w=1080&q=80",
+        "small": "https://images.unsplash.com/photo-123?w=400&q=80",
+        "thumb": "https://images.unsplash.com/photo-123?w=200&q=60"
+      },
+      "links": { "html": "https://unsplash.com/photos/abc123" },
+      "user": {
+        "name": "Test Photographer",
+        "links": { "html": "https://unsplash.com/@testphotographer" }
+      }
+    }
+  ]
+}
+"""
 
 private let openverseImageResponseJSON = """
 {
