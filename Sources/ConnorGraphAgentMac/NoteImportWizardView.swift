@@ -138,6 +138,9 @@ struct NoteImportWizardView: View {
                 }
                 Table(model.filteredNotes) {
                     TableColumn("标题") { Text($0.title).lineLimit(1) }
+                    TableColumn("上级") { note in
+                        Text(noteImportParentTitle(note, notes: model.notes)).foregroundStyle(.secondary).lineLimit(1)
+                    }
                     TableColumn("层级") { Text($0.hierarchy.isEmpty ? "—" : $0.hierarchy.joined(separator: " / ")).foregroundStyle(.secondary).lineLimit(1) }
                     TableColumn("路径") { Text($0.relativePath ?? "—").foregroundStyle(.secondary).lineLimit(1) }
                     TableColumn("附件") { Text("\($0.attachments.count)") }.width(55)
@@ -216,4 +219,10 @@ struct NoteImportWizardView: View {
     private var stepSubtitle: String { ["选择笔记来源", "预览并检查内容", "设置导入方式", "确认后在后台开始"][model.step.rawValue] }
     private var activityLabel: String { switch model.activity { case .idle: ""; case .scanning: "正在扫描…"; case .starting: "正在创建任务…"; case .importing: "正在导入…" } }
     private var summaryPills: some View { HStack { Label("\(model.notes.count) 篇", systemImage: "doc.text"); Label("\(model.attachmentCount) 个附件", systemImage: "paperclip") }.font(.callout).foregroundStyle(.secondary) }
+}
+
+/// 复核表「上级」列：按重建后的父级 sourceIdentity 解析上级笔记标题。
+private func noteImportParentTitle(_ note: ImportedNote, notes: [ImportedNote]) -> String {
+    guard let parent = note.hierarchyParent else { return "—" }
+    return notes.first { $0.sourceIdentity == parent }?.title ?? "—"
 }

@@ -281,7 +281,8 @@ struct NoteImportViewModelTests {
 
         #expect(try fixture.repository.sources().count == 1)
         #expect(try fixture.repository.jobs().count == 2)
-        #expect(try fixture.repository.jobs().allSatisfy { !$0.options.preserveHierarchy })
+        // preserveHierarchy 默认开启（树形层级 + 父子关系重建），协调器不再强制关闭
+        #expect(try fixture.repository.jobs().allSatisfy { $0.options.preserveHierarchy })
     }
 
     private func waitUntil(
