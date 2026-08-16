@@ -174,8 +174,8 @@ struct NotionExportNoteImportAdapterTests {
         #expect(try #require(notes.first { $0.title == "首页" }).hierarchy == ["笔记本"])
         #expect(try #require(notes.first { $0.title == "子页面" }).hierarchy == ["笔记本", "子分类"])
         #expect(try #require(notes.first { $0.title == "深层页面" }).hierarchy == ["笔记本", "子分类", "深层"])
-        // 不保留层级时保持扁平
-        let flat = try await collect(NotionExportNoteImportAdapter(), root: root)
+        // 显式关闭层级时保持扁平
+        let flat = try await collect(NotionExportNoteImportAdapter(), root: root, preserveHierarchy: false)
         #expect(flat.allSatisfy { $0.hierarchy.isEmpty })
     }
 

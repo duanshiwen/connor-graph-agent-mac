@@ -104,7 +104,8 @@ public struct NoteImportOptions: Codable, Sendable, Equatable {
     public init(
         recursivelyScan: Bool = true,
         importAttachments: Bool = true,
-        preserveHierarchy: Bool = false,
+        // 默认保留目录树结构并重建层级关系（Notion 整棵树；文件夹类来源同样受益）
+        preserveHierarchy: Bool = true,
         duplicatePolicy: NoteImportDuplicatePolicy = .skipUnchanged,
         llmMode: NoteImportLLMMode = .disabled,
         llmConcurrency: Int = 1,
