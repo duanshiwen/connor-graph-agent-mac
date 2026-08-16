@@ -1230,9 +1230,19 @@ private struct AgentChatConversationHeader: View {
     var canBeginForwardSelection: Bool
     @Binding var isSessionInfoPresented: Bool
     var onBeginForwardSelection: () -> Void
+    @Environment(\.windowWidthClass) private var windowWidthClass
     @State private var isEditingTitle = false
     @State private var titleDraft = ""
     @FocusState private var isTitleFocused: Bool
+
+    /// 标题左右留白：为右侧操作按钮预留空间，同时避免窄窗口下把标题挤成一个字。
+    private var titleHorizontalInset: CGFloat {
+        switch windowWidthClass {
+        case .regular: 220
+        case .compact: 180
+        case .narrow: 120
+        }
+    }
 
     private var selectedTitle: String {
         selectedSession?.title ?? "智能体聊天"
@@ -1248,7 +1258,7 @@ private struct AgentChatConversationHeader: View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             ZStack {
                 titleView
-                    .padding(.horizontal, 220)
+                    .padding(.horizontal, titleHorizontalInset)
 
                 HStack(spacing: AgentChatLayout.spaceS) {
                     Spacer()
