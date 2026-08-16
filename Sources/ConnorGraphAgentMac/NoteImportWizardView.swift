@@ -68,7 +68,7 @@ struct NoteImportWizardView: View {
                     Button(model.sourceURL == nil ? "选择…" : "更改…") { model.chooseSource() }
                 }
                 if model.sourceKind == .notionExport {
-                    Label("当前请选择已解压的 Notion 导出文件夹；ZIP 直读将在安全归档验证完成后开放。", systemImage: "info.circle")
+                    Label("支持选择已解压的导出文件夹，或直接选择 Notion 导出的 .zip 文件（将自动安全解压并导入全部页面与关联）。", systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }.padding(16).background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
@@ -76,7 +76,13 @@ struct NoteImportWizardView: View {
     }
 
     private func sourceCard(_ kind: NoteImportSourceKind) -> some View {
-        Button { model.sourceKind = kind; model.sourceURL = nil; model.notes = [] } label: {
+        Button {
+            model.sourceKind = kind
+            model.sourceURL = nil
+            model.notes = []
+            // Notion 导入默认保留整棵树（笔记本/子分类/子页面）层级，可在选项步关闭
+            model.options.preserveHierarchy = (kind == .notionExport)
+        } label: {
             HStack(spacing: 12) {
                 Image(systemName: kind.systemImage).font(.title2).frame(width: 30).foregroundStyle(model.sourceKind == kind ? Color.accentColor : Color.secondary)
                 VStack(alignment: .leading, spacing: 3) {
@@ -132,6 +138,7 @@ struct NoteImportWizardView: View {
                 }
                 Table(model.filteredNotes) {
                     TableColumn("标题") { Text($0.title).lineLimit(1) }
+                    TableColumn("层级") { Text($0.hierarchy.isEmpty ? "—" : $0.hierarchy.joined(separator: " / ")).foregroundStyle(.secondary).lineLimit(1) }
                     TableColumn("路径") { Text($0.relativePath ?? "—").foregroundStyle(.secondary).lineLimit(1) }
                     TableColumn("附件") { Text("\($0.attachments.count)") }.width(55)
                     TableColumn("状态") { note in
@@ -147,6 +154,10 @@ struct NoteImportWizardView: View {
         Form {
             Section("内容") {
                 Toggle("导入附件", isOn: $model.options.importAttachments)
+                if model.sourceKind == .notionExport {
+                    Toggle("保留目录树结构（笔记本/子分类/子页面整棵树）", isOn: $model.options.preserveHierarchy)
+                        .help("按 Notion 导出目录的文件夹链保留每篇笔记的层级路径，便于在笔记中还原整棵树。")
+                }
                 Picker("遇到重复笔记", selection: $model.options.duplicatePolicy) {
                     Text("跳过未变化的内容").tag(NoteImportDuplicatePolicy.skipUnchanged)
                     Text("作为更新追加").tag(NoteImportDuplicatePolicy.appendUpdate)

@@ -127,6 +127,7 @@ struct NoteImportCenterView: View {
                             .lineLimit(1)
                             .onAppear { Task { await model.loadMoreSelectedJobItemsIfNeeded(currentItemID: item.id) } }
                     }
+                    TableColumn("层级") { Text(noteImportHierarchyText($0)).foregroundStyle(.secondary).lineLimit(1) }
                     TableColumn("路径") { Text($0.relativePath ?? "—").foregroundStyle(.secondary).lineLimit(1) }
                     TableColumn("状态") { Label($0.status.displayName, systemImage: $0.status.systemImage).foregroundStyle($0.status.tint) }.width(120)
                     TableColumn("问题") { Text($0.errorMessage ?? "—").foregroundStyle($0.errorMessage == nil ? Color.secondary : Color.red).lineLimit(1) }
@@ -181,4 +182,12 @@ struct NoteImportCenterView: View {
     }
 
     private func metric(_ title: String, _ value: Int) -> some View { VStack(alignment: .leading, spacing: 2) { Text("\(value)").font(.title3.bold()); Text(title).font(.caption).foregroundStyle(.secondary) }.frame(minWidth: 72, alignment: .leading) }
+}
+
+/// 从导入项元数据里解码 `imported_note_hierarchy`（JSON 数组），用于在进度表里展示树形层级。
+private func noteImportHierarchyText(_ item: NoteImportItemRecord) -> String {
+    guard let raw = item.metadata["imported_note_hierarchy"], !raw.isEmpty,
+          let data = raw.data(using: .utf8),
+          let value = try? JSONDecoder().decode([String].self, from: data), !value.isEmpty else { return "—" }
+    return value.joined(separator: " / ")
 }
