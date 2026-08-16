@@ -225,7 +225,7 @@ struct AppGlobalSearchTests {
         }
         fixture.runtime.globalSearchFeatureModel.updateQuery("Needle")
 
-        fixture.runtime.globalSearchFeatureModel.showAllResults(kind: .chatSessions)
+        fixture.runtime.globalSearchFeatureModel.showAllResults(kind: .sessions)
 
         #expect(fixture.runtime.selection == .agentChat)
         #expect(fixture.runtime.chatFeatureModel.sessions.searchQuery == "Needle")
@@ -466,7 +466,7 @@ struct AppGlobalSearchTests {
     }
 
     @Test func globalSearchSectionEmptyTitlesCoverEverySource() {
-        #expect(GlobalSearchSectionKind.chatSessions.emptyTitle == "没有匹配的对话")
+        #expect(GlobalSearchSectionKind.sessions.emptyTitle == "没有匹配的会话")
         #expect(GlobalSearchSectionKind.mail.emptyTitle == "没有匹配的邮件")
         #expect(GlobalSearchSectionKind.calendar.emptyTitle == "没有匹配的日程")
         #expect(GlobalSearchSectionKind.rss.emptyTitle == "没有匹配的 RSS")
@@ -522,7 +522,7 @@ struct AppGlobalSearchTests {
 
         #expect(state.isSectionLoading(.mail))
         #expect(state.isSectionLoading(.rss))
-        #expect(!state.isSectionLoading(.chatSessions))
+        #expect(!state.isSectionLoading(.sessions))
         #expect(state.isLoading)
 
         state.loadingSections.remove(.mail)
@@ -573,7 +573,7 @@ struct AppGlobalSearchTests {
 
         await fixture.runtime.globalSearchFeatureModel.refreshPreview(for: "帮我找泰国签证")
 
-        let result = try #require(fixture.runtime.globalSearchFeatureModel.previewState.chatSessionResults.first { $0.id == session.id })
+        let result = try #require(fixture.runtime.globalSearchFeatureModel.previewState.sessionResults.first { $0.id == session.id })
         #expect(result.snippet.contains("泰国"))
     }
 
@@ -588,8 +588,8 @@ struct AppGlobalSearchTests {
 
         await fixture.runtime.globalSearchFeatureModel.refreshPreview(for: "泰国")
 
-        #expect(fixture.runtime.globalSearchFeatureModel.previewState.chatSessionResults.map(\.id).contains(session.id))
-        #expect(fixture.runtime.globalSearchFeatureModel.previewState.chatSessionResults.first(where: { $0.id == session.id })?.title == "泰国长期生活计划")
+        #expect(fixture.runtime.globalSearchFeatureModel.previewState.sessionResults.map(\.id).contains(session.id))
+        #expect(fixture.runtime.globalSearchFeatureModel.previewState.sessionResults.first(where: { $0.id == session.id })?.title == "泰国长期生活计划")
     }
 
     @Test func globalSearchIncludesChatSessionMessageBodyResults() async throws {
@@ -608,9 +608,9 @@ struct AppGlobalSearchTests {
 
         await fixture.runtime.globalSearchFeatureModel.refreshPreview(for: "泰国")
 
-        let result = try #require(fixture.runtime.globalSearchFeatureModel.previewState.chatSessionResults.first { $0.id == session.id })
+        let result = try #require(fixture.runtime.globalSearchFeatureModel.previewState.sessionResults.first { $0.id == session.id })
         #expect(result.snippet.contains("泰国"))
-        #expect(result.messageCount == 1)
+        #expect(result.metaText == "1 条消息")
     }
 
     @Test func openingChatSessionSearchResultSelectsSession() throws {
@@ -621,7 +621,9 @@ struct AppGlobalSearchTests {
         try fixture.repository.saveSession(session)
         fixture.runtime.reloadChatSessions()
 
-        fixture.runtime.globalSearchFeatureModel.openChatSession(session.id)
+        fixture.runtime.globalSearchFeatureModel.openSession(
+            GlobalSearchConversationResult(id: session.id, kind: .agentChat, title: session.title, snippet: "", metaText: "", updatedAt: Date())
+        )
 
         #expect(fixture.runtime.selection == .agentChat)
         #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == session.id)
@@ -642,7 +644,7 @@ struct AppGlobalSearchTests {
         fixture.runtime.globalSearchFeatureModel.moveSelectionDown()
         #expect(fixture.runtime.globalSearchFeatureModel.selectedItem == .action(.webSearch))
         fixture.runtime.globalSearchFeatureModel.moveSelectionDown()
-        #expect(fixture.runtime.globalSearchFeatureModel.selectedItem == .chatSession(session.id))
+        #expect(selectedSessionItem(fixture.runtime.globalSearchFeatureModel.selectedItem, id: session.id))
         fixture.runtime.globalSearchFeatureModel.moveSelectionUp()
         #expect(fixture.runtime.globalSearchFeatureModel.selectedItem == .action(.webSearch))
     }
@@ -834,4 +836,9 @@ struct AppGlobalSearchTests {
             try? FileManager.default.removeItem(at: root)
         }
     }
+}
+
+private func selectedSessionItem(_ item: GlobalSearchSelectableItem?, id: String) -> Bool {
+    if case .session(let result)? = item { return result.id == id }
+    return false
 }

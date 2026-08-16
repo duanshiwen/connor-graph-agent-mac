@@ -177,9 +177,8 @@ final class GlobalSearchRuntimeCoordinator {
             Task { await knowledgeMarketplace.loadDetail(id: id) }
         case .showAll(let kind, let query):
             switch kind {
-            case .imConversations:
-                shell.selection = .agentChat
-            case .chatSessions:
+            case .sessions:
+                // “会话”查看全部：AI 对话/笔记/单聊/群聊统一进入会话页并按关键词过滤
                 chat.sessions.searchQuery = query
                 chatSessions.reloadChatSessions(restoreWorkspaceMode: false)
                 browser.isVisible = false

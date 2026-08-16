@@ -65,8 +65,7 @@ final class GlobalSearchFeatureModel {
             return historyEntries.prefix(8).map { .recentSearch($0.id) }
         }
         var items: [GlobalSearchSelectableItem] = [.action(.newChat), .action(.webSearch)]
-        items.append(contentsOf: previewState.imConversationResults.map { .imConversation($0.id) })
-        items.append(contentsOf: previewState.chatSessionResults.map { .chatSession($0.id) })
+        items.append(contentsOf: previewState.sessionResults.map { .session($0) })
         items.append(contentsOf: previewState.knowledgeBaseResults.map { .knowledgeBase($0.id) })
         items.append(contentsOf: previewState.calendarResults.map { .nativeResult($0.id) })
         items.append(contentsOf: previewState.rssResults.map { .nativeResult($0.id) })
@@ -125,8 +124,7 @@ final class GlobalSearchFeatureModel {
             selectHistoryEntry(entry)
         case .action(.newChat): performNewChat()
         case .action(.webSearch): performWebSearch()
-        case .imConversation(let conversationID): openIMConversation(conversationID)
-        case .chatSession(let sessionID): openChatSession(sessionID)
+        case .session(let result): openSession(result)
         case .nativeResult(let resultID):
             let results = previewState.calendarResults + previewState.rssResults + previewState.mailResults + previewState.browserHistoryResults
             guard let result = results.first(where: { $0.id == resultID }) else { return }
@@ -173,16 +171,16 @@ final class GlobalSearchFeatureModel {
         onDestination?(.browserHistoryRecord(record))
     }
 
-    func openChatSession(_ sessionID: String) {
+    /// 打开统一“会话”结果：AI 对话/笔记 → 会话详情；单聊/群聊 → IM 会话。
+    func openSession(_ result: GlobalSearchConversationResult) {
         recordHistoryIfNeeded(query)
         dismissOverlay()
-        onDestination?(.chatSession(sessionID))
-    }
-
-    func openIMConversation(_ conversationID: String) {
-        recordHistoryIfNeeded(query)
-        dismissOverlay()
-        onDestination?(.imConversation(conversationID))
+        switch result.kind {
+        case .agentChat, .note:
+            onDestination?(.chatSession(result.id))
+        case .peer, .group:
+            onDestination?(.imConversation(result.id))
+        }
     }
 
     func openResult(_ result: NativeSearchResult) {
@@ -215,18 +213,14 @@ final class GlobalSearchFeatureModel {
         let generation = refreshGeneration
         let tokens = GlobalSearchDisplayTokenBuilder.tokens(for: trimmed)
         timings = []
-        let imStartedAt = Date()
-        let imResults = await searchIMConversations(query: trimmed, limit: 5)
-        recordTiming(query: trimmed, section: "imConversations", startedAt: imStartedAt, returnedCount: imResults.count, backend: "loaded-conversations")
-        let chatStartedAt = Date()
-        let chatResults = await searchChatSessions(query: trimmed, limit: 3)
-        recordTiming(query: trimmed, section: "chatSessions", startedAt: chatStartedAt, returnedCount: chatResults.count, backend: sessionSearchIndexService == nil ? "fallback-scan" : "session-fts")
+        let sessionsStartedAt = Date()
+        let sessionResults = await searchSessions(query: trimmed, limit: 8)
+        recordTiming(query: trimmed, section: "sessions", startedAt: sessionsStartedAt, returnedCount: sessionResults.count, backend: "sessions")
         guard canApply(query: trimmed, generation: generation) else { return }
         previewState = GlobalSearchPreviewState(
             query: trimmed,
             loadingSections: [.knowledgeMarketplace, .calendar, .rss, .mail, .browserHistory],
-            imConversationResults: imResults,
-            chatSessionResults: chatResults,
+            sessionResults: sessionResults,
             searchTokens: tokens,
             errorMessage: nil
         )
@@ -484,8 +478,7 @@ final class GlobalSearchFeatureModel {
         if let message = result.errorMessage, state.errorMessage == nil { state.errorMessage = message }
         if !result.results.isEmpty || result.errorMessage != nil { state.sectionStatusMessages[result.kind] = nil }
         switch result.kind {
-        case .imConversations: break
-        case .chatSessions: break
+        case .sessions: break
         case .calendar: state.calendarResults = result.results
         case .rss: state.rssResults = result.results
         case .mail: state.mailResults = result.results
@@ -499,76 +492,101 @@ final class GlobalSearchFeatureModel {
         timings.append(GlobalSearchSectionTiming(query: query, section: section, startedAt: startedAt, endedAt: Date(), candidateCount: returnedCount, returnedCount: returnedCount, backend: backend))
     }
 
-    private func searchChatSessions(query: String, limit: Int) async -> [GlobalSearchSessionResult] {
+    /// 统一「会话」搜索：AI 对话、笔记、单聊、群聊合并为一个类别，按最近活跃排序，并带类型标注。
+    private func searchSessions(query: String, limit: Int) async -> [GlobalSearchConversationResult] {
         let terms = Self.matchTerms(for: query)
-        guard !terms.isEmpty else { return [] }
-        let loadedResults = sessionsProvider().compactMap { session -> (GlobalSearchSessionResult, Double)? in
-            let titleScore = Self.matchScore(text: session.title, terms: terms, weight: 20)
-            var bestMessageScore = 0.0; var bestSnippet = session.messages.last?.content ?? session.title
-            for message in session.messages {
-                let score = Self.matchScore(text: message.content, terms: terms, weight: message.role == .user ? 8 : 5)
-                if score > bestMessageScore { bestMessageScore = score; bestSnippet = Self.snippet(text: message.content, terms: terms) }
-            }
-            let total = titleScore + bestMessageScore
-            guard total > 0 else { return nil }
-            let snippet = titleScore > 0 && bestMessageScore == 0 ? "最近更新：\(session.updatedAt.connorLocalFormatted(date: .medium, time: .short))" : bestSnippet
-            return (GlobalSearchSessionResult(id: session.id, title: session.title.isEmpty ? "新对话" : session.title, snippet: snippet, updatedAt: session.updatedAt, messageCount: session.messages.count), total + min(3, Date().timeIntervalSince(session.updatedAt) / -86_400_000))
-        }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.updatedAt > $1.0.updatedAt }.prefix(limit).map(\.0)
+        var results: [GlobalSearchConversationResult] = []
 
-        guard let sessionSearchIndexService,
-              let indexed = try? await sessionSearchIndexService.search(query: query, limit: limit),
-              !indexed.isEmpty else {
-            return loadedResults
+        // AI 对话 + 笔记（Agent 会话；kind == .note 记为笔记）
+        let sessions = sessionsProvider()
+        let kindByID = Dictionary(
+            sessions.map { ($0.id, Self.sessionKind(for: $0)) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        if !terms.isEmpty {
+            for session in sessions {
+                let titleScore = Self.matchScore(text: session.title, terms: terms, weight: 20)
+                var bestMessageScore = 0.0
+                var bestSnippet = session.messages.last?.content ?? session.title
+                for message in session.messages {
+                    let score = Self.matchScore(text: message.content, terms: terms, weight: message.role == .user ? 8 : 5)
+                    if score > bestMessageScore {
+                        bestMessageScore = score
+                        bestSnippet = Self.snippet(text: message.content, terms: terms)
+                    }
+                }
+                guard titleScore + bestMessageScore > 0 else { continue }
+                let snippet = titleScore > 0 && bestMessageScore == 0
+                    ? "最近更新：\(session.updatedAt.connorLocalFormatted(date: .medium, time: .short))"
+                    : bestSnippet
+                results.append(GlobalSearchConversationResult(
+                    id: session.id,
+                    kind: Self.sessionKind(for: session),
+                    title: session.title.isEmpty ? "新对话" : session.title,
+                    snippet: snippet,
+                    metaText: "\(session.messages.count) 条消息",
+                    updatedAt: session.updatedAt
+                ))
+            }
         }
-        var seen = Set(loadedResults.map(\.id))
-        let indexedResults = indexed.compactMap { result -> GlobalSearchSessionResult? in
-            guard seen.insert(result.id).inserted else { return nil }
-            return GlobalSearchSessionResult(id: result.id, title: result.title, snippet: result.snippet, updatedAt: result.updatedAt, messageCount: result.messageCount)
+        // 会话历史 FTS 索引补充（笔记同样在索引里，按 id 回查类型）
+        if let sessionSearchIndexService,
+           let indexed = try? await sessionSearchIndexService.search(query: query, limit: limit) {
+            let existing = Set(results.map(\.id))
+            for hit in indexed where !existing.contains(hit.id) {
+                results.append(GlobalSearchConversationResult(
+                    id: hit.id,
+                    kind: kindByID[hit.id] ?? .agentChat,
+                    title: hit.title,
+                    snippet: hit.snippet,
+                    metaText: "\(hit.messageCount) 条消息",
+                    updatedAt: hit.updatedAt
+                ))
+            }
         }
-        return Array((loadedResults + indexedResults).prefix(limit))
+        // 单聊 + 群聊（IM）
+        results.append(contentsOf: await searchIMConversations(query: query, terms: terms))
+
+        return results
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .prefix(limit)
+            .map { $0 }
     }
 
-    private func searchIMConversations(query: String, limit: Int) async -> [GlobalSearchIMConversationResult] {
+    private static func sessionKind(for session: AgentSession) -> GlobalSearchSessionKind {
+        session.governance.kind == .note ? .note : .agentChat
+    }
+
+    private func searchIMConversations(query: String, terms: [String]) async -> [GlobalSearchConversationResult] {
         if let imConversationSearchProvider,
-           let indexed = try? await imConversationSearchProvider(query, limit) {
+           let indexed = try? await imConversationSearchProvider(query, 50) {
             return indexed.map { hit in
                 let conversation = hit.conversation
-                return GlobalSearchIMConversationResult(
+                return GlobalSearchConversationResult(
                     id: conversation.id,
-                    kind: conversation.kind,
+                    kind: conversation.kind == .group ? .group : .peer,
                     title: conversation.title.isEmpty ? conversation.participantName : conversation.title,
-                    participantName: conversation.participantName,
                     snippet: hit.snippet,
-                    lastMessageAt: conversation.lastMessageAt
+                    metaText: conversation.participantName,
+                    updatedAt: Date(timeIntervalSince1970: TimeInterval(conversation.lastMessageAt) / 1_000)
                 )
             }
         }
-
-        let terms = Self.matchTerms(for: query)
         guard !terms.isEmpty else { return [] }
-        return imConversationsProvider().compactMap { conversation -> (GlobalSearchIMConversationResult, Double)? in
+        return imConversationsProvider().compactMap { conversation -> GlobalSearchConversationResult? in
             let titleScore = Self.matchScore(text: conversation.title, terms: terms, weight: 20)
             let participantScore = Self.matchScore(text: conversation.participantName, terms: terms, weight: 16)
             let previewScore = Self.matchScore(text: conversation.lastMessagePreview, terms: terms, weight: 8)
-            let total = titleScore + participantScore + previewScore
-            guard total > 0 else { return nil }
-            return (
-                GlobalSearchIMConversationResult(
-                    id: conversation.id,
-                    kind: conversation.kind,
-                    title: conversation.title.isEmpty ? conversation.participantName : conversation.title,
-                    participantName: conversation.participantName,
-                    snippet: conversation.lastMessagePreview,
-                    lastMessageAt: conversation.lastMessageAt
-                ),
-                total
+            guard titleScore + participantScore + previewScore > 0 else { return nil }
+            return GlobalSearchConversationResult(
+                id: conversation.id,
+                kind: conversation.kind == .group ? .group : .peer,
+                title: conversation.title.isEmpty ? conversation.participantName : conversation.title,
+                snippet: conversation.lastMessagePreview,
+                metaText: conversation.participantName,
+                updatedAt: Date(timeIntervalSince1970: TimeInterval(conversation.lastMessageAt) / 1_000)
             )
         }
-        .sorted {
-            $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.lastMessageAt > $1.0.lastMessageAt
-        }
-        .prefix(limit)
-        .map(\.0)
     }
 
     private static func matchTerms(for query: String) -> [String] {
