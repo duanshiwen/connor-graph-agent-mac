@@ -3974,8 +3974,10 @@ extension AppRuntimeLifecycle {
             rss: rssFeatureModel.agentRuntime.repository,
             identity: identityStore
         )
-        // 先镜像「好友并入人物」绑定到 L4 实体，让本轮 reconcile 的投影把它上推给安卓端。
-        await projectFriendBindingsToMemoryL4()
+        // 消费本机「好友并入/解绑」动作：写入或清除 L4 实体的 connor_friend_* 元数据，
+        // 让本轮 reconcile 的投影把它上推给安卓端。动作驱动，不做全量镜像，避免与
+        // 安卓端的解绑互相“打架”（Mac 每轮把本地绑定写回、覆盖安卓刚清除的解绑）。
+        await projectPendingFriendBindingActions()
         let result = try await Task.detached(priority: .utility) {
             try await coordinator.reconcile()
         }.value
@@ -4000,13 +4002,16 @@ extension AppRuntimeLifecycle {
         }
     }
 
-    /// 把 Mac 端「好友并入人物」的绑定镜像成 memory_l4_entities 上人物实体的
-    /// connor_friend_* 元数据并随账号同步上推，让安卓端也能呈现合并结果（Mac→安卓方向）。
-    /// 幂等：内容未变化时不改写实体（避免每轮同步重复上推）；只写入、不清除，
-    /// 避免与安卓端对同一实体的并发写入产生竞态。
-    private func projectFriendBindingsToMemoryL4() async {
+    /// 消费本机「好友并入/解绑」动作，把绑定状态写入或清除到 memory_l4_entities 上人物实体的
+    /// connor_friend_* 元数据并随账号同步上推（Mac→安卓方向）。动作驱动、幂等：
+    /// - 绑定（personProfileID 非空）：在目标人物实体上写入 connor_friend_*（内容一致则跳过）；
+    /// - 解绑（personProfileID 为空）：清除所有 connor_friend_user_id 匹配该好友的实体元数据。
+    /// 不做“本地全量绑定”镜像，避免覆盖安卓端刚清除的解绑。
+    private func projectPendingFriendBindingActions() async {
         guard let im = graph.im, let memory = memoryOSStore else { return }
-        let friends = im.friends
+        let actions = im.pendingFriendBindingProjections
+        guard !actions.isEmpty else { return }
+        im.clearPendingFriendBindingProjections()
         let profilesByID = Dictionary(
             contactsFeatureModel.profiles.map { ($0.id, $0) },
             uniquingKeysWith: { a, _ in a }
@@ -4014,47 +4019,74 @@ extension AppRuntimeLifecycle {
         do {
             let existingEntities = (try? memory.listAllEntities()) ?? []
             let entitiesByID = Dictionary(existingEntities.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-            for friend in friends {
-                guard let rawProfileID = friend.personProfileID else { continue }
-                let profileID = ContactID(rawValue: rawProfileID)
-                // 仅镜像「好友已并入真实人物」的绑定；自动建档档案（connor-friend-<id>）不参与。
-                guard ImFriendPersonProvisioner.profileID(for: friend.userId) != profileID,
-                      let profile = profilesByID[profileID] else { continue }
+            for action in actions {
+                if let rawProfileID = action.personProfileID {
+                    let profileID = ContactID(rawValue: rawProfileID)
+                    // 仅「好友已并入真实人物」的绑定；自动建档档案（connor-friend-<id>）不参与。
+                    guard ImFriendPersonProvisioner.profileID(for: action.userId) != profileID,
+                          let profile = profilesByID[profileID],
+                          let friend = im.friends.first(where: { $0.userId == action.userId })
+                    else { continue }
 
-                let syntheticID = "l4-entity:person-profile:\(profileID.rawValue)"
-                let syntheticStableKey = "person-profile:\(profileID.rawValue)"
-                let existing: MemoryOSEntity? = {
-                    if let memoryEntityID = profile.memoryEntityID, !memoryEntityID.isEmpty {
-                        return entitiesByID[memoryEntityID]
+                    let syntheticID = "l4-entity:person-profile:\(profileID.rawValue)"
+                    let syntheticStableKey = "person-profile:\(profileID.rawValue)"
+                    let existing: MemoryOSEntity? = {
+                        if let memoryEntityID = profile.memoryEntityID, !memoryEntityID.isEmpty {
+                            return entitiesByID[memoryEntityID]
+                        }
+                        return entitiesByID[syntheticID] ?? existingEntities.first { $0.stableKey == syntheticStableKey }
+                    }()
+
+                    var metadata = existing?.metadata ?? [:]
+                    metadata["connor_friend_user_id"] = String(friend.userId)
+                    metadata["connor_friend_username"] = friend.username
+                    metadata["connor_friend_nickname"] = friend.nickname
+                    metadata["connor_friend_email"] = friend.email
+
+                    let name = existing?.name ?? profile.displayName
+                    if let existing, existing.entityType == "person", existing.name == name, existing.metadata == metadata {
+                        continue // 幂等：内容一致，跳过
                     }
-                    return entitiesByID[syntheticID] ?? existingEntities.first { $0.stableKey == syntheticStableKey }
-                }()
-
-                var metadata = existing?.metadata ?? [:]
-                metadata["connor_friend_user_id"] = String(friend.userId)
-                metadata["connor_friend_username"] = friend.username
-                metadata["connor_friend_nickname"] = friend.nickname
-                metadata["connor_friend_email"] = friend.email
-
-                let name = existing?.name ?? profile.displayName
-                if let existing, existing.entityType == "person", existing.name == name, existing.metadata == metadata {
-                    continue // 幂等：内容一致，跳过
-                }
-                let entity = MemoryOSEntity(
-                    id: existing?.id ?? syntheticID,
-                    stableKey: existing?.stableKey ?? syntheticStableKey,
-                    entityType: "person",
-                    name: name,
-                    aliases: existing?.aliases ?? profile.aliases,
-                    summary: existing?.summary ?? "",
-                    confidence: existing?.confidence ?? 0.9,
-                    createdAt: existing?.createdAt ?? Date(),
-                    updatedAt: Date(),
-                    validFrom: existing?.validFrom ?? Date(),
-                    metadata: metadata
-                )
-                try AppAccountSyncSignal.$suppressLocalChange.withValue(true) {
-                    try memory.upsert(entity: entity)
+                    let entity = MemoryOSEntity(
+                        id: existing?.id ?? syntheticID,
+                        stableKey: existing?.stableKey ?? syntheticStableKey,
+                        entityType: "person",
+                        name: name,
+                        aliases: existing?.aliases ?? profile.aliases,
+                        summary: existing?.summary ?? "",
+                        confidence: existing?.confidence ?? 0.9,
+                        createdAt: existing?.createdAt ?? Date(),
+                        updatedAt: Date(),
+                        validFrom: existing?.validFrom ?? Date(),
+                        metadata: metadata
+                    )
+                    try AppAccountSyncSignal.$suppressLocalChange.withValue(true) {
+                        try memory.upsert(entity: entity)
+                    }
+                } else {
+                    // 解绑：清除该好友在所有人物实体上的 connor_friend_* 元数据。
+                    for entity in existingEntities where entity.metadata["connor_friend_user_id"] == String(action.userId) {
+                        var metadata = entity.metadata
+                        for key in ["connor_friend_user_id", "connor_friend_username", "connor_friend_nickname", "connor_friend_email"] {
+                            metadata.removeValue(forKey: key)
+                        }
+                        let updated = MemoryOSEntity(
+                            id: entity.id,
+                            stableKey: entity.stableKey,
+                            entityType: entity.entityType,
+                            name: entity.name,
+                            aliases: entity.aliases,
+                            summary: entity.summary,
+                            confidence: entity.confidence,
+                            createdAt: entity.createdAt,
+                            updatedAt: Date(),
+                            validFrom: entity.validFrom,
+                            metadata: metadata
+                        )
+                        try AppAccountSyncSignal.$suppressLocalChange.withValue(true) {
+                            try memory.upsert(entity: updated)
+                        }
+                    }
                 }
             }
         } catch {
