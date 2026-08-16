@@ -88,4 +88,45 @@ struct FileArtifactStoreTests {
             _ = try store.artifact(fileID: record.fileID)
         }
     }
+
+    @Test func libraryListPaginatesFiltersAndOrdersByRecent() throws {
+        let (_, store) = try makeStore()
+        _ = try store.register(from: try writeSource(name: "photo.png", data: Data("png-bytes".utf8)), filename: "photo.png", source: .session, summary: "最近的照片")
+        _ = try store.register(from: try writeSource(name: "report.pdf", data: Data("%PDF-1.4 fake".utf8)), filename: "report.pdf", source: .imported, summary: "季度报告")
+        _ = try store.register(from: try writeSource(name: "notes.md", data: Data("# 笔记".utf8)), filename: "notes.md", source: .generated, summary: "会议纪要")
+        _ = try store.register(from: try writeSource(name: "clip.mp3", data: Data("mp3-bytes".utf8)), filename: "clip.mp3", source: .forwarded, summary: "语音片段")
+
+        // 分页：每页 2 条，共 2 页
+        let page0 = store.list(page: 0, pageSize: 2)
+        #expect(page0.items.count == 2)
+        #expect(page0.total == 4)
+        #expect(page0.hasMore)
+        let page1 = store.list(page: 1, pageSize: 2)
+        #expect(page1.items.count == 2)
+        #expect(!page1.hasMore)
+
+        // 类型筛选：只看 PDF
+        let pdfs = store.list(kind: .pdf, pageSize: 50)
+        #expect(pdfs.total == 1)
+        #expect(pdfs.items.first?.originalName == "report.pdf")
+
+        // 来源筛选
+        let generated = store.list(source: .generated, pageSize: 50)
+        #expect(generated.total == 1)
+        #expect(generated.items.first?.originalName == "notes.md")
+
+        // 关键词筛选
+        let matched = store.list(query: "报告", pageSize: 50)
+        #expect(matched.total == 1)
+        #expect(matched.items.first?.originalName == "report.pdf")
+
+        // 最近使用优先：重新登记 photo.png（同内容复用并刷新 lastSeenAt）后它应排最前
+        let newest = store.list(pageSize: 50)
+        let namesBefore = newest.items.map { $0.originalName }
+        #expect(newest.items.first?.originalName == "clip.mp3")
+        _ = try store.register(from: try writeSource(name: "photo.png", data: Data("png-bytes".utf8)), filename: "photo.png", source: .session)
+        let namesAfter = store.list(pageSize: 50).items.map { $0.originalName }
+        #expect(namesAfter.first == "photo.png")
+        #expect(namesAfter == ["photo.png"] + namesBefore.filter { $0 != "photo.png" })
+    }
 }
