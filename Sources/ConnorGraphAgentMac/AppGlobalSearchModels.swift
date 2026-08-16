@@ -24,40 +24,50 @@ extension Date {
     }
 }
 
-struct GlobalSearchSessionResult: Identifiable, Equatable {
+/// 综合搜索“会话”栏里的会话类型：AI 对话 / 笔记 / 单聊 / 群聊。
+enum GlobalSearchSessionKind: String, Sendable, Equatable {
+    case agentChat
+    case note
+    case peer
+    case group
+
+    var kindLabel: String {
+        switch self {
+        case .agentChat: return "AI"
+        case .note: return "笔记"
+        case .peer: return "单聊"
+        case .group: return "群聊"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .agentChat: return "bubble.left.and.bubble.right"
+        case .note: return "note.text"
+        case .peer: return "person.crop.circle.fill"
+        case .group: return "person.3.fill"
+        }
+    }
+}
+
+/// 统一的“会话”搜索结果：AI 对话、笔记、单聊、群聊都归到这一类，并带类型标注。
+struct GlobalSearchConversationResult: Identifiable, Equatable {
     var id: String
+    var kind: GlobalSearchSessionKind
     var title: String
     var snippet: String
+    var metaText: String
     var updatedAt: Date
-    var messageCount: Int
 
     var updatedAtLabel: String {
         updatedAt.connorLocalFormatted(date: .medium, time: .short)
     }
 }
 
-struct GlobalSearchIMConversationResult: Identifiable, Equatable {
-    var id: String
-    var kind: ImConversationKind
-    var title: String
-    var participantName: String
-    var snippet: String
-    var lastMessageAt: Int64
-
-    var kindLabel: String { kind == .group ? "群聊" : "单聊" }
-
-    var lastMessageAtLabel: String {
-        guard lastMessageAt > 0 else { return "" }
-        return Date(timeIntervalSince1970: TimeInterval(lastMessageAt) / 1_000)
-            .connorLocalFormatted(date: .medium, time: .short)
-    }
-}
-
 struct GlobalSearchPreviewState: Equatable {
     var query: String = ""
     var loadingSections: Set<GlobalSearchSectionKind> = []
-    var imConversationResults: [GlobalSearchIMConversationResult] = []
-    var chatSessionResults: [GlobalSearchSessionResult] = []
+    var sessionResults: [GlobalSearchConversationResult] = []
     var calendarResults: [NativeSearchResult] = []
     var rssResults: [NativeSearchResult] = []
     var mailResults: [NativeSearchResult] = []
@@ -71,8 +81,7 @@ struct GlobalSearchPreviewState: Equatable {
         query: String = "",
         isLoading: Bool = false,
         loadingSections: Set<GlobalSearchSectionKind>? = nil,
-        imConversationResults: [GlobalSearchIMConversationResult] = [],
-        chatSessionResults: [GlobalSearchSessionResult] = [],
+        sessionResults: [GlobalSearchConversationResult] = [],
         calendarResults: [NativeSearchResult] = [],
         rssResults: [NativeSearchResult] = [],
         mailResults: [NativeSearchResult] = [],
@@ -84,8 +93,7 @@ struct GlobalSearchPreviewState: Equatable {
     ) {
         self.query = query
         self.loadingSections = loadingSections ?? (isLoading ? Set(GlobalSearchSectionKind.allCases) : [])
-        self.imConversationResults = imConversationResults
-        self.chatSessionResults = chatSessionResults
+        self.sessionResults = sessionResults
         self.calendarResults = calendarResults
         self.rssResults = rssResults
         self.mailResults = mailResults
@@ -109,7 +117,7 @@ struct GlobalSearchPreviewState: Equatable {
     }
 
     var hasAnySourceResults: Bool {
-        !imConversationResults.isEmpty || !chatSessionResults.isEmpty || !knowledgeBaseResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !mailResults.isEmpty || !browserHistoryResults.isEmpty
+        !sessionResults.isEmpty || !knowledgeBaseResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !mailResults.isEmpty || !browserHistoryResults.isEmpty
     }
 }
 
@@ -133,8 +141,7 @@ struct GlobalSearchNativeSectionResult: Sendable {
 }
 
 enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
-    case imConversations
-    case chatSessions
+    case sessions
     case calendar
     case rss
     case mail
@@ -154,8 +161,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .imConversations: "真人会话"
-        case .chatSessions: "对话历史"
+        case .sessions: "会话"
         case .calendar: "日历"
         case .rss: "RSS"
         case .mail: "邮件"
@@ -166,8 +172,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
 
     var systemImage: String {
         switch self {
-        case .imConversations: "person.2"
-        case .chatSessions: "bubble.left.and.bubble.right"
+        case .sessions: "tray.full"
         case .calendar: "calendar"
         case .rss: "dot.radiowaves.left.and.right"
         case .mail: "envelope"
@@ -178,8 +183,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
 
     var emptyTitle: String {
         switch self {
-        case .imConversations: "没有匹配的单聊或群聊"
-        case .chatSessions: "没有匹配的对话"
+        case .sessions: "没有匹配的会话"
         case .calendar: "没有匹配的日程"
         case .rss: "没有匹配的 RSS"
         case .mail: "没有匹配的邮件"
@@ -192,8 +196,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
 enum GlobalSearchSelectableItem: Equatable {
     case recentSearch(String)
     case action(GlobalSearchActionKind)
-    case imConversation(String)
-    case chatSession(String)
+    case session(GlobalSearchConversationResult)
     case nativeResult(String)
     case knowledgeBase(String)
 }

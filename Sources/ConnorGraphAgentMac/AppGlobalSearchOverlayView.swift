@@ -108,8 +108,7 @@ struct AppGlobalSearchOverlayView: View {
                 actionRows
                 tokenChips
 
-                imConversationSection(results: state.imConversationResults)
-                chatSessionSection(results: state.chatSessionResults)
+                sessionsSection(results: state.sessionResults)
                 knowledgeMarketplaceSection(results: state.knowledgeBaseResults)
                 resultSection(kind: .calendar, results: state.calendarResults)
                 resultSection(kind: .rss, results: state.rssResults)
@@ -220,19 +219,19 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.vertical, AppShellLayout.spaceXS)
     }
 
-    private func chatSessionSection(results: [GlobalSearchSessionResult]) -> some View {
+    private func sessionsSection(results: [GlobalSearchConversationResult]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: AppShellLayout.spaceXS) {
-                Image(systemName: GlobalSearchSectionKind.chatSessions.systemImage)
+                Image(systemName: GlobalSearchSectionKind.sessions.systemImage)
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 16)
-                Text(GlobalSearchSectionKind.chatSessions.title)
+                Text(GlobalSearchSectionKind.sessions.title)
                     .font(AppListTypography.rowCaptionEmphasized)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Button {
-                    model.showAllResults(kind: .chatSessions)
+                    model.showAllResults(kind: .sessions)
                 } label: {
                     Text("查看全部 ›")
                         .font(AppListTypography.rowCaptionEmphasized)
@@ -244,54 +243,15 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
-            if state.isSectionLoading(.chatSessions), results.isEmpty {
-                GlobalSearchLoadingSourceRow()
-            } else if results.isEmpty {
-                GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.chatSessions.emptyTitle)
-            } else if !results.isEmpty {
-                VStack(spacing: 1) {
-                    ForEach(results.prefix(3)) { result in
-                        Button {
-                            model.openChatSession(result.id)
-                        } label: {
-                            GlobalSearchChatSessionRow(result: result, isSelected: stateSelected(.chatSession(result.id)))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-        .frame(minHeight: 58, alignment: .top)
-        .padding(.bottom, 2)
-    }
-
-    private func imConversationSection(results: [GlobalSearchIMConversationResult]) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: AppShellLayout.spaceXS) {
-                Image(systemName: GlobalSearchSectionKind.imConversations.systemImage)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-                Text(GlobalSearchSectionKind.imConversations.title)
-                    .font(AppListTypography.rowCaptionEmphasized)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, AppShellLayout.spaceS)
-            .padding(.top, AppShellLayout.spaceXS)
-
             if results.isEmpty {
-                GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.imConversations.emptyTitle)
+                GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.sessions.emptyTitle)
             } else {
                 VStack(spacing: 1) {
-                    ForEach(results) { result in
+                    ForEach(results.prefix(5)) { result in
                         Button {
-                            model.openIMConversation(result.id)
+                            model.openSession(result)
                         } label: {
-                            GlobalSearchIMConversationRow(
-                                result: result,
-                                isSelected: stateSelected(.imConversation(result.id))
-                            )
+                            GlobalSearchSessionRow(result: result, isSelected: stateSelected(.session(result)))
                         }
                         .buttonStyle(.plain)
                     }
@@ -621,26 +581,35 @@ private struct GlobalSearchActionRow: View {
     }
 }
 
-private struct GlobalSearchChatSessionRow: View {
-    var result: GlobalSearchSessionResult
+private struct GlobalSearchSessionRow: View {
+    var result: GlobalSearchConversationResult
     var isSelected: Bool = false
 
     @State private var isHovering = false
 
     var body: some View {
         HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
-            Image(systemName: "bubble.left.and.bubble.right")
+            Image(systemName: result.kind.systemImage)
                 .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(.indigo)
+                .foregroundStyle(kindColor)
                 .frame(width: 18)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: AppShellLayout.spaceXS) {
-                    Text(result.title.isEmpty ? "新对话" : result.title)
+                    Text(result.title.isEmpty ? "未命名" : result.title)
                         .font(AppListTypography.rowTitle)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    Text("\(result.messageCount) 条消息")
+                    Text(result.kind.kindLabel)
+                        .font(AppListTypography.rowCaptionEmphasized)
+                        .foregroundStyle(kindColor)
+                    if !result.metaText.isEmpty {
+                        Text(result.metaText)
+                            .font(AppListTypography.rowCaption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                    Text(result.updatedAtLabel)
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
@@ -661,58 +630,13 @@ private struct GlobalSearchChatSessionRow: View {
         .onHover { isHovering = $0 }
     }
 
-    private var rowBackground: Color {
-        if isSelected { return Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.selectedAccentOpacity) }
-        return isHovering ? Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.hoverAccentOpacity) : Color.clear
-    }
-}
-
-private struct GlobalSearchIMConversationRow: View {
-    var result: GlobalSearchIMConversationResult
-    var isSelected: Bool = false
-
-    @State private var isHovering = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
-            Image(systemName: result.kind == .group ? "person.3.fill" : "person.crop.circle.fill")
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(result.kind == .group ? Color.orange : Color.green)
-                .frame(width: 18)
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: AppShellLayout.spaceXS) {
-                    Text(result.title.isEmpty ? result.kindLabel : result.title)
-                        .font(AppListTypography.rowTitle)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Text(result.kindLabel)
-                        .font(AppListTypography.rowCaptionEmphasized)
-                        .foregroundStyle(.secondary)
-                    if !result.lastMessageAtLabel.isEmpty {
-                        Text(result.lastMessageAtLabel)
-                            .font(AppListTypography.rowCaption)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                }
-                let detail = [result.participantName, result.snippet]
-                    .filter { !$0.isEmpty }
-                    .joined(separator: " · ")
-                if !detail.isEmpty {
-                    Text(detail)
-                        .font(AppListTypography.rowSubtitle)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-            }
-            Spacer(minLength: 0)
+    private var kindColor: Color {
+        switch result.kind {
+        case .agentChat: return .indigo
+        case .note: return .purple
+        case .peer: return .green
+        case .group: return .orange
         }
-        .padding(.horizontal, AppShellLayout.spaceS)
-        .padding(.vertical, 6)
-        .background(rowBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
-        .onHover { isHovering = $0 }
     }
 
     private var rowBackground: Color {

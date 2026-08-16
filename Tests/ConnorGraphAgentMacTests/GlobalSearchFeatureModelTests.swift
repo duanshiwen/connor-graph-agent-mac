@@ -88,7 +88,7 @@ struct GlobalSearchFeatureModelTests {
 
         await model.refreshPreview(for: "Swift")
 
-        #expect(model.previewState.chatSessionResults.map(\.id) == ["session-1"])
+        #expect(model.previewState.sessionResults.map(\.id) == ["session-1"])
         #expect(model.previewState.calendarResults.map(\.title) == ["Swift meetup"])
         #expect(model.previewState.loadingSections.isEmpty)
         model.shutdown()
@@ -108,7 +108,7 @@ struct GlobalSearchFeatureModelTests {
         let refreshTask = Task { await model.refreshPreview(for: "Swift") }
         try? await Task.sleep(for: .milliseconds(50))
 
-        #expect(model.previewState.chatSessionResults.map(\.id) == ["session-1"])
+        #expect(model.previewState.sessionResults.map(\.id) == ["session-1"])
         #expect(model.previewState.isSectionLoading(.mail))
 
         model.shutdown()
@@ -156,7 +156,7 @@ struct GlobalSearchFeatureModelTests {
         model.shutdown()
     }
 
-    @Test func peerAndGroupConversationsJoinUnifiedSearchAndOpenConversation() async throws {
+    @Test func peerAndGroupConversationsJoinUnifiedSessionsAndOpenConversation() async throws {
         let model = makeModel()
         model.imConversationsProvider = {
             [
@@ -188,13 +188,67 @@ struct GlobalSearchFeatureModelTests {
 
         await model.refreshPreview(for: "项目")
 
-        #expect(Set(model.previewState.imConversationResults.map(\.kind)) == Set([.peer, .group]))
-        #expect(model.selectableItems.contains(.imConversation("peer:7")))
-        #expect(model.selectableItems.contains(.imConversation("group:delivery")))
+        // 单聊/群聊统一归入“会话”，并带类型标注
+        #expect(Set(model.previewState.sessionResults.map(\.kind)) == Set([.peer, .group]))
+        let peer = try #require(model.previewState.sessionResults.first { $0.id == "peer:7" })
+        let group = try #require(model.previewState.sessionResults.first { $0.id == "group:delivery" })
+        #expect(peer.kind.kindLabel == "单聊")
+        #expect(group.kind.kindLabel == "群聊")
 
-        model.openIMConversation("group:delivery")
+        func isSession(_ item: GlobalSearchSelectableItem, id: String) -> Bool {
+            if case .session(let result) = item { return result.id == id }
+            return false
+        }
+        #expect(model.selectableItems.contains { isSession($0, id: "peer:7") })
+        #expect(model.selectableItems.contains { isSession($0, id: "group:delivery") })
+
+        model.openSession(group)
         #expect(openedConversationID == "group:delivery")
         #expect(!model.isOverlayPresented)
+        model.shutdown()
+    }
+
+    @Test func unifiedSessionsLabelAIChatAndNotesWithKinds() async throws {
+        let model = makeModel()
+        model.sessionsProvider = {
+            [
+                AgentSession(id: "agent-1", title: "Swift 并发", messages: [AgentMessage(role: .user, content: "并发进度整理 actor isolation")], updatedAt: Date(timeIntervalSince1970: 1_700_000_000)),
+                AgentSession(
+                    id: "note-1",
+                    title: "会议纪要",
+                    messages: [AgentMessage(role: .user, content: "项目进度记录")],
+                    updatedAt: Date(timeIntervalSince1970: 1_700_100_000),
+                    governance: AgentSessionGovernanceMetadata(kind: .note)
+                )
+            ]
+        }
+        model.imConversationsProvider = {
+            [
+                ImConversation(
+                    id: "peer:9",
+                    kind: .peer,
+                    peerUserId: 9,
+                    title: "联系人",
+                    participantName: "王五",
+                    lastMessagePreview: "进度同步",
+                    lastMessageAt: 1_754_400_000_000
+                )
+            ]
+        }
+        model.updateQuery("进度")
+
+        await model.refreshPreview(for: "进度")
+
+        // AI 对话、笔记、单聊统一出现在“会话”里，各自带类型标注
+        let agent = try #require(model.previewState.sessionResults.first { $0.id == "agent-1" })
+        let note = try #require(model.previewState.sessionResults.first { $0.id == "note-1" })
+        let peer = try #require(model.previewState.sessionResults.first { $0.id == "peer:9" })
+        #expect(agent.kind == .agentChat)
+        #expect(agent.kind.kindLabel == "AI")
+        #expect(note.kind == .note)
+        #expect(note.kind.kindLabel == "笔记")
+        #expect(peer.kind == .peer)
+        #expect(peer.kind.kindLabel == "单聊")
         model.shutdown()
     }
 
