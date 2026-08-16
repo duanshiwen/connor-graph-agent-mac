@@ -3030,6 +3030,7 @@ struct ContactsSourceSettingsView: View {
     @State private var imageImporter = ContactImageImporterState()
     @State private var pendingFriendRemoval: ImFriend?
     @State private var pendingFriendMergeTarget: PersonProfile?
+    @State private var pendingFriendUnbind: ImFriend?
     @State private var mediaPreview: ChatMediaPreviewItem?
 
     var body: some View {
@@ -3049,7 +3050,10 @@ struct ContactsSourceSettingsView: View {
                             onRemoveFriend: selectedFriend.map { friend in
                                 { pendingFriendRemoval = friend }
                             },
-                            mergeCandidates: selectedFriend == nil ? [] : model.profiles.filter { $0.id != selected.id },
+                            onUnbindFriend: selectedFriendIsMerged ? selectedFriend.map { friend in
+                                { pendingFriendUnbind = friend }
+                            } : nil,
+                            mergeCandidates: friendMergeCandidates,
                             onRequestMergeInto: { pendingFriendMergeTarget = $0 }
                         )
 
@@ -3210,6 +3214,19 @@ struct ContactsSourceSettingsView: View {
         } message: {
             Text("好友人物的资料与关系将合并到“\(pendingFriendMergeTarget?.displayName ?? "所选人物")”，聊天也会改为关联该人物。")
         }
+        .confirmationDialog("解除与康纳好友的人物绑定？", isPresented: Binding(
+            get: { pendingFriendUnbind != nil },
+            set: { if !$0 { pendingFriendUnbind = nil } }
+        )) {
+            Button("解除绑定", role: .destructive) {
+                guard let friend = pendingFriendUnbind, let im else { return }
+                pendingFriendUnbind = nil
+                Task { @MainActor in await im.unbindFriendPerson(userId: friend.userId) }
+            }
+            Button("取消", role: .cancel) { pendingFriendUnbind = nil }
+        } message: {
+            Text("将解除“\(pendingFriendUnbind?.displayName ?? "该好友")”与当前人物的绑定，好友会重新以独立人物出现在人际关系中，之后可再次合并到其他人物。")
+        }
         .fileImporter(
             isPresented: $imageImporter.isPresented,
             allowedContentTypes: [.image],
@@ -3234,6 +3251,22 @@ struct ContactsSourceSettingsView: View {
     private var selectedFriend: ImFriend? {
         guard let im, let id = model.selectedContactID else { return nil }
         return im.friends.first { $0.personProfileID == id.rawValue }
+    }
+
+    /// 好友是否已经并入某个人物（而非仍停留在其自动建档的 connor-friend-<userId> 档案上）。
+    private var selectedFriendIsMerged: Bool {
+        guard let friend = selectedFriend, let id = model.selectedContactID else { return false }
+        return ImFriendPersonProvisioner.profileID(for: friend.userId).rawValue != id.rawValue
+    }
+
+    /// 「合并到已有人物」的候选：仅当当前人物仍是某个康纳好友的自动建档档案时提供。
+    /// 好友一旦已并入某个人物，就不再允许重复合并；如需改合并到其他人，先「解除绑定」。
+    private var friendMergeCandidates: [PersonProfile] {
+        guard let friend = selectedFriend,
+              let id = model.selectedContactID,
+              ImFriendPersonProvisioner.profileID(for: friend.userId).rawValue == id.rawValue
+        else { return [] }
+        return model.profiles.filter { $0.id != id }
     }
 
 }
@@ -3356,6 +3389,7 @@ private struct PersonProfileDetailHero: View {
     var friendDisplayName: String?
     var onMessage: (() -> Void)?
     var onRemoveFriend: (() -> Void)?
+    var onUnbindFriend: (() -> Void)?
     var mergeCandidates: [PersonProfile]
     var onRequestMergeInto: (PersonProfile) -> Void
 
@@ -3412,6 +3446,9 @@ private struct PersonProfileDetailHero: View {
                                     Button(profile.displayName) { onRequestMergeInto(profile) }
                                 }
                             }
+                        }
+                        if let onUnbindFriend {
+                            Button("解除绑定", action: onUnbindFriend)
                         }
                         if let onRemoveFriend {
                             Button("删除好友", role: .destructive, action: onRemoveFriend)

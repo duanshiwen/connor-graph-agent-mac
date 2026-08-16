@@ -114,6 +114,22 @@ public struct ImFriendPersonProvisioner: Sendable {
         try await imStore.bindFriendPerson(userId: friend.userId, personProfileID: personProfileID, now: now())
     }
 
+    /// 解除好友与某个人物的绑定后调用：用好友当前资料重建自动建档档案
+    /// （connor-friend-<userId>，upsert 会覆盖旧的 merged 档案使其重新激活），
+    /// 并把好友重新绑定到该档案，使好友重新以独立人物出现在人际关系中，
+    /// 之后可再次执行「合并到已有人物」。
+    @discardableResult
+    public func rebindToAutoProfile(userId: Int64) async throws -> Bool {
+        guard let profileStore else { return false }
+        let friends = try await imStore.loadFriends()
+        guard let friend = friends.first(where: { $0.userId == userId }) else { return false }
+        let stableID = Self.profileID(for: userId)
+        let profile = makeProfile(for: friend)
+        _ = try await profileStore.upsert(profile)
+        try await bind(friend: friend, personProfileID: stableID.rawValue)
+        return true
+    }
+
     /// 跨端合并回放：安卓端把好友并入人物时，会把好友账号写入该人物 L4 实体的
     /// metadata（connor_friend_*，随 memory_l4_entities 同步）。本机在收到这些实体后，
     /// 把本地好友重新绑定到对应人物档案，并把好友的自动建档档案并入目标人物，
