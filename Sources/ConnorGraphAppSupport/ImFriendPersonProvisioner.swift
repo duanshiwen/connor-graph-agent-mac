@@ -40,18 +40,26 @@ public struct ImFriendPersonProvisioner: Sendable {
         var reconciled: [ImFriend] = []
         reconciled.reserveCapacity(friends.count)
         for friend in friends {
+            let stableID = Self.profileID(for: friend.userId)
             if let boundID = friend.personProfileID.map(ContactID.init(rawValue:)),
                let resolved = resolveActiveProfile(from: boundID, profilesByID: profilesByID) {
                 if resolved.id != boundID {
                     try await bind(friend: friend, personProfileID: resolved.id.rawValue)
                 }
+                // 好友已绑定到某个人物（而非其自动建档的 connor-friend-* 档案）：
+                // 把自动建档档案并入目标人物，让人际关系列表只显示合并后的人物，
+                // 好友信息（姓名/邮箱等）保留在目标档案里而不是作为独立行残留。
+                try await mergeAutoProvisionedProfileIfNeeded(
+                    stableID: stableID,
+                    resolvedID: resolved.id,
+                    profilesByID: &profilesByID
+                )
                 var updated = friend
                 updated.personProfileID = resolved.id.rawValue
                 reconciled.append(updated)
                 continue
             }
 
-            let stableID = Self.profileID(for: friend.userId)
             if let existing = resolveActiveProfile(from: stableID, profilesByID: profilesByID) {
                 try await bind(friend: friend, personProfileID: existing.id.rawValue)
                 var updated = friend
@@ -62,6 +70,11 @@ public struct ImFriendPersonProvisioner: Sendable {
 
             if let existing = uniqueEmailMatch(for: friend, profilesByID: profilesByID) {
                 try await bind(friend: friend, personProfileID: existing.id.rawValue)
+                try await mergeAutoProvisionedProfileIfNeeded(
+                    stableID: stableID,
+                    resolvedID: existing.id,
+                    profilesByID: &profilesByID
+                )
                 var updated = friend
                 updated.personProfileID = existing.id.rawValue
                 reconciled.append(updated)
@@ -79,8 +92,82 @@ public struct ImFriendPersonProvisioner: Sendable {
         return reconciled
     }
 
+    /// 好友已绑定到某个「非自动建档」人物时，把自动建档档案（connor-friend-<id>）并入目标人物：
+    /// 源档案标记 merged → 不再作为独立行出现，其姓名/邮箱等并入目标档案；好友记录本身不删除。
+    /// 若自动建档档案已合并/已删除，或与目标相同，则不重复操作。
+    private func mergeAutoProvisionedProfileIfNeeded(
+        stableID: ContactID,
+        resolvedID: ContactID,
+        profilesByID: inout [ContactID: PersonProfile]
+    ) async throws {
+        guard stableID != resolvedID, let profileStore else { return }
+        guard let source = profilesByID[stableID], source.isActiveForDefaultContext else { return }
+        _ = try await profileStore.merge(sourceID: stableID, targetID: resolvedID, now: Date())
+        // 合并后源档案不再是 active，目标档案内容已更新，刷新本地快照。
+        profilesByID[stableID] = nil
+        if let mergedTarget = try await profileStore.profile(id: resolvedID) {
+            profilesByID[resolvedID] = mergedTarget
+        }
+    }
+
     private func bind(friend: ImFriend, personProfileID: String) async throws {
         try await imStore.bindFriendPerson(userId: friend.userId, personProfileID: personProfileID, now: now())
+    }
+
+    /// 跨端合并回放：安卓端把好友并入人物时，会把好友账号写入该人物 L4 实体的
+    /// metadata（connor_friend_*，随 memory_l4_entities 同步）。本机在收到这些实体后，
+    /// 把本地好友重新绑定到对应人物档案，并把好友的自动建档档案并入目标人物，
+    /// 让人际关系列表与安卓一致地呈现「好友并入人物」。
+    ///
+    /// 只处理能唯一匹配的情况：好友必须存在于本地；目标人物按 memoryEntityID 精确匹配，
+    /// 否则按规范化显示名唯一匹配（active 档案）。无法唯一匹配时跳过，不做臆测性合并。
+    @discardableResult
+    public func reconcileSyncedFriendBindings(entities: [MemoryOSEntity]) async throws -> Int {
+        guard let profileStore else { return 0 }
+        let boundEntities = entities.filter {
+            $0.entityType == MemoryOSEntityType.person.rawValue && $0.metadata["connor_friend_user_id"] != nil
+        }
+        guard !boundEntities.isEmpty else { return 0 }
+
+        let friends = try await imStore.loadFriends()
+        let allProfiles = try await profileStore.loadProfiles(includeInactive: true)
+        var applied = 0
+        for entity in boundEntities {
+            guard let rawUserID = entity.metadata["connor_friend_user_id"],
+                  let userID = Int64(rawUserID),
+                  let friend = friends.first(where: { $0.userId == userID }) else { continue }
+            guard let target = Self.resolveTargetProfile(for: entity, profiles: allProfiles) else { continue }
+            let stableID = Self.profileID(for: userID)
+            guard stableID != target.id else { continue }
+
+            if friend.personProfileID != target.id.rawValue {
+                try await bind(friend: friend, personProfileID: target.id.rawValue)
+            }
+            if let source = allProfiles.first(where: { $0.id == stableID }),
+               source.isActiveForDefaultContext {
+                _ = try await profileStore.merge(sourceID: stableID, targetID: target.id, now: Date())
+            }
+            applied += 1
+        }
+        return applied
+    }
+
+    /// 在本地人物档案中定位与 L4 person 实体对应的人物：先按 memory_entity_id 精确匹配，
+    /// 再按规范化显示名唯一匹配（排除已合并/已删除档案）。
+    private static func resolveTargetProfile(for entity: MemoryOSEntity, profiles: [PersonProfile]) -> PersonProfile? {
+        if let exact = profiles.first(where: {
+            ($0.memoryEntityID != nil && $0.memoryEntityID == entity.id) || ($0.memoryStableKey != nil && $0.memoryStableKey == entity.stableKey)
+        }) {
+            return exact.isActiveForDefaultContext ? exact : nil
+        }
+        let candidates = profiles.filter {
+            $0.isActiveForDefaultContext && Self.normalizedName($0.displayName) == Self.normalizedName(entity.name)
+        }
+        return candidates.count == 1 ? candidates[0] : nil
+    }
+
+    private static func normalizedName(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func makeProfile(for friend: ImFriend) -> PersonProfile {

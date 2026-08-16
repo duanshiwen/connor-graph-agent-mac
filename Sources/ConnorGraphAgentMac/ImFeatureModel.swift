@@ -597,6 +597,18 @@ final class ImFeatureModel {
         }
     }
 
+    /// 账号同步拉取后调用：把安卓端「好友并入人物」的绑定（写在 L4 人物实体 metadata 的
+    /// connor_friend_* 键）回放到本机——重绑好友到对应人物档案，并把好友自动建档档案并入目标人物。
+    func reconcileFriendBindingsFromSync(entities: [MemoryOSEntity]) async {
+        guard let friendProvisioner else { return }
+        do {
+            _ = try await friendProvisioner.reconcileSyncedFriendBindings(entities: entities)
+            friends = (try? await store.loadFriends()) ?? friends
+        } catch {
+            contactMessage = "回放好友人物合并失败：\(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Multi-select (Android `imSelectionMode` semantics)
 
     func enterSelectionMode(initialMessageId: String? = nil) {

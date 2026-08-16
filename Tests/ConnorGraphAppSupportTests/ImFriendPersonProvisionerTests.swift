@@ -94,6 +94,86 @@ struct ImFriendPersonProvisionerTests {
         #expect(try await fixture.imStore.friend(userId: 8)?.personProfileID == bound.id.rawValue)
     }
 
+    @Test func mergesAutoProvisionedProfileIntoBoundTarget() async throws {
+        let fixture = try makeFixture()
+        let targetID = ContactID(rawValue: "person-target")
+        _ = try await fixture.profileStore.upsert(PersonProfile(id: targetID, displayName: "目标人物"))
+        // 好友 7 之前已自动建档（connor-friend-7），随后被用户绑定到目标人物。
+        let stableID = ImFriendPersonProvisioner.profileID(for: 7)
+        _ = try await fixture.profileStore.upsert(PersonProfile(
+            id: stableID,
+            displayName: "爱丽丝",
+            emails: [ContactEmailAddress(email: "alice@example.com")],
+            source: ImFriendPersonProvisioner.connorFriendSource
+        ))
+        try await fixture.imStore.upsertFriends([
+            ImFriend(userId: 7, username: "alice", nickname: "爱丽丝", email: "alice@example.com", personProfileID: targetID.rawValue)
+        ])
+
+        _ = try await fixture.provisioner.reconcile(friends: try await fixture.imStore.loadFriends())
+
+        let profiles = try await fixture.profileStore.loadProfiles(includeInactive: true)
+        let source = try #require(profiles.first { $0.id == stableID })
+        #expect(source.status == .merged)
+        #expect(source.mergedIntoID == targetID)
+        let target = try #require(profiles.first { $0.id == targetID })
+        #expect(target.status == .active)
+        #expect(target.emails.map(\.email).contains("alice@example.com"))
+        // 好友记录保留且重定向到目标人物，而不是被删除。
+        #expect(try await fixture.imStore.friend(userId: 7)?.personProfileID == targetID.rawValue)
+    }
+
+    @Test func reconcilesSyncedFriendBindingMetadataFromL4Entity() async throws {
+        let fixture = try makeFixture()
+        let targetID = ContactID(rawValue: "person-target")
+        _ = try await fixture.profileStore.upsert(PersonProfile(id: targetID, displayName: "目标人物"))
+        let stableID = ImFriendPersonProvisioner.profileID(for: 7)
+        _ = try await fixture.profileStore.upsert(PersonProfile(
+            id: stableID,
+            displayName: "爱丽丝",
+            emails: [ContactEmailAddress(email: "alice@example.com")],
+            source: ImFriendPersonProvisioner.connorFriendSource
+        ))
+        // 好友未绑定；安卓同步来的人物实体携带 connor_friend_user_id。
+        try await fixture.imStore.upsertFriends([ImFriend(userId: 7, username: "alice", nickname: "爱丽丝")])
+        let entity = MemoryOSEntity(
+            id: "l4-entity:person:目标人物",
+            stableKey: "person:目标人物",
+            entityType: "person",
+            name: "目标人物",
+            metadata: ["connor_friend_user_id": "7", "connor_friend_username": "alice"]
+        )
+
+        _ = try await fixture.provisioner.reconcileSyncedFriendBindings(entities: [entity])
+
+        #expect(try await fixture.imStore.friend(userId: 7)?.personProfileID == targetID.rawValue)
+        let profiles = try await fixture.profileStore.loadProfiles(includeInactive: true)
+        #expect(profiles.first { $0.id == stableID }?.status == .merged)
+        #expect(profiles.first { $0.id == stableID }?.mergedIntoID == targetID)
+    }
+
+    @Test func syncReconcilerSkipsAmbiguousNameMatches() async throws {
+        let fixture = try makeFixture()
+        // 两个同名人物的 active 档案 → 无法唯一匹配，跳过合并，不产生副作用。
+        _ = try await fixture.profileStore.upsert(PersonProfile(id: ContactID(rawValue: "person-a"), displayName: "同名"))
+        _ = try await fixture.profileStore.upsert(PersonProfile(id: ContactID(rawValue: "person-b"), displayName: "同名"))
+        try await fixture.imStore.upsertFriends([ImFriend(userId: 7, username: "alice", nickname: "爱丽丝")])
+        let entity = MemoryOSEntity(
+            id: "l4-entity:person:同名",
+            stableKey: "person:同名",
+            entityType: "person",
+            name: "同名",
+            metadata: ["connor_friend_user_id": "7"]
+        )
+
+        let applied = try await fixture.provisioner.reconcileSyncedFriendBindings(entities: [entity])
+
+        #expect(applied == 0)
+        #expect(try await fixture.imStore.friend(userId: 7)?.personProfileID == nil)
+        let profiles = try await fixture.profileStore.loadProfiles(includeInactive: true)
+        #expect(profiles.allSatisfy { $0.status == .active })
+    }
+
     @Test func degradesGracefullyWithoutProfileStore() async throws {
         let root = try makeTemporaryDirectory()
         let imStore = try SQLiteImStore(databaseURL: root.appendingPathComponent("im.sqlite"))
