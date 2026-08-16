@@ -320,6 +320,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 store: AppSessionAttachmentStore(paths: storagePaths),
                 localWorkspacePolicy: localWorkspacePolicy
             ))
+            registry.registerPDFGenerationTool(store: AppSessionAttachmentStore(paths: storagePaths))
             let fileArtifactStore = FileArtifactStore(paths: storagePaths)
             registry.register(FileLookupTool(store: fileArtifactStore))
             if let memoryOSFacade {
@@ -447,6 +448,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let separateGeneratedMediaProvider = generatedMediaProviderResolver?(modelProvider)
             ?? makeConfiguredGeneratedMediaProvider(connectionID: sessionLLMOverride?.generatedMediaConnectionID)
             ?? makeVerifiedConversationMediaProvider(sessionLLMOverride: sessionLLMOverride)
+            ?? makeVerifiedCapableMediaProviderFallback(sessionLLMOverride: sessionLLMOverride)
         let generatedMediaProvider = separateGeneratedMediaProvider.map {
             auditedProvider(
                 $0,
@@ -484,9 +486,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 configuredOverride: configuredContextWindow
             )
         }
-        let generatedImageInstruction = generatedImageToolIsAvailable
-            ? "When the user asks to create or generate an image, use `generate_image`. When the user asks to modify a session image and `edit_image` is available, use `edit_image` with the exact latest source attachment ID instead of generating a replacement from scratch. Do not claim that image generation or editing is unavailable before attempting the corresponding available tool; if the tool fails, report the actual failure briefly."
-            : ""
+        let generatedImageInstruction: String
+        if generatedImageToolIsAvailable {
+            generatedImageInstruction = "When the user asks to create or generate an image, use `generate_image`. When the user asks to modify a session image and `edit_image` is available, use `edit_image` with the exact latest source attachment ID instead of generating a replacement from scratch. Do not claim that image generation or editing is unavailable before attempting the corresponding available tool; if the tool fails, report the actual failure briefly."
+        } else {
+            // 主模型/图片连接不支持生成：明确告知模型“不能生成图片”，避免模型
+            // 只凭想象就说“图片已生成/已附在回答中”（历史真实事故）。
+            generatedImageInstruction = "Image generation (`generate_image`) and image editing (`edit_image`) are NOT available in this session. Never claim that an image was generated, edited, or attached to the response when it was not. If the user explicitly asks for an image, prefer `image_search` to find an existing source-grounded image and show it with `present_image`; only if that is not possible, clearly tell the user that image generation is not available in this session."
+        }
         let interactiveWebInstruction = registry.definition(named: "interactive_web_create_draft") == nil
             ? ""
             : "When the user wants to share or showcase a result, invite other people to visit, or needs persistent interaction such as registration, feedback, or voting, you may naturally ask whether to make it a webpage; after completing a substantial result that is clearly suitable for sharing, you may also suggest this briefly at the end of delivery. If accepted, classify the work as a production task and commit its content, visual, interaction, responsive, and accessibility acceptance criteria before building. Before using any interactive-web functionality (creating, updating, or publishing an interactive webpage), you MUST first request the interactive-web guide via `interactive_web_sdk_usage` in this session and follow the returned specification exactly; never generate or update a webpage draft before fetching the guide, and never reconstruct page interactions from memory. Generate complete HTML, CSS, and JavaScript in the model response and pass them directly to `interactive_web_create_draft`; that tool stores a temporary project folder under the app-managed user-data sandbox. Do not use Shell, ApplyPatch, workspace file tools, attachments, staging files, local preview tools, or documentation searches merely to create or inspect this draft, and do not require a user-selected workspace. For every page that persists registrations, feedback, votes, or other submissions, include matching collections in the draft call; collections whose records must be attributed to a specific person (registrations, check-ins, leaderboards, editable personal submissions, owner-attributed forms) require login (anonymousCreate=false), while anonymous feedback, public message boards, and unattributed votes may stay anonymous (anonymousCreate=true). Configure submitLimit, capacity, and readAuth when the user asks for limits or access control, and add pattern to phone/email fields so the server enforces the same constraint as the page. Aggregate statistics (collection.stats / collection.capacity) are aggregate data - totals, trends, group counts, and numeric aggregates - and never expose raw records or identity; when the page must show aggregate statistics to visitors, set the collection's readStats to \"public\" or \"login\" while keeping anonymousRead=false so raw records stay private, and never use stats to check who submitted, to group by identifying free-text fields such as names or phones, or to reconstruct records. Every generated page MUST load <script src=\"/api/v1/sdk/v1.js\"></script> before any other script; the publish preflight rejects drafts whose index.html omits the SDK script. If you pass CSS through the css parameter (saved as style.css), index.html MUST also link it inside <head> with <link rel=\"stylesheet\" href=\"style.css\">; before creating or updating the draft, verify the link tag is really present in the returned index.html — a missing or mistyped stylesheet link is the most common reason a page publishes without its styles. Deliver page source complete: never compress, simplify, or cut HTML/CSS/JS to fit output length. If a file is too long for one response, write it in chunks from the very start with interactive_web_create_draft (fileName/content/offset/final — the first call creates the project, continue with offset=nextOffset on the same projectID, final=true on the last chunk); chunks are concatenated locally in exact order, never a summary. A draft is not created successfully until every chunked file has final=true — get_status reports incompleteWrites and publish rejects incomplete drafts. For links that must open in a new tab/window (for example an official-website link), use <a href=\"https://...\" target=\"_blank\"> or <a href=\"https://...\" data-connor-external>, or call window.platform.link.open(url) from app.js — the SDK opens them in a new tab/window; never rely on raw window.open (the page runs in a sandboxed iframe and popups are blocked). Never build a password input or a login form inside the page, and never collect or store credentials; login gating and the built-in login guide are handled by the SDK (see the guide). Form submission feedback must be prominent and polished (clear visible submitting/success/failure states); once a visitor has already submitted or can no longer submit (daily/lifetime limit or capacity full), show an explicit message and hide or remove the fillable form instead of merely disabling the submit button. Put all page JavaScript in the separate app.js (the javascript parameter of interactive_web_create_draft) and never write inline <script> blocks or inline event handlers; content pages block inline scripts. Keep submission forms in the DOM and let the SDK's data-connor-auth-required declarative login gate (or window.platform.auth.onAuthChange) handle login-state visibility; never toggle content from a login-button click handler. Before publishing, perform an internal source-level review against the committed criteria and correct the draft when needed; this review does not require a local preview. Then call `interactive_web_publish` with the exact projectID and manifestHash; normal native permission approval still applies. After the approved call succeeds, return the exact publishedURL as a Markdown link such as `[Open webpage](https://...)`; never return only a bare URL or put it in code formatting. To read submitted records such as messages, registrations, or bids, use `interactive_web_records_summary` (pagination: continue with page until hasNextPage is false so all records are covered, and never claim full coverage before finishing every page); export the full records to CSV with `interactive_web_export_records` (one-shot export, requires native approval). When the user asks to change an existing page, request the interactive-web guide first if you have not already obtained it in this session — updates often happen in a separate session and you must not reconstruct the workflow from memory; then read every current file with `interactive_web_get_draft` (large files are paginated: continue with offset=nextOffset until the whole file is read). For targeted changes, call `interactive_web_edit_draft` with the exact oldText/newText (an empty newText deletes the text) or full `content` for a whole-file replacement; for a full rewrite of several files, call `interactive_web_create_draft` with the SAME projectID and the full edited files (files you do not pass, such as css, stay unchanged). Verify only the code you changed: check that the returned plain-text diff and hashes match the requested change; if they do, proceed. Never recreate a project merely to change it, and never rewrite an existing draft from memory. After `interactive_web_publish` returns success, treat the publication as done — do NOT perform any second verification (no re-reading the draft, no re-checking collections with interactive_web_get_project, no preview or screenshot checks); a successful tool result is sufficient. All verification is text-based on the returned diff and hashes; never rely on screenshots or image recognition. Only a successful publish tool result proves that publication happened."
@@ -531,6 +538,38 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             automaticallySynthesizesProgressUpdates: false,
             streamComplete: { provider, request in provider.streamComplete(request) }
         )
+    }
+
+    /// 会话主模型不具备图片生成能力时，回退到“已通过 hosted_image_generation 能力探测”的
+    /// 其它已配置连接（例如主模型用 DeepSeek、图片生成用已校验的 gpt-5.6），
+    /// 让 `generate_image`/`edit_image` 仍然可用，而不是因为主模型不支持而整组隐藏。
+    private func makeVerifiedCapableMediaProviderFallback(sessionLLMOverride: SessionLLMOverride?) -> AnyAgentModelProvider? {
+        guard let settings = try? settingsRepository.loadSettings() else { return nil }
+        for connection in settings.connections {
+            let evidence = (try? capabilityEvidenceRepository.effectiveEvidence(for: .hostedImageGeneration, connection: connection)) ?? nil
+            guard evidence?.status == .verified,
+                  let apiKey = (try? settingsRepository.apiKey(for: connection.id)) ?? nil,
+                  !apiKey.isEmpty,
+                  let baseURL = URL(string: connection.baseURLString) else { continue }
+            let model = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !model.isEmpty else { continue }
+            var extraHeaders = connection.extraHTTPHeaders
+            extraHeaders.removeValue(forKey: AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey)
+            let apiKeyHeaderKind = OpenAICompatibleAPIKeyHeaderKind(rawValue: connection.extraHTTPHeaders[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] ?? "") ?? .bearer
+            return AnyAgentModelProvider(OpenAIResponsesProvider(
+                config: OpenAIResponsesConfig(
+                    baseURL: baseURL,
+                    apiKey: apiKey,
+                    model: model,
+                    extraHeaders: extraHeaders,
+                    apiKeyHeaderKind: apiKeyHeaderKind,
+                    explicitVisionSupport: connection.explicitVisionSupport
+                ),
+                httpClient: URLSessionAgentHTTPClient(),
+                sseClient: URLSessionAgentSSEHTTPClient()
+            ))
+        }
+        return nil
     }
 
     private func makeVerifiedConversationMediaProvider(sessionLLMOverride: SessionLLMOverride?) -> AnyAgentModelProvider? {
