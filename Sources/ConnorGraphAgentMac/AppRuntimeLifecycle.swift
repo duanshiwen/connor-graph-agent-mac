@@ -3974,6 +3974,8 @@ extension AppRuntimeLifecycle {
             rss: rssFeatureModel.agentRuntime.repository,
             identity: identityStore
         )
+        // 先镜像「好友并入人物」绑定到 L4 实体，让本轮 reconcile 的投影把它上推给安卓端。
+        await projectFriendBindingsToMemoryL4()
         let result = try await Task.detached(priority: .utility) {
             try await coordinator.reconcile()
         }.value
@@ -3995,6 +3997,68 @@ extension AppRuntimeLifecycle {
         if let im = graph.im, let memory = memoryOSStore {
             let entities = (try? memory.listAllEntities()) ?? []
             await im.reconcileFriendBindingsFromSync(entities: entities)
+        }
+    }
+
+    /// 把 Mac 端「好友并入人物」的绑定镜像成 memory_l4_entities 上人物实体的
+    /// connor_friend_* 元数据并随账号同步上推，让安卓端也能呈现合并结果（Mac→安卓方向）。
+    /// 幂等：内容未变化时不改写实体（避免每轮同步重复上推）；只写入、不清除，
+    /// 避免与安卓端对同一实体的并发写入产生竞态。
+    private func projectFriendBindingsToMemoryL4() async {
+        guard let im = graph.im, let memory = memoryOSStore else { return }
+        let friends = im.friends
+        let profilesByID = Dictionary(
+            contactsFeatureModel.profiles.map { ($0.id, $0) },
+            uniquingKeysWith: { a, _ in a }
+        )
+        do {
+            let existingEntities = (try? memory.listAllEntities()) ?? []
+            let entitiesByID = Dictionary(existingEntities.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            for friend in friends {
+                guard let rawProfileID = friend.personProfileID else { continue }
+                let profileID = ContactID(rawValue: rawProfileID)
+                // 仅镜像「好友已并入真实人物」的绑定；自动建档档案（connor-friend-<id>）不参与。
+                guard ImFriendPersonProvisioner.profileID(for: friend.userId) != profileID,
+                      let profile = profilesByID[profileID] else { continue }
+
+                let syntheticID = "l4-entity:person-profile:\(profileID.rawValue)"
+                let syntheticStableKey = "person-profile:\(profileID.rawValue)"
+                let existing: MemoryOSEntity? = {
+                    if let memoryEntityID = profile.memoryEntityID, !memoryEntityID.isEmpty {
+                        return entitiesByID[memoryEntityID]
+                    }
+                    return entitiesByID[syntheticID] ?? existingEntities.first { $0.stableKey == syntheticStableKey }
+                }()
+
+                var metadata = existing?.metadata ?? [:]
+                metadata["connor_friend_user_id"] = String(friend.userId)
+                metadata["connor_friend_username"] = friend.username
+                metadata["connor_friend_nickname"] = friend.nickname
+                metadata["connor_friend_email"] = friend.email
+
+                let name = existing?.name ?? profile.displayName
+                if let existing, existing.entityType == "person", existing.name == name, existing.metadata == metadata {
+                    continue // 幂等：内容一致，跳过
+                }
+                let entity = MemoryOSEntity(
+                    id: existing?.id ?? syntheticID,
+                    stableKey: existing?.stableKey ?? syntheticStableKey,
+                    entityType: "person",
+                    name: name,
+                    aliases: existing?.aliases ?? profile.aliases,
+                    summary: existing?.summary ?? "",
+                    confidence: existing?.confidence ?? 0.9,
+                    createdAt: existing?.createdAt ?? Date(),
+                    updatedAt: Date(),
+                    validFrom: existing?.validFrom ?? Date(),
+                    metadata: metadata
+                )
+                try AppAccountSyncSignal.$suppressLocalChange.withValue(true) {
+                    try memory.upsert(entity: entity)
+                }
+            }
+        } catch {
+            AppPerformanceLog.chatTurnLogger.warning("account.sync.friend-projection error=\(String(describing: error), privacy: .public)")
         }
     }
 }
