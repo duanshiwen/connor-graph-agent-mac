@@ -139,10 +139,6 @@ struct ConnorGraphAgentMacApp: App {
                     Divider()
                     Button("定时任务") { root.sendWhenInteractive(.selectSidebar(.scheduledTasks)) }
                     Button("事件触发") { root.sendWhenInteractive(.selectSidebar(.eventTriggeredTasks)) }
-                    Button("自动化") { root.sendWhenInteractive(.selectSidebar(.automation)) }
-                    Divider()
-                    Button("Product OS") { root.sendWhenInteractive(.selectSidebar(.productOS)) }
-                    Button("模型设置") { root.sendWhenInteractive(.selectSidebar(.llmSettings)) }
                 }
 
                 Divider()

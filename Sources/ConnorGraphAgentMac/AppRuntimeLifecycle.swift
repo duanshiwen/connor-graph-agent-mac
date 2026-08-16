@@ -986,7 +986,8 @@ final class AppRuntimeLifecycle {
             case .automationMatched(let records):
                 self.appendAutomationMatchedEvents(records)
             case .releaseGateChecked:
-                self.navigate(to: .productOS)
+                // Product OS 页面已移除：release gate 通过后不再跳转，其余自动化逻辑照常。
+                break
             }
         }
         appSettingsModel.onChanged = { [weak self] in self?.scheduleRuntimeSettingsAutosave() }

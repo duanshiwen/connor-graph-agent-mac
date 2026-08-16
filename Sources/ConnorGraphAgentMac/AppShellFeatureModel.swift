@@ -82,8 +82,6 @@ final class AppShellFeatureModel {
             select(.pendingApprovals)
         case .automation, .localAutomationSurface:
             select(.scheduledTasks)
-        case .productOS:
-            select(.productOS)
         case .calendar:
             select(.calendar)
         case .contacts:

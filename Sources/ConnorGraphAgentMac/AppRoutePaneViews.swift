@@ -67,13 +67,6 @@ struct CraftListPaneView: View {
                     governanceConfig: graph.governance.config,
                     kind: .eventTriggered
                 )
-            case .productOS:
-                CraftSimpleListPane(
-                    title: "Product OS",
-                    subtitle: "本地控制面模块",
-                    rows: graph.productOS.registry.sources.map(\.displayName)
-                        + graph.productOS.registry.skills.map(\.displayName)
-                )
             default:
                 CraftSimpleListPane(title: route.rawValue, subtitle: "康纳同学工作区", rows: [])
             }
@@ -132,12 +125,6 @@ struct CraftDetailPaneView: View {
                 TaskAutomationDetailPane(model: graph.tasks, kind: .scheduled)
             case .eventTriggeredTasks:
                 TaskAutomationDetailPane(model: graph.tasks, kind: .eventTriggered)
-            case .productOS:
-                ProductOSRegistryView(
-                    model: graph.productOS,
-                    governanceConfig: graph.governance.config,
-                    commercialReadinessDashboard: graph.commercialReadinessDashboard()
-                )
             case .calendar:
                 CalendarSourceSettingsView(model: graph.calendar)
             case .contacts:

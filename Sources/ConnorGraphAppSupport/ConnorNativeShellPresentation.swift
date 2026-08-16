@@ -10,7 +10,6 @@ public enum ConnorNativeShellItem: String, Codable, Sendable, Equatable, Hashabl
     case approvals
     case automation
     case localAutomationSurface
-    case productOS
     case calendar
     case contacts
     case mail
@@ -180,8 +179,6 @@ public struct ConnorNativeShellRouteResolver: Sendable {
             ConnorNativeShellRoute(item: item, legacySidebarID: "automation")
         case .localAutomationSurface:
             ConnorNativeShellRoute(item: item, legacySidebarID: "automation")
-        case .productOS:
-            ConnorNativeShellRoute(item: item, legacySidebarID: "productOS")
         case .calendar:
             ConnorNativeShellRoute(item: item, legacySidebarID: "calendar")
         case .contacts:
@@ -243,7 +240,6 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
                 ConnorNativeShellSidebarItem(id: .approvals, title: "Approvals", subtitle: "Permissions and reviews", systemImage: "checkmark.shield", badgeStyle: .warning, isPrimary: true, riskLevel: .high, emptyStateTitle: "暂无待审批事项", emptyStateActionTitle: "查看权限策略"),
                 ConnorNativeShellSidebarItem(id: .automation, title: "Automation", subtitle: "Rules, history, rate limits", systemImage: "bolt.badge.clock", badgeStyle: .warning, riskLevel: .medium),
                 ConnorNativeShellSidebarItem(id: .localAutomationSurface, title: "Local API / CLI", subtitle: "Scriptable automation surface", systemImage: "terminal", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "暂无本地自动化调用", emptyStateActionTitle: "复制 CLI 命令"),
-                ConnorNativeShellSidebarItem(id: .productOS, title: "Product OS", subtitle: "Registry, labels, readiness", systemImage: "square.grid.2x2", isPrimary: true)
             ]),
             ConnorNativeShellSidebarGroup(id: "extensions", title: "Extensions", items: [
                 ConnorNativeShellSidebarItem(id: .calendar, title: "Calendar", subtitle: "Native schedule source", systemImage: "calendar", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "还没有连接日历", emptyStateActionTitle: "添加账户"),
@@ -270,7 +266,6 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
             ConnorNativeShellCommand(id: .openCalendarSources, title: "Open Calendar", systemImage: "calendar", target: .calendar, groupID: "extensions", isPrimaryAction: true, riskLevel: .medium, keywords: ["calendar", "caldav", "events", "schedule"]),
             ConnorNativeShellCommand(id: .openContactsSources, title: "Open Contacts", systemImage: "person.crop.circle.badge", target: .contacts, groupID: "extensions", isPrimaryAction: true, riskLevel: .medium, keywords: ["contacts", "carddav", "people", "address book"]),
             ConnorNativeShellCommand(id: .openRSSSources, title: "Open RSS", systemImage: "dot.radiowaves.left.and.right", keyboardShortcut: "⌘9", target: .rss, groupID: "extensions", isPrimaryAction: true, riskLevel: .medium, keywords: ["rss", "feed", "atom", "json feed", "opml"]),
-            ConnorNativeShellCommand(id: .checkCommercialReadiness, title: "Check Commercial Readiness", systemImage: "checkmark.seal", keyboardShortcut: "⌘R", target: .productOS, groupID: "governance", isPrimaryAction: true, riskLevel: .medium, keywords: ["readiness", "release", "commercial"]),
             ConnorNativeShellCommand(id: .openSettings, title: "Open Settings", systemImage: "gearshape", keyboardShortcut: "⌘,", target: .settings, groupID: "system", isPrimaryAction: true, keywords: ["settings", "model", "preferences"])
         ]
     )
