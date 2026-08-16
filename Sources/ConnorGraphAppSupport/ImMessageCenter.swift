@@ -1218,10 +1218,29 @@ public actor ImMessageCenter {
 
     private static func preview(type rawType: String, content: String) -> String {
         if let bundle = ForwardedChatBundleCodec.decode(content) { return "[聊天记录] \(bundle.title)" }
+        // 转发载荷无法完整解码（如服务端投影截断/换行折叠）：绝不把
+        // [[CONNOR_FORWARD_BUNDLE_V1:...]] 原始串展示到会话卡片上，回退为友好文案。
+        if content.contains("CONNOR_FORWARD_BUNDLE_V1") || content.contains("[聊天记录：") {
+            return forwardBundleFallbackTitle(content)
+        }
         let normalizedType = rawType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let type = normalizedType.isEmpty ? ImMessageType.text : ImMessageType(rawValue: normalizedType)
         guard let type else { return "[不支持的消息]" }
         return type == .text ? String(content.prefix(100)) : type.conversationPreview
+    }
+
+    /// 转发载荷解码失败时的卡片文案：优先从可读行 `[聊天记录：标题]` 提取标题，
+    /// 取不到则用通用 `[聊天记录]`，避免暴露内部编码串。
+    private static func forwardBundleFallbackTitle(_ content: String) -> String {
+        for line in content.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[聊天记录："), trimmed.hasSuffix("]") {
+                let title = trimmed.dropFirst("[聊天记录：".count).dropLast()
+                if !title.isEmpty { return "[聊天记录] \(title)" }
+                break
+            }
+        }
+        return "[聊天记录]"
     }
 
     private static let rfc3339 = epochFormatter(options: [.withInternetDateTime])

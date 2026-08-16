@@ -585,6 +585,53 @@ struct ImMessageCenterTests {
     static func epochMs(_ rfc3339: String) -> Int64 {
         Int64(ISO8601DateFormatter().date(from: rfc3339)!.timeIntervalSince1970 * 1000)
     }
+    @Test func forwardedMessagePreviewShowsChatRecordTitle() async throws {
+        let fixture = try makeFixture()
+        let bundle = ForwardedChatBundle(
+            title: "测试群的聊天记录",
+            sourceTitle: "测试群",
+            items: [ForwardedChatItem(id: "i1", senderName: "张三", createdAt: 1, kind: "text", text: "你好")]
+        )
+        let content = try ForwardedChatBundleCodec.encode(bundle)
+        let jsonContent = jsonEscaped(content)
+        await fixture.center.handleFrame(type: "chat_receive", text: """
+            {"type":"chat_receive","payload":{"sender_id":9,"message_id":"m-fwd-ok","sender_username":"alice",
+            "content":"\(jsonContent)","message_type":"text","sent_at":1722400001000}}
+            """)
+
+        let conversationId = ImConversation.peerConversationID(peerUserId: 9)
+        let conversation = try #require(try await fixture.store.conversation(id: conversationId))
+        #expect(conversation.lastMessagePreview == "[聊天记录] 测试群的聊天记录")
+        #expect(!conversation.lastMessagePreview.contains("CONNOR_FORWARD_BUNDLE_V1"))
+    }
+
+    @Test func forwardedMessagePreviewNeverShowsRawBundleWhenDecodeFails() async throws {
+        let fixture = try makeFixture()
+        // 截断的转发载荷（base64 被破坏 / 服务端投影截断）→ decode 失败：
+        // 卡片必须回退友好文案，绝不展示 [[CONNOR_FORWARD_BUNDLE_V1:...]] 原始串。
+        let truncated = "[[CONNOR_FORWARD_BUNDLE_V1:not-valid-base64!!]]\n\n[聊天记录：季度总结]\n张三：你好"
+        let jsonTruncated = jsonEscaped(truncated)
+        await fixture.center.handleFrame(type: "chat_receive", text: """
+            {"type":"chat_receive","payload":{"sender_id":9,"message_id":"m-fwd-bad","sender_username":"alice",
+            "content":"\(jsonTruncated)","message_type":"text","sent_at":1722400002000}}
+            """)
+
+        let conversationId = ImConversation.peerConversationID(peerUserId: 9)
+        let conversation = try #require(try await fixture.store.conversation(id: conversationId))
+        #expect(!conversation.lastMessagePreview.contains("CONNOR_FORWARD_BUNDLE_V1"))
+        #expect(!conversation.lastMessagePreview.contains("[["))
+        #expect(conversation.lastMessagePreview.contains("聊天记录"))
+    }
+
+    private func jsonEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
+    }
+
 }
 
 // MARK: - Test doubles
@@ -756,4 +803,5 @@ private final class StubImService: ImBackendServicing, @unchecked Sendable {
     private func decode<T: Decodable>(_ json: String) throws -> T {
         try JSONDecoder().decode(T.self, from: Data(json.utf8))
     }
+
 }
