@@ -42,10 +42,14 @@ final class AppShellFeatureModel {
         focusTopSearchRequestID = UUID()
     }
 
-    /// 从会话列表等入口请求“添加康纳好友”：切到人际关系页并打开添加好友区。
+    /// 从会话列表等入口请求“添加康纳好友”：直接弹出加好友对话框，不切换当前页面。
     func requestAddFriend() {
         addFriendRequestID = UUID()
-        _ = select(.contacts)
+    }
+
+    /// 关闭“添加好友”弹窗。
+    func clearAddFriendRequest() {
+        addFriendRequestID = nil
     }
 
     func settingsMessage(for section: ConnorSettingsSection) -> String? {

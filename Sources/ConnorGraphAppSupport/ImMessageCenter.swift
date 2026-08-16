@@ -700,6 +700,8 @@ public actor ImMessageCenter {
             ))
         }
         try await store.upsertFriends(local)
+        // 收敛本地好友表：删除服务端已不存在的好友，避免“幽灵好友”残留在搜索/人际关系里。
+        try await store.pruneFriends(keepUserIds: remote.map(\.friendId))
         for friend in local {
             let conversationID = ImConversation.peerConversationID(peerUserId: friend.userId)
             guard var conversation = try await store.conversation(id: conversationID) else { continue }

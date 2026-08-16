@@ -331,9 +331,24 @@ public struct NativeImageSearchClient: Sendable {
     }
 
     private let httpClient: any NativeWebHTTPClient
+    private let unsplashAccessKey: String?
 
-    public init(httpClient: any NativeWebHTTPClient = URLSessionNativeWebHTTPClient()) {
+    public init(
+        httpClient: any NativeWebHTTPClient = URLSessionNativeWebHTTPClient(),
+        unsplashAccessKey: String? = NativeImageSearchClient.resolveUnsplashAccessKey()
+    ) {
         self.httpClient = httpClient
+        self.unsplashAccessKey = unsplashAccessKey
+    }
+
+    /// Unsplash 需要一个注册过的 Access Key。优先读环境变量 `UNSPLASH_ACCESS_KEY`，
+    /// 其次读 UserDefaults 键 `unsplashAccessKey`（方便 `defaults write`，不用改 Xcode Scheme）。
+    @usableFromInline
+    static func resolveUnsplashAccessKey() -> String? {
+        let raw = ProcessInfo.processInfo.environment["UNSPLASH_ACCESS_KEY"]
+            ?? UserDefaults.standard.string(forKey: "unsplashAccessKey")
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     public func search(
@@ -360,19 +375,34 @@ public struct NativeImageSearchClient: Sendable {
             )
         }
         let resultLimit = min(max(maxResults, 1), 10)
-        let openverse = await searchOpenverse(
+        async let openverse = searchOpenverse(
             englishQuery: normalizedQuery,
             maxResults: resultLimit,
             licenseFilter: licenseFilter
         )
-        let commons = await searchWikimediaCommons(
+        async let commons = searchWikimediaCommons(
             englishQuery: normalizedQuery,
             maxResults: resultLimit
         )
+        async let bing = searchBingImages(
+            englishQuery: normalizedQuery,
+            maxResults: resultLimit
+        )
+        var attempts: [ProviderAttempt] = []
+        attempts.append(await openverse)
+        attempts.append(await commons)
+        attempts.append(await bing)
+        if let unsplashAccessKey, !unsplashAccessKey.isEmpty {
+            attempts.append(await searchUnsplash(
+                englishQuery: normalizedQuery,
+                maxResults: resultLimit,
+                accessKey: unsplashAccessKey
+            ))
+        }
         return result(
             query: normalizedQuery,
             licenseFilter: licenseFilter,
-            attempts: [openverse, commons],
+            attempts: attempts,
             limit: resultLimit
         )
     }
@@ -497,6 +527,96 @@ public struct NativeImageSearchClient: Sendable {
         return successfulAttempt(provider: "wikimedia_commons", results: Array(results.prefix(maxResults)))
     }
 
+    /// 通用网页图片搜索（Bing Images JSON 接口），用于酒店/场所/产品等
+    /// 一般性信息查询；无授权元数据时仅保留原图 URL 与来源页，供
+    /// present_image 下载并标注来源。失败时优雅回退，不影响 Openverse/Commons。
+    private func searchBingImages(englishQuery: String, maxResults: Int) async -> ProviderAttempt {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "www.bing.com"
+        components.path = "/images/search"
+        components.queryItems = [
+            URLQueryItem(name: "q", value: englishQuery),
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "count", value: String(maxResults))
+        ]
+        guard let url = components.url else {
+            return failedAttempt(provider: "bing_images", reason: "Could not construct the Bing image search URL.", retryAdvice: .doNotRetry)
+        }
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = "GET"
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("zh-CN,zh;q=0.9,en;q=0.8", forHTTPHeaderField: "Accept-Language")
+
+        let response: NativeWebHTTPResponse
+        do {
+            response = try await httpClient.data(for: request)
+        } catch {
+            return networkFailureAttempt(provider: "bing_images", error: error)
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            return httpFailureAttempt(provider: "bing_images", statusCode: response.statusCode)
+        }
+        // Bing 部分地区可能返回 HTML 错误页（200）；按 JSON 解码失败即视为该源不可用。
+        let decoded: BingImageSearchResponse
+        do {
+            decoded = try JSONDecoder().decode(BingImageSearchResponse.self, from: response.data)
+        } catch {
+            return failedAttempt(
+                provider: "bing_images",
+                reason: "Bing image search returned an incompatible response (region-blocked or changed contract).",
+                retryAdvice: .retryLater
+            )
+        }
+        return successfulAttempt(provider: "bing_images", results: Array(decoded.value.compactMap(\.resultItem).prefix(maxResults)))
+    }
+
+    /// Unsplash 搜索：需要 Access Key；失败时优雅降级，不影响其它来源。
+    /// 返回的 images.unsplash.com URL 已带官方要求的 imgix 参数（w/q/ixid），
+    /// present_image 可直接下载用于本地展示；结果同时携带摄影师署名信息供引用。
+    private func searchUnsplash(englishQuery: String, maxResults: Int, accessKey: String) async -> ProviderAttempt {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "api.unsplash.com"
+        components.path = "/search/photos"
+        components.queryItems = [
+            URLQueryItem(name: "query", value: englishQuery),
+            URLQueryItem(name: "page", value: "1"),
+            URLQueryItem(name: "per_page", value: String(min(max(maxResults, 1), 30)))
+        ]
+        guard let url = components.url else {
+            return failedAttempt(provider: "unsplash", reason: "Could not construct the Unsplash search URL.", retryAdvice: .doNotRetry)
+        }
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = "GET"
+        request.setValue("Client-ID " + accessKey, forHTTPHeaderField: "Authorization")
+        request.setValue("v1", forHTTPHeaderField: "Accept-Version")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+
+        let response: NativeWebHTTPResponse
+        do {
+            response = try await httpClient.data(for: request)
+        } catch {
+            return networkFailureAttempt(provider: "unsplash", error: error)
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            return httpFailureAttempt(provider: "unsplash", statusCode: response.statusCode)
+        }
+        let decoded: UnsplashSearchResponse
+        do {
+            decoded = try JSONDecoder().decode(UnsplashSearchResponse.self, from: response.data)
+        } catch {
+            return failedAttempt(
+                provider: "unsplash",
+                reason: "Unsplash returned an incompatible response (contract changed or access denied).",
+                retryAdvice: .retryLater
+            )
+        }
+        return successfulAttempt(provider: "unsplash", results: Array(decoded.results.compactMap(\.resultItem).prefix(maxResults)))
+    }
+
     private func result(
         query: String,
         licenseFilter: NativeImageSearchLicenseFilter,
@@ -613,6 +733,91 @@ public struct NativeImageSearchClient: Sendable {
     }
 
     private static let userAgent = "ConnorGraphAgent/1.0 (https://github.com/duanshiwen/connor-graph-agent-mac)"
+}
+private struct BingImageSearchResponse: Decodable {
+    var value: [BingImageSearchResultItem]
+}
+
+private struct BingImageSearchResultItem: Decodable {
+    var contentUrl: String
+    var thumbnailUrl: String?
+    var hostPageUrl: String?
+    var name: String?
+    var width: Int?
+    var height: Int?
+
+    var resultItem: NativeImageSearchResultItem? {
+        let trimmed = contentUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return NativeImageSearchResultItem(
+            title: name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Image",
+            imageURL: trimmed,
+            thumbnailURL: thumbnailUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            sourcePageURL: hostPageUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            creator: "",
+            creatorURL: "",
+            license: "",
+            licenseURL: "",
+            attribution: "",
+            width: width,
+            height: height
+        )
+    }
+}
+
+
+private struct UnsplashSearchResponse: Decodable {
+    var results: [UnsplashPhoto]
+}
+
+private struct UnsplashPhoto: Decodable {
+    var altDescription: String?
+    var urls: UnsplashPhotoURLs
+    var links: UnsplashPhotoLinks
+    var user: UnsplashUser
+    var width: Int?
+    var height: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case urls, links, user, width, height
+        case altDescription = "alt_description"
+    }
+
+    var resultItem: NativeImageSearchResultItem? {
+        let imageURL = urls.regular.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !imageURL.isEmpty else { return nil }
+        let creatorName = user.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return NativeImageSearchResultItem(
+            title: altDescription?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unsplash photo",
+            imageURL: imageURL,
+            thumbnailURL: urls.thumb.trimmingCharacters(in: .whitespacesAndNewlines),
+            sourcePageURL: links.html.trimmingCharacters(in: .whitespacesAndNewlines),
+            creator: creatorName,
+            creatorURL: user.links.html.trimmingCharacters(in: .whitespacesAndNewlines),
+            license: "Unsplash License",
+            licenseURL: "https://unsplash.com/license",
+            attribution: creatorName.isEmpty ? "" : "Photo by " + creatorName + " on Unsplash",
+            width: width,
+            height: height
+        )
+    }
+}
+
+private struct UnsplashPhotoURLs: Decodable {
+    var raw: String
+    var full: String
+    var regular: String
+    var small: String
+    var thumb: String
+}
+
+private struct UnsplashPhotoLinks: Decodable {
+    var html: String
+}
+
+private struct UnsplashUser: Decodable {
+    var name: String
+    var links: UnsplashPhotoLinks
 }
 
 private struct OpenverseImageSearchResponse: Decodable {

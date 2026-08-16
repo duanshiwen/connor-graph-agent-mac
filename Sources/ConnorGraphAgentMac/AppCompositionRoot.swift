@@ -135,7 +135,11 @@ final class AppCompositionRoot: ObservableObject {
                 previousRuntime.graph.im?.shutdown()
                 previousRuntime.shutdown()
                 if case .loaded(let snapshot) = coreOutcome, let imStore = snapshot.imStore {
-                    self.installImFeature(imStore: imStore, runtime: runtime)
+                    self.installImFeature(
+                        imStore: imStore,
+                        applicationSupportDirectory: snapshot.paths.applicationSupportDirectory,
+                        runtime: runtime
+                    )
                 }
                 self.runtime = runtime
                 self.graph = runtime.graph
@@ -186,17 +190,44 @@ final class AppCompositionRoot: ObservableObject {
     /// box, forward-to-AI closures bridged onto the chat actions, then installs
     /// the feature model on the runtime's graph. Mirrors the Android container
     /// wiring for `ImMessageCenter`.
-    private func installImFeature(imStore: SQLiteImStore, runtime: AppRuntimeLifecycle) {
+    private func installImFeature(
+        imStore: SQLiteImStore,
+        applicationSupportDirectory: URL,
+        runtime: AppRuntimeLifecycle
+    ) {
         let identityStore = self.identityStore
         let identityBox = ImSelfIdentityBox()
         if case .signedIn(let user) = identityStore.authenticationState {
             identityBox.value = ImSelfIdentity(id: Int64(user.id), displayName: user.displayName)
         }
+        // 当前 IM 库对应的账号：启动时按已保存令牌解析，之后跟随登录态切换分库，
+        // 避免把上一个账号的 IM 缓存混进当前账号（user id 隔离）。
+        var currentStoreUserID: Int64? = ImStorageAccountResolver.storedUserID()
+        weak var imFeatureRef: ImFeatureModel?
         imIdentityCancellable = identityStore.$authenticationState.sink { state in
             switch state {
             case .signedIn(let user):
-                identityBox.value = ImSelfIdentity(id: Int64(user.id), displayName: user.displayName)
+                let nextUserID = Int64(user.id)
+                identityBox.value = ImSelfIdentity(id: nextUserID, displayName: user.displayName)
+                guard currentStoreUserID != nextUserID else { break }
+                currentStoreUserID = nextUserID
+                let targetURL = ImStorageAccountResolver.databaseURL(
+                    applicationSupportDirectory: applicationSupportDirectory,
+                    userID: nextUserID
+                )
+                try? ImStorageAccountResolver.migrateLegacyDatabaseIfNeeded(
+                    applicationSupportDirectory: applicationSupportDirectory,
+                    userID: nextUserID
+                )
+                do {
+                    try imStore.switchAccount(databaseURL: targetURL)
+                    Task { @MainActor in await imFeatureRef?.reloadAfterAccountSwitch() }
+                } catch {
+                    Task { @MainActor in imFeatureRef?.errorMessage = "切换 IM 账号存储失败：\(error.localizedDescription)" }
+                }
             case .signedOut, .expired:
+                // 登出/离线回退不切换 IM 库：保留当前账号缓存（与旧行为一致），
+                // 换账号登录时上面的 signedIn 分支会切换到新账号分库。
                 identityBox.value = nil
             case .restoring:
                 break
@@ -285,6 +316,7 @@ final class AppCompositionRoot: ObservableObject {
         imAttentionCoordinator.canUseUserNotifications = {
             Bundle.main.bundleURL.pathExtension == "app"
         }
+        imFeatureRef = imFeature
         runtime.graph.im = imFeature
         imFeature.start()
     }

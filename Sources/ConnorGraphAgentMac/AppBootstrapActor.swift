@@ -51,9 +51,19 @@ actor AppBootstrapActor {
         let mailStore = try? FileBackedMailSourceStore(openingStoragePaths: paths, searchService: nativeSourceSearchBackend)
 
         // Peer-to-peer IM local cache (per-account server projection, not synced).
-        let imDatabaseURL = paths.applicationSupportDirectory
-            .appendingPathComponent("im", isDirectory: true)
-            .appendingPathComponent("im.sqlite")
+        // 按登录账号分库（user id 隔离）：已登录用 im/im-{userId}.sqlite，未登录用旧共享库。
+        let imApplicationSupportDirectory = paths.applicationSupportDirectory
+        let storedIMUserID = ImStorageAccountResolver.storedUserID()
+        if let storedIMUserID {
+            try? ImStorageAccountResolver.migrateLegacyDatabaseIfNeeded(
+                applicationSupportDirectory: imApplicationSupportDirectory,
+                userID: storedIMUserID
+            )
+        }
+        let imDatabaseURL = ImStorageAccountResolver.databaseURL(
+            applicationSupportDirectory: imApplicationSupportDirectory,
+            userID: storedIMUserID
+        )
         let imStore = try? SQLiteImStore(databaseURL: imDatabaseURL)
 
         var memoryOSStore: SQLiteMemoryOSStore?

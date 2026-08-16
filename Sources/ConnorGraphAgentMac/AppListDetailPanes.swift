@@ -607,7 +607,6 @@ struct CraftContactsListPane: View {
     @Bindable var model: ContactsFeatureModel
     var im: ImFeatureModel?
     var onOpenPeerChat: (Int64) -> Void
-    var addFriendRequestID: UUID? = nil
     @State private var isAddingConnorFriend = false
 
     var body: some View {
@@ -640,24 +639,22 @@ struct CraftContactsListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .task(id: addFriendRequestID) {
-            if addFriendRequestID != nil {
-                isAddingConnorFriend = true
-            }
-        }
         .task {
             guard let im else { return }
             await im.refreshContacts()
         }
+        .sheet(isPresented: $isAddingConnorFriend) {
+            if let im {
+                ImAddFriendSheet(model: im, isPresented: $isAddingConnorFriend)
+            }
+        }
     }
 
-    /// Friend requests and the explicitly opened friend search share the person list.
+    /// Friend requests still render inline in the person list; the add-friend
+    /// flow moved into a dedicated popup dialog (`ImAddFriendSheet`).
     private var showsFriendSections: Bool {
         guard let im else { return false }
-        return !incomingRequests(im).isEmpty
-            || !outgoingRequests(im).isEmpty
-            || isAddingConnorFriend
-            || !im.userSearchResults.isEmpty
+        return !incomingRequests(im).isEmpty || !outgoingRequests(im).isEmpty
     }
 
     private func incomingRequests(_ im: ImFeatureModel) -> [ImFriendRequest] {
@@ -684,15 +681,6 @@ struct CraftContactsListPane: View {
                             outgoing: outgoingRequests(im),
                             onAccept: { requestId in Task { await im.acceptFriendRequest(requestId: requestId) } },
                             onReject: { requestId in Task { await im.rejectFriendRequest(requestId: requestId) } }
-                        )
-                    }
-                    if isAddingConnorFriend || !im.userSearchResults.isEmpty {
-                        ImAddFriendSection(
-                            model: im,
-                            onClose: {
-                                isAddingConnorFriend = false
-                                im.clearUserSearch()
-                            }
                         )
                     }
                 }
@@ -831,62 +819,263 @@ private struct ImFriendRequestSection: View {
     }
 }
 
-/// Add-friend user search, merged into the 人际关系 list.
-private struct ImAddFriendSection: View {
-    let model: ImFeatureModel
-    var onClose: () -> Void
+/// 添加康纳好友弹窗：按用户名/昵称搜索服务端用户，逐条发送好友申请。
+/// 独立成弹出对话框，避免在人际关系列表里内嵌搜索区。
+struct ImAddFriendSheet: View {
+    @Bindable var model: ImFeatureModel
+    @Binding var isPresented: Bool
     @State private var searchQuery = ""
+    @State private var hasSearched = false
+
+    private var trimmedQuery: String {
+        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSearch: Bool {
+        !trimmedQuery.isEmpty && !model.isSearchingUsers
+    }
+
+    private var contactMessageIsError: Bool {
+        guard let message = model.contactMessage else { return false }
+        return message.hasPrefix("搜索失败") || message.hasPrefix("发送好友请求失败")
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("添加康纳好友")
-                    .font(.headline)
-                Spacer()
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(.borderless)
-                .help("关闭")
-                .accessibilityLabel("关闭添加康纳好友")
-            }
-            HStack(spacing: 8) {
-                TextField("搜索用户名 / 昵称", text: $searchQuery)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { Task { await model.searchUsers(query: searchQuery) } }
-                Button("搜索") {
-                    Task { await model.searchUsers(query: searchQuery) }
-                }
-            }
-            if let message = model.contactMessage {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            ForEach(model.userSearchResults, id: \.id) { user in
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(user.nickname.isEmpty ? user.username : user.nickname)
-                            .font(.body)
-                        Text("@\(user.username)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if model.friends.contains(where: { $0.userId == user.id }) {
-                        Text("已是好友")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Button("加好友") {
-                            Task { await model.sendFriendRequest(username: user.username) }
-                        }
-                    }
-                }
-                .padding(.vertical, 2)
+        VStack(spacing: 0) {
+            header
+            Divider()
+            searchBar
+                .padding(.horizontal, AppShellLayout.spaceL)
+                .padding(.top, AppShellLayout.spaceL)
+                .padding(.bottom, AppShellLayout.spaceS)
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            Divider()
+            footer
+        }
+        .frame(width: 480, height: 520)
+        // 打开弹窗时先刷新好友与申请，确保“已是好友 / 已申请”基于最新服务端状态，
+        // 而不是本地残留缓存（幽灵好友）。
+        .task { await model.refreshContacts() }
+        .onChange(of: isPresented) { _, presented in
+            if !presented {
+                hasSearched = false
+                model.clearUserSearch()
+                model.contactMessage = nil
             }
         }
-        .contactsSectionCard()
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(spacing: AppShellLayout.spaceM) {
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("添加康纳好友")
+                    .font(AppTypography.paneTitle)
+                Text("按用户名或昵称搜索，发送好友申请")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                isPresented = false
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("关闭")
+            .accessibilityLabel("关闭添加康纳好友")
+        }
+        .padding(.horizontal, AppShellLayout.spaceL)
+        .padding(.vertical, AppShellLayout.spaceM)
+    }
+
+    // MARK: - Search bar
+
+    private var searchBar: some View {
+        HStack(spacing: AppShellLayout.spaceS) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField("输入用户名或昵称", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(AppTypography.body)
+                    .onSubmit { performSearch() }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
+            )
+
+            Button("搜索", action: performSearch)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .disabled(!canSearch)
+        }
+    }
+
+    private func performSearch() {
+        let query = trimmedQuery
+        guard !query.isEmpty else { return }
+        hasSearched = true
+        Task { await model.searchUsers(query: query) }
+    }
+
+    // MARK: - Content (loading / error / empty / results)
+
+    @ViewBuilder
+    private var content: some View {
+        if model.isSearchingUsers {
+            VStack(spacing: AppShellLayout.spaceM) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("正在搜索…")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let message = model.contactMessage, contactMessageIsError {
+            stateView(
+                systemImage: "exclamationmark.triangle",
+                title: message,
+                subtitle: "请检查网络或稍后重试"
+            )
+        } else if hasSearched && model.userSearchResults.isEmpty {
+            stateView(
+                systemImage: "person.slash",
+                title: "未找到匹配的用户",
+                subtitle: "换个用户名或昵称试试"
+            )
+        } else if model.userSearchResults.isEmpty {
+            stateView(
+                systemImage: "person.2",
+                title: "输入用户名或昵称开始搜索",
+                subtitle: "搜索结果会显示在这里"
+            )
+        } else {
+            resultsList
+        }
+    }
+
+    private func stateView(systemImage: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: AppShellLayout.spaceS) {
+            Image(systemName: systemImage)
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.tertiary)
+            Text(title)
+                .font(AppTypography.calloutEmphasis)
+                .multilineTextAlignment(.center)
+            Text(subtitle)
+                .font(AppTypography.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(AppShellLayout.spaceXL)
+    }
+
+    private var resultsList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(model.userSearchResults, id: \.id) { user in
+                    resultRow(user)
+                    if user.id != model.userSearchResults.last?.id {
+                        Divider().padding(.leading, 52)
+                    }
+                }
+            }
+            .padding(.vertical, AppShellLayout.spaceXS)
+        }
+    }
+
+    private func resultRow(_ user: ImPublicUserDTO) -> some View {
+        let displayName = user.nickname.isEmpty ? user.username : user.nickname
+        return HStack(spacing: AppShellLayout.spaceM) {
+            ContactProfileThumbnail(imageURL: URL(string: user.avatarUrl), displayName: displayName)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName)
+                    .font(AppListTypography.rowTitle)
+                    .lineLimit(1)
+                Text("@\(user.username)")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            actionButton(for: user)
+        }
+        .padding(.horizontal, AppShellLayout.spaceL)
+        .padding(.vertical, AppShellLayout.spaceS)
+    }
+
+    @ViewBuilder
+    private func actionButton(for user: ImPublicUserDTO) -> some View {
+        switch model.friendSearchActionState(for: user) {
+        case .friend:
+            statusChip("已是好友", systemImage: "checkmark")
+        case .requested:
+            statusChip("已申请", systemImage: "clock")
+        case .submitting:
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 76)
+        case .available:
+            Button {
+                Task { await model.sendFriendRequest(username: user.username) }
+            } label: {
+                Label("加好友", systemImage: "person.badge.plus")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+    }
+
+    private func statusChip(_ text: String, systemImage: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .labelStyle(.titleAndIcon)
+            .font(AppTypography.caption)
+            .padding(.horizontal, AppShellLayout.spaceS)
+            .frame(height: 24)
+            .foregroundStyle(.secondary)
+            .background(Color.secondary.opacity(0.10), in: Capsule())
+            .frame(width: 76)
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        HStack {
+            if let message = model.contactMessage {
+                Label(message, systemImage: contactMessageIsError ? "exclamationmark.circle" : "checkmark.circle")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(contactMessageIsError ? .red : .secondary)
+                    .lineLimit(1)
+            } else if !model.userSearchResults.isEmpty {
+                Text("\(model.userSearchResults.count) 位匹配用户")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("仅展示已注册康纳账号的用户")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Button("关闭") { isPresented = false }
+                .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, AppShellLayout.spaceL)
+        .padding(.vertical, AppShellLayout.spaceM)
     }
 }
 
