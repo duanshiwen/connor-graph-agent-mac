@@ -109,12 +109,21 @@ public struct FileRegisterTool: AgentTool {
 /// 按名称/类型/来源/摘要查找已登记的业务文件。返回 fileID 与元数据，不返回字节。
 public struct FileLookupTool: AgentTool {
     public let name = "file_lookup"
-    public let description = "Search the durable business file store by filename, type, source, or summary context. Returns fileID and metadata so a previously registered file can be reattached (for example as a mail attachment). The original bytes stay local and are never passed to the model."
+    public let description = "Search the attachment library (durable business file store) by filename, type, source, or summary context, ordered by most recently used. Returns fileID and metadata so a previously registered file can be reattached (for example as a mail attachment) or read with file_get. Supports paging: page is 0-based, pageSize defaults to 20 and caps at 50. The original bytes stay local and are never passed to the model."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "query": .string(description: "Search terms: filename, type, source, or context summary."),
-        "limit": .integer(description: "Optional maximum number of results. Defaults to 20, maximum 50.")
-    ], required: ["query"])
+        "query": .string(description: "Search terms: filename, type, source, or context summary. Optional; omit to list recent attachments."),
+        "kind": .stringEnumeration(
+            values: ["text", "markdown", "json", "csv", "code", "image", "audio", "video", "pdf", "document", "spreadsheet", "presentation", "archive", "html", "unknown"],
+            description: "Optional attachment type filter."
+        ),
+        "source": .stringEnumeration(
+            values: ["session", "imported", "generated", "forwarded", "other"],
+            description: "Optional source filter (session/imported/generated/forwarded)."
+        ),
+        "page": .integer(description: "Optional 0-based page number. Defaults to 0."),
+        "limit": .integer(description: "Optional page size. Defaults to 20, maximum 50.")
+    ], required: [])
 
     private let store: FileArtifactStore
 
@@ -123,24 +132,38 @@ public struct FileLookupTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let query = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty else {
-            throw AgentToolError.invalidArguments("query is required")
-        }
-        let limit = min(max(arguments.int("limit") ?? 20, 1), 50)
-        let records = store.lookup(query: query, limit: limit)
+        let query = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kindRaw = arguments.string("kind")
+        let kind = kindRaw.flatMap(AgentAttachmentKind.init(rawValue:))
+        let sourceRaw = arguments.string("source")
+        let source = sourceRaw.flatMap(FileArtifactSource.init(rawValue:))
+        let page = max(arguments.int("page") ?? 0, 0)
+        let pageSize = min(max(arguments.int("limit") ?? 20, 1), 50)
+        let pageResult = store.list(query: query, source: source, kind: kind, page: page, pageSize: pageSize)
+        let records = pageResult.items
+        let iso = ISO8601DateFormatter()
         let rows = records.map { record -> [String: Any] in
             [
                 "fileID": record.fileID,
                 "originalName": record.originalName,
                 "mimeType": record.mimeType ?? "",
+                "kind": record.kind.rawValue,
                 "byteCount": record.byteCount,
                 "source": record.source.rawValue,
                 "extractionStatus": record.extractionStatus.rawValue,
                 "summary": record.summary ?? "",
-                "updatedAt": ISO8601DateFormatter().string(from: record.updatedAt)
+                "lastSeenAt": iso.string(from: record.lastSeenAt)
             ]
         }
-        let payload: [String: Any] = ["query": query, "count": rows.count, "files": rows]
+        let payload: [String: Any] = [
+            "query": query ?? "",
+            "page": page,
+            "pageSize": pageSize,
+            "total": pageResult.total,
+            "hasMore": pageResult.hasMore,
+            "count": rows.count,
+            "files": rows
+        ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
               let json = String(data: data, encoding: .utf8) else {
             throw AgentToolError.invalidArguments("file_lookup failed to render results")
@@ -160,5 +183,73 @@ public struct FileLookupTool: AgentTool {
             contentJSON: json,
             citations: records.map(\.fileID)
         )
+    }
+}
+
+/// 从附件库按 fileID 取回完整附件：返回本地文件 URL、类型、大小，以及文本类文件的完整内容。
+public struct FileGetTool: AgentTool {
+    public let name = "file_get"
+    public let description = "Retrieve the full attachment from the attachment library by exact fileID (returned by file_lookup or file_register). Returns the local file URL, kind, size and, for text-based files (text/markdown/json/csv/code/html), the full content so the model can read it. Use this to read a previously saved file or to resend it as an attachment."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "fileID": .string(description: "Exact fileID from file_lookup / file_register, for example file:abc123....")
+    ], required: ["fileID"])
+
+    private let store: FileArtifactStore
+    private let maxTextBytes: Int
+
+    public init(store: FileArtifactStore, maxTextBytes: Int = 200_000) {
+        self.store = store
+        self.maxTextBytes = maxTextBytes
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let fileID = arguments.string("fileID")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !fileID.isEmpty else {
+            throw AgentToolError.invalidArguments("fileID is required")
+        }
+        let record = try store.artifact(fileID: fileID)
+        let localFileURL = store.paths.filesDirectory.appendingPathComponent(record.storedRelativePath)
+        var text: String?
+        if Self.textKinds.contains(record.kind), record.byteCount <= Int64(maxTextBytes) {
+            let data = try store.readBytes(fileID: fileID)
+            text = String(data: data, encoding: .utf8)
+        }
+        let payload: [String: Any] = [
+            "fileID": record.fileID,
+            "originalName": record.originalName,
+            "mimeType": record.mimeType ?? "",
+            "kind": record.kind.rawValue,
+            "byteCount": record.byteCount,
+            "source": record.source.rawValue,
+            "localFileURL": localFileURL.absoluteString,
+            "text": text ?? NSNull()
+        ]
+        let json = Self.renderJSON(payload)
+        let readable = text != nil
+            ? "\(record.originalName)（\(record.kind.rawValue)，\(record.byteCount) 字节）：\n\(text!)"
+            : "\(record.originalName)（\(record.kind.rawValue)，\(record.byteCount) 字节）。本地文件：\(localFileURL.path)。文本类附件才返回内容。"
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: readable,
+            contentJSON: json,
+            citations: [record.fileID]
+        )
+    }
+
+    private static let textKinds: Set<AgentAttachmentKind> = [.text, .markdown, .json, .csv, .code, .html]
+
+    private static func renderJSON(_ object: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else { return "{}" }
+        return json
+    }
+}
+
+public extension AgentToolRegistry {
+    mutating func registerAttachmentLibraryTools(store: FileArtifactStore) {
+        register(FileLookupTool(store: store))
+        register(FileGetTool(store: store))
     }
 }

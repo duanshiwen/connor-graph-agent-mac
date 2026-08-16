@@ -80,6 +80,64 @@ struct FileRegistrationTests {
         #expect(result.citations.contains(record.fileID))
     }
 
+    @Test func fileGetToolReturnsFullTextAttachment() async throws {
+        let (_, fileStore, _, _) = try makeHarness()
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("connor-file-src-\(UUID().uuidString).md")
+        try "# 会议纪要\n\n- 第一项\n- 第二项".write(to: source, atomically: true, encoding: .utf8)
+        let record = try fileStore.register(from: source, filename: "meeting.md", source: .generated, summary: "会议纪要")
+
+        let tool = FileGetTool(store: fileStore)
+        let result = try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"fileID":"\#(record.fileID)"}"#),
+            context: context()
+        )
+        #expect(result.toolName == "file_get")
+        #expect(result.contentText.contains("会议纪要"))
+        #expect(result.contentText.contains("# 会议纪要"))
+        let json = try #require(result.contentJSON)
+        #expect(json.contains(record.fileID))
+        #expect(json.contains("localFileURL"))
+    }
+
+    @Test func fileGetToolRejectsUnknownFileID() async throws {
+        let (_, fileStore, _, _) = try makeHarness()
+        let tool = FileGetTool(store: fileStore)
+        await #expect(throws: FileArtifactStoreError.self) {
+            _ = try await tool.execute(
+                arguments: try AgentToolArguments(json: #"{"fileID":"file:does-not-exist"}"#),
+                context: context()
+            )
+        }
+    }
+
+    @Test func fileLookupToolSupportsPagingAndKindFilter() async throws {
+        let (_, fileStore, _, _) = try makeHarness()
+        for index in 1...3 {
+            let source = FileManager.default.temporaryDirectory
+                .appendingPathComponent("connor-file-src-\(UUID().uuidString).txt")
+            try "内容 \(index)".write(to: source, atomically: true, encoding: .utf8)
+            _ = try fileStore.register(from: source, filename: "note-\(index).txt", source: .session, summary: "文本附件")
+        }
+        let image = FileManager.default.temporaryDirectory
+            .appendingPathComponent("connor-file-src-\(UUID().uuidString).png")
+        try Data("png".utf8).write(to: image)
+        _ = try fileStore.register(from: image, filename: "photo.png", source: .imported, summary: "图片")
+
+        let tool = FileLookupTool(store: fileStore)
+        let page0 = try await tool.execute(arguments: try AgentToolArguments(json: #"{"page":0,"limit":2}"#), context: context())
+        let json0 = try #require(page0.contentJSON)
+        #expect(json0.contains(#""total":4"#))
+        #expect(json0.contains(#""hasMore":true"#))
+        let page1 = try await tool.execute(arguments: try AgentToolArguments(json: #"{"page":1,"limit":2}"#), context: context())
+        let json1 = try #require(page1.contentJSON)
+        #expect(json1.contains(#""hasMore":false"#))
+        let images = try await tool.execute(arguments: try AgentToolArguments(json: #"{"kind":"image"}"#), context: context())
+        let jsonImage = try #require(images.contentJSON)
+        #expect(jsonImage.contains(#""total":1"#))
+        #expect(jsonImage.contains("photo.png"))
+    }
+
     @Test func mailResolverResolvesFileIDFromFileStore() async throws {
         let (paths, fileStore, _, attachmentStore) = try makeHarness()
         let source = FileManager.default.temporaryDirectory
