@@ -1116,6 +1116,7 @@ struct AgentChatComposerView: View {
                     model: model,
                     onPick: { urls in
                         isAttachmentLibraryPresented = false
+                        AttachmentLibraryRegistration.register(urls: urls)
                         Task { await chatActions.composer.importAttachments(urls: urls) }
                     },
                     onPickFromFolder: {
@@ -1149,6 +1150,7 @@ struct AgentChatComposerView: View {
         panel.allowsMultipleSelection = true
         panel.allowedContentTypes = supportedAttachmentContentTypes
         guard panel.runModal() == .OK else { return }
+        AttachmentLibraryRegistration.register(urls: panel.urls)
         Task { await chatActions.composer.importAttachments(urls: panel.urls) }
     }
 

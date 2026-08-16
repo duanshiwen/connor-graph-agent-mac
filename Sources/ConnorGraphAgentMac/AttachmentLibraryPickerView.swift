@@ -329,3 +329,15 @@ private extension FileArtifactSource {
         }
     }
 }
+
+/// 发送附件时自动登记进附件库（“最近附件”语义，类似微信）：
+/// 用户发给 LLM / 真人 / 群聊的文件会出现在附件库里，之后可再次选用。
+enum AttachmentLibraryRegistration {
+    static func register(urls: [URL], paths: AppStoragePaths? = nil) {
+        guard let paths = paths ?? (try? AppStoragePaths.live()) else { return }
+        let store = FileArtifactStore(paths: paths)
+        for url in urls {
+            try? store.register(from: url, source: .session)
+        }
+    }
+}
