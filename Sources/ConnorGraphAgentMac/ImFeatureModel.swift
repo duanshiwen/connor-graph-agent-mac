@@ -584,6 +584,21 @@ final class ImFeatureModel {
         }
     }
 
+    /// 解除康纳好友与当前人物的绑定（用于合并错后的「解绑」），并重建好友的
+    /// 自动建档档案，使好友重新以独立人物出现在人际关系中，之后可再次合并。
+    func unbindFriendPerson(userId: Int64) async {
+        do {
+            try await center.bindFriendPerson(userId: userId, personProfileID: nil)
+            if let friendProvisioner {
+                _ = try await friendProvisioner.rebindToAutoProfile(userId: userId)
+            }
+            friends = (try? await store.loadFriends()) ?? friends
+            contactMessage = "已解除人物绑定"
+        } catch {
+            contactMessage = "解除人物绑定失败：\(error.localizedDescription)"
+        }
+    }
+
     /// Auto-provisions person profiles for unbound friends. Creating a profile
     /// posts the person-profile store change notification, which refreshes the
     /// 人际关系 feature model automatically.
