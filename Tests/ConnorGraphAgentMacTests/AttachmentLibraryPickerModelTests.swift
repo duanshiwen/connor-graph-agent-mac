@@ -61,6 +61,13 @@ struct AttachmentLibraryPickerModelTests {
         #expect(recent.map(\.originalName).contains(source.lastPathComponent))
     }
 
+    @Test func imLibraryRegistrationExcludesImageAndAudio() {
+        #expect(AttachmentLibraryRegistration.shouldRegister(imMessageType: .image) == false)
+        #expect(AttachmentLibraryRegistration.shouldRegister(imMessageType: .audio) == false)
+        #expect(AttachmentLibraryRegistration.shouldRegister(imMessageType: .file) == true)
+        #expect(AttachmentLibraryRegistration.shouldRegister(imMessageType: .video) == true)
+    }
+
     @Test func filtersByKind() async throws {
         let (paths, model) = try makeModel(pageSize: 10)
         try register(paths, name: "photo.png", data: Data("png".utf8))
