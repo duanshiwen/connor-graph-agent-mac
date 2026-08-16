@@ -35,6 +35,8 @@ public struct FileArtifactRecord: Codable, Sendable, Equatable, Identifiable {
     public var createdAt: Date
     public var updatedAt: Date
     public var lastSeenAt: Date
+    /// 附件类型（按文件名/扩展名分类，用于附件库筛选与展示）。
+    public var kind: AgentAttachmentKind { FileArtifactStore.classifyKind(name: originalName) }
 
     public init(
         fileID: String,
@@ -135,7 +137,8 @@ public struct FileArtifactStore: Sendable {
         let manifestURL = fileDirectory.appendingPathComponent("manifest.json")
 
         if let existing = try? loadManifest(url: manifestURL) {
-            // 同内容复用：刷新最近看到时间。
+            // 同内容复用：刷新最近看到时间（严格递增，保证“最近附件”里被再次使用的文件排到最前）。
+            let seenAt = max(now, existing.lastSeenAt.addingTimeInterval(0.001))
             let refreshed = FileArtifactRecord(
                 fileID: existing.fileID,
                 sha256: existing.sha256,
@@ -148,7 +151,7 @@ public struct FileArtifactStore: Sendable {
                 storedRelativePath: existing.storedRelativePath,
                 createdAt: existing.createdAt,
                 updatedAt: existing.updatedAt,
-                lastSeenAt: now
+                lastSeenAt: seenAt
             )
             try writeManifest(refreshed, to: manifestURL)
             return refreshed
@@ -202,34 +205,85 @@ public struct FileArtifactStore: Sendable {
         return try loadManifest(url: manifestURL)
     }
 
-    /// 按名称/类型/来源/摘要做不区分大小写的子串查找，updatedAt 降序。
+    /// 附件库分页结果。
+    public struct FileArtifactPage: Sendable, Equatable {
+        public var items: [FileArtifactRecord]
+        public var total: Int
+        public var page: Int
+        public var pageSize: Int
+
+        public init(items: [FileArtifactRecord], total: Int, page: Int, pageSize: Int) {
+            self.items = items
+            self.total = total
+            self.page = page
+            self.pageSize = pageSize
+        }
+
+        public var hasMore: Bool { page * pageSize + items.count < total }
+    }
+
+    /// 附件库分页查询：按「最近使用（lastSeenAt 降序）」排序，支持关键词 / 来源 / 类型筛选。
+    /// - Parameters:
+    ///   - page: 0 起始的页码。
+    ///   - pageSize: 每页条数（默认 30，上限 200）。
+    public func list(
+        query: String? = nil,
+        source: FileArtifactSource? = nil,
+        kind: AgentAttachmentKind? = nil,
+        page: Int = 0,
+        pageSize: Int = 30
+    ) -> FileArtifactPage {
+        let needle = query?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let boundedPage = max(page, 0)
+        let boundedPageSize = min(max(pageSize, 1), 200)
+        let all = scanAll()
+            .filter { record in
+                if let source, record.source != source { return false }
+                if let kind, record.kind != kind { return false }
+                if !needle.isEmpty {
+                    let haystack = [
+                        record.originalName,
+                        record.mimeType ?? "",
+                        record.source.rawValue,
+                        record.summary ?? ""
+                    ].joined(separator: " ").lowercased()
+                    guard haystack.contains(needle) else { return false }
+                }
+                return true
+            }
+            .sorted { $0.lastSeenAt > $1.lastSeenAt }
+        let start = boundedPage * boundedPageSize
+        guard start < all.count else {
+            return FileArtifactPage(items: [], total: all.count, page: boundedPage, pageSize: boundedPageSize)
+        }
+        let items = Array(all[start..<min(start + boundedPageSize, all.count)])
+        return FileArtifactPage(items: items, total: all.count, page: boundedPage, pageSize: boundedPageSize)
+    }
+
+    /// 兼容旧入口：按名称/类型/来源/摘要做不区分大小写的子串查找，最近使用优先，取前 [limit] 条。
     public func lookup(query: String?, limit: Int = 20) -> [FileArtifactRecord] {
+        list(query: query, page: 0, pageSize: limit).items
+    }
+
+    /// 附件库全部记录（按最近使用降序）。
+    public func recent(limit: Int = 50) -> [FileArtifactRecord] {
+        list(page: 0, pageSize: limit).items
+    }
+
+    private func scanAll() -> [FileArtifactRecord] {
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(
             at: paths.filesDirectory,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
-        let needle = query?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         var records: [FileArtifactRecord] = []
         for entry in entries {
             guard let manifestURL = try? entry.appendingPathComponent("manifest.json") else { continue }
             guard let record = try? loadManifest(url: manifestURL) else { continue }
-            if !needle.isEmpty {
-                let haystack = [
-                    record.originalName,
-                    record.mimeType ?? "",
-                    record.source.rawValue,
-                    record.summary ?? ""
-                ].joined(separator: " ").lowercased()
-                guard haystack.contains(needle) else { continue }
-            }
             records.append(record)
         }
         return records
-            .sorted { $0.updatedAt > $1.updatedAt }
-            .prefix(limit)
-            .map { $0 }
     }
 
     /// 显式删除：字节与 manifest 一起移除（业务数据独立于会话，用户显式删除才删）。
@@ -252,13 +306,28 @@ public struct FileArtifactStore: Sendable {
         }
         let data = try Data(contentsOf: url)
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let raw = try container.decode(String.self)
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: raw) { return date }
+            // 兼容旧 manifest（秒级无小数）
+            formatter.formatOptions = [.withInternetDateTime]
+            if let date = formatter.date(from: raw) { return date }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 date: \(raw)")
+        }
         return try decoder.decode(FileArtifactRecord.self, from: data)
     }
 
     private func writeManifest(_ record: FileArtifactRecord, to url: URL) throws {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            var container = encoder.singleValueContainer()
+            try container.encode(formatter.string(from: date))
+        }
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(record)
         try data.write(to: url, options: .atomic)
@@ -305,6 +374,11 @@ public struct FileArtifactStore: Sendable {
         case .skippedOversize, .unsupported, .pending:
             return (.unreadable, nil)
         }
+    }
+
+    /// 按文件名/扩展名分类附件类型（附件库筛选与展示用）。
+    public static func classifyKind(name: String) -> AgentAttachmentKind {
+        attachmentKind(for: URL(fileURLWithPath: name), filename: name)
     }
 
     private static func attachmentKind(for url: URL, filename: String) -> AgentAttachmentKind {
