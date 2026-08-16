@@ -197,6 +197,8 @@ public struct NotionExportNoteImportAdapter: NoteImportSourceAdapter {
         note.links = links
         note.attachments = attachments
         note.diagnostics = diagnostics
+        // 树形层级重建：按层级解析上级页面（最近一层实际存在的页面），默认随 preserveHierarchy 生效
+        note.hierarchyParent = index.resolveParent(for: note).map(\.sourceIdentity)
         return note
     }
 
@@ -267,6 +269,7 @@ public struct NotionExportNoteImportAdapter: NoteImportSourceAdapter {
         var byID: [String: ImportedNote] = [:]
         var byPath: [String: ImportedNote] = [:]
         var byTitle: [String: [ImportedNote]] = [:]
+        var byHierarchy: [[String]: [ImportedNote]] = [:]
 
         init(notes: [ImportedNote]) {
             for note in notes {
@@ -279,7 +282,23 @@ public struct NotionExportNoteImportAdapter: NoteImportSourceAdapter {
                 }
                 let titleKey = Self.key(note.title)
                 if !titleKey.isEmpty { byTitle[titleKey, default: []].append(note) }
+                if !note.hierarchy.isEmpty { byHierarchy[note.hierarchy, default: []].append(note) }
             }
+        }
+
+        /// 树形层级重建：返回笔记的上级页面（最近一层实际存在的页面），根节点返回 nil。
+        ///
+        /// Notion 导出的约定：有子页面的页面导出为同名文件夹，其自身内容为
+        /// `文件夹/同名.md`（self-folder page），子页面为同文件夹下的 .md。
+        /// - self-folder page（层级末段 == 标题）：上级 = 父目录层级下存在的页面；
+        /// - 叶子页（层级末段 != 标题）：上级 = 同文件夹内标题等于层级末段的页面。
+        func resolveParent(for note: ImportedNote) -> ImportedNote? {
+            let hierarchy = note.hierarchy
+            guard let last = hierarchy.last, !hierarchy.isEmpty else { return nil }
+            if last == note.title {
+                return byHierarchy[Array(hierarchy.dropLast())]?.first
+            }
+            return byHierarchy[hierarchy]?.first { $0.title == last }
         }
 
         func resolve(target: String) -> [ImportedNote] {

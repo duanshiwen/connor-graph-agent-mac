@@ -204,6 +204,8 @@ public struct ImportedNote: Codable, Sendable, Equatable, Identifiable {
     public var updatedAt: Date?
     public var tags: [String]
     public var hierarchy: [String]
+    /** 树形层级重建：上级笔记的 sourceIdentity（最近一层存在的页面），nil 表示根节点。 */
+    public var hierarchyParent: String?
     public var links: [ImportedNoteLink]
     public var attachments: [ImportedNoteAttachment]
     public var sourceMetadata: [String: String]
@@ -224,6 +226,7 @@ public struct ImportedNote: Codable, Sendable, Equatable, Identifiable {
         updatedAt: Date? = nil,
         tags: [String] = [],
         hierarchy: [String] = [],
+        hierarchyParent: String? = nil,
         links: [ImportedNoteLink] = [],
         attachments: [ImportedNoteAttachment] = [],
         sourceMetadata: [String: String] = [:],
@@ -243,6 +246,7 @@ public struct ImportedNote: Codable, Sendable, Equatable, Identifiable {
         self.updatedAt = updatedAt
         self.tags = tags
         self.hierarchy = hierarchy
+        self.hierarchyParent = hierarchyParent
         self.links = links
         self.attachments = attachments
         self.sourceMetadata = sourceMetadata
