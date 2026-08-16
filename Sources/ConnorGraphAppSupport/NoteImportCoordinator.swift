@@ -56,7 +56,8 @@ public actor NoteImportCoordinator {
         source = try sourceAccessService.authorize(url: sourceURL, source: source)
         try ledger.saveSource(source)
         var flattenedOptions = options
-        flattenedOptions.preserveHierarchy = false
+        // preserveHierarchy 按用户选择保留（Notion 树形结构/文件夹层级导入整棵树）；
+        // LLM 与网络工具在导入流程中固定关闭，避免不可控的外部副作用。
         flattenedOptions.llmMode = .disabled
         flattenedOptions.llmConcurrency = 1
         flattenedOptions.allowNetworkReadTools = false
