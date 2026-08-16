@@ -42,6 +42,8 @@ public struct NoteRecord: Codable, Sendable, Equatable, Identifiable {
     public var leaseExpiresAt: Date?
     /** 导入来源的树形层级（如 Notion「笔记本/子分类/子页面」），空表示未保留层级。 */
     public var importHierarchy: [String]
+    /** 树形层级重建后的上级笔记 sourceIdentity（根节点为 nil）。 */
+    public var importParentIdentity: String?
 
     public init(
         id: String,
@@ -69,7 +71,8 @@ public struct NoteRecord: Codable, Sendable, Equatable, Identifiable {
         sourceCreatedAt: Date? = nil,
         leaseOwner: String? = nil,
         leaseExpiresAt: Date? = nil,
-        importHierarchy: [String] = []
+        importHierarchy: [String] = [],
+        importParentIdentity: String? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -97,6 +100,7 @@ public struct NoteRecord: Codable, Sendable, Equatable, Identifiable {
         self.leaseOwner = leaseOwner
         self.leaseExpiresAt = leaseExpiresAt
         self.importHierarchy = importHierarchy
+        self.importParentIdentity = importParentIdentity
     }
 }
 
@@ -128,8 +132,10 @@ public struct NoteImportProjectionMetadata: Sendable, Equatable {
     public var sourceCreatedAt: Date?
     /** 导入来源的树形层级（如 Notion「笔记本/子分类/子页面」）。 */
     public var hierarchy: [String]
+    /** 树形层级重建后的上级笔记 sourceIdentity（根节点为 nil）。 */
+    public var parentSourceIdentity: String?
 
-    public init(itemID: String, sourceID: String, sourceKind: String, sourceIdentity: String, externalID: String? = nil, relativePath: String? = nil, sourceCreatedAt: Date? = nil, hierarchy: [String] = []) {
+    public init(itemID: String, sourceID: String, sourceKind: String, sourceIdentity: String, externalID: String? = nil, relativePath: String? = nil, sourceCreatedAt: Date? = nil, hierarchy: [String] = [], parentSourceIdentity: String? = nil) {
         self.itemID = itemID
         self.sourceID = sourceID
         self.sourceKind = sourceKind
@@ -138,6 +144,7 @@ public struct NoteImportProjectionMetadata: Sendable, Equatable {
         self.relativePath = relativePath
         self.sourceCreatedAt = sourceCreatedAt
         self.hierarchy = hierarchy
+        self.parentSourceIdentity = parentSourceIdentity
     }
 }
 

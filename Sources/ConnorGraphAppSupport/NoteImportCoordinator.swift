@@ -193,7 +193,8 @@ public actor NoteImportCoordinator {
                             itemID: current.id, sourceID: current.sourceID,
                             sourceKind: sourceKind ?? note.sourceKind.rawValue, sourceIdentity: current.sourceIdentity,
                             externalID: current.externalID, relativePath: current.relativePath, sourceCreatedAt: note.createdAt,
-                            hierarchy: note.hierarchy
+                            hierarchy: note.hierarchy,
+                            parentSourceIdentity: note.hierarchyParent
                         ))
                         current.sessionID = sessionID
                         current.status = .imported
@@ -228,7 +229,8 @@ public actor NoteImportCoordinator {
                             itemID: current.id, sourceID: current.sourceID,
                             sourceKind: sourceKind ?? note.sourceKind.rawValue, sourceIdentity: current.sourceIdentity,
                             externalID: current.externalID, relativePath: current.relativePath, sourceCreatedAt: note.createdAt,
-                            hierarchy: note.hierarchy
+                            hierarchy: note.hierarchy,
+                            parentSourceIdentity: note.hierarchyParent
                         ))
                         current.status = .completed
                         current.errorCode = nil

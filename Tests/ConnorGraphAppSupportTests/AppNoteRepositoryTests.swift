@@ -35,11 +35,12 @@ import ConnorGraphAppSupport
     try repository.upsert(NoteRecord(
         id: "note:notion", sessionID: "session-notion", sourceMessageID: "message",
         title: "深层页面", body: "body", contentHash: "hash", sourceUpdatedAt: .now,
-        createdAt: .now, updatedAt: .now, importHierarchy: ["笔记本", "子分类", "深层"]
+        createdAt: .now, updatedAt: .now, importHierarchy: ["笔记本", "子分类", "深层"], importParentIdentity: "parent:sub"
     ))
 
     let loaded = try #require(try repository.note(sessionID: "session-notion"))
     #expect(loaded.importHierarchy == ["笔记本", "子分类", "深层"])
+    #expect(loaded.importParentIdentity == "parent:sub")
     #expect(loaded.title == "深层页面")
 }
 
@@ -55,11 +56,12 @@ import ConnorGraphAppSupport
     try repository.attachImportMetadata(sessionID: "session-notion-2", metadata: NoteImportProjectionMetadata(
         itemID: "item-1", sourceID: "source-1", sourceKind: "notion_export", sourceIdentity: "identity",
         externalID: "abc", relativePath: "笔记本/子分类/子页面.md", sourceCreatedAt: .now,
-        hierarchy: ["笔记本", "子分类"]
+        hierarchy: ["笔记本", "子分类"], parentSourceIdentity: "parent:sub"
     ))
 
     let loaded = try #require(try repository.note(sessionID: "session-notion-2"))
     #expect(loaded.importHierarchy == ["笔记本", "子分类"])
+    #expect(loaded.importParentIdentity == "parent:sub")
     #expect(loaded.originKind == .imported)
     #expect(loaded.relativePath == "笔记本/子分类/子页面.md")
 }
