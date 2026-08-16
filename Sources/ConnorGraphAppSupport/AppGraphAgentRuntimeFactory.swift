@@ -322,7 +322,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             ))
             registry.registerPDFGenerationTool(store: AppSessionAttachmentStore(paths: storagePaths))
             let fileArtifactStore = FileArtifactStore(paths: storagePaths)
-            registry.register(FileLookupTool(store: fileArtifactStore))
+            registry.registerAttachmentLibraryTools(store: fileArtifactStore)
             if let memoryOSFacade {
                 registry.register(FileRegisterTool(
                     attachmentStore: AppSessionAttachmentStore(paths: storagePaths),
