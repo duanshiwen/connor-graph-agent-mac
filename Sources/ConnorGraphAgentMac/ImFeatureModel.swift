@@ -30,6 +30,48 @@ final class ImFeatureModel {
     private(set) var conversations: [ImConversation] = []
     private(set) var messages: [ImMessage] = []
     private(set) var friends: [ImFriend] = []
+
+    /// 待镜像到 memory_l4_entities 的好友↔人物绑定动作（跨端同步用）：
+    /// 由 syncAccountData 在每轮同步开始时消费并清空。personProfileID 为 nil 表示解绑。
+    struct FriendBindingProjection: Equatable, Sendable {
+        var userId: Int64
+        var personProfileID: String?
+    }
+
+    private(set) var pendingFriendBindingProjections: [FriendBindingProjection] = []
+
+    func clearPendingFriendBindingProjections() {
+        pendingFriendBindingProjections = []
+    }
+
+    /// 本机「从远端应用过」的好友↔人物绑定 userID 集合（持久化）。
+    /// 只有这些绑定才会随对端解绑（connor_friend_* 元数据消失）自动解绑，
+    /// 避免误伤本机本地发起的合并。
+    private static let remoteFriendBindingDefaultsKey = "ConnorRemoteAppliedFriendBindingUserIDs"
+
+    private(set) var remoteAppliedFriendBindingUserIDs: Set<Int64> {
+        get { Set(UserDefaults.standard.array(forKey: Self.remoteFriendBindingDefaultsKey) as? [Int64] ?? []) }
+        set { UserDefaults.standard.set(Array(newValue), forKey: Self.remoteFriendBindingDefaultsKey) }
+    }
+
+    func noteRemoteFriendBinding(userId: Int64) {
+        var set = remoteAppliedFriendBindingUserIDs
+        set.insert(userId)
+        remoteAppliedFriendBindingUserIDs = set
+    }
+
+    func noteRemoteFriendUnbinding(userId: Int64) {
+        var set = remoteAppliedFriendBindingUserIDs
+        set.remove(userId)
+        remoteAppliedFriendBindingUserIDs = set
+    }
+
+    /// 本地发起绑定/解绑：该绑定改由本机持有，不再随远端元数据消失自动解绑。
+    private func noteLocalFriendBindingChange(userId: Int64) {
+        var set = remoteAppliedFriendBindingUserIDs
+        set.remove(userId)
+        remoteAppliedFriendBindingUserIDs = set
+    }
     private(set) var friendRequests: [ImFriendRequest] = []
     private(set) var selectedConversationId: String?
     private(set) var socketConnected = false
@@ -580,6 +622,8 @@ final class ImFeatureModel {
             try await center.bindFriendPerson(userId: userId, personProfileID: personProfileID)
             friends = (try? await store.loadFriends()) ?? friends
             contactMessage = personProfileID == nil ? "已解除人物关联" : "已关联人物"
+            pendingFriendBindingProjections.append(FriendBindingProjection(userId: userId, personProfileID: personProfileID))
+            noteLocalFriendBindingChange(userId: userId)
             AppAccountSyncSignal.postLocalDataDidChange()
         } catch {
             contactMessage = "关联人物失败：\(error.localizedDescription)"
@@ -596,6 +640,8 @@ final class ImFeatureModel {
             }
             friends = (try? await store.loadFriends()) ?? friends
             contactMessage = "已解除人物绑定"
+            pendingFriendBindingProjections.append(FriendBindingProjection(userId: userId, personProfileID: nil))
+            noteLocalFriendBindingChange(userId: userId)
             AppAccountSyncSignal.postLocalDataDidChange()
         } catch {
             contactMessage = "解除人物绑定失败：\(error.localizedDescription)"
@@ -620,7 +666,17 @@ final class ImFeatureModel {
     func reconcileFriendBindingsFromSync(entities: [MemoryOSEntity]) async {
         guard let friendProvisioner else { return }
         do {
-            _ = try await friendProvisioner.reconcileSyncedFriendBindings(entities: entities)
+            let remoteApplied = remoteAppliedFriendBindingUserIDs
+            let result = try await friendProvisioner.reconcileSyncedFriendBindings(
+                entities: entities,
+                shouldAutoUnbind: { userId in remoteApplied.contains(userId) }
+            )
+            for userId in result.applied {
+                noteRemoteFriendBinding(userId: userId)
+            }
+            for userId in result.unbound {
+                noteRemoteFriendUnbinding(userId: userId)
+            }
             friends = (try? await store.loadFriends()) ?? friends
         } catch {
             contactMessage = "回放好友人物合并失败：\(error.localizedDescription)"

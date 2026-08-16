@@ -130,24 +130,38 @@ public struct ImFriendPersonProvisioner: Sendable {
         return true
     }
 
-    /// 跨端合并回放：安卓端把好友并入人物时，会把好友账号写入该人物 L4 实体的
+    /// 跨端合并回放：对端把好友并入人物时，会把好友账号写入该人物 L4 实体的
     /// metadata（connor_friend_*，随 memory_l4_entities 同步）。本机在收到这些实体后，
     /// 把本地好友重新绑定到对应人物档案，并把好友的自动建档档案并入目标人物，
-    /// 让人际关系列表与安卓一致地呈现「好友并入人物」。
+    /// 让人际关系列表与对端一致地呈现「好友并入人物」。
+    ///
+    /// 同时支持「解绑回放」：当本机此前从远端应用过某条绑定（shouldAutoUnbind 返回 true），
+    /// 而该人物实体的 connor_friend_user_id 已不再匹配该好友（对端解绑/改绑）时，解除本机绑定。
     ///
     /// 只处理能唯一匹配的情况：好友必须存在于本地；目标人物按 memoryEntityID 精确匹配，
     /// 否则按规范化显示名唯一匹配（active 档案）。无法唯一匹配时跳过，不做臆测性合并。
+    public struct FriendBindingReconcileResult: Sendable {
+        public var applied: [Int64]
+        public var unbound: [Int64]
+        public init(applied: [Int64] = [], unbound: [Int64] = []) {
+            self.applied = applied
+            self.unbound = unbound
+        }
+    }
+
     @discardableResult
-    public func reconcileSyncedFriendBindings(entities: [MemoryOSEntity]) async throws -> Int {
-        guard let profileStore else { return 0 }
+    public func reconcileSyncedFriendBindings(
+        entities: [MemoryOSEntity],
+        shouldAutoUnbind: @Sendable (Int64) -> Bool = { _ in false }
+    ) async throws -> FriendBindingReconcileResult {
+        guard let profileStore else { return FriendBindingReconcileResult() }
         let boundEntities = entities.filter {
             $0.entityType == MemoryOSEntityType.person.rawValue && $0.metadata["connor_friend_user_id"] != nil
         }
-        guard !boundEntities.isEmpty else { return 0 }
 
         let friends = try await imStore.loadFriends()
         let allProfiles = try await profileStore.loadProfiles(includeInactive: true)
-        var applied = 0
+        var result = FriendBindingReconcileResult()
         for entity in boundEntities {
             guard let rawUserID = entity.metadata["connor_friend_user_id"],
                   let userID = Int64(rawUserID),
@@ -163,9 +177,32 @@ public struct ImFriendPersonProvisioner: Sendable {
                source.isActiveForDefaultContext {
                 _ = try await profileStore.merge(sourceID: stableID, targetID: target.id, now: Date())
             }
-            applied += 1
+            result.applied.append(userID)
         }
-        return applied
+
+        // 解绑回放：仅对「本机此前从远端应用过的绑定」生效，避免误伤本机本地发起的合并。
+        for friend in friends where shouldAutoUnbind(friend.userId) {
+            guard let rawBoundID = friend.personProfileID else { continue }
+            let boundID = ContactID(rawValue: rawBoundID)
+            guard let profile = allProfiles.first(where: { $0.id == boundID }),
+                  let entity = Self.resolveEntity(for: profile, entities: entities)
+            else { continue }
+            // 实体仍带有该好友的绑定 → 保持；否则视为对端已解绑/改绑。
+            guard entity.metadata["connor_friend_user_id"] != String(friend.userId) else { continue }
+            try await imStore.bindFriendPerson(userId: friend.userId, personProfileID: nil, now: now())
+            result.unbound.append(friend.userId)
+        }
+        return result
+    }
+
+    /// 按人物档案定位对应的 L4 person 实体：优先 memoryEntityID，其次合成键。
+    private static func resolveEntity(for profile: PersonProfile, entities: [MemoryOSEntity]) -> MemoryOSEntity? {
+        if let memoryEntityID = profile.memoryEntityID, !memoryEntityID.isEmpty {
+            return entities.first { $0.id == memoryEntityID }
+        }
+        let syntheticID = "l4-entity:person-profile:\(profile.id.rawValue)"
+        let syntheticStableKey = "person-profile:\(profile.id.rawValue)"
+        return entities.first { $0.id == syntheticID || $0.stableKey == syntheticStableKey }
     }
 
     /// 在本地人物档案中定位与 L4 person 实体对应的人物：先按 memory_entity_id 精确匹配，
