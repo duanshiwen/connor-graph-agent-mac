@@ -975,6 +975,10 @@ public final class AppUserIdentityStore: ObservableObject {
                     if isDeviceSyncEnabled {
                         let lease = try await session.acquireL1Lease(deviceID: deviceID)
                         L1ExtractionEligibility.shared.update(granted: lease.granted, expiresAt: lease.expiresAt)
+                        // 心跳周期兜底同步：WebSocket 的 sync_changed 推送在后台/弱网/掉线重连时
+                        // 可能丢失，这里保证每个心跳周期都主动触发一次 push+pull，
+                        // 让跨端（安卓↔Mac）人际关系等变更 ~45s 内完成同步（与安卓端行为一致）。
+                        requestDeviceSyncPass()
                     } else {
                         // 同步关闭：不申请租约，本机始终自行提取。
                         L1ExtractionEligibility.shared.enableStandalone()
