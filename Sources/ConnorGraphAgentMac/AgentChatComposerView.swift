@@ -401,13 +401,19 @@ struct AgentChatComposerView: View {
             guard !result.accepted.isEmpty else { return }
             let imageRefs = result.accepted.filter { $0.kind == .image }
             for ref in imageRefs {
-                // Insert Markdown image reference into composer
-                let mdImage = "![^\(ref.displayName)]"
-                if localChatInput.isEmpty {
-                    localChatInput = mdImage
-                } else {
-                    localChatInput += "\n\n\(mdImage)"
-                }
+                // 行内图片：把 Markdown 图片引用插入到光标所在位置（图文混排），
+                // 渲染时按会话附件根目录解析本地文件 URL。
+                guard let fileURL = chatActions.composer.localAttachmentFileURL(ref) else { continue }
+                let safeName = ref.displayName
+                    .replacingOccurrences(of: "]", with: "-")
+                    .replacingOccurrences(of: "(", with: "-")
+                    .replacingOccurrences(of: ")", with: "-")
+                let mdImage = "![\(safeName)](\(fileURL.absoluteString))"
+                localChatInput = NoteInlineMediaInsertion.insert(
+                    mdImage,
+                    at: composerSelectionTracker.selectedRange?.location,
+                    into: localChatInput
+                )
                 chatActions.composer.updateSelectedChatInputDraft(localChatInput)
                 // Check model image support
                 if !chatActions.composer.currentModelSupportsImages() {
@@ -1583,5 +1589,14 @@ private struct ComposerFormatBar: View {
         case "photo": return "插入图片"
         default: return ""
         }
+    }
+}
+
+/// 行内多媒体插入：把 Markdown 片段插入到光标位置（图文混排），无光标时追加到末尾。
+enum NoteInlineMediaInsertion {
+    static func insert(_ snippet: String, at location: Int?, into text: String) -> String {
+        let ns = text as NSString
+        let bounded = min(max(location ?? ns.length, 0), ns.length)
+        return ns.replacingCharacters(in: NSRange(location: bounded, length: 0), with: snippet + "\n\n")
     }
 }
