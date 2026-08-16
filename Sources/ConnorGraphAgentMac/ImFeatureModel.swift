@@ -568,6 +568,7 @@ final class ImFeatureModel {
             try await center.removeFriend(userId: userId)
             friends = (try? await store.loadFriends()) ?? []
             contactMessage = "已删除好友"
+            AppAccountSyncSignal.postLocalDataDidChange()
         } catch {
             contactMessage = "删除好友失败：\(error.localizedDescription)"
         }
@@ -579,6 +580,7 @@ final class ImFeatureModel {
             try await center.bindFriendPerson(userId: userId, personProfileID: personProfileID)
             friends = (try? await store.loadFriends()) ?? friends
             contactMessage = personProfileID == nil ? "已解除人物关联" : "已关联人物"
+            AppAccountSyncSignal.postLocalDataDidChange()
         } catch {
             contactMessage = "关联人物失败：\(error.localizedDescription)"
         }
@@ -594,6 +596,7 @@ final class ImFeatureModel {
             }
             friends = (try? await store.loadFriends()) ?? friends
             contactMessage = "已解除人物绑定"
+            AppAccountSyncSignal.postLocalDataDidChange()
         } catch {
             contactMessage = "解除人物绑定失败：\(error.localizedDescription)"
         }

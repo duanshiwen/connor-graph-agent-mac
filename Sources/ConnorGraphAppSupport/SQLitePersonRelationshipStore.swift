@@ -108,10 +108,12 @@ public final class SQLitePersonRelationshipStore: PersonRelationshipStore, @unch
     }
 
     public func upsert(_ relationship: PersonRelationship) async throws -> PersonRelationship {
-        try queue.sync {
+        let saved = try queue.sync {
             try upsertInternal(relationship)
             return relationship
         }
+        AppAccountSyncSignal.postLocalDataDidChange()
+        return saved
     }
 
     public func markDeleted(id: String, now: Date = Date()) async throws {
@@ -123,6 +125,7 @@ public final class SQLitePersonRelationshipStore: PersonRelationshipStore, @unch
             relationship.updatedAt = now
             try upsertInternal(relationship)
         }
+        AppAccountSyncSignal.postLocalDataDidChange()
     }
 
     public func reassignPersonIDForMerge(sourceID: ContactID, targetID: ContactID, now: Date = Date()) async throws {
@@ -157,6 +160,7 @@ public final class SQLitePersonRelationshipStore: PersonRelationshipStore, @unch
                 try upsertInternal(relationship)
             }
         }
+        AppAccountSyncSignal.postLocalDataDidChange()
     }
 
     private static func configurePragmas(db: OpaquePointer) throws {
