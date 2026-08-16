@@ -37,7 +37,8 @@ struct CraftListPaneView: View {
                 CraftContactsListPane(
                     model: graph.contacts,
                     im: graph.im,
-                    onOpenPeerChat: openPeerChat
+                    onOpenPeerChat: openPeerChat,
+                    forwarding: makeListItemForwarding(graph: graph)
                 )
             case .rss:
                 RSSListRouteView(model: graph.rss, forwarding: makeListItemForwarding(graph: graph))

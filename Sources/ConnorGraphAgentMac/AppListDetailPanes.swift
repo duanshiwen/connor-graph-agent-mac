@@ -607,7 +607,10 @@ struct CraftContactsListPane: View {
     @Bindable var model: ContactsFeatureModel
     var im: ImFeatureModel?
     var onOpenPeerChat: (Int64) -> Void
+    var forwarding: ListItemForwardingContext
     @State private var isAddingConnorFriend = false
+    @State private var pendingForwardBundle: ForwardedChatBundle?
+    @State private var isForwardSending = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -647,6 +650,24 @@ struct CraftContactsListPane: View {
             if let im {
                 ImAddFriendSheet(model: im, isPresented: $isAddingConnorFriend)
             }
+        }
+        .sheet(item: $pendingForwardBundle) { bundle in
+            ForwardDestinationSheet(
+                bundle: bundle,
+                pager: forwarding.makePager(),
+                isSending: isForwardSending,
+                onCancel: { pendingForwardBundle = nil },
+                onSend: { caption, keys in
+                    var copy = bundle
+                    copy.caption = caption
+                    isForwardSending = true
+                    defer {
+                        isForwardSending = false
+                        pendingForwardBundle = nil
+                    }
+                    try? await forwarding.send(copy, keys)
+                }
+            )
         }
     }
 
@@ -697,7 +718,16 @@ struct CraftContactsListPane: View {
                         friendProfileIDs: friendProfileIDs,
                         imageURL: { model.imageURLs(for: $0).first },
                         onSelect: { model.selectedContactID = $0 },
-                        onLoadMore: { id in Task { await model.loadMoreProfilesIfNeeded(currentProfileID: id) } }
+                        onLoadMore: { id in Task { await model.loadMoreProfilesIfNeeded(currentProfileID: id) } },
+                        onForward: { row in pendingForwardBundle = contactForwardBundle(row) },
+                        onCopyInfo: { row in
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(contactInfoText(row), forType: .string)
+                        },
+                        onMessage: { row in
+                            guard let friend = im?.friends.first(where: { $0.personProfileID == row.id.rawValue }) else { return }
+                            onOpenPeerChat(friend.userId)
+                        }
                     )
                 }
             }
@@ -715,6 +745,9 @@ private struct ContactsRowsScrollView: View {
     var imageURL: (ContactID) -> URL?
     var onSelect: (ContactID) -> Void
     var onLoadMore: (ContactID) -> Void
+    var onForward: (NativeContactRowPresentation) -> Void
+    var onCopyInfo: (NativeContactRowPresentation) -> Void
+    var onMessage: (NativeContactRowPresentation) -> Void
 
     var body: some View {
         LazyVStack(spacing: AppListCardLayout.spacing) {
@@ -724,7 +757,10 @@ private struct ContactsRowsScrollView: View {
                     imageURL: imageURL(row.id),
                     isSelected: row.id == selectedID,
                     isConnorFriend: friendProfileIDs.contains(row.id.rawValue),
-                    onSelect: { onSelect(row.id) }
+                    onSelect: { onSelect(row.id) },
+                    onForward: { onForward(row) },
+                    onCopyInfo: { onCopyInfo(row) },
+                    onMessage: { onMessage(row) }
                 )
                     .onAppear { onLoadMore(row.id) }
             }
@@ -738,6 +774,9 @@ private struct ContactRowButton: View {
     var isSelected: Bool
     var isConnorFriend: Bool
     var onSelect: () -> Void
+    var onForward: () -> Void
+    var onCopyInfo: () -> Void
+    var onMessage: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
@@ -769,6 +808,15 @@ private struct ContactRowButton: View {
             .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("打开人物详情", systemImage: "person.text.rectangle") { onSelect() }
+            Button("发送给…", systemImage: "arrowshape.turn.up.right") { onForward() }
+            if isConnorFriend {
+                Button("发消息", systemImage: "bubble.left") { onMessage() }
+            }
+            Divider()
+            Button("复制人物信息", systemImage: "doc.on.doc") { onCopyInfo() }
+        }
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityHint("打开人物详情")
     }
@@ -4879,6 +4927,48 @@ private func rssForwardBundle(_ item: RSSItemSummary, source: RSSSource?) -> For
             )
         ]
     )
+}
+
+private func contactForwardBundle(_ row: NativeContactRowPresentation) -> ForwardedChatBundle {
+    var lines: [String] = []
+    if let email = row.primaryEmail?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
+        lines.append("邮箱：\(email)")
+    }
+    if let org = row.organizationName?.trimmingCharacters(in: .whitespacesAndNewlines), !org.isEmpty {
+        lines.append("组织：\(org)")
+    }
+    let subtitle = row.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !subtitle.isEmpty, subtitle != row.displayName {
+        lines.append("简介：\(subtitle)")
+    }
+    let body = lines.joined(separator: "\n")
+    return ForwardedChatBundle(
+        title: "人物：\(row.displayName)",
+        sourceTitle: "人际关系",
+        items: [
+            ForwardedChatItem(
+                id: row.id.rawValue,
+                senderName: "康纳同学",
+                createdAt: Int64(Date().timeIntervalSince1970 * 1000),
+                text: body.isEmpty ? row.displayName : body
+            )
+        ]
+    )
+}
+
+private func contactInfoText(_ row: NativeContactRowPresentation) -> String {
+    var lines = [row.displayName]
+    if let email = row.primaryEmail?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
+        lines.append("邮箱：\(email)")
+    }
+    if let org = row.organizationName?.trimmingCharacters(in: .whitespacesAndNewlines), !org.isEmpty {
+        lines.append("组织：\(org)")
+    }
+    let subtitle = row.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !subtitle.isEmpty, subtitle != row.displayName {
+        lines.append(subtitle)
+    }
+    return lines.joined(separator: "\n")
 }
 
 private func calendarForwardBundle(_ row: NativeCalendarEventRowPresentation) -> ForwardedChatBundle {
