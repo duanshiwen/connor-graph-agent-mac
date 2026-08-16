@@ -127,6 +127,26 @@ struct ConnorGraphAgentMacApp: App {
 
                 Divider()
 
+                Menu("跳转到") {
+                    Button("智能体聊天") { root.sendWhenInteractive(.selectSidebar(.agentChat)) }
+                    Button("人际关系") { root.sendWhenInteractive(.selectSidebar(.contacts)) }
+                    Button("日历") { root.sendWhenInteractive(.selectSidebar(.calendar)) }
+                    Button("邮件") { root.sendWhenInteractive(.selectSidebar(.mail)) }
+                    Button("RSS") { root.sendWhenInteractive(.selectSidebar(.rss)) }
+                    Button("数据源 / MCP") { root.sendWhenInteractive(.selectSidebar(.sources)) }
+                    Button("技能") { root.sendWhenInteractive(.selectSidebar(.skills)) }
+                    Button("知识市场") { root.sendWhenInteractive(.selectSidebar(.knowledgeMarketplace)) }
+                    Divider()
+                    Button("定时任务") { root.sendWhenInteractive(.selectSidebar(.scheduledTasks)) }
+                    Button("事件触发") { root.sendWhenInteractive(.selectSidebar(.eventTriggeredTasks)) }
+                    Button("自动化") { root.sendWhenInteractive(.selectSidebar(.automation)) }
+                    Divider()
+                    Button("Product OS") { root.sendWhenInteractive(.selectSidebar(.productOS)) }
+                    Button("模型设置") { root.sendWhenInteractive(.selectSidebar(.llmSettings)) }
+                }
+
+                Divider()
+
                 Button("打开设置") {
                     root.sendWhenInteractive(.shortcut(.openSettings))
                 }
