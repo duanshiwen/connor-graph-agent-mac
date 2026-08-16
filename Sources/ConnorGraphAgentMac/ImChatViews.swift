@@ -602,7 +602,6 @@ struct ImChatDetailView: View {
     }
 
     private func sendMedia(type: ImMessageType, url: URL) {
-        AttachmentLibraryRegistration.register(urls: [url])
         Task {
             let metadata = await ImMediaInspector.metadata(for: url, type: type)
             await model.sendMedia(fileURL: url, messageType: type, metadata: metadata)

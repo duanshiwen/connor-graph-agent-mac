@@ -128,6 +128,26 @@ struct ComposerDraftSynchronizationTests {
         #expect(ChatComposerDraftRepository(storagePaths: paths).load(sessionID: "session") == nil)
     }
 
+    @Test func importAttachmentsRegistersFilesIntoAttachmentLibrary() async throws {
+        let root = temporaryDirectory()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        let model = ChatComposerModel()
+        let coordinator = ChatComposerCoordinator(model: model, storagePaths: paths)
+        coordinator.selectedSessionID = { "session" }
+        let source = root.appendingPathComponent("note-\(UUID().uuidString).txt")
+        try "附件内容".write(to: source, atomically: true, encoding: .utf8)
+
+        let result = await coordinator.importAttachments(urls: [source])
+
+        #expect(result.accepted.count == 1)
+        #expect(!model.pendingAttachmentRefs.isEmpty)
+        // LLM 会话/笔记里加入的附件自动纳入附件库
+        let recent = FileArtifactStore(paths: paths).recent(limit: 10)
+        #expect(recent.map(\.originalName).contains(source.lastPathComponent))
+    }
+
     private func makeFixture(autoSaveDraftsEnabled: Bool = true) -> (model: ChatComposerModel, coordinator: ChatComposerCoordinator) {
         let model = ChatComposerModel()
         let coordinator = ChatComposerCoordinator(model: model, storagePaths: nil)

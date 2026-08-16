@@ -201,6 +201,9 @@ final class ChatComposerCoordinator {
             model.pendingAttachmentRefs.append(contentsOf: imported)
             pendingAttachmentsBySessionID[sessionID] = model.pendingAttachmentRefs
             runExtractionJobs(sessionID: sessionID)
+            // 会话里加入的附件（选文件/附件库/拖拽/粘贴/笔记图片）一律登记进附件库，
+            // 保证“最近附件”与 LLM 会话、笔记里的图片/文件都纳入。
+            AttachmentLibraryRegistration.register(urls: urls, paths: storagePaths)
         }
         let result = AttachmentImportBatchResult(accepted: imported, rejected: rejected)
         if !rejected.isEmpty { showImportToast(result) }
