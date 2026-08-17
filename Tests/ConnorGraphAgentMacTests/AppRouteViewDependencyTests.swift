@@ -279,7 +279,6 @@ struct AppRouteViewDependencyTests {
         case .automation: "automation"
         case .scheduledTasks: "scheduledTasks"
         case .eventTriggeredTasks: "eventTriggeredTasks"
-        case .productOS: "productOS"
         case .calendar: "calendar"
         case .contacts: "contacts"
         case .mail: "mail"
