@@ -404,6 +404,11 @@ public actor NoteImportCoordinator {
            accessError == .pathEscapesAuthorizedRoot {
             return (false, .unsafePath, nil)
         }
+        if error is AppSessionAttachmentImportError || error is NoteImportAttachmentImporterError {
+            // 附件被策略拒绝（超限/不支持）、源文件缺失或校验失败都是永久性错误：
+            // 重试不会成功，直接判定失败并继续导入后续笔记，避免整批导入被退避重试卡住。
+            return (false, .attachmentMissing, nil)
+        }
         if let code = error as? NoteImportErrorCode {
             switch code {
             case .unsafePath, .llmContextExceeded, .internalInvariantViolation:
