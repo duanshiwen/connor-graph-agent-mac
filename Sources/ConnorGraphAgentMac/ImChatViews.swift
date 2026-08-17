@@ -74,7 +74,21 @@ struct ImConversationRow: View {
         .onAppear { titleDraft = conversation.title }
         .onChange(of: conversation.title) { _, title in if !isEditingTitle { titleDraft = title } }
         .onChange(of: isTitleFocused) { _, focused in if !focused && isEditingTitle { commitTitleEdit() } }
-        .contextMenu { contextMenu }
+        .nativeContextMenu {
+            AppSessionNativeContextMenu.makeMenu(
+                currentStatus: conversation.status,
+                labels: labelDefinitions,
+                selectedLabelIDs: Set(conversation.labelIds),
+                onSetStatus: onSetStatus,
+                onToggleLabel: onToggleLabel,
+                onRename: beginTitleEdit,
+                onRegenerateTitle: onRegenerateTitle,
+                onToggleMuted: onToggleMuted,
+                isMuted: conversation.muted,
+                isRegeneratingTitle: isRegeneratingTitle,
+                onDelete: onDelete
+            )
+        }
     }
 
     private var titleRow: some View {
@@ -169,29 +183,6 @@ struct ImConversationRow: View {
                 }
             }
         }
-    }
-
-    @ViewBuilder private var contextMenu: some View {
-        Menu("更改状态", systemImage: "circle.dashed") {
-            ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
-                Button(status.displayName) { onSetStatus(status) }
-            }
-        }
-        Menu("标签", systemImage: "tag") {
-            ForEach(labelDefinitions) { definition in
-                Button {
-                    onToggleLabel(definition.id)
-                } label: {
-                    Label(definition.name, systemImage: conversation.labelIds.contains(definition.id) ? "checkmark.circle.fill" : "tag")
-                }
-            }
-        }
-        Divider()
-        Button("重命名", systemImage: "pencil", action: beginTitleEdit)
-        Button("AI 重设标题", systemImage: "sparkles", action: onRegenerateTitle).disabled(isRegeneratingTitle)
-        Button(conversation.muted ? "取消免打扰" : "免打扰", systemImage: "bell.slash", action: onToggleMuted)
-        Divider()
-        Button("删除会话", systemImage: "trash", role: .destructive, action: onDelete)
     }
 
     private var statusIcon: String {

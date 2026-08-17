@@ -4443,7 +4443,24 @@ struct CraftSessionRow: View {
                 }
                 .disabled(hasRunningBackgroundTask)
             }
-            .contextMenu { contextMenuItems }
+            .nativeContextMenu {
+                AppSessionNativeContextMenu.makeMenu(
+                    currentStatus: row.status,
+                    labels: labelDefinitions,
+                    selectedLabelIDs: Set(row.labels.map(\.id)),
+                    statusImageProvider: { status in
+                        status == row.status ? "checkmark.circle.fill" : icon(for: status)
+                    },
+                    onSetStatus: onSetStatus,
+                    onToggleLabel: onToggleLabel,
+                    onRename: beginTitleEdit,
+                    onRegenerateTitle: onRegenerateTitle,
+                    isRegeneratingTitle: isRegeneratingTitle,
+                    onDelete: { isDeleteConfirmationPresented = true },
+                    canDelete: !hasRunningBackgroundTask,
+                    deleteTitle: "删除"
+                )
+            }
             .onChange(of: row.title) { _, newTitle in
             guard !isEditingTitle else { return }
             titleDraft = newTitle
@@ -4464,64 +4481,6 @@ struct CraftSessionRow: View {
             } message: {
                 Text(hasRunningBackgroundTask ? "此会话仍有后台任务正在运行,请等待任务结束后再删除。" : "删除后会话将从列表中移除。")
             }
-    }
-
-    @ViewBuilder
-    private var contextMenuItems: some View {
-        Menu {
-            ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
-                Button {
-                    onSetStatus(status)
-                } label: {
-                    Label(status.displayName, systemImage: status == row.status ? "checkmark.circle.fill" : icon(for: status))
-                }
-            }
-        } label: {
-            Label("更改状态", systemImage: "circle.dashed")
-        }
-
-        Menu {
-            if labelDefinitions.isEmpty {
-                Button {} label: {
-                    Label("暂无可切换标签", systemImage: "tag.slash")
-                }
-                .disabled(true)
-            } else {
-                ForEach(labelDefinitions) { definition in
-                    Button {
-                        onToggleLabel(definition.id)
-                    } label: {
-                        Label(definition.name, systemImage: row.labels.contains(where: { $0.id == definition.id }) ? "checkmark.circle.fill" : "tag")
-                    }
-                }
-            }
-        } label: {
-            Label("标签", systemImage: "tag")
-        }
-
-        Divider()
-
-        Button {
-            beginTitleEdit()
-        } label: {
-            Label("重命名", systemImage: "pencil")
-        }
-
-        Button {
-            onRegenerateTitle()
-        } label: {
-            Label("重设标题", systemImage: "sparkles")
-        }
-        .disabled(isRegeneratingTitle)
-
-        Divider()
-
-        Button(role: .destructive) {
-            isDeleteConfirmationPresented = true
-        } label: {
-            Label("删除", systemImage: "trash")
-        }
-        .disabled(hasRunningBackgroundTask)
     }
 
     private var rowContent: some View {

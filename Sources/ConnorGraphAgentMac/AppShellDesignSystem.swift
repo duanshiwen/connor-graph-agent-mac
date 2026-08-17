@@ -429,3 +429,194 @@ struct AppMetricCard: View {
         )
     }
 }
+
+// MARK: - 原生右键菜单（修复 SwiftUI contextMenu 嵌套子菜单 hover 消失）
+
+/// SwiftUI `.contextMenu` 内嵌套 `Menu` 子菜单在 macOS 上存在已知缺陷：
+/// 光标移到子菜单所在行时，hover 会触发视图重建，菜单跟踪被中断，整个菜单消失。
+/// 该问题在行视图带 `onHover`/状态动画（如会话卡片）时稳定复现。
+/// 这里改为原生 `NSMenu` 子菜单：子菜单的展开由 AppKit 跟踪，不受 SwiftUI 重建影响。
+final class NativeMenuActionTarget: NSObject {
+    private let handler: () -> Void
+    init(_ handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init()
+    }
+    @objc func invoke(_ sender: Any?) {
+        handler()
+    }
+}
+
+/// 捕获右键点击并在该位置弹出原生 NSMenu 的透明桥接视图。
+/// 仅拦截右键事件；左键/双击等事件全部穿透到下层 SwiftUI 视图。
+final class NativeRightClickMenuView: NSView {
+    var makeMenu: () -> NSMenu
+    /// 强持有 menu item 的 action target，防止菜单弹出期间 target 被释放。
+    private var retainedTargets: [NativeMenuActionTarget] = []
+
+    init(makeMenu: @escaping () -> NSMenu) {
+        self.makeMenu = makeMenu
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // 只拦截右键，其余事件放行给下层（避免挡住行点击/双击/滚动）。
+        if NSApp.currentEvent?.type == .rightMouseDown {
+            return self
+        }
+        return nil
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        let menu = makeMenu()
+        retainedTargets = Self.collectTargets(in: menu)
+        menu.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
+    }
+
+    private static func collectTargets(in menu: NSMenu) -> [NativeMenuActionTarget] {
+        var targets: [NativeMenuActionTarget] = []
+        for item in menu.items {
+            if let target = item.target as? NativeMenuActionTarget {
+                targets.append(target)
+            }
+            if let submenu = item.submenu {
+                targets.append(contentsOf: collectTargets(in: submenu))
+            }
+        }
+        return targets
+    }
+}
+
+struct NativeContextMenuBridge: NSViewRepresentable {
+    var makeMenu: () -> NSMenu
+
+    func makeNSView(context: Context) -> NativeRightClickMenuView {
+        NativeRightClickMenuView(makeMenu: makeMenu)
+    }
+
+    func updateNSView(_ nsView: NativeRightClickMenuView, context: Context) {
+        nsView.makeMenu = makeMenu
+    }
+}
+
+extension View {
+    /// 用原生 NSMenu 替代 SwiftUI `.contextMenu`，支持可靠的嵌套子菜单。
+    func nativeContextMenu(_ makeMenu: @escaping () -> NSMenu) -> some View {
+        self.overlay(NativeContextMenuBridge(makeMenu: makeMenu))
+    }
+}
+
+// MARK: - 会话卡片原生右键菜单构建
+
+enum AppSessionNativeContextMenu {
+    /// 构建会话卡片的完整原生右键菜单（替代 SwiftUI `.contextMenu` 嵌套 `Menu`）。
+    /// - Parameters:
+    ///   - currentStatus: 当前状态，用于在子菜单中打勾。
+    ///   - statuses: 可选的状态列表，默认全部（除已归档）。
+    ///   - labels: 标签定义列表；为空时显示“暂无可切换标签”。
+    ///   - selectedLabelIDs: 已选中的标签 ID 集合，用于打勾。
+    ///   - statusImageProvider: 状态图标（默认用 AgentSessionStatusDefinition.defaults）。
+    static func makeMenu(
+        title: String = "",
+        currentStatus: AgentSessionStatus,
+        statuses: [AgentSessionStatus]? = nil,
+        labels: [AgentSessionLabelDefinition],
+        selectedLabelIDs: Set<String>,
+        statusImageProvider: (AgentSessionStatus) -> String = { status in
+            AgentSessionStatusDefinition.defaults.first(where: { $0.id == status.rawValue })?.systemImage ?? "circle"
+        },
+        onSetStatus: @escaping (AgentSessionStatus) -> Void,
+        onToggleLabel: @escaping (String) -> Void,
+        onRename: @escaping () -> Void,
+        onRegenerateTitle: @escaping () -> Void,
+        onToggleMuted: (() -> Void)? = nil,
+        isMuted: Bool = false,
+        isRegeneratingTitle: Bool,
+        onDelete: @escaping () -> Void,
+        canDelete: Bool = true,
+        deleteTitle: String = "删除会话"
+    ) -> NSMenu {
+        let menu = NSMenu(title: title)
+        if !title.isEmpty {
+            let header = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+        }
+
+        // 更改状态（子菜单）
+        let statusItem = NSMenuItem(title: "更改状态", action: nil, keyEquivalent: "")
+        statusItem.image = NSImage(systemSymbolName: "circle.dashed", accessibilityDescription: "更改状态")
+        let statusMenu = NSMenu(title: "更改状态")
+        for status in statuses ?? AgentSessionStatus.allCases.filter({ $0 != .archived }) {
+            let item = NSMenuItem(title: status.displayName, action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: statusImageProvider(status), accessibilityDescription: status.displayName)
+            item.target = NativeMenuActionTarget { onSetStatus(status) }
+            if status == currentStatus {
+                item.state = .on
+            }
+            statusMenu.addItem(item)
+        }
+        statusItem.submenu = statusMenu
+        menu.addItem(statusItem)
+
+        // 标签（子菜单）
+        let labelItem = NSMenuItem(title: "标签", action: nil, keyEquivalent: "")
+        labelItem.image = NSImage(systemSymbolName: "tag", accessibilityDescription: "标签")
+        let labelMenu = NSMenu(title: "标签")
+        if labels.isEmpty {
+            let empty = NSMenuItem(title: "暂无可切换标签", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            labelMenu.addItem(empty)
+        } else {
+            for definition in labels {
+                let item = NSMenuItem(title: definition.name, action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
+                item.image = NSImage(systemSymbolName: selectedLabelIDs.contains(definition.id) ? "checkmark.circle.fill" : (definition.systemImage.isEmpty ? "tag" : definition.systemImage), accessibilityDescription: definition.name)
+                item.target = NativeMenuActionTarget { onToggleLabel(definition.id) }
+                if selectedLabelIDs.contains(definition.id) {
+                    item.state = .on
+                }
+                labelMenu.addItem(item)
+            }
+        }
+        labelItem.submenu = labelMenu
+        menu.addItem(labelItem)
+
+        menu.addItem(.separator())
+
+        // 重命名
+        let renameItem = NSMenuItem(title: "重命名", action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
+        renameItem.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: "重命名")
+        renameItem.target = NativeMenuActionTarget(onRename)
+        menu.addItem(renameItem)
+
+        // AI 重设标题
+        let regenerateItem = NSMenuItem(title: "AI 重设标题", action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
+        regenerateItem.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "AI 重设标题")
+        regenerateItem.target = NativeMenuActionTarget(onRegenerateTitle)
+        regenerateItem.isEnabled = !isRegeneratingTitle
+        menu.addItem(regenerateItem)
+
+        // 免打扰（可选：IM 会话有免打扰，Craft 会话没有）
+        if let onToggleMuted {
+            let muteItem = NSMenuItem(title: isMuted ? "取消免打扰" : "免打扰", action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
+            muteItem.image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: isMuted ? "取消免打扰" : "免打扰")
+            muteItem.target = NativeMenuActionTarget(onToggleMuted)
+            menu.addItem(muteItem)
+        }
+
+        menu.addItem(.separator())
+
+        // 删除
+        let deleteItem = NSMenuItem(title: deleteTitle, action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
+        deleteItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: deleteTitle)
+        deleteItem.target = NativeMenuActionTarget(onDelete)
+        deleteItem.isEnabled = canDelete
+        menu.addItem(deleteItem)
+
+        return menu
+    }
+}
