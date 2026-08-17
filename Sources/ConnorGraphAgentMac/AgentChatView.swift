@@ -571,6 +571,7 @@ private struct AgentChatConversationView: View {
     @State private var selectedForwardMessageIDs: Set<String> = []
     @State private var isForwardSelectionMode = false
     @State private var isForwardSheetPresented = false
+    @State private var isSessionForwardSheetPresented = false
     @State private var isForwarding = false
     @StateObject private var chatViewportController = ChatViewportController(
         configuration: ChatViewportConfiguration(
@@ -980,6 +981,9 @@ private struct AgentChatConversationView: View {
                     onBeginForwardSelection: {
                         selectedForwardMessageIDs = []
                         isForwardSelectionMode = true
+                    },
+                    onForwardSession: {
+                        isSessionForwardSheetPresented = true
                     }
                 )
                     .padding(.horizontal, AgentChatLayout.spaceL)
@@ -1125,6 +1129,32 @@ private struct AgentChatConversationView: View {
                 )
             }
         }
+        .sheet(isPresented: $isSessionForwardSheetPresented) {
+            if let bundle = sessionForwardBundle, let imModel {
+                ForwardDestinationSheet(
+                    bundle: bundle,
+                    pager: imModel.makeForwardDestinationPager(),
+                    isSending: isForwarding,
+                    onCancel: { isSessionForwardSheetPresented = false },
+                    onSend: { caption, destinationKeys in
+                        isForwarding = true
+                        var outgoing = bundle
+                        outgoing.caption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+                        do {
+                            try await imModel.forward(
+                                bundle: outgoing,
+                                destinationKeys: destinationKeys,
+                                onBackgroundError: { chatActions.errors.errorMessage = $0 }
+                            )
+                            isSessionForwardSheetPresented = false
+                        } catch {
+                            chatActions.errors.errorMessage = "转发失败：\(error.localizedDescription)"
+                        }
+                        isForwarding = false
+                    }
+                )
+            }
+        }
         .padding(.horizontal, AgentChatLayout.spaceL)
         .padding(.vertical, AgentChatLayout.spaceM)
     }
@@ -1159,6 +1189,29 @@ private struct AgentChatConversationView: View {
                     text: nested?.title ?? message.content
                 )
             }
+        )
+    }
+
+    /// 整体转发：把当前会话已加载的全部消息打包成一个转发卡片。
+    private var sessionForwardBundle: ForwardedChatBundle? {
+        guard let sessionID = model.sessions.selectedSessionID,
+              let session = model.sessions.allSessions.first(where: { $0.id == sessionID })
+        else { return nil }
+        let items = model.run.transcript.map { message in
+            let nested = ForwardedChatBundleCodec.decode(message.content)
+            return ForwardedChatItem(
+                id: message.id,
+                senderName: message.role == .user ? "我" : "康纳",
+                createdAt: Int64(message.createdAt.timeIntervalSince1970 * 1000),
+                kind: nested == nil ? "text" : "forward",
+                text: nested?.title ?? message.content
+            )
+        }
+        guard !items.isEmpty else { return nil }
+        return ForwardedChatBundle(
+            title: "\(session.title)的聊天记录",
+            sourceTitle: session.title,
+            items: items
         )
     }
 
@@ -1230,6 +1283,7 @@ private struct AgentChatConversationHeader: View {
     var canBeginForwardSelection: Bool
     @Binding var isSessionInfoPresented: Bool
     var onBeginForwardSelection: () -> Void
+    var onForwardSession: () -> Void
     @Environment(\.windowWidthClass) private var windowWidthClass
     @State private var isEditingTitle = false
     @State private var titleDraft = ""
@@ -1276,6 +1330,12 @@ private struct AgentChatConversationHeader: View {
                     }
                     Spacer()
                     if !isForwardSelectionMode {
+                        Button("转发会话", systemImage: "arrowshape.turn.up.right.2") {
+                            onForwardSession()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("把整个会话转发到单聊、群聊或其他会话")
                         Button("选择消息", systemImage: "checkmark.circle") {
                             onBeginForwardSelection()
                         }
