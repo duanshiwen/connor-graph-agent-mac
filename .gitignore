@@ -76,6 +76,7 @@ Cargo.lock
 
 # Build artifacts
 *.dmg
+!downloads/*.dmg
 *.pkg
 *.zip
 *.tar.gz
