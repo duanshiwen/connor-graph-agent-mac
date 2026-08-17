@@ -32,6 +32,7 @@ import Testing
         "interactive_web_get_draft",
         "interactive_web_get_status",
         "interactive_web_publish",
+        "interactive_web_delete_project",
         "interactive_web_records_summary",
         "interactive_web_export_records",
         "interactive_web_offline"
