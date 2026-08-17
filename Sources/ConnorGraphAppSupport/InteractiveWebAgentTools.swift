@@ -500,6 +500,43 @@ public actor InteractiveWebToolRuntime {
         return try status(project)
     }
 
+    /// 永久删除远程互动网页项目，并清理本机对应的本地草稿记录与目录。
+    /// 支持传入本地 projectID 或在线项目 ID（interactive_web_list_projects 返回）；
+    /// 本机没有对应草稿时只删除远程项目。
+    public func deleteProject(projectID: String) async throws -> InteractiveWebProjectStatus {
+        let api = try requireAPI()
+        let remoteID = try await remoteProjectID(for: projectID)
+        var localProject = try await store.project(id: projectID)
+        if localProject == nil {
+            localProject = try await store.project(remoteProjectID: remoteID)
+        }
+        let finalStatus: InteractiveWebProjectStatus
+        if let localProject {
+            finalStatus = try status(localProject)
+        } else {
+            finalStatus = InteractiveWebProjectStatus(
+                projectID: projectID,
+                name: "已删除",
+                rootURL: projectsRoot.appendingPathComponent(projectID, isDirectory: true),
+                revision: 1,
+                manifestHash: "",
+                fileCount: 0,
+                totalBytes: 0
+            )
+        }
+        try await api.deleteProject(projectID: remoteID)
+        if let localProject {
+            try? fileManager.removeItem(at: localProject.rootURL)
+            try await store.delete(projectID: localProject.id)
+        }
+        var result = finalStatus
+        result.remoteProjectID = nil
+        result.remoteSiteID = nil
+        result.latestDeploymentID = nil
+        result.publishedURL = nil
+        return result
+    }
+
     public func records(projectID: String, collection: String, limit: Int, page: Int = 1) async throws -> InteractiveWebRecordPage {
         let api = try requireAPI()
         let remoteProjectID = try await remoteProjectID(for: projectID)
@@ -753,6 +790,7 @@ public struct InteractiveWebAgentTool: AgentTool {
         case rollback = "interactive_web_rollback"
         case setAccess = "interactive_web_set_access"
         case offline = "interactive_web_offline"
+        case deleteProject = "interactive_web_delete_project"
         case recordsSummary = "interactive_web_records_summary"
         case exportRecords = "interactive_web_export_records"
     }
@@ -766,7 +804,7 @@ public struct InteractiveWebAgentTool: AgentTool {
 		case .createDraft, .editDraft, .downloadProject: .createInteractiveWebDraft
 		case .getDraft, .getStatus: .readSession
 		case .listProjects, .getProject, .recordsSummary: .externalNetwork
-        case .publish, .rollback, .setAccess, .offline, .exportRecords: .publishInteractiveWeb
+        case .publish, .rollback, .setAccess, .offline, .deleteProject, .exportRecords: .publishInteractiveWeb
         }
     }
     public var description: String {
@@ -782,7 +820,8 @@ public struct InteractiveWebAgentTool: AgentTool {
         case .publish: "Publish the exact current webpage revision to the internet and return its URL. Always requires native human approval; copy manifestHash exactly from interactive_web_create_draft (create or update) or interactive_web_get_status output. Publishing rejects drafts whose index.html omits the SDK script tag. Publishing a draft that came from interactive_web_download_project or was previously published keeps the SAME URL (the project's site is reused); only a brand-new draft (no remote project yet) gets a new URL. To revise an already-published webpage, download the original project and publish the same projectID — never create a new draft for that purpose."
         case .rollback: "Rollback a published webpage to a specific deployment. Always requires native human approval."
         case .setAccess: "Change who can access a published webpage. Always requires native human approval."
-        case .offline: "Take a published webpage offline. Always requires native human approval."
+        case .offline: "Take a published webpage offline; the project and its URL stay intact and can be brought back online later. Always requires native human approval."
+        case .deleteProject: "Permanently delete an interactive webpage project: the site URL stops working and all its files and visitor-submitted records are destroyed irreversibly. Unlike interactive_web_offline (which only hides the page and can be reversed), deletion cannot be undone. Only call this when the user has clearly asked to delete or permanently remove the webpage, never for hiding or temporary takedown; confirm the exact project with the user first, then always requires native human approval. Accepts a local projectID or the online project ID from interactive_web_list_projects; the local draft is removed from this device as well."
         case .recordsSummary: "Read submitted records from a published interactive webpage collection, one page at a time (default 100 per page, max 1000). Continue with page until hasNextPage is false so all records are covered."
         case .exportRecords: "Export submitted webpage records to CSV. Always requires native human approval."
         }
@@ -851,6 +890,8 @@ public struct InteractiveWebAgentTool: AgentTool {
             .closedObject(properties: ["projectID": .string(description: Self.localProjectIDDescription), "deploymentID": .string(description: "Target deployment ID")], required: ["projectID", "deploymentID"])
         case .setAccess:
             .object(properties: ["projectID": .string(description: Self.localProjectIDDescription), "accessMode": .stringEnumeration(values: ["public", "password", "private"], description: "Who can access the site"), "password": .string(description: "Required only for password access")], required: ["projectID", "accessMode"])
+        case .deleteProject:
+            .closedObject(properties: ["projectID": .string(description: "Exact local project ID, or the online project ID from interactive_web_list_projects")], required: ["projectID"])
         case .recordsSummary:
             .object(properties: ["projectID": .string(description: "Exact local project ID, or the online project ID from interactive_web_list_projects"), "collection": .string(description: "Collection name"), "limit": .integer(description: "1 through 1000"), "page": .integer(description: "1-based page number; default 1")], required: ["projectID", "collection"])
         case .exportRecords:
@@ -992,6 +1033,9 @@ public struct InteractiveWebAgentTool: AgentTool {
         case .offline:
             try requireExternalApproval(context)
             status = try await runtime.offline(projectID: requiredString("projectID", arguments)); text = "Published webpage is offline."
+        case .deleteProject:
+            try requireExternalApproval(context)
+            status = try await runtime.deleteProject(projectID: requiredString("projectID", arguments)); text = "Interactive webpage project permanently deleted."
         case .recordsSummary:
             status = nil
             let collection = try requiredString("collection", arguments)

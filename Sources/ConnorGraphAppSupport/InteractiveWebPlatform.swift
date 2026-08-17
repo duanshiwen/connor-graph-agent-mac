@@ -593,6 +593,7 @@ public actor InteractiveWebLocalStore {
     public func projects(accountID: String) throws -> [LocalInteractiveWebProject] { try read().projects.filter { $0.accountID == accountID } }
     public func project(id: String) throws -> LocalInteractiveWebProject? { try read().projects.first { $0.id == id } }
     public func project(remoteProjectID: String) throws -> LocalInteractiveWebProject? { try read().projects.first { $0.remoteProjectID == remoteProjectID } }
+    public func delete(projectID: String) throws { var state = try read(); state.projects.removeAll { $0.id == projectID }; try write(state) }
     public func save(choice: InteractiveWebChoiceRequest) throws { var state = try read(); state.choices.removeAll { $0.choiceRequestID == choice.choiceRequestID }; state.choices.append(choice); try write(state) }
     public func pendingChoices(accountID: String, conversationID: String) throws -> [InteractiveWebChoiceRequest] { try read().choices.filter { $0.accountID == accountID && $0.conversationID == conversationID && $0.state == "awaiting_user_choice" } }
     public func complete(_ response: InteractiveWebChoiceResponse, contextRevision: Int) throws -> Bool {
