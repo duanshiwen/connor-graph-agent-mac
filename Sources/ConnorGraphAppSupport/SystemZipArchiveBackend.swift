@@ -26,22 +26,77 @@ public struct SystemZipArchiveBackend: SafeArchiveBackend {
     }
 }
 
-/// 将用户选择的 Notion 来源解析为可扫描的文件夹：如果是 .zip 则先安全解压到临时目录。
+/// 将用户选择的 Notion 来源解析为可扫描的文件夹。
+///
+/// Notion 的大体量导出会先把真实导出包拆成 `Part-N.zip`，再整体包一层 zip 供下载；
+/// 只解一层的话扫描目录里就只有嵌套的 Part zip、没有任何 .md/.csv，导致「检查导入内容」为空。
+/// 因此这里会把嵌套的 Part zip 一并解压到扫描根目录下（临时目录会删除原 Part zip，
+/// 用户文件夹保持只读、仅在其内部新增解压目录），保证扫描器能递归扫到全部笔记。
 public enum NotionExportSourceResolver {
     public static func extractIfZip(_ selected: URL, extractor: SafeArchiveExtractor = .init(backend: SystemZipArchiveBackend())) throws -> URL {
-        guard selected.pathExtension.lowercased() == "zip" else { return selected }
-        let base = selected.deletingPathExtension().lastPathComponent.isEmpty
-            ? "NotionExport"
-            : selected.deletingPathExtension().lastPathComponent
-        var directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ConnorNotionImport-\(base)", isDirectory: true)
+        let root: URL
+        let deleteNestedZips: Bool
+        if selected.pathExtension.lowercased() == "zip" {
+            let base = selected.deletingPathExtension().lastPathComponent.isEmpty
+                ? "NotionExport"
+                : selected.deletingPathExtension().lastPathComponent
+            var directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("ConnorNotionImport-\(base)", isDirectory: true)
+            var suffix = 1
+            while FileManager.default.fileExists(atPath: directory.path) {
+                directory = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("ConnorNotionImport-\(base)-\(suffix)", isDirectory: true)
+                suffix += 1
+            }
+            _ = try extractor.extract(selected, to: directory)
+            root = directory
+            deleteNestedZips = true
+        } else {
+            root = selected
+            deleteNestedZips = false
+        }
+        try resolveNestedZips(in: root, extractor: extractor, deleteZips: deleteNestedZips)
+        return root
+    }
+
+    /// 把扫描根目录下嵌套的 .zip（Notion 多部分导出的 Part-N.zip）逐一解压到同层子目录，
+    /// 使扫描器能递归扫描到全部笔记。带深度上限，避免递归嵌套过深。
+    private static func resolveNestedZips(in root: URL, extractor: SafeArchiveExtractor, deleteZips: Bool, depth: Int = 0) throws {
+        guard depth < 4 else { return }
+        let zips = zipFiles(under: root)
+        guard !zips.isEmpty else { return }
+        for zip in zips {
+            let destination = uniqueDirectory(named: zip.deletingPathExtension().lastPathComponent, under: root)
+            _ = try extractor.extract(zip, to: destination)
+            if deleteZips {
+                try? FileManager.default.removeItem(at: zip)
+            }
+            try resolveNestedZips(in: destination, extractor: extractor, deleteZips: deleteZips, depth: depth + 1)
+        }
+    }
+
+    private static func zipFiles(under root: URL) -> [URL] {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey]
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+        var result: [URL] = []
+        for case let url as URL in enumerator {
+            guard (try? url.resourceValues(forKeys: keys))?.isRegularFile == true else { continue }
+            if url.pathExtension.lowercased() == "zip" { result.append(url) }
+        }
+        return result
+    }
+
+    private static func uniqueDirectory(named name: String, under root: URL) -> URL {
+        var directory = root.appendingPathComponent(name, isDirectory: true)
         var suffix = 1
         while FileManager.default.fileExists(atPath: directory.path) {
-            directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("ConnorNotionImport-\(base)-\(suffix)", isDirectory: true)
+            directory = root.appendingPathComponent("\(name)-\(suffix)", isDirectory: true)
             suffix += 1
         }
-        _ = try extractor.extract(selected, to: directory)
         return directory
     }
 }
