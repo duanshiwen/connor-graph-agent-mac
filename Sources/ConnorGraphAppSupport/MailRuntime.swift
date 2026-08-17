@@ -493,7 +493,15 @@ public struct MailRuntime: Sendable {
             throw MailRuntimeError.attachmentSessionRequired
         }
         let composed = try messageComposer.compose(draft: draft, identity: identity, attachments: attachments)
-        guard let approvedEnvelopeHash = draft.approvedEnvelopeHash, !approvedEnvelopeHash.isEmpty else {
+        // 执行模式（trustedWrite/allowAll）没有审批卡片、也不会调用 sendApprovalPayload
+        // 写入 approvedEnvelopeHash：此处视为对当前信封的自动批准，先落库再比对，
+        // 否则 approved=true 的发送会因缺少 hash 而失败（"执行模式下发送不成功"）。
+        var approvedEnvelopeHash = draft.approvedEnvelopeHash
+        if approved, approvedEnvelopeHash == nil || approvedEnvelopeHash?.isEmpty == true {
+            approvedEnvelopeHash = composed.envelopeHash
+            _ = try await draftStore.updateApprovedEnvelopeHash(id: draftID, envelopeHash: composed.envelopeHash)
+        }
+        guard let approvedEnvelopeHash, !approvedEnvelopeHash.isEmpty else {
             try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .sendApprovalRequested, riskClass: .send, redactedSummary: "Approved send blocked because draft has no approved envelope hash", payloadHash: composed.envelopeHash))
             throw MailRuntimeError.missingApprovedEnvelopeHash(draftID.rawValue)
         }
