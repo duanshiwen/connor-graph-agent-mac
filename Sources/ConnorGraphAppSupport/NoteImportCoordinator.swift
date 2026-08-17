@@ -211,20 +211,21 @@ public actor NoteImportCoordinator {
                         throw AppNoteImportRepositoryError.itemNotFound("Missing session for item \(current.id)")
                     }
                     if [.imported, .queuedForLLM, .runningLLM].contains(current.status) {
-                        var attachmentRefs: [AgentMessageAttachmentRef] = []
+                        var attachmentResults: [NoteImportAttachmentImportResult] = []
                         if options.importAttachments, let attachmentImporter, !note.attachments.isEmpty {
                             let authorizedRoot = note.sourceKind == .evernoteENEX ? enexLease : sourceLease
-                            attachmentRefs = try await attachmentImporter.importAttachments(
+                            attachmentResults = try await attachmentImporter.importAttachments(
                                 note.attachments,
                                 sessionID: boundSessionID,
                                 authorizedRoot: authorizedRoot
-                            ).map(\.messageRef)
+                            )
                         }
+                        let renderedContent = Self.rewritingImageReferences(in: note.markdownContent, results: attachmentResults)
                         let importedSession = try await sessionService.upsertImportedNoteMessage(
                             sessionID: boundSessionID,
                             messageID: messageID,
-                            content: note.markdownContent,
-                            attachments: attachmentRefs,
+                            content: renderedContent,
+                            attachments: attachmentResults.map(\.messageRef),
                             createdAt: note.createdAt ?? current.createdAt
                         )
                         onSessionImported(importedSession)
@@ -426,6 +427,56 @@ public actor NoteImportCoordinator {
     private func requireJob(_ id: String) throws -> NoteImportJobRecord { guard let value = try ledger.job(id: id) else { throw AppNoteImportRepositoryError.jobNotFound(id) }; return value }
     private func requireItem(_ id: String) throws -> NoteImportItemRecord { guard let value = try ledger.item(id: id) else { throw AppNoteImportRepositoryError.itemNotFound(id) }; return value }
     private func confidence(_ value: String?) -> Double? { switch value { case "certain": 1; case "high": 0.9; case "medium": 0.7; case "low": 0.4; case "ambiguous": 0.2; default: nil } }
+
+    /// 将笔记 Markdown 中的本地图片引用改写为已导入会话附件存储中的 file:// URL，
+    /// 使 AgentMarkdownPreviewText 能按会话附件根目录安全加载并显示图片。
+    /// - Notion / Markdown 文件夹：`![alt](相对路径)` → `![alt](file://…/原始文件)`
+    /// - Evernote：`attachment:<md5>` 占位符 → file URL
+    /// - Obsidian：`![[嵌入表达式]]` → 标准图片语法
+    static func rewritingImageReferences(in content: String, results: [NoteImportAttachmentImportResult]) -> String {
+        var output = content
+        for result in results {
+            let attachment = result.attachment
+            let storedURL = result.storedFileURL.absoluteString
+            if let md5 = attachment.metadata["enex_md5"] {
+                output = output.replacingOccurrences(of: "attachment:\(md5)", with: storedURL)
+                continue
+            }
+            if let embed = attachment.metadata["obsidian_embed"], embed.hasPrefix("![[") {
+                output = output.replacingOccurrences(of: embed, with: "![\(attachment.displayName)](\(storedURL))")
+                continue
+            }
+            guard let originalTarget = attachment.metadata["notion_target"] ?? attachment.metadata["markdown_target"] else { continue }
+            output = replacingMarkdownImageTarget(in: output, expected: normalizedReference(originalTarget), storedURL: storedURL)
+        }
+        return output
+    }
+
+    private static func normalizedReference(_ value: String) -> String {
+        var normalized = value.components(separatedBy: "#")[0]
+        normalized = normalized.removingPercentEncoding ?? normalized
+        normalized = normalized.replacingOccurrences(of: "\\", with: "/")
+        while normalized.hasPrefix("./") { normalized = String(normalized.dropFirst(2)) }
+        return normalized.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func replacingMarkdownImageTarget(in content: String, expected: String, storedURL: String) -> String {
+        let pattern = #"!\[([^\]]*)\]\(\s*([^()\n]*?)(?:\s+["'][^"']*["'])?\s*\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return content }
+        let ns = content as NSString
+        var replacements: [(range: NSRange, alt: String)] = []
+        for match in regex.matches(in: content, range: NSRange(location: 0, length: ns.length)) {
+            let target = ns.substring(with: match.range(at: 2))
+            guard normalizedReference(target) == expected else { continue }
+            replacements.append((match.range, ns.substring(with: match.range(at: 1))))
+        }
+        guard !replacements.isEmpty else { return content }
+        let mutable = NSMutableString(string: content)
+        for replacement in replacements.reversed() {
+            mutable.replaceCharacters(in: replacement.range, with: "![\(replacement.alt)](\(storedURL))")
+        }
+        return mutable as String
+    }
 
     private static func encodePayload(_ note: ImportedNote) throws -> String {
         let interval = NoteImportPerformanceLog.begin("Payload Encode", jobID: "preview")

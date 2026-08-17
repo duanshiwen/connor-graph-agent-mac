@@ -12,12 +12,14 @@ public struct NoteImportAttachmentImportResult: Sendable, Equatable {
     public var attachment: ImportedNoteAttachment
     public var messageRef: AgentMessageAttachmentRef
     public var reused: Bool
+    /// 附件在会话附件存储中的实际文件 URL（供笔记 Markdown 图片引用改写）。
+    public var storedFileURL: URL
 }
 
 public actor NoteImportAttachmentImporter {
     private let store: AppSessionAttachmentStore
     private let policy: AttachmentImportPolicy
-    private var importedBySessionAndHash: [String: AgentMessageAttachmentRef] = [:]
+    private var importedBySessionAndHash: [String: AgentAttachmentManifest] = [:]
 
     /// 笔记导入使用比日常聊天更宽松的附件策略：
     /// Notion/Obsidian 等导出的图片可能超过默认 10 MB 上限，放宽图片限制避免导入被拒绝。
@@ -44,10 +46,23 @@ public actor NoteImportAttachmentImporter {
         let hash = try AppSessionAttachmentStore.sha256Hex(forItemAt: url)
         if let expected = attachment.contentHash, expected.lowercased() != hash.lowercased() { throw NoteImportAttachmentImporterError.hashMismatch(expected: expected, actual: hash) }
         let key = sessionID + ":" + hash
-        if let existing = importedBySessionAndHash[key] { return .init(attachment: attachment, messageRef: existing, reused: true) }
+        let directories = try store.paths.ensureSessionArtifactDirectories(sessionID: sessionID)
+        if let existing = importedBySessionAndHash[key] {
+            return .init(
+                attachment: attachment,
+                messageRef: existing.messageRef,
+                reused: true,
+                storedFileURL: directories.root.appendingPathComponent(existing.storedRelativePath)
+            )
+        }
         let manifest = try store.importFile(at: url, sessionID: sessionID, policy: policy)
-        importedBySessionAndHash[key] = manifest.messageRef
-        return .init(attachment: attachment, messageRef: manifest.messageRef, reused: false)
+        importedBySessionAndHash[key] = manifest
+        return .init(
+            attachment: attachment,
+            messageRef: manifest.messageRef,
+            reused: false,
+            storedFileURL: directories.root.appendingPathComponent(manifest.storedRelativePath)
+        )
     }
 
     public func importAttachments(_ attachments: [ImportedNoteAttachment], sessionID: String, authorizedRoot: NoteImportSourceAccessLease? = nil) throws -> [NoteImportAttachmentImportResult] {
