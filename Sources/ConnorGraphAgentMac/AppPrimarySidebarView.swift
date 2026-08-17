@@ -11,6 +11,7 @@ struct CraftPrimarySidebarView: View {
     let graph: AppFeatureGraph
     @Binding var selection: SidebarItem?
     var sendCommand: (AppCommand) -> Void
+    @Environment(\.openWindow) private var openWindow
     @State private var sessionsExpanded = true
     @State private var labelsExpanded = true
     @State private var sourcesExpanded = true
@@ -34,7 +35,15 @@ struct CraftPrimarySidebarView: View {
                 select(.agentChat)
                 sendCommand(.newNote)
             } label: {
-                SidebarActionButtonLabel(title: "新建或导入笔记", systemImage: "note.text.badge.plus", minHeight: 32)
+                SidebarActionButtonLabel(title: "新建笔记", systemImage: "note.text.badge.plus", minHeight: 32)
+            }
+            .buttonStyle(SidebarActionButtonStyle())
+            .padding(.horizontal, AppShellLayout.spaceM)
+
+            Button {
+                openWindow(id: AppMenuPresentation.noteImportWizardWindowID)
+            } label: {
+                SidebarActionButtonLabel(title: "批量导入笔记", systemImage: "square.and.arrow.down.on.square", minHeight: 32)
             }
             .buttonStyle(SidebarActionButtonStyle())
             .padding(.horizontal, AppShellLayout.spaceM)
