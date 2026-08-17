@@ -539,6 +539,41 @@ struct NoteImportCoordinatorTests {
         }
     }
 
+    @Test("Reimports a cancelled job's items that never created a session instead of skipping them")
+    func reimportsCancelledItemsWithoutSession() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let databasePath = root.appendingPathComponent("db.sqlite").path
+        let store = try SQLiteGraphKernelStore(path: databasePath)
+        try store.migrate()
+        let chat = AppChatSessionRepository(store: store)
+        let ledger = try AppNoteImportRepository(databasePath: databasePath)
+        let service = HeadlessNoteSessionService(repository: chat) { session in NativeSessionManager(backend: CoordinatorBackend(), sessionRepository: chat, session: session) }
+        let coordinator = NoteImportCoordinator(ledger: ledger, sessionService: service)
+
+        try ledger.saveSource(.init(id: "source", kind: .markdownFolder, displayName: "Notes"))
+        // 第一次任务被取消：同 hash 的项扫描过但从未创建会话（sessionID 为空）。
+        try ledger.saveJob(.init(id: "cancelled", sourceID: "source", status: .cancelled, options: .init(llmMode: .disabled), discoveredCount: 1))
+        let note = ImportedNote(sourceKind: .markdownFolder, sourceIdentity: "note.md", title: "Note", markdownContent: "Original", rawByteHash: "raw", normalizedTextHash: "same")
+        try ledger.saveItem(.init(id: "cancelled-item", jobID: "cancelled", sourceID: "source", sourceIdentity: note.sourceIdentity, title: note.title, status: .cancelled, rawByteHash: "raw", normalizedTextHash: "same"))
+
+        // 重新导入：不应判为重复跳过，而应真正创建笔记会话。
+        let options = NoteImportOptions(duplicatePolicy: .skipUnchanged, llmMode: .disabled)
+        try ledger.saveJob(.init(id: "new", sourceID: "source", options: options))
+        _ = try await coordinator.scan(jobID: "new", adapter: SingleNoteAdapter(note: note), request: .init(sourceID: "source", sourceURL: root, kind: .markdownFolder, options: options))
+        let item = try #require(ledger.items(jobID: "new").first)
+        #expect(item.status == .ready)
+        #expect(item.sessionID == nil)
+
+        _ = try await coordinator.execute(jobID: "new")
+        let completed = try #require(ledger.item(id: item.id))
+        #expect(completed.status == .completed)
+        #expect(completed.sessionID != nil)
+        #expect(try ledger.job(id: "new")?.importedCount == 1)
+        #expect(try ledger.job(id: "new")?.duplicateCount == 0)
+    }
+
     @Test("Cleans payload and controlled ENEX staging after successful completion")
     func cleansTerminalStaging() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
