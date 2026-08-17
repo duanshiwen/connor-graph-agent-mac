@@ -293,6 +293,7 @@ struct ImChatDetailView: View {
         case .regular: 220
         case .compact: 180
         case .narrow: 120
+        case .phone: 96
         }
     }
 
@@ -355,6 +356,18 @@ struct ImChatDetailView: View {
                 .padding(.horizontal, titleHorizontalInset)
 
             HStack(spacing: AgentChatLayout.spaceS) {
+                if windowWidthClass.isPhone {
+                    Button {
+                        Task { await model.selectConversation(nil) }
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Color.accentColor)
+                    .help("返回会话列表")
+                    .accessibilityLabel("返回会话列表")
+                }
                 if !model.socketConnected {
                     Label("连接已断开", systemImage: "wifi.slash")
                         .font(AgentChatTypography.meta)

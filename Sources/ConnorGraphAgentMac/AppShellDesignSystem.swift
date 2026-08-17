@@ -150,8 +150,8 @@ enum AppShellLayout {
     static let listColumnNarrowWidth: CGFloat = 240
 
     static let detailColumnMinWidth: CGFloat = 360
-    static let shellMinWidth: CGFloat = 780
-    static let shellMinHeight: CGFloat = 680
+    static let shellMinWidth: CGFloat = 420
+    static let shellMinHeight: CGFloat = 560
 
     // 响应式断点（按窗口内容宽度）：
     // - 小于 sidebarCollapseThreshold：自动收起主侧栏（并禁用手动展开，保证详情列宽度）
@@ -160,6 +160,8 @@ enum AppShellLayout {
     static let sidebarCollapseThreshold: CGFloat = 1120
     static let sidebarExpandThreshold: CGFloat = 1160
     static let narrowWidthThreshold: CGFloat = 920
+    // - 小于 phoneWidthThreshold：进入手机式堆叠布局（列表/详情二选一全屏）
+    static let phoneWidthThreshold: CGFloat = 600
 
     static let contentMaxWidth: CGFloat = 780
     static let hairlineOpacity: Double = 0.14
@@ -170,8 +172,10 @@ enum AppWindowWidthClass: Equatable, Sendable {
     case regular   // 完整布局：主侧栏 + 列表 + 详情
     case compact   // 自动收起主侧栏，保留全部控件
     case narrow    // 窄窗口：收起主侧栏，省略次要控件
+    case phone     // 手机宽度：列表/详情堆叠切换
 
     var isNarrow: Bool { self == .narrow }
+    var isPhone: Bool { self == .phone }
     var isCompactOrNarrow: Bool { self != .regular }
 }
 

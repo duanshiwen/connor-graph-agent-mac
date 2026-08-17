@@ -144,6 +144,11 @@ final class RSSFeatureModel {
         }
     }
 
+    /// 手机式布局下返回列表：清除当前条目选择。
+    func clearItemSelection() {
+        selectedItemID = nil
+    }
+
     func setReadState(_ itemIDs: [RSSItemID], isRead: Bool) {
         guard !itemIDs.isEmpty, !isShutdown else { return }
         let targetIDs = Set(itemIDs)

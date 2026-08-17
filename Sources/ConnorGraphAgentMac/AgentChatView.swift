@@ -1241,6 +1241,7 @@ private struct AgentChatConversationHeader: View {
         case .regular: 220
         case .compact: 180
         case .narrow: 120
+        case .phone: 96
         }
     }
 
@@ -1261,6 +1262,18 @@ private struct AgentChatConversationHeader: View {
                     .padding(.horizontal, titleHorizontalInset)
 
                 HStack(spacing: AgentChatLayout.spaceS) {
+                    if windowWidthClass.isPhone {
+                        Button {
+                            chatActions.session.clearSelectedChatSession()
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Color.accentColor)
+                        .help("返回会话列表")
+                        .accessibilityLabel("返回会话列表")
+                    }
                     Spacer()
                     if !isForwardSelectionMode {
                         Button("选择消息", systemImage: "checkmark.circle") {

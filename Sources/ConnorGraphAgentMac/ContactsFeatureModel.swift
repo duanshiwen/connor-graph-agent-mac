@@ -42,6 +42,12 @@ final class ContactsFeatureModel {
     var isPresentingProfileEditor = false
     var editingProfileDraft: PersonProfileDraft?
     var pendingProfileDeletionID: ContactID?
+
+    /// 手机式布局下返回列表：清除当前人物档案选择。
+    func clearContactSelection() {
+        selectedContactID = nil
+    }
+
     private(set) var isSyncingSystemContacts = false
     private(set) var syncMessage: String?
     private(set) var errorMessage: String?
