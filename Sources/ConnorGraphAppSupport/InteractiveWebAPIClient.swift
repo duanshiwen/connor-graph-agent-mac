@@ -26,7 +26,12 @@ public struct InteractiveWebAPIClient: Sendable {
         let deployment: Deployment = try await send("api/v1/projects/\(remoteProjectID)/deployments", method: "POST", body: Empty())
         let session: UploadSession = try await send("api/v1/deployments/\(deployment.id)/upload-session", method: "POST", body: UploadPaths(paths: manifest.files.map(\.path)))
         for file in manifest.files {
-            guard let uploadURL = session.uploadUrls[file.path] else { throw InteractiveWebAPIError.invalidResponse }
+            guard let uploadURLString = session.uploadUrls[file.path] else {
+                throw InteractiveWebAPIError.uploadMissingURL(path: file.path)
+            }
+            guard let uploadURL = URL(string: uploadURLString) else {
+                throw InteractiveWebAPIError.invalidUploadURL(path: file.path, raw: uploadURLString)
+            }
             var request = URLRequest(url: uploadURL); request.httpMethod = "PUT"; request.httpBody = try Data(contentsOf: project.rootURL.appendingPathComponent(file.path)); request.setValue(file.mediaType, forHTTPHeaderField: "Content-Type")
             let (data, response) = try await transport.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -156,7 +161,7 @@ public struct InteractiveWebAPIClient: Sendable {
     private struct Rollback: Encodable { var deploymentId: String }
     private struct RemoteProject: Decodable { var id: String; var siteId: String }
     private struct Deployment: Decodable { var id: String }
-    private struct UploadSession: Decodable { var uploadUrls: [String: URL] }
+    private struct UploadSession: Decodable { var uploadUrls: [String: String] }
     private struct RollbackResult: Decodable { var currentDeploymentId: String }
     private struct AccessPolicy: Encodable { var mode: String; var password: String?; var expiresAt: Date? }
     private struct AccessPolicyResult: Decodable { var mode: String; var expiresAt: Date? }
@@ -251,6 +256,8 @@ public enum InteractiveWebAPIError: Error, LocalizedError, CustomStringConvertib
     case server(statusCode: Int, message: String)
     case invalidResponse
     case uploadFailed(statusCode: Int?, message: String)
+    case uploadMissingURL(path: String)
+    case invalidUploadURL(path: String, raw: String)
 
     public var description: String { message }
     public var errorDescription: String? { message }
@@ -264,6 +271,10 @@ public enum InteractiveWebAPIError: Error, LocalizedError, CustomStringConvertib
         case .uploadFailed(let statusCode, let message):
             let detail = Self.trimmed(message) ?? statusCode.map { "HTTP \($0)" } ?? "未知错误"
             return "互动网页文件上传失败：\(detail)"
+        case .uploadMissingURL(let path):
+            return "服务器未返回该文件的上传地址：\(path)"
+        case .invalidUploadURL(let path, let raw):
+            return "服务器返回的上传地址无效：\(path)（\(raw)）"
         }
     }
 
