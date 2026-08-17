@@ -67,6 +67,50 @@ private struct FailingNoteAdapter: NoteImportSourceAdapter {
 
 @Suite("Note import coordinator")
 struct NoteImportCoordinatorTests {
+    @Test("Fails permanently on a missing attachment source without retry storm")
+    func missingAttachmentSourceFailsFast() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SQLiteGraphKernelStore(path: root.appendingPathComponent("db.sqlite").path)
+        try store.migrate()
+        let paths = AppStoragePaths(applicationSupportDirectory: root.appendingPathComponent("support", isDirectory: true))
+        let chat = AppChatSessionRepository(store: store, storagePaths: paths)
+        let ledger = try AppNoteImportRepository(databasePath: root.appendingPathComponent("db.sqlite").path)
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try ledger.saveSource(source)
+        let job = NoteImportJobRecord(id: "job", sourceID: source.id)
+        try ledger.saveJob(job)
+        let sessionService = HeadlessNoteSessionService(repository: chat) { session in
+            NativeSessionManager(backend: CoordinatorBackend(), sessionRepository: chat, session: session)
+        }
+        let missing = root.appendingPathComponent("gone.png")
+        let note = ImportedNote(
+            sourceKind: .markdownFolder,
+            sourceIdentity: "n1",
+            title: "Note",
+            markdownContent: "# Note",
+            attachments: [.init(sourcePath: missing.path, displayName: "gone.png")],
+            rawByteHash: "hash",
+            normalizedTextHash: "text"
+        )
+        // 用极小的退避参数：如果附件错误被误判为可重试，attemptCount 会 > 1，测试快速失败。
+        let coordinator = NoteImportCoordinator(
+            ledger: ledger,
+            sessionService: sessionService,
+            attachmentImporter: NoteImportAttachmentImporter(store: AppSessionAttachmentStore(paths: paths)),
+            payloadStore: NoteImportPayloadStore(rootDirectory: paths.artifactsDirectory.appendingPathComponent("note-import-staging", isDirectory: true)),
+            retryPolicy: .init(maxAttempts: 3, initialDelay: 0.01, maximumDelay: 0.05)
+        )
+        let request = NoteImportScanRequest(sourceID: source.id, sourceURL: root, kind: .markdownFolder, options: job.options)
+        _ = try await coordinator.scan(jobID: job.id, adapter: SingleNoteAdapter(note: note), request: request)
+        let executed = try await coordinator.execute(jobID: job.id)
+        #expect(executed.status == .completedWithIssues)
+        let item = try #require(try ledger.items(jobID: job.id).first)
+        #expect(item.status == .attachmentFailed)
+        #expect(item.attemptCount == 1)
+    }
+
     @Test("Marks a job failed when source scanning throws")
     func scanFailureIsTerminal() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

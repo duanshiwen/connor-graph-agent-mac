@@ -37,6 +37,35 @@ struct NoteImportAttachmentImporterTests {
         #expect(reloaded.messages.first?.attachments.map(\.id) == [manifest.id])
     }
 
+    @Test("Imports images above the default 10 MB chat limit with the note-import policy")
+    func importsOversizedImageWithNoteImportPolicy() async throws {
+        let fixture = try Fixture(); defer { fixture.cleanup() }
+        let file = fixture.root.appendingPathComponent("large.png")
+        try Data(repeating: 0x89, count: 10_500_000).write(to: file)
+
+        let importer = NoteImportAttachmentImporter(store: fixture.attachmentStore)
+        let result = try await importer.importAttachment(
+            .init(sourcePath: file.path, displayName: "large.png"),
+            sessionID: fixture.session.id
+        )
+        let manifest = try fixture.attachmentStore.loadManifest(sessionID: fixture.session.id, attachmentID: result.messageRef.id)
+        #expect(manifest.kind == .image)
+        #expect(manifest.byteCount == 10_500_000)
+        let storedURL = fixture.attachmentStore.paths.sessionArtifactDirectories(sessionID: fixture.session.id).root.appendingPathComponent(manifest.storedRelativePath)
+        #expect(FileManager.default.fileExists(atPath: storedURL.path))
+    }
+
+    @Test("Default store policy still rejects images above 10 MB")
+    func defaultPolicyRejectsOversizedImage() async throws {
+        let fixture = try Fixture(); defer { fixture.cleanup() }
+        let file = fixture.root.appendingPathComponent("large.png")
+        try Data(repeating: 0x89, count: 10_500_000).write(to: file)
+
+        await #expect(throws: AppSessionAttachmentImportError.self) {
+            _ = try fixture.attachmentStore.importFile(at: file, sessionID: fixture.session.id)
+        }
+    }
+
     @Test("Rejects a mismatched source hash")
     func rejectsHashMismatch() async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
