@@ -30,12 +30,13 @@ struct NoteImportControlStyleContractTests {
         #expect(!center.contains("job.updatedAt, style: .relative"))
     }
 
-    @Test("Import options are always flattened")
-    func hierarchyOptionIsAbsent() throws {
+    @Test("Import mode preserves the user's hierarchy choice instead of force-flattening")
+    func hierarchyOptionIsPreserved() throws {
         let wizard = try source("NoteImportWizardView.swift")
         let coordinator = try appSupportSource("NoteImportCoordinator.swift")
         #expect(!wizard.contains("保留文件夹层级"))
-        #expect(coordinator.contains("flattenedOptions.preserveHierarchy = false"))
+        #expect(wizard.contains("保留目录树结构"))
+        #expect(!coordinator.contains("flattenedOptions.preserveHierarchy = false"))
     }
 
     @Test("Import mode stores only the note body and exposes no AI processing option")
