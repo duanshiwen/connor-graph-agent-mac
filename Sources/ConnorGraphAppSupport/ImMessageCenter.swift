@@ -44,7 +44,7 @@ public protocol ImBackendServicing: Sendable {
     func deleteFriend(userId: Int64) async throws
     func searchUsers(query: String, limit: Int) async throws -> [ImPublicUserDTO]
     func uploadMedia(fileURL: URL, messageType: ImMessageType) async throws -> ImMediaUploadDTO
-    func markPrivateMediaCached(messageId: String) async throws
+    func markPrivateMediaCached(messageId: String, deviceID: String) async throws
     func markGroupMediaCached(groupId: String, messageId: String) async throws
     func markGroupRead(groupId: String) async throws
 }
@@ -53,7 +53,7 @@ public extension ImBackendServicing {
     func uploadMedia(fileURL: URL, messageType: ImMessageType) async throws -> ImMediaUploadDTO {
         throw ConnorBackendAPIError.invalidResponse
     }
-    func markPrivateMediaCached(messageId: String) async throws {}
+    func markPrivateMediaCached(messageId: String, deviceID: String) async throws {}
     func markGroupMediaCached(groupId: String, messageId: String) async throws {}
     func markGroupRead(groupId: String) async throws {}
 }
@@ -103,6 +103,7 @@ public actor ImMessageCenter {
 
     private let store: any ImStore
     private let service: any ImBackendServicing
+    private let deviceID: String
     private let sendFrame: @Sendable (String) async -> Bool
     private let currentIdentity: @Sendable () -> ImSelfIdentity?
     private let onRealtimeEvent: @Sendable (ImRealtimeEvent) async -> Void
@@ -127,6 +128,7 @@ public actor ImMessageCenter {
     public init(
         store: any ImStore,
         service: any ImBackendServicing,
+        deviceID: String,
         sendFrame: @escaping @Sendable (String) async -> Bool,
         currentIdentity: @escaping @Sendable () -> ImSelfIdentity?,
         onRealtimeEvent: @escaping @Sendable (ImRealtimeEvent) async -> Void = { _ in },
@@ -134,6 +136,7 @@ public actor ImMessageCenter {
     ) {
         self.store = store
         self.service = service
+        self.deviceID = deviceID
         self.sendFrame = sendFrame
         self.currentIdentity = currentIdentity
         self.onRealtimeEvent = onRealtimeEvent
@@ -965,7 +968,7 @@ public actor ImMessageCenter {
               let conversation = try? await store.conversation(id: message.conversationId) else { return }
         switch conversation.kind {
         case .peer:
-            try? await service.markPrivateMediaCached(messageId: message.id)
+            try? await service.markPrivateMediaCached(messageId: message.id, deviceID: deviceID)
         case .group:
             guard let groupId = conversation.groupId else { return }
             try? await service.markGroupMediaCached(groupId: groupId, messageId: message.id)

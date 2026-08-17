@@ -518,12 +518,12 @@ public struct ImAPIClient: Sendable {
         return upload
     }
 
-    public func markPrivateMediaCached(token: String, messageId: String) async throws {
+    public func markPrivateMediaCached(token: String, messageId: String, deviceID: String) async throws {
         try await requestVoid(
             "chat/media/cached",
             method: "POST",
             token: token,
-            bodyData: try encoder.encode(MediaCachedBody(messageId: messageId))
+            bodyData: try encoder.encode(MediaCachedBody(messageId: messageId, deviceId: deviceID))
         )
     }
 
@@ -671,7 +671,8 @@ public struct ImAPIClient: Sendable {
     }
     private struct MediaCachedBody: Encodable {
         var messageId: String
-        enum CodingKeys: String, CodingKey { case messageId = "message_id" }
+        var deviceId: String
+        enum CodingKeys: String, CodingKey { case messageId = "message_id"; case deviceId = "deviceId" }
     }
 
     private struct ImAPIEnvelope<T: Decodable>: Decodable { var code: Int?; var msg: String?; var data: T? }
@@ -828,8 +829,8 @@ public struct ImBackendService: Sendable {
         try await authenticated { try await api.mediaUpload(token: $0, fileURL: fileURL, messageType: messageType) }
     }
 
-    public func markPrivateMediaCached(messageId: String) async throws {
-        try await authenticated { try await api.markPrivateMediaCached(token: $0, messageId: messageId) }
+    public func markPrivateMediaCached(messageId: String, deviceID: String) async throws {
+        try await authenticated { try await api.markPrivateMediaCached(token: $0, messageId: messageId, deviceID: deviceID) }
     }
 
     public func markGroupMediaCached(groupId: String, messageId: String) async throws {

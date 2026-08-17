@@ -238,6 +238,7 @@ final class AppCompositionRoot: ObservableObject {
         let center = ImMessageCenter(
             store: imStore,
             service: identityStore.makeImBackendService(),
+            deviceID: identityStore.syncDeviceID,
             sendFrame: { [weak identityStore] text in
                 guard let identityStore else { return false }
                 return await identityStore.sendImFrame(text)

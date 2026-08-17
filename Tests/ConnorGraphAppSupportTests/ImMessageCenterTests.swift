@@ -555,6 +555,7 @@ struct ImMessageCenterTests {
         let center = ImMessageCenter(
             store: store,
             service: service,
+            deviceID: "test-device",
             sendFrame: { frames.record($0) },
             currentIdentity: { ImSelfIdentity(id: selfId, displayName: "康纳") },
             onRealtimeEvent: { events.record($0) },
@@ -790,7 +791,7 @@ private final class StubImService: ImBackendServicing, @unchecked Sendable {
             """)
     }
 
-    func markPrivateMediaCached(messageId: String) async throws {
+    func markPrivateMediaCached(messageId: String, deviceID: String) async throws {
         lock.withLock { _privateMediaCachedIDs.append(messageId) }
     }
 
