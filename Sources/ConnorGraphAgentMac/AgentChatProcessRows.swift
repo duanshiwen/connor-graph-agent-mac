@@ -358,17 +358,53 @@ struct AgentChatTurnProcessRow: View {
     }
 }
 
+/// 运行态标题流光。性能策略（相对曾被移除的 30fps 版本）：
+/// 1) TimelineView 帧率从 30fps 降到 15fps，1.8s 周期下视觉几乎无差别，CPU 减半；
+/// 2) 流光仅作用于标题文字（小区域 + mask），不重绘整行；
+/// 3) 该视图只在 summary.state == .running 时渲染，轮次结束即销毁，动画自动停止；
+/// 4) 尊重系统"减弱动态效果"，开启时退化为静态标题。
 private struct AgentRunningActivityShimmerText: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var text: String
     var baseColor: Color
 
-    /// 静态运行态标题：不再使用 30fps TimelineView 流光（模型请求期间会持续推高 CPU）。
     var body: some View {
         Text(text)
             .font(AgentChatTypography.micro.weight(.medium))
             .foregroundStyle(baseColor)
             .lineLimit(1)
             .truncationMode(.tail)
+            .overlay {
+                if !reduceMotion {
+                    GeometryReader { geometry in
+                        TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { context in
+                            let duration = 1.8
+                            let progress = context.date.timeIntervalSinceReferenceDate
+                                .truncatingRemainder(dividingBy: duration) / duration
+                            let highlightWidth = max(36, geometry.size.width * 0.24)
+                            LinearGradient(
+                                colors: [
+                                    .clear,
+                                    ConnorCraftPalette.accent.opacity(0.28),
+                                    Color.primary.opacity(0.72),
+                                    ConnorCraftPalette.accent.opacity(0.34),
+                                    .clear
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: highlightWidth)
+                            .offset(x: -highlightWidth + progress * (geometry.size.width + highlightWidth))
+                        }
+                    }
+                }
+            }
+            .mask {
+                Text(text)
+                    .font(AgentChatTypography.micro.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
             .allowsHitTesting(false)
     }
 }
