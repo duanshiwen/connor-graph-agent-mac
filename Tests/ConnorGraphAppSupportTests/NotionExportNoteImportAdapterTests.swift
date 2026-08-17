@@ -209,6 +209,61 @@ struct NotionExportNoteImportAdapterTests {
         #expect(notebook.hierarchyParent == nil)
     }
 
+    @Test("Resolves Notion multi-part wrapper zip (outer zip containing Part-N.zip)")
+    func wrapperZipWithNestedPartImportsAllNotes() async throws {
+        let sourceDir = try directory(); defer { try? FileManager.default.removeItem(at: sourceDir) }
+        let idParent = String(repeating: "a", count: 32)
+        let idChild = String(repeating: "b", count: 32)
+        try "# Parent\n\n[Child](Child%20\(idChild).md)".write(to: sourceDir.appendingPathComponent("Parent \(idParent).md"), atomically: true, encoding: .utf8)
+        try "# Child".write(to: sourceDir.appendingPathComponent("Child \(idChild).md"), atomically: true, encoding: .utf8)
+
+        // 真实 Notion 大体量导出：外层 zip 里只有一个 Part-N.zip
+        let part = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "-Part-1.zip")
+        defer { try? FileManager.default.removeItem(at: part) }
+        try makeZip(from: sourceDir, to: part)
+
+        let partDir = try directory(); defer { try? FileManager.default.removeItem(at: partDir) }
+        try FileManager.default.copyItem(at: part, to: partDir.appendingPathComponent(part.lastPathComponent))
+        let wrapper = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "-wrapper.zip")
+        defer { try? FileManager.default.removeItem(at: wrapper) }
+        try makeZip(from: partDir, to: wrapper)
+
+        let resolved = try NotionExportSourceResolver.extractIfZip(wrapper)
+        defer { try? FileManager.default.removeItem(at: resolved) }
+        #expect(resolved.path != wrapper.path)
+
+        // 临时目录里嵌套的 Part zip 应已被解压并移除，扫描器能扫到全部笔记
+        let notes = try await collect(NotionExportNoteImportAdapter(), root: resolved)
+        #expect(notes.count == 2)
+        #expect(notes.contains { $0.title == "Parent" })
+        #expect(notes.contains { $0.title == "Child" })
+        #expect(!FileManager.default.fileExists(atPath: resolved.appendingPathComponent(part.lastPathComponent).path))
+        #expect(FileManager.default.fileExists(atPath: resolved.appendingPathComponent(part.deletingPathExtension().lastPathComponent).path))
+    }
+
+    @Test("Resolves nested part zips inside a selected folder without deleting them")
+    func folderWithNestedZipResolvesInPlace() async throws {
+        let wrapper = try directory(); defer { try? FileManager.default.removeItem(at: wrapper) }
+        let idHome = String(repeating: "c", count: 32)
+        try "# Home".write(to: wrapper.appendingPathComponent("Home \(idHome).md"), atomically: true, encoding: .utf8)
+
+        let part = wrapper.appendingPathComponent("ExportBlock-abc-Part-1.zip")
+        let sourceDir = try directory(); defer { try? FileManager.default.removeItem(at: sourceDir) }
+        let idDeep = String(repeating: "d", count: 32)
+        try "# Deep".write(to: sourceDir.appendingPathComponent("Deep \(idDeep).md"), atomically: true, encoding: .utf8)
+        try makeZip(from: sourceDir, to: part)
+
+        // 文件夹输入：保持文件夹只读，嵌套 zip 在原文件夹内解压、且不删除原 zip
+        let resolved = try NotionExportSourceResolver.extractIfZip(wrapper)
+        #expect(resolved.path == wrapper.path)
+        #expect(FileManager.default.fileExists(atPath: part.path))
+
+        let notes = try await collect(NotionExportNoteImportAdapter(), root: resolved)
+        #expect(notes.count == 2)
+        #expect(notes.contains { $0.title == "Home" })
+        #expect(notes.contains { $0.title == "Deep" })
+    }
+
     private func makeZip(from directory: URL, to archive: URL) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
