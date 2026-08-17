@@ -15,7 +15,6 @@ import ConnorGraphAppSupport
         (.graphEntities, .entities),
         (.approvals, .pendingApprovals),
         (.automation, .scheduledTasks),
-        (.productOS, .productOS),
         (.calendar, .calendar),
         (.contacts, .contacts),
         (.mail, .mail),

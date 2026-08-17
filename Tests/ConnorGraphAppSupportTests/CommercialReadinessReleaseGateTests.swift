@@ -63,12 +63,10 @@ struct CommercialReadinessReleaseGateTests {
         }
     }
 
-    @Test func nativeShellIncludesOneClickCommercialReadinessCheck() {
+    @Test func nativeShellNoLongerBundlesOneClickCommercialReadinessCheck() {
+        // Product OS 导航链移除后，一键商业就绪检查不再出现在默认命令列表中。
         let command = ConnorNativeShellPresentation.default.command(for: .checkCommercialReadiness)
 
-        #expect(command?.title == "Check Commercial Readiness")
-        #expect(command?.target == .productOS)
-        #expect(command?.systemImage == "checkmark.seal")
-        #expect(command?.isPrimaryAction == true)
+        #expect(command == nil)
     }
 }

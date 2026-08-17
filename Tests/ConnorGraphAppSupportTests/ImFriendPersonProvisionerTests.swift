@@ -168,7 +168,7 @@ struct ImFriendPersonProvisionerTests {
 
         let applied = try await fixture.provisioner.reconcileSyncedFriendBindings(entities: [entity])
 
-        #expect(applied == 0)
+        #expect(applied.applied.isEmpty)
         #expect(try await fixture.imStore.friend(userId: 7)?.personProfileID == nil)
         let profiles = try await fixture.profileStore.loadProfiles(includeInactive: true)
         #expect(profiles.allSatisfy { $0.status == .active })
