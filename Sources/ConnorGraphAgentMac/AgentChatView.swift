@@ -244,6 +244,7 @@ private struct AgentAttachmentPreviewOverlay: View {
     var onShare: (() -> Void)? = nil
     var onRetryExtraction: (() -> Void)? = nil
     var onClose: () -> Void
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -287,7 +288,7 @@ private struct AgentAttachmentPreviewOverlay: View {
                     onRetryExtraction: onRetryExtraction
                 )
                     .frame(maxWidth: 900, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, AgentChatLayout.spaceXL)
+                    .padding(.horizontal, windowWidthClass.usesStackedPanes ? AppShellLayout.spaceM : AgentChatLayout.spaceXL)
                     .padding(.bottom, AgentChatLayout.spaceXL)
             }
             .background(Color(nsColor: .windowBackgroundColor).opacity(0.96), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
@@ -296,7 +297,7 @@ private struct AgentAttachmentPreviewOverlay: View {
                     .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
-            .padding(AgentChatLayout.spaceXL)
+            .padding(windowWidthClass.usesStackedPanes ? AppShellLayout.spaceM : AgentChatLayout.spaceXL)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -305,6 +306,7 @@ private struct AgentAttachmentPreviewOverlay: View {
 private struct AgentBackgroundTaskOverlay: View {
     var tasks: [AppSessionBackgroundTask]
     var onClose: () -> Void
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -352,7 +354,7 @@ private struct AgentBackgroundTaskOverlay: View {
                     .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
-            .padding(AgentChatLayout.spaceXL)
+            .padding(windowWidthClass.usesStackedPanes ? AppShellLayout.spaceM : AgentChatLayout.spaceXL)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1294,9 +1296,14 @@ private struct AgentChatConversationHeader: View {
         switch windowWidthClass {
         case .regular: 220
         case .compact: 180
-        case .narrow: 120
-        case .phone: 96
+        case .narrow: 88
+        case .phone: 72
         }
+    }
+
+    /// 堆叠布局下头部图标按钮统一放大一档，便于点击与识别。
+    private var headerButtonSize: CGFloat {
+        windowWidthClass.usesStackedPanes ? AppShellLayout.stackedBackButtonSize : AgentChatLayout.iconButtonSize
     }
 
     private var selectedTitle: String {
@@ -1316,12 +1323,13 @@ private struct AgentChatConversationHeader: View {
                     .padding(.horizontal, titleHorizontalInset)
 
                 HStack(spacing: AgentChatLayout.spaceS) {
-                    if windowWidthClass.isPhone {
+                    if windowWidthClass.usesStackedPanes {
                         Button {
                             chatActions.session.clearSelectedChatSession()
                         } label: {
                             Image(systemName: "chevron.left")
-                                .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                                .font(.system(size: AppShellLayout.stackedBackButtonIconSize, weight: .bold))
+                                .frame(width: headerButtonSize, height: headerButtonSize)
                         }
                         .buttonStyle(.borderless)
                         .foregroundStyle(Color.accentColor)
@@ -1330,19 +1338,46 @@ private struct AgentChatConversationHeader: View {
                     }
                     Spacer()
                     if !isForwardSelectionMode {
-                        Button("转发会话", systemImage: "arrowshape.turn.up.right.2") {
-                            onForwardSession()
+                        if windowWidthClass.usesStackedPanes {
+                            Button {
+                                onForwardSession()
+                            } label: {
+                                Image(systemName: "arrowshape.turn.up.right.2")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .frame(width: headerButtonSize, height: headerButtonSize)
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.secondary)
+                            .help("把整个会话转发到单聊、群聊或其他会话")
+                            .accessibilityLabel("转发会话")
+
+                            Button {
+                                onBeginForwardSelection()
+                            } label: {
+                                Image(systemName: "checkmark.circle")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .frame(width: headerButtonSize, height: headerButtonSize)
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.secondary)
+                            .disabled(!canBeginForwardSelection)
+                            .help("选择多条消息并合并转发")
+                            .accessibilityLabel("选择消息")
+                        } else {
+                            Button("转发会话", systemImage: "arrowshape.turn.up.right.2") {
+                                onForwardSession()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("把整个会话转发到单聊、群聊或其他会话")
+                            Button("选择消息", systemImage: "checkmark.circle") {
+                                onBeginForwardSelection()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(!canBeginForwardSelection)
+                            .help("选择多条消息并合并转发")
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help("把整个会话转发到单聊、群聊或其他会话")
-                        Button("选择消息", systemImage: "checkmark.circle") {
-                            onBeginForwardSelection()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(!canBeginForwardSelection)
-                        .help("选择多条消息并合并转发")
                     }
                     Button {
                         withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
@@ -1350,7 +1385,8 @@ private struct AgentChatConversationHeader: View {
                         }
                     } label: {
                         Image(systemName: "info.circle")
-                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                            .font(.system(size: windowWidthClass.usesStackedPanes ? 14 : 13, weight: .semibold))
+                            .frame(width: headerButtonSize, height: headerButtonSize)
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(isSessionInfoPresented ? Color.accentColor : Color.secondary)
@@ -1428,6 +1464,7 @@ private struct AgentChatConversationHeader: View {
             Text(selectedTitle)
                 .font(AgentChatTypography.title)
                 .lineLimit(1)
+                .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .contentShape(Rectangle())
                 .onTapGesture { beginTitleEdit() }

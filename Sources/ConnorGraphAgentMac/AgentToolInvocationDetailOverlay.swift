@@ -5,6 +5,7 @@ import ConnorGraphAppSupport
 struct AgentToolInvocationDetailOverlay: View {
     var invocation: AgentToolInvocationPresentation
     var onClose: () -> Void
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -35,7 +36,7 @@ struct AgentToolInvocationDetailOverlay: View {
                     .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
-            .padding(AgentChatLayout.spaceXL)
+            .padding(windowWidthClass.usesStackedPanes ? AppShellLayout.spaceM : AgentChatLayout.spaceXL)
         }
         .task(id: invocation.callID) {
             await Task.yield()
@@ -57,15 +58,17 @@ struct AgentToolInvocationDetailOverlay: View {
                     .stroke(severityColor.opacity(0.28), lineWidth: 1)
                 )
 
-            Text(AgentToolDisplayNameResolver.categoryName(
-                rawToolName: invocation.toolName,
-                semanticKind: invocation.semanticKind
-            ))
-                .font(AgentChatTypography.monoMicro)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 7)
-                .frame(height: AgentChatLayout.chipHeight)
-                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+            if !windowWidthClass.usesStackedPanes {
+                Text(AgentToolDisplayNameResolver.categoryName(
+                    rawToolName: invocation.toolName,
+                    semanticKind: invocation.semanticKind
+                ))
+                    .font(AgentChatTypography.monoMicro)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .frame(height: AgentChatLayout.chipHeight)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+            }
 
             Text(invocation.phase.rawValue)
                 .font(AgentChatTypography.monoMicro)

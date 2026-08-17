@@ -15,38 +15,54 @@ struct AgentComposerOptionBar: View {
     @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
-        HStack(spacing: AgentChatLayout.spaceS) {
+        Group {
+            if windowWidthClass.usesStackedPanes {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    optionBarContent
+                }
+                .scrollClipDisabled()
+            } else {
+                optionBarContent
+            }
+        }
+        .padding(.horizontal, 1)
+        .padding(.bottom, 2)
+    }
+
+    private var optionBarContent: some View {
+        HStack(spacing: windowWidthClass.usesStackedPanes ? AgentChatLayout.spaceXS : AgentChatLayout.spaceS) {
             permissionModeMenu
 
             if let selectedSession {
                 sessionStatusMenu(selectedSession)
             }
 
-            RemoteKnowledgeBaseSelectionMenu(
-                store: knowledgeMarketplace,
-                explicitIDs: composerState.remoteKnowledgeBaseIDs,
-                isDisabled: selectedSession == nil || composerState.isSubmitting,
-                onSelectionChanged: { onAction(.setRemoteKnowledgeBaseIDs($0)) }
-            )
+            // 极窄（phone）模式下隐藏知识库与 MCP 工具选择，给输入区留出空间。
+            if !windowWidthClass.isPhone {
+                RemoteKnowledgeBaseSelectionMenu(
+                    store: knowledgeMarketplace,
+                    explicitIDs: composerState.remoteKnowledgeBaseIDs,
+                    isDisabled: selectedSession == nil || composerState.isSubmitting,
+                    onSelectionChanged: { onAction(.setRemoteKnowledgeBaseIDs($0)) }
+                )
 
-            MCPToolSelectionMenu(
-                sourceRuntime: sourceRuntime,
-                explicitToolNames: composerState.allowedMCPToolNames,
-                isDisabled: selectedSession == nil || composerState.isSubmitting,
-                onSelectionChanged: { onAction(.setAllowedMCPToolNames($0)) }
-            )
+                MCPToolSelectionMenu(
+                    sourceRuntime: sourceRuntime,
+                    explicitToolNames: composerState.allowedMCPToolNames,
+                    isDisabled: selectedSession == nil || composerState.isSubmitting,
+                    onSelectionChanged: { onAction(.setAllowedMCPToolNames($0)) }
+                )
+            }
 
             Spacer(minLength: AgentChatLayout.spaceS)
 
-            // 窄窗口下省略次要控件，给输入区留出空间
-            if !windowWidthClass.isNarrow {
+            // 堆叠窗口（narrow/phone）下省略次要控件，给输入区留出空间
+            if !windowWidthClass.usesStackedPanes {
                 speechTranscriptionButton
 
                 backgroundTasksButton
             }
         }
-        .padding(.horizontal, 1)
-        .padding(.bottom, 2)
     }
 
     private var speechTranscriptionButton: some View {

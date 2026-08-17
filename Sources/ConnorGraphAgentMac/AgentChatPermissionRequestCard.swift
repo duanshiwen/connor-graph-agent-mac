@@ -9,6 +9,7 @@ struct AgentChatPermissionRequestCard: View {
     var chatActions: ChatFeatureActions
     var onExpandReview: (() -> Void)? = nil
     @State private var isPayloadExpanded = false
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     private var mailApproval: AppMailSendApprovalPresentation {
         AppMailSendApprovalPresentation(approval)
@@ -48,6 +49,8 @@ struct AgentChatPermissionRequestCard: View {
                     .font(AgentChatTypography.calloutEmphasis)
                 Text(approvalPresentation.capabilityLabel)
                     .font(AgentChatTypography.meta)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .padding(.horizontal, AgentChatLayout.spaceS)
                     .padding(.vertical, AgentChatLayout.spaceXS)
                     .background(Color.orange.opacity(0.12), in: Capsule())
@@ -56,9 +59,11 @@ struct AgentChatPermissionRequestCard: View {
 
             Spacer(minLength: 0)
 
-            Text("请求审批")
-                .font(AgentChatTypography.metaEmphasis)
-                .foregroundStyle(.orange)
+            if !windowWidthClass.usesStackedPanes {
+                Text("请求审批")
+                    .font(AgentChatTypography.metaEmphasis)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 
@@ -131,49 +136,70 @@ struct AgentChatPermissionRequestCard: View {
     }
 
     private var actions: some View {
-        HStack(spacing: AgentChatLayout.spaceS) {
-            Button {
-                onExpandReview?()
-            } label: {
-                Label("放大审阅", systemImage: "arrow.up.left.and.arrow.down.right")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.regular)
-            .disabled(onExpandReview == nil)
-            .help("放大查看完整权限请求细节；缩小或按 Esc 不会批准或拒绝。")
-
-            Button {
-                chatActions.approval.approvePendingApproval(approval)
-            } label: {
-                Label(mailApproval.isMailSendRequest ? "允许发送" : "允许", systemImage: "checkmark")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-
-            if approvalPresentation.allowsAlwaysAllow {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            HStack(spacing: AgentChatLayout.spaceS) {
                 Button {
-                    chatActions.approval.alwaysAllowPendingApproval(approval)
+                    onExpandReview?()
                 } label: {
-                    Label("始终允许", systemImage: "arrow.triangle.2.circlepath")
+                    if windowWidthClass.usesStackedPanes {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    } else {
+                        Label("放大审阅", systemImage: "arrow.up.left.and.arrow.down.right")
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
-                .help("将当前 Agent 会话切换为执行；批准此请求，并自动放行之后的所有权限请求")
+                .disabled(onExpandReview == nil)
+                .help("放大查看完整权限请求细节；缩小或按 Esc 不会批准或拒绝。")
+                .accessibilityLabel("放大审阅")
+
+                Button {
+                    chatActions.approval.approvePendingApproval(approval)
+                } label: {
+                    Label(mailApproval.isMailSendRequest ? "允许发送" : "允许", systemImage: "checkmark")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+
+                if approvalPresentation.allowsAlwaysAllow {
+                    Button {
+                        chatActions.approval.alwaysAllowPendingApproval(approval)
+                    } label: {
+                        if windowWidthClass.usesStackedPanes {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        } else {
+                            Label("始终允许", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .help("将当前 Agent 会话切换为执行；批准此请求，并自动放行之后的所有权限请求")
+                    .accessibilityLabel("始终允许")
+                }
+
+                Button(role: .destructive) {
+                    chatActions.approval.denyPendingApproval(approval)
+                } label: {
+                    Label(mailApproval.isMailSendRequest ? "取消发送" : "拒绝", systemImage: "xmark")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+
+                if !windowWidthClass.usesStackedPanes {
+                    Spacer(minLength: AgentChatLayout.spaceS)
+
+                    Text(approvalPresentation.allowsAlwaysAllow ? "始终允许会将当前会话切换为执行，后续权限请求直接放行" : (mailApproval.isMailSendRequest ? "可放大审阅；询问模式下发送邮件需要逐次确认" : "可放大审阅；询问模式下此操作需要逐次审批"))
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            Button(role: .destructive) {
-                chatActions.approval.denyPendingApproval(approval)
-            } label: {
-                Label(mailApproval.isMailSendRequest ? "取消发送" : "拒绝", systemImage: "xmark")
+            if windowWidthClass.usesStackedPanes {
+                Text(approvalPresentation.allowsAlwaysAllow ? "始终允许会将当前会话切换为执行，后续权限请求直接放行" : (mailApproval.isMailSendRequest ? "可放大审阅；询问模式下发送邮件需要逐次确认" : "可放大审阅；询问模式下此操作需要逐次审批"))
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.regular)
-
-            Spacer(minLength: AgentChatLayout.spaceS)
-
-            Text(approvalPresentation.allowsAlwaysAllow ? "始终允许会将当前会话切换为执行，后续权限请求直接放行" : (mailApproval.isMailSendRequest ? "可放大审阅；询问模式下发送邮件需要逐次确认" : "可放大审阅；询问模式下此操作需要逐次审批"))
-                .font(AgentChatTypography.meta)
-                .foregroundStyle(.secondary)
         }
     }
 

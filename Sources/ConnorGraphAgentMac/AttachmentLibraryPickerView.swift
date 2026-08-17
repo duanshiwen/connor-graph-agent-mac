@@ -143,6 +143,12 @@ struct AttachmentLibraryPickerView: View {
     var title = "附件库"
     var onPick: ([URL]) -> Void
     var onPickFromFolder: () -> Void
+    /// 内嵌子页面形态下隐藏内置头部（由外层面板提供“返回”按钮）。
+    var showsHeader: Bool = true
+    /// 高度：弹窗形态 540，内嵌子页面形态由外层面板传入更小的高度。
+    var preferredHeight: CGFloat = 540
+    /// 内嵌形态下点击关闭/返回时调用；缺省时走系统 dismiss（弹窗形态）。
+    var onCollapse: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
     private var selectedURLs: [URL] {
@@ -151,15 +157,19 @@ struct AttachmentLibraryPickerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
+            if showsHeader {
+                header
+                Divider()
+            }
             searchAndFilters
             Divider()
             list
             Divider()
             footer
         }
-        .frame(width: 580, height: 540)
+        // 宽度自适应：窄窗口下跟随窗口宽度收缩，常规宽度上限 600，高度保持稳定。
+        .frame(maxWidth: 600)
+        .frame(height: preferredHeight)
         .onAppear { if !model.hasLoadedOnce { model.reload() } }
     }
 
@@ -173,17 +183,21 @@ struct AttachmentLibraryPickerView: View {
             }
             Spacer()
             Button {
-                if !model.allowsMultipleSelection, let first = model.selectedIDs.first,
-                   let record = model.items.first(where: { $0.fileID == first }) {
-                    onPick([model.localURL(for: record)])
+                if let onCollapse {
+                    onCollapse()
                 } else {
-                    dismiss()
+                    if !model.allowsMultipleSelection, let first = model.selectedIDs.first,
+                       let record = model.items.first(where: { $0.fileID == first }) {
+                        onPick([model.localURL(for: record)])
+                    } else {
+                        dismiss()
+                    }
                 }
             } label: {
                 Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help("关闭")
+            .help(onCollapse == nil ? "关闭" : "收起附件选择")
         }
         .padding(16)
     }
@@ -378,6 +392,70 @@ struct AttachmentLibraryPickerView: View {
         formatter.dateStyle = .short
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+}
+
+/// 内嵌式附件选择面板：作为聊天输入区的展开子页面展示，支持一键收起返回。
+struct AttachmentLibraryPickerPanel: View {
+    @ObservedObject var model: AttachmentLibraryPickerModel
+    var onPick: ([URL]) -> Void
+    var onPickFromFolder: () -> Void
+    var onCollapse: () -> Void
+    @Environment(\.windowWidthClass) private var windowWidthClass
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button(action: onCollapse) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("返回")
+                            .font(AppTypography.callout)
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .help("收起附件选择，返回对话")
+                .accessibilityLabel("收起附件选择，返回对话")
+
+                Spacer(minLength: 0)
+
+                Label("附件库", systemImage: "tray.full")
+                    .font(AppTypography.calloutEmphasis)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                Button(action: onCollapse) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("收起附件选择")
+                .accessibilityLabel("收起附件选择")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            AttachmentLibraryPickerView(
+                model: model,
+                onPick: onPick,
+                onPickFromFolder: onPickFromFolder,
+                showsHeader: false,
+                preferredHeight: windowWidthClass.usesStackedPanes ? 240 : 340,
+                onCollapse: onCollapse
+            )
+        }
+        .frame(maxHeight: 420)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 4)
     }
 }
 

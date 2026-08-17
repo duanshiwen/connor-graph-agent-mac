@@ -114,6 +114,21 @@ struct AgentChatComposerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            if let pickerModel = attachmentLibraryModel {
+                AttachmentLibraryPickerPanel(
+                    model: pickerModel,
+                    onPick: { urls in
+                        attachmentLibraryModel = nil
+                        Task { await chatActions.composer.importAttachments(urls: urls) }
+                    },
+                    onPickFromFolder: {
+                        chooseAttachments()
+                    },
+                    onCollapse: { attachmentLibraryModel = nil }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             optionBadgeRow
 
             VStack(spacing: 0) {
@@ -151,10 +166,13 @@ struct AgentChatComposerView: View {
                 HStack(spacing: AgentChatLayout.spaceS) {
                     attachmentButton
 
-                    workingDirectoryMenu
+                    // 极窄（phone）模式下隐藏工作目录选择，给输入区留出空间。
+                    if !windowWidthClass.isPhone {
+                        workingDirectoryMenu
+                    }
 
-                    // 窄窗口下省略次要控件，给输入区留出空间
-                    if !windowWidthClass.isNarrow {
+                    // 堆叠窗口（narrow/phone）下省略次要控件，给输入区留出空间
+                    if !windowWidthClass.usesStackedPanes {
                         Button {
                             model.workspaceExplorer.toggleTree(
                                 sessionID: model.sessions.selectedSessionID,
@@ -241,6 +259,7 @@ struct AgentChatComposerView: View {
         }
         .padding(0)
         .background(Color.clear)
+        .animation(.easeInOut(duration: 0.22), value: attachmentLibraryModel != nil)
         .onAppear {
             localChatInput = model.composer.input
             installSpeechKeyboardMonitorIfNeeded()
@@ -1119,23 +1138,15 @@ struct AgentChatComposerView: View {
         .opacity(isNoteMode ? 0.4 : 1.0)
         .help(isNoteMode ? "笔记模式下不可用，请用格式工具栏插入图片" : "添加附件")
         .accessibilityLabel("添加附件")
-        .sheet(item: $attachmentLibraryModel) { model in
-            AttachmentLibraryPickerView(
-                model: model,
-                onPick: { urls in
-                    attachmentLibraryModel = nil
-                    Task { await chatActions.composer.importAttachments(urls: urls) }
-                },
-                onPickFromFolder: {
-                    attachmentLibraryModel = nil
-                    chooseAttachments()
-                }
-            )
-        }
     }
 
     /// 发附件默认打开附件库（最近附件，可搜索/筛选/分页）；库为空或要选库外的文件时回退文件夹。
     private func openAttachmentLibrary() {
+        // 面板已展开时再次点击附件按钮：收起子页面，而不是重建模型重新加载。
+        if attachmentLibraryModel != nil {
+            attachmentLibraryModel = nil
+            return
+        }
         guard let paths = try? AppStoragePaths.live() else {
             chooseAttachments()
             return
@@ -1155,7 +1166,10 @@ struct AgentChatComposerView: View {
         panel.allowsMultipleSelection = true
         panel.allowedContentTypes = supportedAttachmentContentTypes
         guard panel.runModal() == .OK else { return }
-        Task { await chatActions.composer.importAttachments(urls: panel.urls) }
+        Task {
+            _ = await chatActions.composer.importAttachments(urls: panel.urls)
+            attachmentLibraryModel = nil
+        }
     }
 
     private var composerControlForeground: Color { .secondary }
@@ -1260,6 +1274,19 @@ struct RemoteKnowledgeBaseSelectionMenu: View {
 private struct ComposerModelSelectionLabel: View {
     let presentation: ComposerModelSelectionPresentation
     var foreground: Color
+    @Environment(\.windowWidthClass) private var windowWidthClass
+
+    private var modelMenuMinWidth: CGFloat {
+        windowWidthClass.usesStackedPanes ? 84 : 96
+    }
+
+    private var modelMenuIdealWidth: CGFloat {
+        windowWidthClass.usesStackedPanes ? 112 : 148
+    }
+
+    private var modelMenuMaxWidth: CGFloat {
+        windowWidthClass.usesStackedPanes ? 132 : AgentChatLayout.modelMenuMaxWidth
+    }
 
     var body: some View {
         HStack(spacing: AgentChatLayout.spaceXS) {
@@ -1278,7 +1305,7 @@ private struct ComposerModelSelectionLabel: View {
         .foregroundStyle(foreground)
         .padding(.leading, AgentChatLayout.spaceM)
         .padding(.trailing, presentation.showsSessionOverrideIndicator ? AgentChatLayout.spaceL : AgentChatLayout.spaceM)
-        .frame(minWidth: 96, idealWidth: 148, maxWidth: AgentChatLayout.modelMenuMaxWidth, minHeight: AgentChatLayout.chipHeight, maxHeight: AgentChatLayout.chipHeight, alignment: .leading)
+        .frame(minWidth: modelMenuMinWidth, idealWidth: modelMenuIdealWidth, maxWidth: modelMenuMaxWidth, minHeight: AgentChatLayout.chipHeight, maxHeight: AgentChatLayout.chipHeight, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor).opacity(0.42))

@@ -8,6 +8,7 @@ struct BrowserBookmarksPanelView: View {
     @Bindable var model: BrowserFeatureModel
     var currentPageURL: String?
     var currentPageTitle: String?
+    @Environment(\.windowWidthClass) private var windowWidthClass
     @State private var searchText: String = ""
     @State private var groupText: String = ""
 
@@ -31,7 +32,7 @@ struct BrowserBookmarksPanelView: View {
             Divider()
             footerBar
         }
-        .frame(width: 300)
+        .frame(width: windowWidthClass.usesStackedPanes ? 260 : 300)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             model.loadBookmarks()

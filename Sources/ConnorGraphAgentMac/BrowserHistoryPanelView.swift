@@ -6,6 +6,7 @@ import ConnorGraphAppSupport
 
 struct BrowserHistoryPanelView: View {
     @Bindable var model: BrowserFeatureModel
+    @Environment(\.windowWidthClass) private var windowWidthClass
     @State private var clearConfirmation: Bool = false
 
     private var searchText: Binding<String> {
@@ -31,7 +32,7 @@ struct BrowserHistoryPanelView: View {
             Divider()
             footerBar
         }
-        .frame(width: 300)
+        .frame(width: windowWidthClass.usesStackedPanes ? 260 : 300)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 

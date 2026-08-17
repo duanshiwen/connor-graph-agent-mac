@@ -5,6 +5,7 @@ import ConnorGraphAppSupport
 struct AgentActivityDetailOverlay: View {
     var event: AgentEventPresentation
     var onClose: () -> Void
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -79,7 +80,7 @@ struct AgentActivityDetailOverlay: View {
                     .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
-            .padding(AgentChatLayout.spaceXL)
+            .padding(windowWidthClass.usesStackedPanes ? AppShellLayout.spaceM : AgentChatLayout.spaceXL)
         }
     }
 }

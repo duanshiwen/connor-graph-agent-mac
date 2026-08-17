@@ -142,25 +142,23 @@ enum AppShellLayout {
     static let radiusM: CGFloat = 12
     static let radiusL: CGFloat = 16
 
-    static let primarySidebarMinWidth: CGFloat = 180
-    static let primarySidebarDefaultWidth: CGFloat = 210
-    static let primarySidebarMaxWidth: CGFloat = 250
-
     static let listColumnWidth: CGFloat = 300
-    static let listColumnNarrowWidth: CGFloat = 240
 
     static let detailColumnMinWidth: CGFloat = 360
+    // 最窄窗口（堆叠布局）下详情页返回按钮：稍大并加粗，便于点击与识别。
+    static let stackedBackButtonSize: CGFloat = 36
+    static let stackedBackButtonIconSize: CGFloat = 15
     static let shellMinWidth: CGFloat = 420
     static let shellMinHeight: CGFloat = 560
 
     // 响应式断点（按窗口内容宽度）：
     // - 小于 sidebarCollapseThreshold：自动收起主侧栏（并禁用手动展开，保证详情列宽度）
     // - 大于 sidebarExpandThreshold：自动展开主侧栏（若用户未手动隐藏）
-    // - 小于 narrowWidthThreshold：进入窄模式，省略次要控件、压缩列表列
+    // - 小于 narrowWidthThreshold：进入窄窗口堆叠布局（列表/详情二选一全屏，详情页可返回列表）
     static let sidebarCollapseThreshold: CGFloat = 1120
     static let sidebarExpandThreshold: CGFloat = 1160
     static let narrowWidthThreshold: CGFloat = 920
-    // - 小于 phoneWidthThreshold：进入手机式堆叠布局（列表/详情二选一全屏）
+    // - 小于 phoneWidthThreshold：最窄一档，同样为列表/详情堆叠；保留断点用于区分次要控件的省略程度
     static let phoneWidthThreshold: CGFloat = 600
 
     static let contentMaxWidth: CGFloat = 780
@@ -171,12 +169,14 @@ enum AppShellLayout {
 enum AppWindowWidthClass: Equatable, Sendable {
     case regular   // 完整布局：主侧栏 + 列表 + 详情
     case compact   // 自动收起主侧栏，保留全部控件
-    case narrow    // 窄窗口：收起主侧栏，省略次要控件
-    case phone     // 手机宽度：列表/详情堆叠切换
+    case narrow    // 窄窗口：收起主侧栏，列表/详情堆叠切换，详情可返回列表
+    case phone     // 最窄窗口：列表/详情堆叠切换，详情可返回列表
 
     var isNarrow: Bool { self == .narrow }
     var isPhone: Bool { self == .phone }
     var isCompactOrNarrow: Bool { self != .regular }
+    /// 列表/详情以全屏堆叠切换（narrow 与 phone），详情页带返回入口。
+    var usesStackedPanes: Bool { isNarrow || isPhone }
 }
 
 private struct AppWindowWidthClassKey: EnvironmentKey {
