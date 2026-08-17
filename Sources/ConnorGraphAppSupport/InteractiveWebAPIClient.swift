@@ -100,6 +100,11 @@ public struct InteractiveWebAPIClient: Sendable {
 		try await sendNoContent("api/v1/sites/\(siteID)/offline", method: "POST")
     }
 
+    /// 永久删除互动网页项目（含全部部署、文件与数据记录），不可恢复。
+    public func deleteProject(projectID: String) async throws {
+        try await sendNoContent("api/v1/projects/\(projectID)", method: "DELETE")
+    }
+
     public func analytics(projectID: String) async throws -> InteractiveWebAnalytics {
         try await get("api/v1/projects/\(projectID)/analytics")
     }
