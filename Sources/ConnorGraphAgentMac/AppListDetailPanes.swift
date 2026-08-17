@@ -1210,7 +1210,7 @@ struct CraftSessionListPane: View {
                             onAddFriend()
                         }
                     }
-                    Button("新建或导入笔记", systemImage: "note.text.badge.plus") {
+                    Button("新建笔记", systemImage: "note.text.badge.plus") {
                         sessionActions.newNoteSession()
                     }
                 } label: {

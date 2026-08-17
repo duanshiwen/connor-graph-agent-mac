@@ -454,7 +454,7 @@ private struct AgentChatSessionListView: View {
                             Label("新建会话", systemImage: "square.and.pencil")
                         }
                         Button(action: { chatActions.session.newNoteSession() }) {
-                            Label("新建或导入笔记", systemImage: "note.text.badge.plus")
+                            Label("新建笔记", systemImage: "note.text.badge.plus")
                         }
                     } label: {
                         Image(systemName: "plus")
