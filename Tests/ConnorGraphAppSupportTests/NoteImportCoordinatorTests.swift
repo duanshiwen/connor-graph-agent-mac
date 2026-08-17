@@ -567,7 +567,8 @@ struct NoteImportCoordinatorTests {
         #expect(item.sessionID == nil)
 
         _ = try await coordinator.execute(jobID: "new")
-        let completed = try #require(ledger.item(id: item.id))
+        let completedItem = try ledger.item(id: item.id)
+        let completed = try #require(completedItem)
         #expect(completed.status == .completed)
         #expect(completed.sessionID != nil)
         #expect(try ledger.job(id: "new")?.importedCount == 1)
