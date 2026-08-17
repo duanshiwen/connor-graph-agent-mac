@@ -179,6 +179,13 @@ final class MailFeatureModel {
 
     func selectMessageFromList(_ message: MailMessageSummary) { selectMessage(message) }
 
+    /// 手机式布局下返回列表：清除当前消息选择。
+    func clearMessageSelection() {
+        selectedMessageID = nil
+        selectedMessageSummary = nil
+        navigationTargetID = nil
+    }
+
     /// 右键菜单「标记为已读 / 标记为未读」：更新本地缓存并触发列表刷新。
     func setReadState(messageIDs: [MailMessageID], isRead: Bool) async {
         guard !isShutdown, let runtime = agentRuntime else { return }

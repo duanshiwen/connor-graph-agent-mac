@@ -131,41 +131,45 @@ struct AppShellView: View {
                     openURL: graph.shellActions.openURL
                 )
             } else {
-                HSplitView {
-                    if isPrimarySidebarVisible {
-                        CraftPrimarySidebarView(
+                if widthClass.isPhone {
+                    phoneContent
+                } else {
+                    HSplitView {
+                        if isPrimarySidebarVisible {
+                            CraftPrimarySidebarView(
+                                graph: graph,
+                                selection: selectionBinding,
+                                sendCommand: sendCommand
+                            )
+                            .frame(
+                                minWidth: AppShellLayout.primarySidebarMinWidth,
+                                idealWidth: AppShellLayout.primarySidebarDefaultWidth,
+                                maxWidth: AppShellLayout.primarySidebarMaxWidth,
+                                maxHeight: .infinity
+                            )
+                            .background(.bar)
+                            .controlSize(AppButtonLayout.controlSize)
+                        }
+
+                        CraftListPaneView(
                             graph: graph,
-                            selection: selectionBinding,
-                            sendCommand: sendCommand
+                            selection: selectionBinding
                         )
-                    .frame(
-                        minWidth: AppShellLayout.primarySidebarMinWidth,
-                        idealWidth: AppShellLayout.primarySidebarDefaultWidth,
-                        maxWidth: AppShellLayout.primarySidebarMaxWidth,
-                        maxHeight: .infinity
-                    )
-                    .background(.bar)
-                    .controlSize(AppButtonLayout.controlSize)
-            }
+                            .frame(width: widthClass == .narrow ? AppShellLayout.listColumnNarrowWidth : AppShellLayout.listColumnWidth)
+                            .frame(maxHeight: .infinity)
+                            .background(AppShellColors.listBackground)
+                            .controlSize(AppButtonLayout.controlSize)
 
-            CraftListPaneView(
-                graph: graph,
-                selection: selectionBinding
-            )
-                .frame(width: widthClass == .narrow ? AppShellLayout.listColumnNarrowWidth : AppShellLayout.listColumnWidth)
-                .frame(maxHeight: .infinity)
-                .background(AppShellColors.listBackground)
-                .controlSize(AppButtonLayout.controlSize)
-
-            CraftDetailPaneView(
-                graph: graph,
-                identityStore: identityStore,
-                selection: graph.shell.selection ?? .agentChat
-            )
-                .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
-                .controlSize(AppButtonLayout.controlSize)
-        }
+                        CraftDetailPaneView(
+                            graph: graph,
+                            identityStore: identityStore,
+                            selection: graph.shell.selection ?? .agentChat
+                        )
+                            .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
+                            .controlSize(AppButtonLayout.controlSize)
+                    }
+                }
         }
         }
         .onChange(of: graph.knowledgeCreator.snapshot.stage) { oldStage, newStage in
@@ -330,9 +334,88 @@ struct AppShellView: View {
     }
 
     private var widthClass: AppWindowWidthClass {
+        if shellContentWidth < AppShellLayout.phoneWidthThreshold { return .phone }
         if shellContentWidth < AppShellLayout.narrowWidthThreshold { return .narrow }
         if shellContentWidth < AppShellLayout.sidebarCollapseThreshold { return .compact }
         return .regular
+    }
+
+    /// 手机式布局：列表/详情二选一，全屏堆叠，带滑动切换动画。
+    private var phoneContent: some View {
+        ZStack {
+            if isPhoneDetailActive {
+                CraftDetailPaneView(
+                    graph: graph,
+                    identityStore: identityStore,
+                    selection: graph.shell.selection ?? .agentChat
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
+                .controlSize(AppButtonLayout.controlSize)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .overlay(alignment: .topLeading) {
+                    if let backAction = phoneBackAction {
+                        Button(action: backAction) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 13, weight: .semibold))
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .padding(.leading, AppShellLayout.spaceM)
+                        .padding(.top, AppShellLayout.spaceS)
+                        .help("返回")
+                        .accessibilityLabel("返回")
+                    }
+                }
+            } else {
+                CraftListPaneView(
+                    graph: graph,
+                    selection: selectionBinding
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(AppShellColors.listBackground)
+                .controlSize(AppButtonLayout.controlSize)
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: isPhoneDetailActive)
+    }
+
+    /// 手机式布局下当前路由是否处于“详情”页（需要展示返回按钮并隐藏列表）。
+    private var isPhoneDetailActive: Bool {
+        let route = graph.shell.selection ?? .agentChat
+        switch route {
+        case .agentChat:
+            if let im = graph.im, im.selectedConversationId != nil { return true }
+            return graph.chat.sessions.selectedSessionID != nil
+        case .mail:
+            return graph.mail.selectedMessageID != nil
+        case .rss:
+            return graph.rss.selectedItemID != nil
+        case .contacts:
+            return graph.contacts.selectedContactID != nil
+        default:
+            // 设置/来源/技能/自动化等页面本身即详情形态，直接全屏展示。
+            return true
+        }
+    }
+
+    /// 手机式布局下详情页顶部的返回动作；聊天详情在头部自带返回按钮，这里不再叠加。
+    private var phoneBackAction: (() -> Void)? {
+        let route = graph.shell.selection ?? .agentChat
+        switch route {
+        case .agentChat:
+            return nil
+        case .mail:
+            return { graph.mail.clearMessageSelection() }
+        case .rss:
+            return { graph.rss.clearItemSelection() }
+        case .contacts:
+            return { graph.contacts.clearContactSelection() }
+        default:
+            return { _ = graph.shell.select(.agentChat) }
+        }
     }
 
     private func applyResponsiveSidebar(width: CGFloat) {
