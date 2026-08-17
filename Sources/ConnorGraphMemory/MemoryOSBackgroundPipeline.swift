@@ -601,7 +601,9 @@ public enum MemoryOSBackgroundToolCatalog {
             l2UpdateEntitiesTool(),
             updateCurrentUserProfileTool(),
             l3UpdateBeliefsTool(),
-            l4UpdateEntitiesTool()
+            l4UpdateEntitiesTool(),
+            contactsReadTool(),
+            personRegistryWriteTool()
         ]
     }
 
@@ -736,6 +738,24 @@ public enum MemoryOSBackgroundToolCatalog {
         )
     }
 
+    private static func contactsReadTool() -> MemoryOSBackgroundToolDescriptor {
+        MemoryOSBackgroundToolDescriptor(
+            name: "contacts_read",
+            description: "Read the user's Person Registry profiles: list_people, search_people(query), get_person(personID). Returns exact personID values for use with person_registry_write.",
+            inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"operation\":{\"type\":\"string\",\"enum\":[\"list_people\",\"search_people\",\"get_person\"],\"description\":\"Person Registry read operation.\"},\"query\":{\"type\":\"string\",\"description\":\"Search by display name, alias, email, organization or notes.\"},\"personID\":{\"type\":\"string\",\"description\":\"Exact personID from a previous result; do not infer from display name.\"}},\"required\":[\"operation\"],\"additionalProperties\":false}",
+            usagePolicy: "Use before person_registry_write to resolve whether a person already has a profile. Copy exact personID values; never invent IDs from display names."
+        )
+    }
+
+    private static func personRegistryWriteTool() -> MemoryOSBackgroundToolDescriptor {
+        MemoryOSBackgroundToolDescriptor(
+            name: "person_registry_write",
+            description: "L1-only background channel to create or update a Person Registry profile without user approval. Supports create_person and update_person only; profiles are tagged source=llm-discovery. Images, deletion and merges are not available.",
+            inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"operation\":{\"type\":\"string\",\"enum\":[\"create_person\",\"update_person\"],\"description\":\"Write operation.\"},\"name\":{\"type\":\"string\",\"description\":\"Display name (create_person).\"},\"personID\":{\"type\":\"string\",\"description\":\"Exact personID from contacts_read for update_person.\"},\"aliases\":{\"type\":\"string\",\"description\":\"Optional comma-separated aliases.\"},\"email\":{\"type\":\"string\",\"description\":\"Email address.\"},\"organization\":{\"type\":\"string\",\"description\":\"Organization.\"},\"jobTitle\":{\"type\":\"string\",\"description\":\"Job title.\"},\"notes\":{\"type\":\"string\",\"description\":\"Concise evidence-backed profile notes discovered from L1 evidence.\"}},\"required\":[\"operation\"],\"additionalProperties\":false}",
+            usagePolicy: "Call contacts_read first. If an exact match exists, update_person with that exact personID; otherwise create_person only when evidence is strong (at least two mentions or a stable identity anchor plus concrete facts). Writes are unmonitored background projections: keep notes concise, factual and traceable to L0 evidence; never guess IDs and never fabricate contact details."
+        )
+    }
+
     private static func jsonArray(_ values: [String]) -> String {
         String(decoding: try! JSONEncoder().encode(values), as: UTF8.self)
     }
@@ -842,6 +862,7 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         - Other L2 facts: use memory_os_l2_update_entities.
         - L3 knowledge: use memory_os_l3_update_beliefs (only after all four promotion filters pass).
         - L4 entities/relations: use memory_os_l4_update_entities.
+        - Person profiles: before writing person facts, call contacts_read to resolve whether the person already has a Person Registry profile. If an exact profile exists, append new evidence with person_registry_write update_person using its exact personID. If no profile exists and the person has a stable identity anchor (a clear name plus concrete facts, or evidence in at least two sources), create one with person_registry_write create_person; the source is tagged llm-discovery automatically. These background writes run without user approval and are part of the silent L1 projection. Never guess personIDs from display names, never fabricate emails or organizations, and keep notes concise and traceable to L0 evidence. Always also write the person's facts to memory_os_l2_update_entities so L2 memory and the profile stay consistent.
 
         After processing, the L1 events will be physically deleted (L0 retains permanent evidence).
 

@@ -32,6 +32,9 @@ public enum MemoryOSBackgroundToolExecutionError: Error, Sendable, Equatable, Cu
 
 public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
     public static let defaultAllowedToolNames: Set<String> = [
+        "contacts_read",
+        "person_registry_write",
+        
         "memory_os_recent_context",
         "memory_os_knowledge_context",
         "memory_os_search",
@@ -52,15 +55,18 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
     public var facade: AppMemoryOSFacade
     public var contextToolConfiguration: MemoryOSContextToolConfiguration
     public var environmentSnapshotRuntime: EnvironmentSnapshotBackgroundRuntime?
+    public var contactRuntime: (any AgentContactRuntime)?
 
     public init(
         facade: AppMemoryOSFacade,
         contextToolConfiguration: MemoryOSContextToolConfiguration = .init(),
-        environmentSnapshotRuntime: EnvironmentSnapshotBackgroundRuntime? = nil
+        environmentSnapshotRuntime: EnvironmentSnapshotBackgroundRuntime? = nil,
+        contactRuntime: (any AgentContactRuntime)? = nil
     ) {
         self.facade = facade
         self.contextToolConfiguration = contextToolConfiguration
         self.environmentSnapshotRuntime = environmentSnapshotRuntime
+        self.contactRuntime = contactRuntime
     }
 
     public func execute(_ call: MemoryOSBackgroundToolCall, context: MemoryOSBackgroundToolExecutionContext) throws -> MemoryOSBackgroundToolResult {
@@ -316,6 +322,18 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
             let resultJSON = String(data: resultData, encoding: .utf8) ?? "{}"
             return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: resultJSON, contentText: "Created \(result.createdBeliefCount) L3 belief(s).", citations: [])
 
+        case "contacts_read":
+            guard let contactRuntime else {
+                throw MemoryOSBackgroundToolExecutionError.toolExecutionFailed("person registry runtime is unavailable")
+            }
+            return try Self.executeContactsRead(call: call, arguments: agentArguments, runtime: contactRuntime)
+
+        case "person_registry_write":
+            guard let contactRuntime else {
+                throw MemoryOSBackgroundToolExecutionError.toolExecutionFailed("person registry runtime is unavailable")
+            }
+            return try Self.executePersonRegistryWrite(call: call, arguments: agentArguments, runtime: contactRuntime)
+
         case "memory_os_l4_update_entities":
             let entitiesArray = args.array("entities") ?? []
             let relationsArray = args.array("relations") ?? []
@@ -366,12 +384,187 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         case "memory_os_l4_neighbors": MemoryOSL4NeighborsTool(facade: facade).inputSchema
         case "environment_history_coverage", "environment_history_query": Self.environmentHistorySchema(compare: false)
         case "environment_history_compare": Self.environmentHistorySchema(compare: true)
+        case "contacts_read": Self.contactsReadSchema()
+        case "person_registry_write": Self.personRegistryWriteSchema()
         case "memory_os_l2_update_entities": MemoryOSL2UpdateEntitiesTool(facade: facade).inputSchema
         case "memory_os_update_current_user_profile": MemoryOSUpdateCurrentUserProfileTool(facade: facade).inputSchema
         case "memory_os_l3_update_beliefs": MemoryOSL3UpdateBeliefsTool(facade: facade).inputSchema
         case "memory_os_l4_update_entities": MemoryOSL4UpdateEntitiesTool(facade: facade).inputSchema
         default: nil
         }
+    }
+
+    static func contactsReadSchema() -> AgentToolInputSchema {
+        .closedObject(properties: [
+            "operation": .stringEnumeration(values: ["search_people", "get_person", "list_people"], description: "Person Registry read operation."),
+            "query": .string(description: "Person query; use display name or alias."),
+            "personID": .string(description: "Exact personID from a previous result; do not infer from display name.")
+        ], required: ["operation"])
+    }
+
+    static func personRegistryWriteSchema() -> AgentToolInputSchema {
+        .closedObject(properties: [
+            "operation": .stringEnumeration(values: ["create_person", "update_person"], description: "Person Registry write operation. Only create_person and update_person are allowed in the background pipeline."),
+            "name": .string(description: "Display name (create_person)."),
+            "personID": .string(description: "Exact personID from contacts_read for update_person."),
+            "aliases": .string(description: "Comma-separated aliases."),
+            "email": .string(description: "Email."),
+            "organization": .string(description: "Organization."),
+            "jobTitle": .string(description: "Job title."),
+            "notes": .string(description: "Concise notes containing clearly evidenced profile facts discovered from L1 evidence.")
+        ], required: ["operation"])
+    }
+
+    private static func executeContactsRead(call: MemoryOSBackgroundToolCall, arguments: AgentToolArguments, runtime: any AgentContactRuntime) throws -> MemoryOSBackgroundToolResult {
+        let operation = arguments.string("operation") ?? "search_people"
+        switch operation {
+        case "list_people":
+            let people: [PersonProfile] = try runAsyncBlocking {
+                try await runtime.listPeople()
+            }
+            return try backgroundPeopleResult(call: call, people: people, text: "Found \(people.count) people")
+        case "search_people", "resolve_person":
+            let query = arguments.string("query") ?? ""
+            let people: [PersonProfile] = try runAsyncBlocking {
+                try await runtime.searchPeople(query: query)
+            }
+            return try backgroundPeopleResult(call: call, people: people, text: "Found \(people.count) people")
+        case "get_person":
+            guard let rawID = arguments.string("personID") ?? arguments.string("person_id") ?? arguments.string("id") ?? arguments.string("query") else {
+                throw MemoryOSBackgroundToolExecutionError.invalidArguments("personID is required")
+            }
+            let id = rawID.trimmingCharacters(in: .whitespacesAndNewlines)
+            let person: PersonProfile? = try runAsyncBlocking {
+                try await runtime.getPerson(id: ContactID(rawValue: id))
+            }
+            if let person {
+                return try backgroundPersonResult(call: call, person: person)
+            }
+            let matches: [PersonProfile] = try runAsyncBlocking {
+                try await runtime.searchPeople(query: id)
+            }
+            if matches.count == 1, let resolved = matches.first {
+                return try backgroundPersonResult(call: call, person: resolved)
+            }
+            if matches.count > 1 {
+                return try backgroundPeopleResult(call: call, people: matches, text: "Ambiguous person query \"\(id)\"; use an exact personID")
+            }
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: "null", contentText: "Person not found")
+        default:
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("Unsupported contacts_read operation: \(operation)")
+        }
+    }
+
+    private static func backgroundPersonResult(call: MemoryOSBackgroundToolCall, person: PersonProfile) throws -> MemoryOSBackgroundToolResult {
+        MemoryOSBackgroundToolResult(
+            callID: call.id,
+            name: call.name,
+            contentJSON: try ContactJSON.encodePerson(person),
+            contentText: "Person: \(person.displayName) (personID: \(person.id.rawValue))"
+        )
+    }
+
+    private static func backgroundPeopleResult(call: MemoryOSBackgroundToolCall, people: [PersonProfile], text: String) throws -> MemoryOSBackgroundToolResult {
+        MemoryOSBackgroundToolResult(
+            callID: call.id,
+            name: call.name,
+            contentJSON: try ContactJSON.encodePeople(people),
+            contentText: text
+        )
+    }
+
+    private static func executePersonRegistryWrite(call: MemoryOSBackgroundToolCall, arguments: AgentToolArguments, runtime: any AgentContactRuntime) throws -> MemoryOSBackgroundToolResult {
+        guard let operation = arguments.string("operation") else {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("operation is required")
+        }
+        let approved = true // L1 background projection is unmonitored by design.
+        switch operation {
+        case "create_person":
+            let name = arguments.string("name") ?? arguments.string("displayName")
+            guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw MemoryOSBackgroundToolExecutionError.invalidArguments("name is required")
+            }
+            let aliases = aliasesFromArguments(arguments)
+            let email = arguments.string("email")
+            let profile = PersonProfile(
+                displayName: name,
+                aliases: aliases,
+                emails: email.map { [ContactEmailAddress(email: $0)] } ?? [],
+                organizationName: arguments.string("organization"),
+                jobTitle: arguments.string("jobTitle"),
+                notes: arguments.string("notes"),
+                source: "llm-discovery",
+                discoveredBy: "L1 background projection"
+            )
+            let created: PersonProfile = try runAsyncBlocking {
+                try await runtime.createPerson(profile, approved: approved)
+            }
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: try ContactJSON.encodePerson(created), contentText: "Created person profile \(created.id.rawValue) (llm-discovery).")
+        case "update_person":
+            guard let rawID = arguments.string("personID") ?? arguments.string("id") else {
+                throw MemoryOSBackgroundToolExecutionError.invalidArguments("personID is required")
+            }
+            let id = ContactID(rawValue: rawID.trimmingCharacters(in: .whitespacesAndNewlines))
+            let existing: PersonProfile? = try runAsyncBlocking {
+                try await runtime.getPerson(id: id)
+            }
+            guard let existing else { throw MemoryOSBackgroundToolExecutionError.invalidArguments("Unknown person \(rawID)") }
+            var draft = PersonProfileDraft(profile: existing)
+            if let name = arguments.string("name") ?? arguments.string("displayName") { draft.displayName = name }
+            let aliases = aliasesFromArguments(arguments)
+            if !aliases.isEmpty { draft.aliases = Array(Set(draft.aliases + aliases)).sorted() }
+            if let organization = arguments.string("organization") { draft.organizationName = organization }
+            if let jobTitle = arguments.string("jobTitle") { draft.jobTitle = jobTitle }
+            if let email = arguments.string("email") { draft.emails = [ContactEmailAddress(email: email)] }
+            if let notes = arguments.string("notes") {
+                let existingNotes = draft.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let note = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+                draft.notes = existingNotes.isEmpty ? note : "\(existingNotes)\n\(note)"
+            }
+            draft.lastMentionedAt = Date()
+            let update = draft
+            let updated: PersonProfile = try runAsyncBlocking {
+                try await runtime.updatePerson(id: id, update: update, approved: approved)
+            }
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: try ContactJSON.encodePerson(updated), contentText: "Updated person profile \(updated.id.rawValue).")
+        default:
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("Unsupported person_registry_write operation: \(operation)")
+        }
+    }
+
+    private static func aliasesFromArguments(_ arguments: AgentToolArguments) -> [String] {
+        if let array = arguments.array("aliases") {
+            return array.compactMap(\.stringValue).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        }
+        guard let raw = arguments.string("aliases") else { return [] }
+        return raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    /// Bridges the synchronous tool-executor chain to the async Person Registry runtime.
+    /// The executor's call sites already run off the main thread, so blocking here is safe.
+    private static func runAsyncBlocking<T>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
+        let semaphore = DispatchSemaphore(value: 0)
+        let box = MemoryOSBackgroundAsyncBox<T>()
+        let task = Task {
+            do {
+                box.value = try await operation()
+            } catch {
+                box.error = error
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        task.cancel()
+        if let error = box.error { throw error }
+        guard let value = box.value else {
+            throw MemoryOSBackgroundToolExecutionError.toolExecutionFailed("Person registry operation returned no value")
+        }
+        return value
+    }
+
+    private final class MemoryOSBackgroundAsyncBox<T>: @unchecked Sendable {
+        var value: T?
+        var error: Error?
     }
 
     private static func environmentHistorySchema(compare: Bool) -> AgentToolInputSchema {

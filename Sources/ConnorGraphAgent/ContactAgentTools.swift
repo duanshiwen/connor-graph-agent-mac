@@ -1,19 +1,19 @@
 import Foundation
 import ConnorGraphCore
 
-enum ContactJSON {
+public enum ContactJSON {
     private static let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
         return e
     }()
 
-    static func encode<T: Encodable>(_ value: T) throws -> String {
+    public static func encode<T: Encodable>(_ value: T) throws -> String {
         let data = try encoder.encode(value)
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 
-    static func encodePeople(_ people: [PersonProfile]) throws -> String {
+    public static func encodePeople(_ people: [PersonProfile]) throws -> String {
         let data = try encoder.encode(people)
         guard var rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             return String(data: data, encoding: .utf8) ?? "[]"
@@ -24,7 +24,7 @@ enum ContactJSON {
         return try encodeJSONObject(rows)
     }
 
-    static func encodePerson(_ person: PersonProfile?) throws -> String {
+    public static func encodePerson(_ person: PersonProfile?) throws -> String {
         let data = try encoder.encode(person)
         guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return String(data: data, encoding: .utf8) ?? "null"
@@ -33,7 +33,7 @@ enum ContactJSON {
         return try encodeJSONObject(object)
     }
 
-    static func encodeDraft(_ draft: ContactMutationDraft) throws -> String {
+    public static func encodeDraft(_ draft: ContactMutationDraft) throws -> String {
         let data = try encoder.encode(draft)
         guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return String(data: data, encoding: .utf8) ?? "{}"

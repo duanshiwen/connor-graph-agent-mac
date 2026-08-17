@@ -195,13 +195,17 @@ final class AppRuntimeLifecycle {
         let environmentSnapshotRuntime = storagePaths.map {
             EnvironmentSnapshotBackgroundRuntime(databaseURL: $0.environmentDatabaseURL)
         }
+        let contactRuntime = contactsFeatureModel.agentProfileStore.map {
+            PersonRegistryAgentContactRuntime(profileStore: $0, memoryOSFacade: memoryOSFacade, storagePaths: storagePaths)
+        }
         return BackgroundAIExecutorProvider { facade in
             let model = AgentModelBackgroundToolLoopModel(provider: factory.makeAgentModelProvider())
             let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
                 model: model,
                 toolExecutor: MemoryOSBackgroundToolExecutor(
                     facade: facade,
-                    environmentSnapshotRuntime: environmentSnapshotRuntime
+                    environmentSnapshotRuntime: environmentSnapshotRuntime,
+                    contactRuntime: contactRuntime
                 ),
                 store: store
             )
