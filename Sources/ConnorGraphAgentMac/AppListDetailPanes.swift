@@ -1193,6 +1193,7 @@ struct CraftSessionListPane: View {
     var imModel: ImFeatureModel? = nil
     var onAddFriend: () -> Void = {}
     @State private var isCreateGroupPresented = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let items = mixedConversationItems
@@ -1212,6 +1213,9 @@ struct CraftSessionListPane: View {
                     }
                     Button("新建笔记", systemImage: "note.text.badge.plus") {
                         sessionActions.newNoteSession()
+                    }
+                    Button("批量导入笔记", systemImage: "square.and.arrow.down.on.square") {
+                        openWindow(id: AppMenuPresentation.noteImportWizardWindowID)
                     }
                 } label: {
                     Image(systemName: "plus")
