@@ -705,6 +705,7 @@ struct BrowserDownloadsPanelView: View {
     var onOpen: (BrowserDownloadItem) -> Void
     var onReveal: (BrowserDownloadItem) -> Void
     var onClearCompleted: () -> Void
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
         VStack(spacing: 0) {
@@ -753,7 +754,7 @@ struct BrowserDownloadsPanelView: View {
             .padding(.horizontal, AppShellLayout.spaceM)
             .padding(.vertical, AppShellLayout.spaceS)
         }
-        .frame(width: 300)
+        .frame(width: windowWidthClass.usesStackedPanes ? 260 : 300)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 

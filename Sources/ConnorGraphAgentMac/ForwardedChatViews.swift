@@ -137,6 +137,7 @@ struct ForwardDestinationSheet: View {
     var isSending: Bool
     var onCancel: () -> Void
     var onSend: (String, Set<String>) async -> Void
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     @State private var searchText = ""
     @State private var caption = ""
@@ -169,50 +170,25 @@ struct ForwardDestinationSheet: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("选择聊天")
-                    .font(.headline)
-                TextField("搜索", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                Picker("筛选", selection: $kindFilter) {
-                    Text("全部").tag(Optional<ForwardDestinationKind>.none)
-                    Text("会话").tag(Optional<ForwardDestinationKind>.some(.agent))
-                    Text("联系人").tag(Optional<ForwardDestinationKind>.some(.peer))
-                    Text("群聊").tag(Optional<ForwardDestinationKind>.some(.group))
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                destinationList
-            }
-            .padding(20)
-            .frame(width: 320)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 16) {
-                Text("发送给")
-                    .font(.title3.weight(.semibold))
-                Spacer(minLength: 8)
-                ForwardedChatCard(bundle: bundle)
-                    .frame(maxWidth: 460)
-                TextField("给对方留言（可选）", text: $caption, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(2...4)
-                HStack {
-                    Spacer()
-                    Button("取消", action: onCancel)
-                    Button(isSending ? "发送中…" : selectedKeys.count > 1 ? "发送给 \(selectedKeys.count) 个会话" : "发送") {
-                        Task { await onSend(caption, selectedKeys) }
+        Group {
+            if windowWidthClass.usesStackedPanes {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        destinationColumn
+                        Divider()
+                        sendColumn
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(selectedKeys.isEmpty || isSending)
+                }
+            } else {
+                HStack(spacing: 0) {
+                    destinationColumn
+                    Divider()
+                    sendColumn
                 }
             }
-            .padding(28)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 820, height: 580)
+        .frame(maxWidth: 860)
+        .frame(height: 580)
         .task {
             await loadMore()
         }
@@ -224,6 +200,50 @@ struct ForwardDestinationSheet: View {
             }
             Task { await runSearch(query) }
         }
+    }
+
+    private var destinationColumn: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("选择聊天")
+                .font(.headline)
+            TextField("搜索", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+            Picker("筛选", selection: $kindFilter) {
+                Text("全部").tag(Optional<ForwardDestinationKind>.none)
+                Text("会话").tag(Optional<ForwardDestinationKind>.some(.agent))
+                Text("联系人").tag(Optional<ForwardDestinationKind>.some(.peer))
+                Text("群聊").tag(Optional<ForwardDestinationKind>.some(.group))
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            destinationList
+        }
+        .padding(20)
+        .frame(width: windowWidthClass.usesStackedPanes ? nil : 320)
+    }
+
+    private var sendColumn: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("发送给")
+                .font(.title3.weight(.semibold))
+            Spacer(minLength: 8)
+            ForwardedChatCard(bundle: bundle)
+                .frame(maxWidth: 460)
+            TextField("给对方留言（可选）", text: $caption, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...4)
+            HStack {
+                Spacer()
+                Button("取消", action: onCancel)
+                Button(isSending ? "发送中…" : selectedKeys.count > 1 ? "发送给 \(selectedKeys.count) 个会话" : "发送") {
+                    Task { await onSend(caption, selectedKeys) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedKeys.isEmpty || isSending)
+            }
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
@@ -366,6 +386,7 @@ struct ForwardedChatCard: View {
 struct ForwardedChatDetailView: View {
     var bundle: ForwardedChatBundle
     var onClose: () -> Void
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
         VStack(spacing: 0) {
@@ -389,7 +410,12 @@ struct ForwardedChatDetailView: View {
                 .padding(20)
             }
         }
-        .frame(minWidth: 620, idealWidth: 760, minHeight: 520, idealHeight: 680)
+        .frame(
+            minWidth: windowWidthClass.usesStackedPanes ? 380 : 620,
+            idealWidth: 760,
+            minHeight: 520,
+            idealHeight: 680
+        )
     }
 }
 

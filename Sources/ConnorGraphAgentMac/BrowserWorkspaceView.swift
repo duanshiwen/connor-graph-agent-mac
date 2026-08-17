@@ -29,6 +29,7 @@ struct BrowserWorkspaceChatActions {
 struct BrowserWorkspaceView: View {
     @Bindable var model: BrowserFeatureModel
     var chat: BrowserWorkspaceChatActions
+    @Environment(\.windowWidthClass) private var windowWidthClass
     @State private var webViewsByTabID: [UUID: WKWebView] = [:]
     @State private var addressText: String = ""
     @State private var isAddressEditing = false
@@ -61,7 +62,7 @@ struct BrowserWorkspaceView: View {
             }
 
             toolbar
-                .padding(.horizontal, 12)
+                .padding(.horizontal, windowWidthClass.usesStackedPanes ? 8 : 12)
                 .padding(.vertical, 8)
                 .background(Color(nsColor: .windowBackgroundColor))
 
@@ -439,7 +440,12 @@ struct BrowserWorkspaceView: View {
         ZStack(alignment: .leading) {
             verticalTabSidebar
         }
-        .frame(width: model.isVerticalTabSidebarPinned ? 248 : 44, alignment: .leading)
+        .frame(
+            width: model.isVerticalTabSidebarPinned
+                ? (windowWidthClass.usesStackedPanes ? 210 : 248)
+                : 44,
+            alignment: .leading
+        )
         .zIndex(10)
         .animation(.easeInOut(duration: 0.16), value: model.isVerticalTabSidebarPinned)
     }
@@ -609,7 +615,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private var toolbar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: windowWidthClass.usesStackedPanes ? 4 : 8) {
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.16)) {
                     model.toggleTabLayoutMode()
@@ -652,79 +658,85 @@ struct BrowserWorkspaceView: View {
 
             BrowserAddressTextField(
                 text: $addressText,
-                placeholder: "输入网址或搜索词，按 Return 打开",
+                placeholder: windowWidthClass.usesStackedPanes ? "输入网址或搜索" : "输入网址或搜索词，按 Return 打开",
                 focusRequestID: focusAddressRequestID,
                 onEditingChanged: { isAddressEditing = $0 },
-                onSubmit: navigateFromAddressBar
+                onSubmit: navigateFromAddressBar,
+                fontSize: windowWidthClass.usesStackedPanes ? 12 : 13
             )
             .frame(height: AppButtonLayout.height)
 
-            Button(action: { model.toggleBookmarksPanel() }) {
-                BrowserToolbarIconButtonLabel(
-                    systemImage: activeURLIsBookmarked ? "star.fill" : "star",
-                    isActive: model.isBookmarksPanelVisible || activeURLIsBookmarked,
-                    iconFont: .system(size: 16, weight: .semibold)
-                )
-            }
-            .buttonStyle(.plain)
-            .help(activeURLIsBookmarked ? "当前页已收藏，打开收藏夹" : "打开收藏夹")
-            .accessibilityLabel("收藏夹")
+            // 极窄模式下：收藏/历史/下载/分享/问 AI/返回对话 全部收进「更多」菜单。
+            if !windowWidthClass.usesStackedPanes {
+                Button(action: { model.toggleBookmarksPanel() }) {
+                    BrowserToolbarIconButtonLabel(
+                        systemImage: activeURLIsBookmarked ? "star.fill" : "star",
+                        isActive: model.isBookmarksPanelVisible || activeURLIsBookmarked,
+                        iconFont: .system(size: 16, weight: .semibold)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help(activeURLIsBookmarked ? "当前页已收藏，打开收藏夹" : "打开收藏夹")
+                .accessibilityLabel("收藏夹")
 
-            Button(action: { model.toggleHistoryPanel() }) {
-                BrowserToolbarIconButtonLabel(
-                    systemImage: model.isHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
-                    isActive: model.isHistoryPanelVisible,
-                    iconFont: .system(size: 16, weight: .semibold)
-                )
-            }
-            .buttonStyle(.plain)
-            .help("浏览历史")
-            .accessibilityLabel("历史")
+                Button(action: { model.toggleHistoryPanel() }) {
+                    BrowserToolbarIconButtonLabel(
+                        systemImage: model.isHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
+                        isActive: model.isHistoryPanelVisible,
+                        iconFont: .system(size: 16, weight: .semibold)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("浏览历史")
+                .accessibilityLabel("历史")
 
-            Button(action: { model.toggleDownloadsPanel() }) {
-                BrowserToolbarIconButtonLabel(
-                    systemImage: activeDownloadCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle",
-                    isActive: model.isDownloadsPanelVisible || activeDownloadCount > 0,
-                    iconFont: .system(size: 16, weight: .semibold)
-                )
-            }
-            .buttonStyle(.plain)
-            .help(activeDownloadCount > 0 ? "正在下载 \(activeDownloadCount) 个项目" : "下载")
-            .accessibilityLabel("下载")
+                Button(action: { model.toggleDownloadsPanel() }) {
+                    BrowserToolbarIconButtonLabel(
+                        systemImage: activeDownloadCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle",
+                        isActive: model.isDownloadsPanelVisible || activeDownloadCount > 0,
+                        iconFont: .system(size: 16, weight: .semibold)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help(activeDownloadCount > 0 ? "正在下载 \(activeDownloadCount) 个项目" : "下载")
+                .accessibilityLabel("下载")
 
-            Button(action: shareCurrentURL) {
-                BrowserToolbarIconButtonLabel(
-                    systemImage: "square.and.arrow.up",
-                    iconFont: .system(size: 16, weight: .semibold)
-                )
+                Button(action: shareCurrentURL) {
+                    BrowserToolbarIconButtonLabel(
+                        systemImage: "square.and.arrow.up",
+                        iconFont: .system(size: 16, weight: .semibold)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(activeWebView?.url == nil)
+                .opacity(activeWebView?.url == nil ? 0.48 : 1)
+                .help("分享当前页面")
+                .accessibilityLabel("分享当前页面")
             }
-            .buttonStyle(.plain)
-            .disabled(activeWebView?.url == nil)
-            .opacity(activeWebView?.url == nil ? 0.48 : 1)
-            .help("分享当前页面")
-            .accessibilityLabel("分享当前页面")
 
             browserToolsMenu
 
-            Button(action: showPageQuestionPopover) {
-                BrowserAskAIButtonLabel()
-            }
-            .buttonStyle(.plain)
-            .disabled(activeWebView == nil || activeTab?.navigationState.isLoading == true)
-            .opacity(activeWebView == nil || activeTab?.navigationState.isLoading == true ? 0.48 : 1)
-            .help("基于当前网页全文提问")
+            if !windowWidthClass.usesStackedPanes {
+                Button(action: showPageQuestionPopover) {
+                    BrowserAskAIButtonLabel()
+                }
+                .buttonStyle(.plain)
+                .disabled(activeWebView == nil || activeTab?.navigationState.isLoading == true)
+                .opacity(activeWebView == nil || activeTab?.navigationState.isLoading == true ? 0.48 : 1)
+                .help("基于当前网页全文提问")
 
-            Button(action: { model.returnFromWorkspace() }) {
-                SidebarActionButtonLabel(
-                    title: "返回对话",
-                    systemImage: "bubble.left.and.bubble.right",
-                    fillsWidth: false,
-                    titleFont: BrowserFloatingTypography.askButton,
-                    iconFont: BrowserFloatingTypography.askButtonIcon
-                )
+                Button(action: { model.returnFromWorkspace() }) {
+                    SidebarActionButtonLabel(
+                        title: "返回对话",
+                        systemImage: "bubble.left.and.bubble.right",
+                        fillsWidth: false,
+                        titleFont: BrowserFloatingTypography.askButton,
+                        iconFont: BrowserFloatingTypography.askButtonIcon
+                    )
+                }
+                .buttonStyle(SidebarActionButtonStyle())
+                .help("关闭网页工作区，返回关联会话的对话时间线")
             }
-            .buttonStyle(SidebarActionButtonStyle())
-            .help("关闭网页工作区，返回关联会话的对话时间线")
         }
     }
 
@@ -774,6 +786,18 @@ struct BrowserWorkspaceView: View {
 
     private var browserToolsMenu: some View {
         Menu {
+            // 极窄模式下：收藏/历史/下载/问 AI/返回对话 全部收进「更多」菜单。
+            if windowWidthClass.usesStackedPanes {
+                Button("收藏夹 / 收藏当前页", systemImage: activeURLIsBookmarked ? "star.fill" : "star") {
+                    model.toggleBookmarksPanel()
+                }
+                Button("浏览历史", systemImage: "clock") { model.toggleHistoryPanel() }
+                Button("下载", systemImage: "arrow.down.circle") { model.toggleDownloadsPanel() }
+                Button("问一问 AI", systemImage: "sparkles") { showPageQuestionPopover() }
+                    .disabled(activeWebView == nil || activeTab?.navigationState.isLoading == true)
+                Button("返回对话", systemImage: "bubble.left.and.bubble.right") { model.returnFromWorkspace() }
+                Divider()
+            }
             Button("在页面中查找…", systemImage: "magnifyingglass") { showFindBar() }
             Button("新建私密标签页", systemImage: "hand.raised.fill") { openPrivateTab() }
             Divider()
@@ -1908,12 +1932,13 @@ private struct BrowserAddressTextField: NSViewRepresentable {
     var focusRequestID: UUID
     var onEditingChanged: (Bool) -> Void
     var onSubmit: () -> Void
+    var fontSize: CGFloat = 13
 
     func makeNSView(context: Context) -> NSTextField {
         let textField = SelectAllOnFocusTextField()
         textField.delegate = context.coordinator
         textField.placeholderString = placeholder
-        textField.font = .systemFont(ofSize: 13)
+        textField.font = .systemFont(ofSize: fontSize)
         textField.isBordered = true
         textField.isBezeled = true
         textField.bezelStyle = .roundedBezel

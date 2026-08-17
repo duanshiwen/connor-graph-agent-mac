@@ -292,9 +292,14 @@ struct ImChatDetailView: View {
         switch windowWidthClass {
         case .regular: 220
         case .compact: 180
-        case .narrow: 120
-        case .phone: 96
+        case .narrow: 88
+        case .phone: 72
         }
+    }
+
+    /// 堆叠布局下头部图标按钮统一放大一档，便于点击与识别。
+    private var headerButtonSize: CGFloat {
+        windowWidthClass.usesStackedPanes ? AppShellLayout.stackedBackButtonSize : AgentChatLayout.iconButtonSize
     }
 
     private var conversationTitle: String {
@@ -352,16 +357,18 @@ struct ImChatDetailView: View {
             Text(conversationTitle)
                 .font(AgentChatTypography.title)
                 .lineLimit(1)
+                .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, titleHorizontalInset)
 
             HStack(spacing: AgentChatLayout.spaceS) {
-                if windowWidthClass.isPhone {
+                if windowWidthClass.usesStackedPanes {
                     Button {
                         Task { await model.selectConversation(nil) }
                     } label: {
                         Image(systemName: "chevron.left")
-                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                            .font(.system(size: AppShellLayout.stackedBackButtonIconSize, weight: .bold))
+                            .frame(width: headerButtonSize, height: headerButtonSize)
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(Color.accentColor)
@@ -375,19 +382,35 @@ struct ImChatDetailView: View {
                 }
                 Spacer()
                 if !model.isSelectionMode {
-                    Button("选择消息", systemImage: "checkmark.circle") {
-                        model.enterSelectionMode()
+                    if windowWidthClass.usesStackedPanes {
+                        Button {
+                            model.enterSelectionMode()
+                        } label: {
+                            Image(systemName: "checkmark.circle")
+                                .font(.system(size: 13, weight: .semibold))
+                                .frame(width: headerButtonSize, height: headerButtonSize)
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .disabled(model.messages.isEmpty)
+                        .help("选择多条消息并合并转发")
+                        .accessibilityLabel("选择消息")
+                    } else {
+                        Button("选择消息", systemImage: "checkmark.circle") {
+                            model.enterSelectionMode()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(model.messages.isEmpty)
+                        .help("选择多条消息并合并转发")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(model.messages.isEmpty)
-                    .help("选择多条消息并合并转发")
                 }
                 Button {
                     isConversationInfoPresented = true
                 } label: {
                     Image(systemName: "info.circle")
-                        .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                        .font(.system(size: windowWidthClass.usesStackedPanes ? 14 : 13, weight: .semibold))
+                        .frame(width: headerButtonSize, height: headerButtonSize)
                 }
                 .buttonStyle(.borderless)
                 .help("会话信息")
@@ -465,6 +488,32 @@ struct ImChatDetailView: View {
 
     private var composer: some View {
         VStack(spacing: 0) {
+            if let pickerModel = attachmentLibraryModel {
+                AttachmentLibraryPickerPanel(
+                    model: pickerModel,
+                    onPick: { urls in
+                        attachmentLibraryModel = nil
+                        guard let url = urls.first else { return }
+                        sendMedia(
+                            type: pickerModel.kindFilter == .image ? .image
+                                : pickerModel.kindFilter == .video ? .video
+                                : pickerModel.kindFilter == .audio ? .audio
+                                : .file,
+                            url: url
+                        )
+                    },
+                    onPickFromFolder: {
+                        let type: ImMessageType = pickerModel.kindFilter == .image ? .image
+                            : pickerModel.kindFilter == .video ? .video
+                            : pickerModel.kindFilter == .audio ? .audio
+                            : .file
+                        folderPick(type: type)
+                    },
+                    onCollapse: { attachmentLibraryModel = nil }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             TextField(
                 model.socketConnected ? "发送消息…" : "连接已断开，无法发送",
                 text: $composerText,
@@ -539,31 +588,10 @@ struct ImChatDetailView: View {
         .padding(.horizontal, AgentChatLayout.chatViewportSpacing)
         .padding(.bottom, AgentChatLayout.spaceM)
         .frame(maxWidth: .infinity)
+        .animation(.easeInOut(duration: 0.22), value: attachmentLibraryModel != nil)
         .onChange(of: voiceRecorder.isRecording) { wasRecording, isRecording in
             guard wasRecording, !isRecording, let recording = voiceRecorder.takeFinishedRecording() else { return }
             sendRecording(recording)
-        }
-        .sheet(item: $attachmentLibraryModel) { model in
-            AttachmentLibraryPickerView(
-                model: model,
-                title: "附件库 · 发送附件",
-                onPick: { urls in
-                    attachmentLibraryModel = nil
-                    guard let url = urls.first else { return }
-                    sendMedia(type: model.kindFilter == .image ? .image
-                                    : model.kindFilter == .video ? .video
-                                    : model.kindFilter == .audio ? .audio
-                                    : .file, url: url)
-                },
-                onPickFromFolder: {
-                    attachmentLibraryModel = nil
-                    let type: ImMessageType = model.kindFilter == .image ? .image
-                        : model.kindFilter == .video ? .video
-                        : model.kindFilter == .audio ? .audio
-                        : .file
-                    folderPick(type: type)
-                }
-            )
         }
     }
 
@@ -576,15 +604,21 @@ struct ImChatDetailView: View {
 
     /// 发附件默认打开附件库（按类型筛选的最近附件）；库为空或要选库外文件时回退文件夹。
     private func chooseMedia(type: ImMessageType) {
-        guard let paths = try? AppStoragePaths.live() else {
-            folderPick(type: type)
-            return
-        }
         let preset: AttachmentLibraryPickerModel.KindFilter = switch type {
         case .image: .image
         case .video: .video
         case .audio: .audio
         case .file, .text, .system: .all
+        }
+        // 面板已展开时：切换筛选而不是重建模型，避免回到“正在加载附件库…”。
+        if let existing = attachmentLibraryModel {
+            existing.kindFilter = preset
+            existing.reload()
+            return
+        }
+        guard let paths = try? AppStoragePaths.live() else {
+            folderPick(type: type)
+            return
         }
         attachmentLibraryModel = AttachmentLibraryPickerModel(
             store: FileArtifactStore(paths: paths),
@@ -609,6 +643,7 @@ struct ImChatDetailView: View {
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         sendMedia(type: type, url: url)
+        attachmentLibraryModel = nil
     }
 
     private func sendMedia(type: ImMessageType, url: URL) {
@@ -686,7 +721,8 @@ struct ImCreateGroupSheet: View {
             }
             .formStyle(.grouped)
         }
-        .frame(width: 440, height: 520)
+        .frame(maxWidth: 460)
+        .frame(height: 520)
     }
 
     private func memberBinding(_ userId: Int64) -> Binding<Bool> {
@@ -791,7 +827,8 @@ struct ImGroupDetailSheet: View {
                 ContentUnavailableView("无法加载群聊", systemImage: "person.3")
             }
         }
-        .frame(width: 480, height: 600)
+        .frame(maxWidth: 500)
+        .frame(height: 600)
         .task { await model.loadSelectedGroupDetails() }
     }
 }
@@ -852,7 +889,8 @@ private struct ImConversationInfoSheet: View {
                 ContentUnavailableView("无法加载会话", systemImage: "info.circle")
             }
         }
-        .frame(width: 420, height: 430)
+        .frame(maxWidth: 440)
+        .frame(height: 430)
     }
 }
 

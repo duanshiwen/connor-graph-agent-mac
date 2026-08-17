@@ -8,6 +8,7 @@ struct AgentAttachmentPreviewSheetView: View {
     var onDownloadImage: (() -> Void)? = nil
     var onShare: (() -> Void)? = nil
     var onRetryExtraction: (() -> Void)? = nil
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
@@ -28,9 +29,12 @@ struct AgentAttachmentPreviewSheetView: View {
                 Text(model.title)
                     .font(AgentChatTypography.sectionTitle)
                     .lineLimit(2)
+                    .truncationMode(.tail)
                 Text(model.subtitle)
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
                 if let error = model.errorMessage {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(AgentChatTypography.meta)
@@ -41,7 +45,11 @@ struct AgentAttachmentPreviewSheetView: View {
             Spacer()
             if model.sourceFileURL != nil, let onShare {
                 Button(action: onShare) {
-                    Label("分享", systemImage: "square.and.arrow.up")
+                    if windowWidthClass.usesStackedPanes {
+                        Image(systemName: "square.and.arrow.up")
+                    } else {
+                        Label("分享", systemImage: "square.and.arrow.up")
+                    }
                 }
                 .buttonStyle(.bordered)
                 .accessibilityLabel("分享这个附件")
@@ -49,7 +57,11 @@ struct AgentAttachmentPreviewSheetView: View {
             }
             if canDownloadImage, let onDownloadImage {
                 Button(action: onDownloadImage) {
-                    Label("下载", systemImage: "square.and.arrow.down")
+                    if windowWidthClass.usesStackedPanes {
+                        Image(systemName: "square.and.arrow.down")
+                    } else {
+                        Label("下载", systemImage: "square.and.arrow.down")
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .accessibilityLabel("下载这张图片")
@@ -57,10 +69,15 @@ struct AgentAttachmentPreviewSheetView: View {
             }
             if canRetryExtraction, let onRetryExtraction {
                 Button(action: onRetryExtraction) {
-                    Label("重新解析", systemImage: "arrow.clockwise")
+                    if windowWidthClass.usesStackedPanes {
+                        Image(systemName: "arrow.clockwise")
+                    } else {
+                        Label("重新解析", systemImage: "arrow.clockwise")
+                    }
                 }
                 .buttonStyle(.bordered)
                 .help("重新排队解析这个附件")
+                .accessibilityLabel("重新解析")
             }
         }
     }

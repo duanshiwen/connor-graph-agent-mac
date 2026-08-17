@@ -10,6 +10,7 @@ struct AgentAttachmentInspectorView: View {
     var onReindex: (() -> Void)? = nil
     var onCreateEvidence: (() -> Void)? = nil
     var onPurgeRemote: ((AgentAttachmentRemoteFileRef) -> Void)? = nil
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
@@ -27,7 +28,10 @@ struct AgentAttachmentInspectorView: View {
             }
         }
         .padding(AgentChatLayout.spaceL)
-        .frame(minWidth: 520, minHeight: 560)
+        .frame(
+            minWidth: windowWidthClass.usesStackedPanes ? 360 : 520,
+            minHeight: 560
+        )
     }
 
     private var header: some View {

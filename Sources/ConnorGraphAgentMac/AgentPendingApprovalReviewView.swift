@@ -10,6 +10,7 @@ import ConnorGraphAppSupport
 struct AgentPendingApprovalReviewView: View {
     @Bindable var model: ChatFeatureModel
     var chatActions: ChatFeatureActions
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -54,11 +55,23 @@ struct AgentPendingApprovalReviewView: View {
                             .font(.subheadline)
                             .textSelection(.enabled)
 
-                        HStack(spacing: 12) {
-                            Label("运行 ID：\(approval.runID)", systemImage: "play.circle")
-                            Label("所在会话：\(row.sessionTitle)", systemImage: "bubble.left.and.bubble.right")
-                            if approval.toolName != nil {
-                                Label(row.toolDisplayName, systemImage: "wrench.and.screwdriver")
+                        Group {
+                            if windowWidthClass.usesStackedPanes {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Label("运行 ID：\(approval.runID)", systemImage: "play.circle")
+                                    Label("所在会话：\(row.sessionTitle)", systemImage: "bubble.left.and.bubble.right")
+                                    if approval.toolName != nil {
+                                        Label(row.toolDisplayName, systemImage: "wrench.and.screwdriver")
+                                    }
+                                }
+                            } else {
+                                HStack(spacing: 12) {
+                                    Label("运行 ID：\(approval.runID)", systemImage: "play.circle")
+                                    Label("所在会话：\(row.sessionTitle)", systemImage: "bubble.left.and.bubble.right")
+                                    if approval.toolName != nil {
+                                        Label(row.toolDisplayName, systemImage: "wrench.and.screwdriver")
+                                    }
+                                }
                             }
                         }
                         .font(.caption)

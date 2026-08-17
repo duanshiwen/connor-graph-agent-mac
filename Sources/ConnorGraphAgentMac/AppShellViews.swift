@@ -111,6 +111,10 @@ struct AppShellView: View {
         )
     }
 
+    private var identityButtonHelp: String {
+        identityStore.currentUser.map { "打开用户菜单，当前用户：\($0.displayName)" } ?? "打开用户菜单，尚未登录"
+    }
+
     /// 从会话列表等入口请求“添加康纳好友”时，在当前页面上方直接弹出加好友弹窗，
     /// 不切换左侧栏到人际关系页。
     private var addFriendPresented: Binding<Bool> {
@@ -131,22 +135,19 @@ struct AppShellView: View {
                     openURL: graph.shellActions.openURL
                 )
             } else {
-                if widthClass.isPhone {
-                    phoneContent
+                if widthClass.usesStackedPanes {
+                    stackedContent
                 } else {
-                    HSplitView {
+                    HStack(spacing: 0) {
                         if isPrimarySidebarVisible {
                             CraftPrimarySidebarView(
                                 graph: graph,
                                 selection: selectionBinding,
                                 sendCommand: sendCommand
                             )
-                            .frame(
-                                minWidth: AppShellLayout.primarySidebarMinWidth,
-                                idealWidth: AppShellLayout.primarySidebarDefaultWidth,
-                                maxWidth: AppShellLayout.primarySidebarMaxWidth,
-                                maxHeight: .infinity
-                            )
+                            // 主侧栏固定为与列表列相同的宽度，不允许用户拖动更改。
+                            .frame(width: AppShellLayout.listColumnWidth)
+                            .frame(maxHeight: .infinity)
                             .background(.bar)
                             .controlSize(AppButtonLayout.controlSize)
                         }
@@ -155,7 +156,7 @@ struct AppShellView: View {
                             graph: graph,
                             selection: selectionBinding
                         )
-                            .frame(width: widthClass == .narrow ? AppShellLayout.listColumnNarrowWidth : AppShellLayout.listColumnWidth)
+                            .frame(width: AppShellLayout.listColumnWidth)
                             .frame(maxHeight: .infinity)
                             .background(AppShellColors.listBackground)
                             .controlSize(AppButtonLayout.controlSize)
@@ -256,8 +257,8 @@ struct AppShellView: View {
                     }
                 }
                 .buttonStyle(.appIcon)
-                .help(identityStore.currentUser.map { "打开用户菜单，当前用户：\($0.displayName)" } ?? "打开用户菜单，尚未登录")
-                .accessibilityLabel(identityStore.currentUser.map { "打开用户菜单，当前用户：\($0.displayName)" } ?? "打开用户菜单，尚未登录")
+                .help(identityButtonHelp)
+                .accessibilityLabel(identityButtonHelp)
                 .popover(isPresented: $isIdentityPopoverPresented, arrowEdge: .bottom) {
                     UserIdentityPopoverView(identityStore: identityStore) {
                         isIdentityPopoverPresented = false
@@ -340,10 +341,11 @@ struct AppShellView: View {
         return .regular
     }
 
-    /// 手机式布局：列表/详情二选一，全屏堆叠，带滑动切换动画。
-    private var phoneContent: some View {
+    /// 窄窗口堆叠布局（narrow/phone）：列表/详情二选一，全屏堆叠，带滑动切换动画；
+    /// 详情页始终提供返回入口，返回后回到列表。
+    private var stackedContent: some View {
         ZStack {
-            if isPhoneDetailActive {
+            if isDetailActive {
                 CraftDetailPaneView(
                     graph: graph,
                     identityStore: identityStore,
@@ -354,15 +356,15 @@ struct AppShellView: View {
                 .controlSize(AppButtonLayout.controlSize)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
                 .overlay(alignment: .topLeading) {
-                    if let backAction = phoneBackAction {
+                    if let backAction = stackedBackAction {
                         Button(action: backAction) {
                             Image(systemName: "chevron.left")
-                                .font(.system(size: 13, weight: .semibold))
-                                .frame(width: 30, height: 30)
+                                .font(.system(size: AppShellLayout.stackedBackButtonIconSize, weight: .bold))
+                                .frame(width: AppShellLayout.stackedBackButtonSize, height: AppShellLayout.stackedBackButtonSize)
                         }
                         .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .padding(.leading, AppShellLayout.spaceM)
+                        .controlSize(.regular)
+                        .padding(.horizontal, AppShellLayout.spaceM)
                         .padding(.top, AppShellLayout.spaceS)
                         .help("返回")
                         .accessibilityLabel("返回")
@@ -379,11 +381,11 @@ struct AppShellView: View {
                 .transition(.move(edge: .leading).combined(with: .opacity))
             }
         }
-        .animation(.easeInOut(duration: 0.22), value: isPhoneDetailActive)
+        .animation(.easeInOut(duration: 0.22), value: isDetailActive)
     }
 
-    /// 手机式布局下当前路由是否处于“详情”页（需要展示返回按钮并隐藏列表）。
-    private var isPhoneDetailActive: Bool {
+    /// 窄窗口堆叠布局下当前路由是否处于“详情”页（需要展示返回按钮并隐藏列表）。
+    private var isDetailActive: Bool {
         let route = graph.shell.selection ?? .agentChat
         switch route {
         case .agentChat:
@@ -401,8 +403,8 @@ struct AppShellView: View {
         }
     }
 
-    /// 手机式布局下详情页顶部的返回动作；聊天详情在头部自带返回按钮，这里不再叠加。
-    private var phoneBackAction: (() -> Void)? {
+    /// 窄窗口堆叠布局下详情页顶部的返回动作；聊天/IM 详情在头部自带返回按钮，这里不再叠加。
+    private var stackedBackAction: (() -> Void)? {
         let route = graph.shell.selection ?? .agentChat
         switch route {
         case .agentChat:

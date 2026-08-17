@@ -22,6 +22,7 @@ struct WorkspaceFilePreviewOverlay: View {
     /// 复制完整文件文字后的反馈提示；在预览浮窗内渲染，确保不被遮罩层盖住。
     var copyFeedbackToast: AgentChatToast?
     var onDismissCopyFeedback: () -> Void
+    @Environment(\.windowWidthClass) private var windowWidthClass
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -73,7 +74,7 @@ struct WorkspaceFilePreviewOverlay: View {
                     .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
-            .padding(AgentChatLayout.spaceXL)
+            .padding(windowWidthClass.usesStackedPanes ? AppShellLayout.spaceM : AgentChatLayout.spaceXL)
 
             if let copyFeedbackToast {
                 AgentChatToastView(toast: copyFeedbackToast, onDismiss: onDismissCopyFeedback)
@@ -122,7 +123,11 @@ struct WorkspaceFilePreviewOverlay: View {
                     Button {
                         onShare(model.node.url)
                     } label: {
-                        Label("分享", systemImage: "square.and.arrow.up")
+                        if windowWidthClass.usesStackedPanes {
+                            Image(systemName: "square.and.arrow.up")
+                        } else {
+                            Label("分享", systemImage: "square.and.arrow.up")
+                        }
                     }
                     .buttonStyle(.bordered)
                     .accessibilityLabel("分享这个文件")
@@ -130,11 +135,16 @@ struct WorkspaceFilePreviewOverlay: View {
                 }
                 if model.isTruncated {
                     Button(action: onLoadMore) {
-                        Label("继续加载", systemImage: "arrow.down.doc")
+                        if windowWidthClass.usesStackedPanes {
+                            Image(systemName: "arrow.down.doc")
+                        } else {
+                            Label("继续加载", systemImage: "arrow.down.doc")
+                        }
                     }
                     .buttonStyle(.bordered)
                     .disabled(isLoading)
                     .help("再加载 2 MB 文本")
+                    .accessibilityLabel("继续加载")
                 }
             }
 
