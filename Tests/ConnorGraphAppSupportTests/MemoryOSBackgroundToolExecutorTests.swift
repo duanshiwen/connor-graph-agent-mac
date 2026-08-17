@@ -21,6 +21,76 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(rejected.error?.contains("toolNotAllowed") == true)
     }
 
+    @Test func readsPersonRegistryThroughBackgroundContactsRead() throws {
+        let runtime = InMemoryAgentContactRuntime(people: [
+            PersonProfile(displayName: "张三", organizationName: "Example Inc.", notes: "Product designer")
+        ])
+        let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try store.migrate()
+        let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store), contactRuntime: runtime)
+
+        let listed = try executor.execute(
+            .init(id: "read-list", name: "contacts_read", argumentsJSON: #"{"operation":"list_people"}"#),
+            context: MemoryOSBackgroundToolExecutionContext(runID: "run-read", iteration: 1)
+        )
+        #expect(listed.error == nil)
+        #expect(listed.contentJSON.contains("张三"))
+        #expect(listed.contentText.contains("Found 1 people"))
+
+        let searched = try executor.execute(
+            .init(id: "read-search", name: "contacts_read", argumentsJSON: #"{"operation":"search_people","query":"张三"}"#),
+            context: MemoryOSBackgroundToolExecutionContext(runID: "run-read", iteration: 1)
+        )
+        #expect(searched.error == nil)
+        #expect(searched.contentJSON.contains("Example Inc."))
+    }
+
+    @Test func createsPersonProfileThroughUnmonitoredBackgroundWriteChannel() throws {
+        let runtime = InMemoryAgentContactRuntime()
+        let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try store.migrate()
+        let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store), contactRuntime: runtime)
+
+        let result = try executor.execute(
+            .init(
+                id: "create-1",
+                name: "person_registry_write",
+                argumentsJSON: #"{"operation":"create_person","name":"李四","email":"lisi@example.com","organization":"Acme","notes":"Product manager at Acme"}"#
+            ),
+            context: MemoryOSBackgroundToolExecutionContext(runID: "run-create", iteration: 1)
+        )
+        #expect(result.error == nil)
+        #expect(result.contentText.contains("Created person profile"))
+        #expect(result.contentJSON.contains("llm-discovery"))
+
+        let people = try executor.execute(
+            .init(id: "read-after-create", name: "contacts_read", argumentsJSON: #"{"operation":"search_people","query":"李四"}"#),
+            context: MemoryOSBackgroundToolExecutionContext(runID: "run-create", iteration: 1)
+        )
+        #expect(people.contentJSON.contains("Acme"))
+    }
+
+    @Test func appendsEvidenceToExistingPersonProfileThroughBackgroundUpdate() throws {
+        let existing = PersonProfile(displayName: "王五", notes: "Met at conference")
+        let runtime = InMemoryAgentContactRuntime(people: [existing])
+        let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try store.migrate()
+        let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store), contactRuntime: runtime)
+
+        let result = try executor.execute(
+            .init(
+                id: "update-1",
+                name: "person_registry_write",
+                argumentsJSON: #"{"operation":"update_person","personID":"\#(existing.id.rawValue)","notes":"Prefers Chinese for meetings","aliases":"小五"}"#
+            ),
+            context: MemoryOSBackgroundToolExecutionContext(runID: "run-update", iteration: 1)
+        )
+        #expect(result.error == nil)
+        #expect(result.contentText.contains("Updated person profile"))
+        #expect(result.contentJSON.contains("Prefers Chinese for meetings"))
+        #expect(result.contentJSON.contains("小五"))
+    }
+
     @Test func readsProvenanceThroughReadonlyBackgroundTool() throws {
         let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
         try store.migrate()
