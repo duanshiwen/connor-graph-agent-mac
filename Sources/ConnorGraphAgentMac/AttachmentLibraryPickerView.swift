@@ -400,7 +400,7 @@ enum AttachmentLibraryRegistration {
         guard let paths = paths ?? (try? AppStoragePaths.live()) else { return }
         let store = FileArtifactStore(paths: paths)
         for url in urls {
-            try? store.register(from: url, source: .session)
+            _ = try? store.register(from: url, source: .session)
         }
     }
 
