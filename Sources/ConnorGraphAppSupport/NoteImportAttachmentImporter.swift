@@ -16,8 +16,23 @@ public struct NoteImportAttachmentImportResult: Sendable, Equatable {
 
 public actor NoteImportAttachmentImporter {
     private let store: AppSessionAttachmentStore
+    private let policy: AttachmentImportPolicy
     private var importedBySessionAndHash: [String: AgentMessageAttachmentRef] = [:]
-    public init(store: AppSessionAttachmentStore) { self.store = store }
+
+    /// 笔记导入使用比日常聊天更宽松的附件策略：
+    /// Notion/Obsidian 等导出的图片可能超过默认 10 MB 上限，放宽图片限制避免导入被拒绝。
+    public init(
+        store: AppSessionAttachmentStore,
+        policy: AttachmentImportPolicy = AttachmentImportPolicy(
+            maxAcceptedBytes: 512_000,
+            maxImageBytes: 100_000_000,
+            maxDocumentBytes: 25_000_000,
+            maxAudioBytes: 50_000_000
+        )
+    ) {
+        self.store = store
+        self.policy = policy
+    }
 
     public func importAttachment(_ attachment: ImportedNoteAttachment, sessionID: String, authorizedRoot: NoteImportSourceAccessLease? = nil) throws -> NoteImportAttachmentImportResult {
         guard let path = attachment.sourcePath else { throw NoteImportAttachmentImporterError.missingSourcePath(attachment.displayName) }
@@ -30,7 +45,7 @@ public actor NoteImportAttachmentImporter {
         if let expected = attachment.contentHash, expected.lowercased() != hash.lowercased() { throw NoteImportAttachmentImporterError.hashMismatch(expected: expected, actual: hash) }
         let key = sessionID + ":" + hash
         if let existing = importedBySessionAndHash[key] { return .init(attachment: attachment, messageRef: existing, reused: true) }
-        let manifest = try store.importFile(at: url, sessionID: sessionID)
+        let manifest = try store.importFile(at: url, sessionID: sessionID, policy: policy)
         importedBySessionAndHash[key] = manifest.messageRef
         return .init(attachment: attachment, messageRef: manifest.messageRef, reused: false)
     }

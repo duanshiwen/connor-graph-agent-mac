@@ -20,10 +20,11 @@ public struct AppSessionAttachmentStore: Sendable {
         sessionID: String,
         now: Date = Date(),
         origin: AgentAttachmentOrigin = .userImported,
-        generationMetadata: AgentAttachmentGenerationMetadata? = nil
+        generationMetadata: AgentAttachmentGenerationMetadata? = nil,
+        policy: AttachmentImportPolicy? = nil
     ) throws -> AgentAttachmentManifest {
         let fileManager = FileManager.default
-        let importPolicy = AttachmentImportPolicy(maxAcceptedBytes: maxTextExtractionBytes)
+        let importPolicy = policy ?? AttachmentImportPolicy(maxAcceptedBytes: maxTextExtractionBytes)
         let originalFilename = sourceURL.lastPathComponent
         let validation = importPolicy.validate(url: sourceURL, fileManager: fileManager)
         let kind: AgentAttachmentKind
