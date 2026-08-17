@@ -247,7 +247,9 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("## File Handoff, Retrieval, and Reuse"))
     #expect(prompt.contains("`file_register` using exact current-session `attachmentIDs`"))
-    #expect(prompt.contains("`file_lookup` or Memory OS search and copy the exact returned `fileID`"))
+    #expect(prompt.contains("start by searching the attachment library: call `file_lookup`"))
+    #expect(prompt.contains("read the content with `file_get` before answering"))
+    #expect(prompt.contains("`file_lookup` first and copy the exact returned `fileID`"))
     #expect(prompt.contains("pass its `fileID` in `mail_create_draft.attachmentIDs`"))
     #expect(prompt.contains("Cross-session reuse is allowed only when backed by a real registered `fileID`"))
 }
