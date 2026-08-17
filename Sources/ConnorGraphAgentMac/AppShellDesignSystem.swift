@@ -447,12 +447,21 @@ final class NativeMenuActionTarget: NSObject {
     }
 }
 
+nonisolated(unsafe) private var nativeMenuTargetsKey: UInt8 = 0
+
+extension NSMenu {
+    /// 强持有菜单项的 action target。
+    /// `NSMenuItem.target` 是弱引用，若不额外持有，target 会在菜单弹出前被 ARC 释放，
+    /// 导致菜单项因无法响应 action 而变灰不可点击。
+    func retainingActionTargets(_ targets: [NativeMenuActionTarget]) {
+        objc_setAssociatedObject(self, &nativeMenuTargetsKey, targets, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    }
+}
+
 /// 捕获右键点击并在该位置弹出原生 NSMenu 的透明桥接视图。
 /// 仅拦截右键事件；左键/双击等事件全部穿透到下层 SwiftUI 视图。
 final class NativeRightClickMenuView: NSView {
     var makeMenu: () -> NSMenu
-    /// 强持有 menu item 的 action target，防止菜单弹出期间 target 被释放。
-    private var retainedTargets: [NativeMenuActionTarget] = []
 
     init(makeMenu: @escaping () -> NSMenu) {
         self.makeMenu = makeMenu
@@ -472,22 +481,10 @@ final class NativeRightClickMenuView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        // menu 通过 retainingActionTargets 强持有所有 action target，
+        // popUp 同步运行期间 target 必然存活。
         let menu = makeMenu()
-        retainedTargets = Self.collectTargets(in: menu)
         menu.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
-    }
-
-    private static func collectTargets(in menu: NSMenu) -> [NativeMenuActionTarget] {
-        var targets: [NativeMenuActionTarget] = []
-        for item in menu.items {
-            if let target = item.target as? NativeMenuActionTarget {
-                targets.append(target)
-            }
-            if let submenu = item.submenu {
-                targets.append(contentsOf: collectTargets(in: submenu))
-            }
-        }
-        return targets
     }
 }
 
@@ -541,6 +538,7 @@ enum AppSessionNativeContextMenu {
         deleteTitle: String = "删除会话"
     ) -> NSMenu {
         let menu = NSMenu(title: title)
+        var retainedTargets: [NativeMenuActionTarget] = []
         if !title.isEmpty {
             let header = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             header.isEnabled = false
@@ -554,7 +552,9 @@ enum AppSessionNativeContextMenu {
         for status in statuses ?? AgentSessionStatus.allCases.filter({ $0 != .archived }) {
             let item = NSMenuItem(title: status.displayName, action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
             item.image = NSImage(systemSymbolName: statusImageProvider(status), accessibilityDescription: status.displayName)
-            item.target = NativeMenuActionTarget { onSetStatus(status) }
+            let target = NativeMenuActionTarget { onSetStatus(status) }
+            item.target = target
+            retainedTargets.append(target)
             if status == currentStatus {
                 item.state = .on
             }
@@ -575,7 +575,9 @@ enum AppSessionNativeContextMenu {
             for definition in labels {
                 let item = NSMenuItem(title: definition.name, action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
                 item.image = NSImage(systemSymbolName: selectedLabelIDs.contains(definition.id) ? "checkmark.circle.fill" : (definition.systemImage.isEmpty ? "tag" : definition.systemImage), accessibilityDescription: definition.name)
-                item.target = NativeMenuActionTarget { onToggleLabel(definition.id) }
+                let target = NativeMenuActionTarget { onToggleLabel(definition.id) }
+                item.target = target
+                retainedTargets.append(target)
                 if selectedLabelIDs.contains(definition.id) {
                     item.state = .on
                 }
@@ -590,13 +592,17 @@ enum AppSessionNativeContextMenu {
         // 重命名
         let renameItem = NSMenuItem(title: "重命名", action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
         renameItem.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: "重命名")
-        renameItem.target = NativeMenuActionTarget(onRename)
+        let renameTarget = NativeMenuActionTarget(onRename)
+        renameItem.target = renameTarget
+        retainedTargets.append(renameTarget)
         menu.addItem(renameItem)
 
         // AI 重设标题
         let regenerateItem = NSMenuItem(title: "AI 重设标题", action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
         regenerateItem.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "AI 重设标题")
-        regenerateItem.target = NativeMenuActionTarget(onRegenerateTitle)
+        let regenerateTarget = NativeMenuActionTarget(onRegenerateTitle)
+        regenerateItem.target = regenerateTarget
+        retainedTargets.append(regenerateTarget)
         regenerateItem.isEnabled = !isRegeneratingTitle
         menu.addItem(regenerateItem)
 
@@ -604,7 +610,9 @@ enum AppSessionNativeContextMenu {
         if let onToggleMuted {
             let muteItem = NSMenuItem(title: isMuted ? "取消免打扰" : "免打扰", action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
             muteItem.image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: isMuted ? "取消免打扰" : "免打扰")
-            muteItem.target = NativeMenuActionTarget(onToggleMuted)
+            let muteTarget = NativeMenuActionTarget(onToggleMuted)
+            muteItem.target = muteTarget
+            retainedTargets.append(muteTarget)
             menu.addItem(muteItem)
         }
 
@@ -613,10 +621,14 @@ enum AppSessionNativeContextMenu {
         // 删除
         let deleteItem = NSMenuItem(title: deleteTitle, action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
         deleteItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: deleteTitle)
-        deleteItem.target = NativeMenuActionTarget(onDelete)
+        let deleteTarget = NativeMenuActionTarget(onDelete)
+        deleteItem.target = deleteTarget
+        retainedTargets.append(deleteTarget)
         deleteItem.isEnabled = canDelete
         menu.addItem(deleteItem)
 
+        // 让 menu 自身强持有所有 action target，直到菜单弹出结束。
+        menu.retainingActionTargets(retainedTargets)
         return menu
     }
 }
