@@ -107,14 +107,14 @@ struct AppSessionAttachmentStoreImportPolicyTests {
         }
     }
 
-    @Test func rejectsArchiveAndVideoButAcceptsDocumentsAndAudio() throws {
+    @Test func rejectsArchiveButAcceptsDocumentsAudioAndVideo() throws {
         let policy = AttachmentImportPolicy()
-        for file in ["report.docx", "paper.pdf", "slides.pptx"] {
+        for file in ["report.docx", "paper.pdf", "slides.pptx", "clip.mp4", "voice.m4a"] {
             if case .rejected(let reason) = policy.validate(url: URL(fileURLWithPath: "/tmp/\(file)")) {
                 Issue.record("Expected \(file) to be accepted, rejected with \(reason)")
             }
         }
-        for file in ["archive.zip", "movie.mp4"] {
+        for file in ["archive.zip"] {
             let result = policy.validate(url: URL(fileURLWithPath: "/tmp/\(file)"))
             if case .accepted = result {
                 Issue.record("Expected \(file) to be rejected")

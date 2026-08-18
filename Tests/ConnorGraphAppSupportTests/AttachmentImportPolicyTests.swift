@@ -64,13 +64,21 @@ struct AttachmentImportPolicyTests {
         #expect(AttachmentImportPolicy.acceptedKind(forExtension: "ogg") == nil)
     }
 
+    @Test func acceptsSupportedVideoAllowlist() {
+        for ext in ["mp4", "mov", "m4v", "mkv", "avi", "webm"] {
+            #expect(AttachmentImportPolicy.acceptedKind(forExtension: ext) == .video)
+        }
+        #expect(AttachmentImportPolicy.acceptedKind(forExtension: "wmv") == nil)
+        #expect(AttachmentImportPolicy.acceptedKind(forExtension: "flv") == nil)
+    }
+
     @Test func rejectsUnsupportedAttachmentFamilies() {
         let rejected: [(String, AttachmentImportRejectionReason)] = [
             ("page.html", .unsupportedHTML),
             ("page.htm", .unsupportedHTML),
             ("vector.svg", .unsupportedSVG),
             ("audio.flac", .unsupportedAudio),
-            ("video.mp4", .unsupportedVideo),
+            ("video.wmv", .unsupportedVideo),
             ("archive.zip", .unsupportedArchive),
             ("archive.tar", .unsupportedArchive),
             ("db.sqlite", .unsupportedDatabase),
@@ -107,6 +115,20 @@ struct AttachmentImportPolicyTests {
 
         #expect(policy.validate(url: text) == .rejected(.fileTooLarge(512_000)))
         #expect(policy.validate(url: document) == .accepted(kind: .pdf))
+    }
+
+    @Test func appliesSeparateVideoSizeLimit() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let text = root.appendingPathComponent("large.json")
+        let video = root.appendingPathComponent("large.mp4")
+        try Data(repeating: 0, count: 600_000).write(to: text)
+        try Data(repeating: 0, count: 600_000).write(to: video)
+
+        let policy = AttachmentImportPolicy(maxAcceptedBytes: 512_000, maxImageBytes: 10_000_000, maxVideoBytes: 1_000_000)
+
+        #expect(policy.validate(url: text) == .rejected(.fileTooLarge(512_000)))
+        #expect(policy.validate(url: video) == .accepted(kind: .video))
     }
 
     @Test func appliesSeparateAudioSizeLimitAndValidatesContainerSignature() throws {

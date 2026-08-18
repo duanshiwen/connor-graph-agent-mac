@@ -24,7 +24,7 @@ struct NoteImportCenterView: View {
             .frame(minWidth: 260)
         } detail: {
             if let job = model.selectedJob { jobDetail(job) }
-            else { ContentUnavailableView("还没有导入任务", systemImage: "square.and.arrow.down", description: Text("从 Markdown、Obsidian、Notion 或 ENEX 导入笔记。")) }
+            else { ContentUnavailableView("还没有导入任务", systemImage: "square.and.arrow.down", description: Text("从 Markdown、Obsidian、Notion 或印象笔记（.notes / .enex）导入笔记。")) }
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) { Button { openWindow(id: AppMenuPresentation.noteImportWizardWindowID) } label: { Label("新建导入", systemImage: "plus") } }

@@ -73,12 +73,20 @@ public struct AttachmentImportPolicy: Sendable {
     public var maxImageBytes: Int64
     public var maxDocumentBytes: Int64
     public var maxAudioBytes: Int64
+    public var maxVideoBytes: Int64
 
-    public init(maxAcceptedBytes: Int64 = 512_000, maxImageBytes: Int64 = 10_000_000, maxDocumentBytes: Int64 = 25_000_000, maxAudioBytes: Int64 = 50_000_000) {
+    public init(
+        maxAcceptedBytes: Int64 = 512_000,
+        maxImageBytes: Int64 = 10_000_000,
+        maxDocumentBytes: Int64 = 25_000_000,
+        maxAudioBytes: Int64 = 50_000_000,
+        maxVideoBytes: Int64 = 100_000_000
+    ) {
         self.maxAcceptedBytes = maxAcceptedBytes
         self.maxImageBytes = maxImageBytes
         self.maxDocumentBytes = maxDocumentBytes
         self.maxAudioBytes = maxAudioBytes
+        self.maxVideoBytes = maxVideoBytes
     }
 
     public func validate(url: URL, fileManager: FileManager = .default) -> AttachmentImportValidationResult {
@@ -116,6 +124,7 @@ public struct AttachmentImportPolicy: Sendable {
         case "xls", "xlsx", "numbers": return .spreadsheet
         case "ppt", "pptx", "keynote": return .presentation
         case "mp3", "wav", "m4a", "aac": return .audio
+        case "mp4", "mov", "m4v", "mkv", "avi", "webm": return .video
         default:
             return nil
         }
@@ -126,7 +135,7 @@ public struct AttachmentImportPolicy: Sendable {
         case "html", "htm": return .unsupportedHTML
         case "svg", "avif": return .unsupportedSVG
         case "flac", "ogg": return .unsupportedAudio
-        case "mp4", "mov", "mkv", "avi", "webm": return .unsupportedVideo
+        case "mpg", "mpeg", "3gp", "wmv", "flv": return .unsupportedVideo
         case "pages", "numbers", "keynote": return .unsupportedIWork
         case "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz": return .unsupportedArchive
         case "sqlite", "db": return .unsupportedDatabase
@@ -143,6 +152,8 @@ public struct AttachmentImportPolicy: Sendable {
             return maxDocumentBytes
         case .audio:
             return maxAudioBytes
+        case .video:
+            return maxVideoBytes
         default:
             return maxAcceptedBytes
         }
