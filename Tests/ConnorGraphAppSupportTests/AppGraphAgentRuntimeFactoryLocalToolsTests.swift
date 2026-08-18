@@ -57,6 +57,7 @@ import ConnorGraphStore
     #expect(names.contains("session_set_status"))
     #expect(names.contains("session_list_by_status"))
     #expect(names.contains("session_batch_set_status"))
+    #expect(names.contains("session_batch_delete"))
     #expect(names.contains("note_search"))
     #expect(names.contains("note_get"))
 }

@@ -101,6 +101,7 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         case .readGraph: "读取知识图谱"
         case .readSession: "读取会话"
         case .mutateSessionStatus: "修改会话状态"
+        case .deleteSession: "删除会话"
         case .mutatePersonality: "修改康纳同学性格"
         case .proposeGraphWrite: "提议写入知识图谱"
         case .commitGraphWrite: "写入知识图谱"
@@ -158,6 +159,8 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
             "允许连接外部网络或打开网页，可能向第三方服务发送请求。"
         case .modelCall, .costlyModelCall:
             "允许调用 AI 模型；可能产生用量或费用。"
+        case .deleteSession:
+            "删除会话及其本地记录，操作不可撤销，请确认目标会话。"
         case .runReadOnlyShellCommand, .computeScientific:
             "允许在本机执行计算或只读命令。"
         case .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand,

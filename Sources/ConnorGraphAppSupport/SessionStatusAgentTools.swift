@@ -91,6 +91,7 @@ public extension AgentToolRegistry {
         register(SessionSetStatusTool(repository: repository, governanceConfig: governanceConfig))
         register(SessionListByStatusTool(repository: repository, governanceConfig: governanceConfig))
         register(SessionBatchSetStatusTool(repository: repository, governanceConfig: governanceConfig))
+        register(SessionBatchDeleteTool(repository: repository))
         register(SessionListStatusesTool(governanceConfig: governanceConfig))
     }
 }
@@ -291,6 +292,74 @@ public struct SessionListStatusesTool: AgentTool {
     }
 }
 
+public struct SessionBatchDeleteTool: AgentTool {
+    public let name = "session_batch_delete"
+    public let description = "Delete one or more Connor sessions. Copy each sessionID exactly from session_list_by_status (follow nextPage until all pages are read). The current session can never be deleted through this tool. Each item returns deleted, not_found, running_tasks, or failed so partial results are explicit; do not claim the whole batch succeeded unless every item reports deleted. Deletion is destructive and gated by user approval — only call this tool after the user explicitly asks to delete sessions, and report failures/conflicts instead of retrying blindly."
+    public let permission: AgentPermissionCapability = .deleteSession
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "sessionIDs": .array(
+            items: .string(description: "Exact sessionID returned by session_list_by_status; copy the field without renaming it."),
+            description: "One or more sessions to delete. Duplicate session IDs are processed once."
+        ),
+        "reason": .string(description: "Optional human-readable reason for the deletion.")
+    ], required: ["sessionIDs"])
+
+    private let repository: AppChatSessionRepository
+
+    public init(repository: AppChatSessionRepository) {
+        self.repository = repository
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let rawValues = arguments.array("sessionIDs") ?? arguments.array("session_ids") ?? []
+        guard !rawValues.isEmpty else {
+            throw AgentToolError.invalidArguments("sessionIDs must not be empty")
+        }
+        var seen = Set<String>()
+        var requestedIDs = Set<String>()
+        var results: [SessionBatchDeleteItemResult] = []
+        for value in rawValues {
+            guard let sessionID = value.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !sessionID.isEmpty else {
+                results.append(SessionBatchDeleteItemResult(sessionID: "", outcome: "failed", message: "sessionID is required"))
+                continue
+            }
+            requestedIDs.insert(sessionID)
+            guard seen.insert(sessionID).inserted else { continue }
+            if sessionID == context.sessionID {
+                results.append(SessionBatchDeleteItemResult(
+                    sessionID: sessionID,
+                    outcome: "failed",
+                    message: "当前会话不能通过工具删除，请使用会话列表界面操作。"
+                ))
+                continue
+            }
+            do {
+                try repository.deleteSession(sessionID: sessionID)
+                results.append(SessionBatchDeleteItemResult(sessionID: sessionID, outcome: "deleted", message: nil))
+            } catch AppChatSessionRepositoryError.sessionNotFound {
+                results.append(SessionBatchDeleteItemResult(sessionID: sessionID, outcome: "not_found", message: "Session not found."))
+            } catch AppChatSessionRepositoryError.sessionHasRunningBackgroundTasks {
+                results.append(SessionBatchDeleteItemResult(sessionID: sessionID, outcome: "running_tasks", message: "Session has running background tasks; cancel or wait before deleting."))
+            } catch {
+                results.append(SessionBatchDeleteItemResult(sessionID: sessionID, outcome: "failed", message: String(describing: error)))
+            }
+        }
+        let payload = SessionBatchDeleteResponse(
+            requestedItems: requestedIDs.count,
+            deletedItems: results.filter { $0.outcome == "deleted" }.count,
+            failedItems: results.filter { $0.outcome != "deleted" }.count,
+            results: results
+        )
+        return try sessionStatusJSONResult(
+            payload,
+            context: context,
+            toolName: name,
+            text: "Batch session deletion completed: \(payload.deletedItems) deleted, \(payload.failedItems) failed, not found, or blocked.",
+            modelContentUsesJSON: true
+        )
+    }
+}
+
 private struct SessionStatusToolPayload: Codable {
     var sessionID: String
     var title: String
@@ -385,6 +454,19 @@ private struct SessionBatchStatusResponse: Codable {
     var unchangedItems: Int
     var failedItems: Int
     var results: [SessionBatchStatusItemResult]
+}
+
+private struct SessionBatchDeleteItemResult: Codable {
+    var sessionID: String
+    var outcome: String
+    var message: String?
+}
+
+private struct SessionBatchDeleteResponse: Codable {
+    var requestedItems: Int
+    var deletedItems: Int
+    var failedItems: Int
+    var results: [SessionBatchDeleteItemResult]
 }
 
 private func sessionStatusJSONResult<T: Encodable>(
