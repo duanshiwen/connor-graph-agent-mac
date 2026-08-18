@@ -96,6 +96,22 @@ struct NotionExportNoteImportAdapterTests {
         let childNote = try #require(notes.first { $0.title == "Child One" })
         #expect(parentNote.links.contains { $0.kind == .internalNote && $0.resolvedSourceIdentity == childNote.sourceIdentity })
         #expect(parentNote.attachments.map(\.displayName) == ["pic.png"])
+        #expect(parentNote.markdownContent.contains("![](pic.png)"))
+    }
+
+    @Test("Preserves remote images in HTML exports as Markdown image syntax")
+    func htmlRemoteImagesStayInMarkdown() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        try """
+        <h1>Page</h1>
+        <img src="https://example.com/photo.png" alt="照片">
+        <img src="http://example.com/legacy.jpg">
+        """.write(to: root.appendingPathComponent("Page.html"), atomically: true, encoding: .utf8)
+
+        let notes = try await collect(NotionExportNoteImportAdapter(), root: root)
+        let note = try #require(notes.first)
+        #expect(note.markdownContent.contains("![照片](https://example.com/photo.png)"))
+        #expect(note.markdownContent.contains("![](http://example.com/legacy.jpg)"))
     }
 
     @Test("Imports every note in nested folders plus CSV")

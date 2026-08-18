@@ -356,8 +356,33 @@ public struct NotionExportNoteImportAdapter: NoteImportSourceAdapter {
         value = value
             .replacingOccurrences(of: "(?i)<br\\s*/?>", with: "\n", options: .regularExpression)
             .replacingOccurrences(of: "(?i)</(p|div|li|h[1-6]|tr)>", with: "\n", options: .regularExpression)
-            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-        return decodeHTMLEntities(value)
+        // 图片保留为 Markdown 图片（远程 URL 或本地相对路径都原样保留，
+        // 本地路径后续由附件导入改写为 file://，远程 URL 由气泡渲染器安全加载）。
+        value = replacingImagesInHTML(value)
+        return decodeHTMLEntities(value.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression))
+    }
+
+    private static func replacingImagesInHTML(_ html: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: "(?is)<img\\b[^>]*>") else { return html }
+        let ns = html as NSString
+        let matches = regex.matches(in: html, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return html }
+        let mutable = NSMutableString(string: html)
+        for match in matches.reversed() {
+            let tag = ns.substring(with: match.range)
+            let src = attributeValue(in: tag, name: "src") ?? ""
+            guard !src.isEmpty else { continue }
+            let alt = attributeValue(in: tag, name: "alt") ?? ""
+            mutable.replaceCharacters(in: match.range, with: "![\(alt)](\(src))")
+        }
+        return mutable as String
+    }
+
+    private static func attributeValue(in tag: String, name: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: "(?is)\(name)\\s*=\\s*[\"']([^\"']*)[\"']") else { return nil }
+        let ns = tag as NSString
+        guard let match = regex.firstMatch(in: tag, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        return ns.substring(with: match.range(at: 1))
     }
 
     private static func decodeHTMLEntities(_ value: String) -> String {
