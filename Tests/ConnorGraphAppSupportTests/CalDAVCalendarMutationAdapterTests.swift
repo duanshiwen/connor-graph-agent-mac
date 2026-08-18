@@ -49,9 +49,51 @@ struct CalDAVCalendarMutationAdapterTests {
         #expect(await transport.recordedRequests().count == 1)
     }
 
+    @Test func createsRecurringEventWithRRULE() async throws {
+        let transport = QueueCalDAVTransport(responses: [
+            .init(statusCode: 201, body: "", headers: ["ETag": "\"v1\""]),
+            .init(statusCode: 200, body: Self.ics(uid: "uid-r", title: "周会", rrule: "FREQ=WEEKLY;INTERVAL=2;COUNT=10"), headers: ["ETag": "\"v1\""])
+        ])
+        let adapter = CalDAVCalendarMutationAdapter(client: .init(transport: transport), credentialProvider: { _ in "secret" }, uidGenerator: { "uid-r" }, resourceNameGenerator: { "resource-r.ics" })
+        let request = CalendarMutationRequest(operation: .create, draft: .init(calendarID: Self.collection.id, title: "周会", start: .init(date: Date(timeIntervalSince1970: 1_782_276_400)), end: .init(date: Date(timeIntervalSince1970: 1_782_280_000)), recurrence: .init(frequency: .weekly, interval: 2, count: 10)))
+        let result = try await adapter.mutate(request, account: Self.account, collection: Self.collection, currentEvent: nil)
+        let requests = await transport.recordedRequests()
+        #expect(requests.first?.body.contains("RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=10") == true)
+        #expect(result.confirmedEvent?.recurrenceSummary?.ruleDescription == "FREQ=WEEKLY;INTERVAL=2;COUNT=10")
+    }
+
+    @Test func updatesRecurringSeriesAndPreservesRuleWhenUnchanged() async throws {
+        let weakETag = "W/\"opaque-v7\""
+        let transport = QueueCalDAVTransport(responses: [
+            .init(statusCode: 200, body: Self.ics(uid: "uid-1", title: "Remote", rrule: "FREQ=DAILY"), headers: ["ETag": weakETag]),
+            .init(statusCode: 204, body: "", headers: ["ETag": weakETag]),
+            .init(statusCode: 200, body: Self.ics(uid: "uid-1", title: "Updated", rrule: "FREQ=DAILY"), headers: ["ETag": weakETag])
+        ])
+        let adapter = CalDAVCalendarMutationAdapter(client: .init(transport: transport), credentialProvider: { _ in nil })
+        let event = CalendarEvent(id: .init(rawValue: "caldav-c-uid-1"), calendarID: Self.collection.id, title: "Remote", start: .init(date: Date(timeIntervalSince1970: 1_782_276_400)), end: .init(date: Date(timeIntervalSince1970: 1_782_280_000)), recurrenceSummary: .init(ruleDescription: "FREQ=DAILY"), sourceMetadata: .init(sourceKind: .genericCalDAV, remoteIdentifier: "uid-1", resourceURL: URL(string: "https://cal.example.com/cal/work/e.ics"), etag: weakETag, isRecurring: true))
+        let result = try await adapter.mutate(.init(operation: .update, eventID: event.id, expectedVersion: .init(value: weakETag), patch: .init(title: .set("Updated"))), account: Self.account, collection: Self.collection, currentEvent: event)
+        let requests = await transport.recordedRequests()
+        #expect(requests[1].body.contains("SUMMARY:Updated") == true)
+        #expect(requests[1].body.contains("RRULE:FREQ=DAILY") == true)
+        #expect(result.confirmedEvent?.recurrenceSummary?.ruleDescription == "FREQ=DAILY")
+    }
+
+    @Test func rejectsInstanceScopeOnCalDAV() async throws {
+        let transport = QueueCalDAVTransport(responses: [])
+        let adapter = CalDAVCalendarMutationAdapter(client: .init(transport: transport), credentialProvider: { _ in nil })
+        let event = CalendarEvent(id: .init(rawValue: "e"), calendarID: Self.collection.id, title: "Remote", start: .init(date: Date(timeIntervalSince1970: 10)), end: .init(date: Date(timeIntervalSince1970: 20)), recurrenceSummary: .init(ruleDescription: "FREQ=DAILY"), sourceMetadata: .init(sourceKind: .genericCalDAV, remoteIdentifier: "uid-1", resourceURL: URL(string: "https://cal.example.com/cal/work/e.ics"), etag: "\"v1\"", isRecurring: true))
+        await #expect(throws: CalendarMutationError.invalidInput("CalDAV 仅支持对整系列（entireSeries）修改/删除；单实例或未来实例操作暂不支持")) {
+            try await adapter.mutate(.init(operation: .update, eventID: event.id, expectedVersion: .init(value: "\"v1\""), patch: .init(title: .set("New")), scope: .thisEvent, occurrenceDate: Date(timeIntervalSince1970: 1_782_276_400)), account: Self.account, collection: Self.collection, currentEvent: event)
+        }
+        #expect(await transport.recordedRequests().isEmpty)
+    }
+
     private static var account: CalendarAccount { CalendarAccount(id: .init(rawValue: "a"), provider: .genericCalDAVCardDAV, sourceKind: .genericCalDAV, displayName: "Cal", configuration: .init(sourceKind: .genericCalDAV, authMode: .appPassword, syncMode: .bidirectional, calendarHomeSetURL: URL(string: "https://cal.example.com/cal/"), providerMetadata: ["collectionURL:c": "https://cal.example.com/cal/work/"])) }
     private static var collection: CalendarCollection { CalendarCollection(id: .init(rawValue: "c"), accountID: .init(rawValue: "a"), displayName: "Work") }
-    private static func ics(uid: String, title: String) -> String { "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:\(uid)\r\nSUMMARY:\(title)\r\nDTSTART:20260624T040000Z\r\nDTEND:20260624T050000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n" }
+    private static func ics(uid: String, title: String, rrule: String? = nil) -> String {
+        let rule = rrule.map { "RRULE:\($0)\r\n" } ?? ""
+        return "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:\(uid)\r\nSUMMARY:\(title)\r\n\(rule)DTSTART:20260624T040000Z\r\nDTEND:20260624T050000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    }
 }
 
 private actor QueueCalDAVTransport: CalendarCalDAVHTTPTransport {

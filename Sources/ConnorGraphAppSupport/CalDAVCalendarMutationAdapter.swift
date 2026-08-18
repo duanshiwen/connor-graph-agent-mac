@@ -24,6 +24,7 @@ public struct CalDAVCalendarMutationAdapter: CalendarMutationAdapter, Sendable {
         case .update:
             guard let event = currentEvent, let collection, let url = trustedURL(event: event, account: account, collection: collection), let expected = request.expectedVersion?.value, let patch = request.patch else { throw CalendarMutationError.invalidInput("Missing event metadata") }
             try protect(event)
+            guard request.scope == .entireSeries else { throw CalendarMutationError.invalidInput("CalDAV 仅支持对整系列（entireSeries）修改/删除；单实例或未来实例操作暂不支持") }
             let remote = try await mapHTTP { try await client.get(url: url, credential: credential) }
             let actual = header("ETag", in: remote)
             guard actual == expected else { throw CalendarMutationError.conflict(expected: expected, actual: actual) }
@@ -35,6 +36,7 @@ public struct CalDAVCalendarMutationAdapter: CalendarMutationAdapter, Sendable {
         case .delete:
             guard let event = currentEvent, let collection, let url = trustedURL(event: event, account: account, collection: collection), let expected = request.expectedVersion?.value else { throw CalendarMutationError.invalidInput("Missing event metadata") }
             try protect(event)
+            guard request.scope == .entireSeries else { throw CalendarMutationError.invalidInput("CalDAV 仅支持对整系列（entireSeries）修改/删除；单实例或未来实例操作暂不支持") }
             let remote = try await mapHTTP { try await client.get(url: url, credential: credential) }
             let actual = header("ETag", in: remote)
             guard actual == expected else { throw CalendarMutationError.conflict(expected: expected, actual: actual) }
@@ -55,13 +57,26 @@ public struct CalDAVCalendarMutationAdapter: CalendarMutationAdapter, Sendable {
 
     private func collectionURL(account: CalendarAccount, collection: CalendarCollection) -> URL? { account.configuration.providerMetadata["collectionURL:\(collection.id.rawValue)"].flatMap(URL.init(string:)) }
     private func trustedURL(event: CalendarEvent, account: CalendarAccount, collection: CalendarCollection) -> URL? { guard let base = collectionURL(account: account, collection: collection), let url = event.sourceMetadata?.resourceURL, base.scheme?.lowercased() == url.scheme?.lowercased(), base.host?.lowercased() == url.host?.lowercased(), url.path.hasPrefix(base.path) else { return nil }; return url }
-    private func protect(_ event: CalendarEvent) throws { if event.sourceMetadata?.isRecurring == true || event.recurrenceSummary != nil { throw CalendarMutationError.recurrenceUnsupported }; if event.sourceMetadata?.hasAttendees == true || !event.attendees.isEmpty || event.sourceMetadata?.organizerEmail != nil || event.sourceMetadata?.scheduleTag != nil { throw CalendarMutationError.schedulingUnsupported } }
+    private func protect(_ event: CalendarEvent) throws { if event.sourceMetadata?.hasAttendees == true || !event.attendees.isEmpty || event.sourceMetadata?.organizerEmail != nil || event.sourceMetadata?.scheduleTag != nil { throw CalendarMutationError.schedulingUnsupported } }
     private func header(_ name: String, in response: CalendarCalDAVHTTPResponse) -> String? { response.headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value }
 
     private func apply(patch: CalendarEventPatch, to event: CalendarEvent) -> CalendarEventDraft {
         func value<T>(_ patch: CalendarPatchValue<T>, current: T) -> T { if case .set(let v) = patch { return v }; return current }
         func optional<T>(_ patch: CalendarPatchValue<T>, current: T?) -> T? { switch patch { case .unchanged: current; case .clear: nil; case .set(let v): v } }
-        return CalendarEventDraft(calendarID: event.calendarID, title: value(patch.title, current: event.title), start: value(patch.start, current: event.start), end: value(patch.end, current: event.end), isAllDay: value(patch.isAllDay, current: event.isAllDay), location: optional(patch.location, current: event.location), url: optional(patch.url, current: event.url), notes: optional(patch.notes, current: event.notes))
+        let recurrence: CalendarRecurrence?
+        switch patch.recurrence {
+        case .unchanged:
+            if let rule = event.recurrenceSummary?.ruleDescription {
+                recurrence = CalendarRecurrence(rrule: rule)
+            } else {
+                recurrence = nil
+            }
+        case .clear:
+            recurrence = nil
+        case .set(let value):
+            recurrence = value
+        }
+        return CalendarEventDraft(calendarID: event.calendarID, title: value(patch.title, current: event.title), start: value(patch.start, current: event.start), end: value(patch.end, current: event.end), isAllDay: value(patch.isAllDay, current: event.isAllDay), location: optional(patch.location, current: event.location), url: optional(patch.url, current: event.url), notes: optional(patch.notes, current: event.notes), recurrence: recurrence)
     }
 
     private func mapHTTP<T>(_ operation: () async throws -> T) async throws -> T {

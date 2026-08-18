@@ -575,33 +575,27 @@ struct NoteImportCoordinatorTests {
         #expect(try ledger.job(id: "new")?.duplicateCount == 0)
     }
 
-    @Test("Cleans payload and controlled ENEX staging after successful completion")
+    @Test("Cleans payload staging after successful completion")
     func cleansTerminalStaging() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let payloadRoot = root.appendingPathComponent("payloads", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let enexRoot = FileManager.default.temporaryDirectory.appendingPathComponent("connor-enex-resources", isDirectory: true)
-        try FileManager.default.createDirectory(at: enexRoot, withIntermediateDirectories: true)
-        let staged = enexRoot.appendingPathComponent("\(UUID().uuidString)-resource.txt")
-        try Data("resource".utf8).write(to: staged)
-        defer { try? FileManager.default.removeItem(at: staged) }
         let databasePath = root.appendingPathComponent("db.sqlite").path
         let graph = try SQLiteGraphKernelStore(path: databasePath)
         try graph.migrate()
         let chat = AppChatSessionRepository(store: graph)
         let ledger = try AppNoteImportRepository(databasePath: databasePath)
-        try ledger.saveSource(.init(id: "source", kind: .evernoteENEX, displayName: "Evernote"))
+        try ledger.saveSource(.init(id: "source", kind: .markdownFolder, displayName: "Markdown"))
         let options = NoteImportOptions(importAttachments: false, llmMode: .disabled)
         try ledger.saveJob(.init(id: "job", sourceID: "source", options: options))
-        let note = ImportedNote(sourceKind: .evernoteENEX, sourceIdentity: "note", title: "Note", markdownContent: "Body", attachments: [.init(sourcePath: staged.path, displayName: "resource.txt")], rawByteHash: "raw", normalizedTextHash: "text")
+        let note = ImportedNote(sourceKind: .markdownFolder, sourceIdentity: "note.md", title: "Note", markdownContent: "Body", rawByteHash: "raw", normalizedTextHash: "text")
         let service = HeadlessNoteSessionService(repository: chat) { session in NativeSessionManager(backend: CoordinatorBackend(), sessionRepository: chat, session: session) }
         let coordinator = NoteImportCoordinator(ledger: ledger, sessionService: service, payloadStore: .init(rootDirectory: payloadRoot))
 
-        _ = try await coordinator.scan(jobID: "job", adapter: SingleNoteAdapter(note: note), request: .init(sourceID: "source", sourceURL: root, kind: .evernoteENEX, options: options))
+        _ = try await coordinator.scan(jobID: "job", adapter: SingleNoteAdapter(note: note), request: .init(sourceID: "source", sourceURL: root, kind: .markdownFolder, options: options))
         #expect(FileManager.default.fileExists(atPath: payloadRoot.appendingPathComponent("job").path))
         #expect(try await coordinator.execute(jobID: "job").status == .completed)
         #expect(!FileManager.default.fileExists(atPath: payloadRoot.appendingPathComponent("job").path))
-        #expect(!FileManager.default.fileExists(atPath: staged.path))
     }
 }

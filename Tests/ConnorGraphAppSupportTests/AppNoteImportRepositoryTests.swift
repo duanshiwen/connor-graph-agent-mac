@@ -301,7 +301,7 @@ struct AppNoteImportRepositoryTests {
     @Test("Repository validates persisted transitions")
     func validatesTransitions() throws {
         let fixture = try Fixture()
-        let source = NoteImportSourceRecord(id: "source", kind: .evernoteENEX, displayName: "Evernote")
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Markdown")
         try fixture.repository.saveSource(source)
         try fixture.repository.saveJob(NoteImportJobRecord(id: "job", sourceID: source.id))
         #expect(try fixture.repository.transitionJob(id: "job", to: .scanning).status == .scanning)

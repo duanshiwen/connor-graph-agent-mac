@@ -141,7 +141,11 @@ struct AgentChatView: View {
             }
         }
         .environment(\.openURL, OpenURLAction { url in
-            chatActions.workspace.openURLInCurrentChatBrowser(url)
+            if url.scheme?.lowercased() == "connor" {
+                chatActions.workspace.openDeepLink(url)
+            } else {
+                chatActions.workspace.openURLInCurrentChatBrowser(url)
+            }
             return .handled
         })
     }
@@ -877,7 +881,7 @@ private struct AgentChatConversationView: View {
                     onExportAssistantMessage: { message in
                         chatActions.run.exportAssistantMessageToFile(message)
                     },
-                    onEditNoteBody: noteBodyEditAction(for: message),
+                    onBeginEditingNoteBody: noteBodyEditBeginAction(for: message),
                     isForwardSelectionMode: isForwardSelectionMode,
                     isForwardSelected: selectedForwardMessageIDs.contains(message.id),
                     onEnterForwardSelection: {
@@ -926,16 +930,53 @@ private struct AgentChatConversationView: View {
         }
     }
 
-    private func noteBodyEditAction(
+    private func noteBodyEditBeginAction(
         for message: AgentChatMessagePresentation
-    ) -> ((String) async -> Bool)? {
+    ) -> (() -> Void)? {
         guard isNoteBodyMessage(message), !model.run.isSubmitting else { return nil }
-        return { content in
-            await chatActions.run.reviseNoteBody(
-                messageID: message.message.id,
-                expectedContent: message.message.content,
-                content: content
-            )
+        return { beginNoteBodyEditing(for: message) }
+    }
+
+    private func beginNoteBodyEditing(for message: AgentChatMessagePresentation) {
+        guard let sessionID = model.sessions.selectedSessionID else { return }
+        model.noteBodyEditing = AgentNoteBodyEditingTarget(
+            sessionID: sessionID,
+            messageID: message.message.id,
+            originalContent: message.message.content,
+            previousDraft: model.composer.input
+        )
+        chatActions.composer.restoreDraftForFailedSubmission(sessionID: sessionID, text: message.message.content)
+    }
+
+    private func cancelNoteBodyEditing(restoringDraft: Bool = true) {
+        guard let editing = model.noteBodyEditing else { return }
+        if restoringDraft {
+            chatActions.composer.restoreDraftForFailedSubmission(sessionID: editing.sessionID, text: editing.previousDraft)
+        }
+        model.noteBodyEditing = nil
+    }
+
+    private var noteBodyEditingHeader: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            Image(systemName: "square.and.pencil")
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(ConnorCraftPalette.accent)
+            Text("编辑笔记正文")
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Text("发送后保存并替换原正文")
+                .font(AgentChatTypography.meta)
+                .foregroundStyle(.tertiary)
+            Button("取消编辑", action: { cancelNoteBodyEditing() })
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+        }
+        .padding(.bottom, AgentChatLayout.spaceXS)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.12))
+                .frame(height: 1)
         }
     }
 
@@ -962,6 +1003,11 @@ private struct AgentChatConversationView: View {
         )
     }
 
+    private var isNoteEditing: Bool {
+        guard let sessionID = model.sessions.selectedSessionID else { return false }
+        return model.noteBodyEditing?.sessionID == sessionID
+    }
+
     var body: some View {
         let timelineSnapshot = timelineItems
         let chatItems = AgentChatTimelineAdapter().items(from: timelineSnapshot, insertsDateSeparators: true)
@@ -970,7 +1016,7 @@ private struct AgentChatConversationView: View {
             sessionID: model.sessions.selectedSessionID,
             revision: model.run.transcriptRevision
         )
-        let noteFullscreen = isNoteModeBeforeFirstMessage
+        let noteFullscreen = isNoteModeBeforeFirstMessage || isNoteEditing
 
         VStack(spacing: 0) {
             if !noteFullscreen {
@@ -995,10 +1041,16 @@ private struct AgentChatConversationView: View {
 
             Group {
                 if noteFullscreen {
-                    Color.clear
-                        .frame(maxWidth: .infinity, maxHeight: 0)
-                        .clipped()
-                        .allowsHitTesting(false)
+                    if isNoteEditing {
+                        noteBodyEditingHeader
+                            .padding(.horizontal, AgentChatLayout.spaceL)
+                            .padding(.top, AgentChatLayout.spaceS)
+                    } else {
+                        Color.clear
+                            .frame(maxWidth: .infinity, maxHeight: 0)
+                            .clipped()
+                            .allowsHitTesting(false)
+                    }
                 } else if model.sessions.isWaitingForSelectedPresentation {
                     AgentChatSessionLoadingView()
                         .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
@@ -1047,6 +1099,9 @@ private struct AgentChatConversationView: View {
                 lastObservedTranscriptCount = model.run.transcript.count
             }
             .onChange(of: model.sessions.selectedSessionID) { _, newSessionID in
+                if model.noteBodyEditing?.sessionID != newSessionID {
+                    cancelNoteBodyEditing()
+                }
                 resetVisibleMessageWindow()
                 lastObservedSessionID = newSessionID
                 lastObservedTranscriptCount = model.run.transcript.count

@@ -5,12 +5,20 @@ public struct ConnorDeepLinkResolution: Codable, Sendable, Equatable {
     public var sidebarItem: String
     public var requiresBrowserVisible: Bool
     public var focus: String?
+    public var sessionID: String?
 
-    public init(item: ConnorNativeShellItem, sidebarItem: String, requiresBrowserVisible: Bool = false, focus: String? = nil) {
+    public init(
+        item: ConnorNativeShellItem,
+        sidebarItem: String,
+        requiresBrowserVisible: Bool = false,
+        focus: String? = nil,
+        sessionID: String? = nil
+    ) {
         self.item = item
         self.sidebarItem = sidebarItem
         self.requiresBrowserVisible = requiresBrowserVisible
         self.focus = focus
+        self.sessionID = sessionID
     }
 }
 
@@ -54,14 +62,19 @@ public struct ConnorDeepLinkNavigator: Sendable {
             item: item,
             sidebarItem: route.legacySidebarID,
             requiresBrowserVisible: route.requiresBrowserVisible,
-            focus: focusValue(in: url)
+            focus: focusValue(in: url),
+            sessionID: queryValue(named: "session", in: url)
         )
     }
 
     private func focusValue(in url: URL) -> String? {
+        queryValue(named: "focus", in: url)
+    }
+
+    private func queryValue(named name: String, in url: URL) -> String? {
         URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?
-            .first { $0.name == "focus" }?
+            .first { $0.name == name }?
             .value
     }
 }

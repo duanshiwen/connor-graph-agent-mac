@@ -42,4 +42,29 @@ struct CalendarMutationDomainTests {
         #expect(decoded.location == .clear)
         #expect(decoded.url == .unchanged)
     }
+
+    @Test func recurrenceBuildsRRULEAndParsesBack() {
+        let weekly = CalendarRecurrence(frequency: .weekly, interval: 2, count: 10)
+        #expect(weekly.rruleString == "FREQ=WEEKLY;INTERVAL=2;COUNT=10")
+        #expect(CalendarRecurrence(rrule: "FREQ=WEEKLY;INTERVAL=2;COUNT=10") == weekly)
+
+        let monthly = CalendarRecurrence(frequency: .monthly, until: Date(timeIntervalSince1970: 1_782_270_000))
+        #expect(monthly.rruleString == "FREQ=MONTHLY;UNTIL=20260624T030000Z")
+        #expect(CalendarRecurrence(rrule: "FREQ=MONTHLY;UNTIL=20260624T030000Z") == monthly)
+
+        #expect(CalendarRecurrence(rrule: "FREQ=HOURLY") == nil)
+        #expect(CalendarRecurrence(frequency: .daily, until: Date(), count: 2).rruleString == nil)
+    }
+
+    @Test func recurrenceDraftAndPatchRoundTripAndValidate() throws {
+        let draft = CalendarEventDraft(calendarID: .init(rawValue: "c1"), title: "周会", start: .init(date: Date(timeIntervalSince1970: 10)), end: .init(date: Date(timeIntervalSince1970: 20)), recurrence: .init(frequency: .weekly, count: 5))
+        let request = CalendarMutationRequest(operation: .create, draft: draft, scope: .entireSeries)
+        #expect(try request.validated() == request)
+        let decoded = try JSONDecoder().decode(CalendarMutationRequest.self, from: JSONEncoder().encode(request))
+        #expect(decoded.scope == .entireSeries)
+        #expect(decoded.draft?.recurrence == draft.recurrence)
+
+        let invalid = CalendarMutationRequest(operation: .create, draft: CalendarEventDraft(calendarID: .init(rawValue: "c1"), title: "周会", start: .init(date: Date(timeIntervalSince1970: 10)), end: .init(date: Date(timeIntervalSince1970: 20)), recurrence: .init(frequency: .daily, until: Date(), count: 3)))
+        #expect(throws: CalendarMutationError.self) { try invalid.validated() }
+    }
 }

@@ -15,6 +15,7 @@ struct AgentComposerStore {
             transcriptMessageCount: model.run.transcript.count,
             isSubmitting: model.run.isSubmitting
         )
+        let isNoteEditing = model.noteBodyEditing?.sessionID == selectedSession?.id
         return AgentComposerState(
             input: input,
             pendingAttachments: model.composer.pendingAttachmentRefs,
@@ -22,7 +23,7 @@ struct AgentComposerStore {
             activeSkillDisplayName: model.composer.activeSkillDisplayName,
             canSubmit: canSubmit && !actions.session.isLoadingSelectedChatSessionDetail,
             isSubmitting: model.run.isSubmitting,
-            displayMode: isNoteBeforeFirstMessage ? .note : .normal,
+            displayMode: (isNoteBeforeFirstMessage || isNoteEditing) ? .note : .normal,
             selectedModel: actions.dependencies.aiConnections.selectedModel,
             sessionHasLLMOverride: actions.dependencies.sessionHasLLMOverride(),
             remoteKnowledgeBaseIDs: model.composer.remoteKnowledgeBaseIDs,

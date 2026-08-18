@@ -600,6 +600,101 @@ public enum CalendarMutationOperation: String, Codable, Sendable, Equatable, Has
     case delete
 }
 
+public enum CalendarRecurrenceFrequency: String, Codable, Sendable, Equatable, Hashable {
+    case daily
+    case weekly
+    case monthly
+    case yearly
+}
+
+public struct CalendarRecurrence: Codable, Sendable, Equatable, Hashable {
+    public var frequency: CalendarRecurrenceFrequency
+    public var interval: Int
+    public var until: Date?
+    public var count: Int?
+
+    public init(frequency: CalendarRecurrenceFrequency, interval: Int = 1, until: Date? = nil, count: Int? = nil) {
+        self.frequency = frequency
+        self.interval = max(1, interval)
+        self.until = until
+        self.count = count.map { max(1, $0) }
+    }
+
+    /// RFC 5545 RRULE 文本，例如 "FREQ=WEEKLY;INTERVAL=2;UNTIL=20261231T235959Z"。
+    public var rruleString: String? {
+        guard interval >= 1, until == nil || count == nil, count == nil || count! >= 1 else { return nil }
+        var parts = ["FREQ=\(frequency.rawValue.uppercased())"]
+        if interval > 1 { parts.append("INTERVAL=\(interval)") }
+        if let until {
+            parts.append("UNTIL=\(Self.utcFormatted(until))")
+        } else if let count {
+            parts.append("COUNT=\(count)")
+        }
+        return parts.joined(separator: ";")
+    }
+
+    /// 从 RRULE 文本解析；不支持 BY* 等高级规则时返回 nil。
+    public init?(rrule: String) {
+        var frequency: CalendarRecurrenceFrequency?
+        var interval = 1
+        var until: Date?
+        var count: Int?
+        for part in rrule.components(separatedBy: ";") {
+            let pair = part.split(separator: "=", maxSplits: 1).map(String.init)
+            guard pair.count == 2 else { continue }
+            switch pair[0].uppercased() {
+            case "FREQ":
+                switch pair[1].uppercased() {
+                case "DAILY": frequency = .daily
+                case "WEEKLY": frequency = .weekly
+                case "MONTHLY": frequency = .monthly
+                case "YEARLY": frequency = .yearly
+                default: break
+                }
+            case "INTERVAL":
+                interval = Int(pair[1]) ?? 1
+            case "UNTIL":
+                until = Self.dateFromUTC(pair[1].uppercased())
+            case "COUNT":
+                count = Int(pair[1])
+            default:
+                break
+            }
+        }
+        guard let frequency else { return nil }
+        guard until == nil || count == nil, count == nil || count! >= 1 else { return nil }
+        self.init(frequency: frequency, interval: max(1, interval), until: until, count: count)
+    }
+
+    private static func utcFormatted(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        return formatter.string(from: date)
+    }
+
+    private static func dateFromUTC(_ value: String) -> Date? {
+        let trimmed = value.replacingOccurrences(of: "'", with: "")
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        return formatter.date(from: trimmed)
+    }
+}
+
+public enum CalendarMutationScope: String, Codable, Sendable, Equatable, Hashable {
+    /// 只修改/删除单个实例（周期事件的某一次）。
+    case thisEvent
+    /// 修改/删除当前实例及之后的所有实例。
+    case futureEvents
+    /// 修改/删除整个周期系列（默认）。
+    case entireSeries
+}
+
 public struct CalendarEventDraft: Codable, Sendable, Equatable, Hashable {
     public var calendarID: CalendarID
     public var title: String
@@ -609,8 +704,9 @@ public struct CalendarEventDraft: Codable, Sendable, Equatable, Hashable {
     public var location: String?
     public var url: URL?
     public var notes: String?
+    public var recurrence: CalendarRecurrence?
 
-    public init(calendarID: CalendarID, title: String, start: CalendarEventDateTime, end: CalendarEventDateTime, isAllDay: Bool = false, location: String? = nil, url: URL? = nil, notes: String? = nil) {
+    public init(calendarID: CalendarID, title: String, start: CalendarEventDateTime, end: CalendarEventDateTime, isAllDay: Bool = false, location: String? = nil, url: URL? = nil, notes: String? = nil, recurrence: CalendarRecurrence? = nil) {
         self.calendarID = calendarID
         self.title = title
         self.start = start
@@ -619,6 +715,7 @@ public struct CalendarEventDraft: Codable, Sendable, Equatable, Hashable {
         self.location = location
         self.url = url
         self.notes = notes
+        self.recurrence = recurrence
     }
 }
 
@@ -630,8 +727,9 @@ public struct CalendarEventPatch: Codable, Sendable, Equatable, Hashable {
     public var location: CalendarPatchValue<String>
     public var url: CalendarPatchValue<URL>
     public var notes: CalendarPatchValue<String>
+    public var recurrence: CalendarPatchValue<CalendarRecurrence>
 
-    public init(title: CalendarPatchValue<String> = .unchanged, start: CalendarPatchValue<CalendarEventDateTime> = .unchanged, end: CalendarPatchValue<CalendarEventDateTime> = .unchanged, isAllDay: CalendarPatchValue<Bool> = .unchanged, location: CalendarPatchValue<String> = .unchanged, url: CalendarPatchValue<URL> = .unchanged, notes: CalendarPatchValue<String> = .unchanged) {
+    public init(title: CalendarPatchValue<String> = .unchanged, start: CalendarPatchValue<CalendarEventDateTime> = .unchanged, end: CalendarPatchValue<CalendarEventDateTime> = .unchanged, isAllDay: CalendarPatchValue<Bool> = .unchanged, location: CalendarPatchValue<String> = .unchanged, url: CalendarPatchValue<URL> = .unchanged, notes: CalendarPatchValue<String> = .unchanged, recurrence: CalendarPatchValue<CalendarRecurrence> = .unchanged) {
         self.title = title
         self.start = start
         self.end = end
@@ -639,10 +737,11 @@ public struct CalendarEventPatch: Codable, Sendable, Equatable, Hashable {
         self.location = location
         self.url = url
         self.notes = notes
+        self.recurrence = recurrence
     }
 
     public var isEmpty: Bool {
-        title == .unchanged && start == .unchanged && end == .unchanged && isAllDay == .unchanged && location == .unchanged && url == .unchanged && notes == .unchanged
+        title == .unchanged && start == .unchanged && end == .unchanged && isAllDay == .unchanged && location == .unchanged && url == .unchanged && notes == .unchanged && recurrence == .unchanged
     }
 }
 
@@ -673,16 +772,20 @@ public struct CalendarMutationRequest: Codable, Sendable, Equatable, Hashable {
     public var expectedVersion: CalendarMutationVersion?
     public var draft: CalendarEventDraft?
     public var patch: CalendarEventPatch?
+    public var scope: CalendarMutationScope
+    public var occurrenceDate: Date?
     public var approvalID: String?
     public var runID: String?
     public var sessionID: String?
 
-    public init(operation: CalendarMutationOperation, eventID: CalendarEventID? = nil, expectedVersion: CalendarMutationVersion? = nil, draft: CalendarEventDraft? = nil, patch: CalendarEventPatch? = nil, approvalID: String? = nil, runID: String? = nil, sessionID: String? = nil) {
+    public init(operation: CalendarMutationOperation, eventID: CalendarEventID? = nil, expectedVersion: CalendarMutationVersion? = nil, draft: CalendarEventDraft? = nil, patch: CalendarEventPatch? = nil, scope: CalendarMutationScope = .entireSeries, occurrenceDate: Date? = nil, approvalID: String? = nil, runID: String? = nil, sessionID: String? = nil) {
         self.operation = operation
         self.eventID = eventID
         self.expectedVersion = expectedVersion
         self.draft = draft
         self.patch = patch
+        self.scope = scope
+        self.occurrenceDate = occurrenceDate
         self.approvalID = approvalID
         self.runID = runID
         self.sessionID = sessionID
@@ -694,12 +797,20 @@ public struct CalendarMutationRequest: Codable, Sendable, Equatable, Hashable {
             guard let draft else { throw CalendarMutationError.invalidInput("draft is required") }
             guard !draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CalendarMutationError.invalidInput("title is required") }
             guard draft.end.date > draft.start.date else { throw CalendarMutationError.invalidInput("end must be after start") }
+            if let recurrence = draft.recurrence { try Self.validate(recurrence) }
         case .update:
             guard eventID != nil, expectedVersion != nil, let patch, !patch.isEmpty else { throw CalendarMutationError.invalidInput("eventID, expectedVersion, and a non-empty patch are required") }
+            if case .set(let recurrence) = patch.recurrence { try Self.validate(recurrence) }
         case .delete:
             guard eventID != nil, expectedVersion != nil else { throw CalendarMutationError.invalidInput("eventID and expectedVersion are required") }
         }
         return self
+    }
+
+    private static func validate(_ recurrence: CalendarRecurrence) throws {
+        guard recurrence.interval >= 1 else { throw CalendarMutationError.invalidInput("recurrence interval must be at least 1") }
+        guard recurrence.count == nil || recurrence.count! >= 1 else { throw CalendarMutationError.invalidInput("recurrence count must be at least 1") }
+        guard recurrence.until == nil || recurrence.count == nil else { throw CalendarMutationError.invalidInput("recurrence until and count are mutually exclusive") }
     }
 }
 

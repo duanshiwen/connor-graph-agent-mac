@@ -1,5 +1,7 @@
 import SwiftUI
 @preconcurrency import AppKit
+import ImageIO
+import UniformTypeIdentifiers
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 
@@ -553,6 +555,11 @@ struct AgentMarkdownPreviewText: View {
 }
 
 enum AgentMarkdownImageSourcePolicy {
+    enum Source: Equatable {
+        case local(URL)
+        case remote(URL)
+    }
+
     static func localFileURL(source: String, allowedRoot: URL?) -> URL? {
         guard let allowedRoot,
               let sourceURL = URL(string: source),
@@ -563,6 +570,159 @@ enum AgentMarkdownImageSourcePolicy {
         let candidatePath = candidate.path
         guard candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/") else { return nil }
         return candidate
+    }
+
+    static func resolvedSource(source: String, allowedRoot: URL?) -> Source? {
+        if let local = localFileURL(source: source, allowedRoot: allowedRoot) { return .local(local) }
+        guard let remote = remoteImageURL(source: source) else { return nil }
+        return .remote(remote)
+    }
+
+    /// 远程图片白名单（安全最佳实践）：
+    /// - 只允许 https；http 仅放行设备回环（localhost/127.0.0.1/::1），用于本地调试；
+    /// - 拒绝 data:、javascript:、file:、ftp: 等其它 scheme；
+    /// - 拒绝携带用户名/密码（userinfo）的 URL，避免把凭据发给第三方；
+    /// - 必须包含非空主机名。
+    static func remoteImageURL(source: String) -> URL? {
+        guard let url = URL(string: source),
+              let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased(),
+              !host.isEmpty,
+              url.user == nil,
+              url.password == nil else { return nil }
+        switch scheme {
+        case "https":
+            return url
+        case "http":
+            return isLoopbackHost(host) ? url : nil
+        default:
+            return nil
+        }
+    }
+
+    static func isLoopbackHost(_ host: String) -> Bool {
+        let trimmed = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        return trimmed == "localhost" || trimmed == "127.0.0.1" || trimmed == "::1"
+    }
+}
+
+/// 远程图片下载与解码安全策略（按最佳实践收紧）：
+/// - 无 Cookie、无凭据、无磁盘缓存（ephemeral），不暴露会话身份；
+/// - 流式接收并设置字节上限，超限立即取消，避免内存被耗尽；
+/// - 校验 Content-Type 与响应状态码；
+/// - 解码前用 ImageIO 校验真实图像格式、像素尺寸上限（防解压炸弹）、GIF 帧数上限；
+/// - 拒绝远程 SVG（历史上存在解析器风险；本地 SVG 仍可正常显示）。
+enum AgentMarkdownRemoteImagePolicy {
+    static let maxBytes = 20_000_000
+    static let maxPixels = 40_000_000
+    static let maxGIFFrames = 40
+    static let requestTimeout: TimeInterval = 20
+    static let resourceTimeout: TimeInterval = 30
+
+    static func loadData(from url: URL) async -> Data? {
+        if let cached = AgentMarkdownRemoteImageCache.shared.data(for: url) { return cached }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = requestTimeout
+        configuration.timeoutIntervalForResource = resourceTimeout
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
+        let delegate = AgentMarkdownBoundedDataDelegate(limit: maxBytes)
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        let task = session.dataTask(with: url)
+        task.resume()
+        guard let data = await delegate.result.first(where: { _ in true }) else { return nil }
+        guard let validated = validatedImageData(data) else { return nil }
+        AgentMarkdownRemoteImageCache.shared.store(validated, for: url)
+        return validated
+    }
+
+    /// 解码前校验：必须是可被 ImageIO 识别的栅格图像、尺寸在安全范围内、GIF 帧数受限、且不是 SVG。
+    static func validatedImageData(_ data: Data) -> Data? {
+        guard data.count <= maxBytes else { return nil }
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let type = CGImageSourceGetType(source) as String?,
+              let utType = UTType(type) else { return nil }
+        guard utType.conforms(to: .image), !utType.conforms(to: .svg) else { return nil }
+        guard CGImageSourceGetCount(source) <= maxGIFFrames,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, [kCGImageSourceShouldCache: false] as CFDictionary) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              width > 0, height > 0,
+              Int64(width) * Int64(height) <= Int64(maxPixels) else { return nil }
+        return data
+    }
+}
+
+private final class AgentMarkdownRemoteImageCache: @unchecked Sendable {
+    static let shared = AgentMarkdownRemoteImageCache()
+    private let cache = NSCache<NSString, NSData>()
+
+    private init() {
+        cache.countLimit = 120
+        cache.totalCostLimit = 120 * 1_024 * 1_024
+    }
+
+    func data(for url: URL) -> Data? {
+        cache.object(forKey: url.absoluteString as NSString).map { $0 as Data }
+    }
+
+    func store(_ data: Data, for url: URL) {
+        cache.setObject(data as NSData, forKey: url.absoluteString as NSString, cost: data.count)
+    }
+}
+
+/// 有界流式下载：超过字节上限立即取消，避免恶意服务器无限下发数据。
+private final class AgentMarkdownBoundedDataDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let limit: Int
+    private var data = Data()
+    let result: AsyncStream<Data>
+
+    init(limit: Int) {
+        self.limit = limit
+        var continuation: AsyncStream<Data>.Continuation!
+        result = AsyncStream<Data> { continuation = $0 }
+        self.continuation = continuation
+    }
+
+    private let continuation: AsyncStream<Data>.Continuation
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        if let http = response as? HTTPURLResponse {
+            guard (200..<300).contains(http.statusCode) else {
+                continuation.finish()
+                completionHandler(.cancel)
+                return
+            }
+            if let mime = http.mimeType?.lowercased(), !mime.hasPrefix("image/") {
+                continuation.finish()
+                completionHandler(.cancel)
+                return
+            }
+        }
+        if response.expectedContentLength > Int64(limit) {
+            continuation.finish()
+            completionHandler(.cancel)
+            return
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+        guard data.count + chunk.count <= limit else {
+            continuation.finish()
+            dataTask.cancel()
+            return
+        }
+        data.append(chunk)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if error == nil { continuation.yield(data) }
+        continuation.finish()
     }
 }
 
@@ -601,14 +761,21 @@ private struct AgentMarkdownImageView: View {
         .accessibilityLabel(altText.isEmpty ? "回复图片" : altText)
         .task(id: source) {
             phase = .loading
-            guard let url = AgentMarkdownImageSourcePolicy.localFileURL(source: source, allowedRoot: allowedRoot) else {
+            guard let resolved = AgentMarkdownImageSourcePolicy.resolvedSource(source: source, allowedRoot: allowedRoot) else {
                 phase = .failed
                 return
             }
-            let data = await Task.detached(priority: .utility) {
-                guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count <= 20_000_000 else { return nil as Data? }
-                return data
-            }.value
+            let data: Data?
+            switch resolved {
+            case .local(let url):
+                data = await Task.detached(priority: .utility) {
+                    guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+                          data.count <= AgentMarkdownRemoteImagePolicy.maxBytes else { return nil as Data? }
+                    return data
+                }.value
+            case .remote(let url):
+                data = await AgentMarkdownRemoteImagePolicy.loadData(from: url)
+            }
             guard !Task.isCancelled, let data, let image = NSImage(data: data) else { return phase = .failed }
             phase = .loaded(image)
         }

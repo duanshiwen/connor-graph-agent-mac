@@ -4,9 +4,6 @@ public enum NoteImportSourceKind: String, Codable, Sendable, CaseIterable, Hasha
     case markdownFolder = "markdown_folder"
     case obsidianVault = "obsidian_vault"
     case notionExport = "notion_export"
-    /// 新版印象笔记导出的「印象笔记XML格式（.notes）」，结构与 ENEX 相同（en-export > note），正文为 ENML。
-    case yinxiangNotes = "yinxiang_notes"
-    case evernoteENEX = "evernote_enex"
 }
 
 public enum NoteImportJobStatus: String, Codable, Sendable, CaseIterable, Hashable {

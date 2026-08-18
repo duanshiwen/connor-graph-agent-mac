@@ -508,6 +508,9 @@ final class AppRuntimeLifecycle {
         do {
             let resolution = try ConnorDeepLinkNavigator().resolve(url)
             navigate(to: resolution.item)
+            if let sessionID = resolution.sessionID, !sessionID.isEmpty {
+                openSessionFromNotification(sessionID)
+            }
             errorMessage = nil
         } catch {
             errorMessage = "不支持的康纳同学链接：\(url.absoluteString)"
@@ -3895,6 +3898,7 @@ extension AppRuntimeLifecycle {
             approval: model.chatApprovalCoordinator,
             workspace: ClosureChatWorkspacePort(
                 open: { [weak browser] in browser?.openURL($0) },
+                deepLink: { [weak model] in model?.openDeepLink($0) },
                 record: { [weak model] in model?.appendSessionRecord(kind: $0, title: $1, body: $2, metadata: $3, sessionID: $4) }
             ),
             errors: ClosureChatErrorPort(

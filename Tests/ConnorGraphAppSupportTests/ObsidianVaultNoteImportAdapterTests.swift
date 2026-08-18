@@ -18,6 +18,7 @@ struct ObsidianVaultNoteImportAdapterTests {
         #expect(home.links.contains { $0.rawTarget == "Robert#^bio|Profile" && $0.resolvedSourceIdentity != nil && $0.metadata["anchor"] == "^bio" })
         #expect(home.links.contains { $0.rawTarget == "Missing" && $0.kind == .unresolved })
         #expect(home.attachments.first?.displayName == "portrait.png")
+        #expect(home.attachments.first?.metadata["obsidian_embed"] == "![[portrait.png]]")
         let robert = try #require(notes.first { $0.title == "Robert" }); #expect(robert.sourceMetadata["obsidian_aliases"] == "Robert|Bob")
     }
 

@@ -149,10 +149,6 @@ public actor NoteImportCoordinator {
             source.locationBookmark == nil ? nil : try sourceAccessService.access(source: source)
         }
         defer { sourceLease?.release() }
-        let enexLease = NoteImportSourceAccessLease(
-            rootURL: FileManager.default.temporaryDirectory.appendingPathComponent("connor-enex-resources", isDirectory: true),
-            didStart: false
-        )
 
         let scheduler = NoteImportExecutionScheduler(configuration: .init(concurrency: 1))
         activeSchedulers[jobID] = scheduler
@@ -165,7 +161,7 @@ public actor NoteImportCoordinator {
         let sourceKind = source?.kind.rawValue
         let payloadStore = self.payloadStore
         let retryPolicy = self.retryPolicy
-        _ = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, payloadStore, options, sourceKind, sourceLease, enexLease, retryPolicy, onSessionImported] item in
+        _ = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, payloadStore, options, sourceKind, sourceLease, retryPolicy, onSessionImported] item in
             let itemInterval = NoteImportPerformanceLog.begin("Import Item", jobID: jobID, itemCount: 1)
             defer { NoteImportPerformanceLog.end(itemInterval, jobID: jobID, itemCount: 1) }
             let owner = "\(jobID):\(UUID().uuidString)"
@@ -213,13 +209,10 @@ public actor NoteImportCoordinator {
                     if [.imported, .queuedForLLM, .runningLLM].contains(current.status) {
                         var attachmentResults: [NoteImportAttachmentImportResult] = []
                         if options.importAttachments, let attachmentImporter, !note.attachments.isEmpty {
-                            // .enex 与新版 .notes 的资源都落在 connor-enex-resources 暂存目录，
-                            // 统一走受控租约，防止附件导入越权访问其它临时文件。
-                            let authorizedRoot = [.evernoteENEX, .yinxiangNotes].contains(note.sourceKind) ? enexLease : sourceLease
                             attachmentResults = try await attachmentImporter.importAttachments(
                                 note.attachments,
                                 sessionID: boundSessionID,
-                                authorizedRoot: authorizedRoot
+                                authorizedRoot: sourceLease
                             )
                         }
                         let renderedContent = Self.rewritingImageReferences(in: note.markdownContent, results: attachmentResults)
@@ -359,21 +352,6 @@ public actor NoteImportCoordinator {
     }
 
     private func cleanupStaging(jobID: String) {
-        let enexRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("connor-enex-resources", isDirectory: true)
-            .resolvingSymlinksInPath().standardizedFileURL
-        let enexPrefix = enexRoot.path.hasSuffix("/") ? enexRoot.path : enexRoot.path + "/"
-        if let items = try? ledger.items(jobID: jobID) {
-            for item in items {
-                guard let note = try? Self.decodePayload(item, payloadStore: payloadStore) else { continue }
-                for attachment in note.attachments {
-                    guard let path = attachment.sourcePath else { continue }
-                    let url = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
-                    guard url.path.hasPrefix(enexPrefix) else { continue }
-                    try? FileManager.default.removeItem(at: url)
-                }
-            }
-        }
         try? payloadStore?.removeJob(jobID: jobID)
     }
 
@@ -430,28 +408,61 @@ public actor NoteImportCoordinator {
     private func requireItem(_ id: String) throws -> NoteImportItemRecord { guard let value = try ledger.item(id: id) else { throw AppNoteImportRepositoryError.itemNotFound(id) }; return value }
     private func confidence(_ value: String?) -> Double? { switch value { case "certain": 1; case "high": 0.9; case "medium": 0.7; case "low": 0.4; case "ambiguous": 0.2; default: nil } }
 
-    /// 将笔记 Markdown 中的本地图片引用改写为已导入会话附件存储中的 file:// URL，
-    /// 使 AgentMarkdownPreviewText 能按会话附件根目录安全加载并显示图片。
+    /// 将笔记 Markdown 中的本地引用改写为已导入会话附件存储中的 file:// URL：
+    /// - 图片（Markdown 图片、Obsidian `![[图片]]`）→ `![name](file://…)`，
+    ///   AgentMarkdownPreviewText 按会话附件根目录安全加载并显示。
+    /// - 音频/视频/其它附件（Obsidian `![[音频/视频]]`）→ 改写为可读文本标记，
+    ///   不把非图片误当图片显示；实际文件仍作为消息附件 chip 提供预览/播放。
     /// - Notion / Markdown 文件夹：`![alt](相对路径)` → `![alt](file://…/原始文件)`
-    /// - Evernote：`attachment:<md5>` 占位符 → file URL
-    /// - Obsidian：`![[嵌入表达式]]` → 标准图片语法
     static func rewritingImageReferences(in content: String, results: [NoteImportAttachmentImportResult]) -> String {
         var output = content
         for result in results {
             let attachment = result.attachment
             let storedURL = result.storedFileURL.absoluteString
-            if let md5 = attachment.metadata["enex_md5"] {
-                output = output.replacingOccurrences(of: "attachment:\(md5)", with: storedURL)
-                continue
-            }
             if let embed = attachment.metadata["obsidian_embed"], embed.hasPrefix("![[") {
-                output = output.replacingOccurrences(of: embed, with: "![\(attachment.displayName)](\(storedURL))")
+                output = output.replacingOccurrences(of: embed, with: obsidianEmbedReplacement(for: attachment, storedURL: storedURL))
                 continue
             }
             guard let originalTarget = attachment.metadata["notion_target"] ?? attachment.metadata["markdown_target"] else { continue }
             output = replacingMarkdownImageTarget(in: output, expected: normalizedReference(originalTarget), storedURL: storedURL)
         }
         return output
+    }
+
+    private static func obsidianEmbedReplacement(for attachment: ImportedNoteAttachment, storedURL: String) -> String {
+        switch ImportedMediaKind.classify(attachment) {
+        case .image: return "![\(attachment.displayName)](\(storedURL))"
+        case .audio: return "🎵 \(attachment.displayName)"
+        case .video: return "🎬 \(attachment.displayName)"
+        case .other: return "📎 \(attachment.displayName)"
+        }
+    }
+
+    private enum ImportedMediaKind {
+        case image, audio, video, other
+
+        static func classify(_ attachment: ImportedNoteAttachment) -> ImportedMediaKind {
+            if let mime = attachment.mimeType?.lowercased() {
+                if mime.hasPrefix("image/") { return .image }
+                if mime.hasPrefix("audio/") { return .audio }
+                if mime.hasPrefix("video/") { return .video }
+            }
+            let ext = (attachment.displayName as NSString).pathExtension.lowercased()
+            if Self.imageExtensions.contains(ext) { return .image }
+            if Self.audioExtensions.contains(ext) { return .audio }
+            if Self.videoExtensions.contains(ext) { return .video }
+            return .other
+        }
+
+        private static let imageExtensions: Set<String> = [
+            "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "bmp", "tif", "tiff", "svg", "avif", "ico"
+        ]
+        private static let audioExtensions: Set<String> = [
+            "mp3", "m4a", "wav", "aac", "flac", "ogg", "opus", "wma", "aiff", "caf"
+        ]
+        private static let videoExtensions: Set<String> = [
+            "mp4", "mov", "m4v", "avi", "mkv", "webm", "wmv", "flv", "mpg", "mpeg", "3gp", "ts"
+        ]
     }
 
     private static func normalizedReference(_ value: String) -> String {

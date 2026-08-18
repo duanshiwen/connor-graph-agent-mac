@@ -94,6 +94,7 @@ extension ChatRunCommanding {
 
 @MainActor protocol ChatWorkspaceCommanding: AnyObject {
     func openURLInCurrentChatBrowser(_ url: URL)
+    func openDeepLink(_ url: URL)
     func appendSessionRecord(kind: String, title: String?, body: String?, metadata: [String: String], sessionID: String?)
 }
 
@@ -234,9 +235,19 @@ final class ClosureChatRunPort: ChatRunCommanding {
 @MainActor
 final class ClosureChatWorkspacePort: ChatWorkspaceCommanding {
     let openAction: (URL) -> Void
+    let deepLinkAction: (URL) -> Void
     let recordAction: (String, String?, String?, [String: String], String?) -> Void
-    init(open: @escaping (URL) -> Void, record: @escaping (String, String?, String?, [String: String], String?) -> Void) { openAction = open; recordAction = record }
+    init(
+        open: @escaping (URL) -> Void,
+        deepLink: @escaping (URL) -> Void,
+        record: @escaping (String, String?, String?, [String: String], String?) -> Void
+    ) {
+        openAction = open
+        deepLinkAction = deepLink
+        recordAction = record
+    }
     func openURLInCurrentChatBrowser(_ url: URL) { openAction(url) }
+    func openDeepLink(_ url: URL) { deepLinkAction(url) }
     func appendSessionRecord(kind: String, title: String?, body: String?, metadata: [String: String], sessionID: String?) { recordAction(kind, title, body, metadata, sessionID) }
 }
 
