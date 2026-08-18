@@ -72,6 +72,30 @@ struct NoteImportExecutionSupervisorTests {
         #expect(try fixture.ledger.job(id: "job")?.status == .completed)
         #expect(await !supervisor.isRunning(jobID: "job"))
     }
+
+    @Test("Detects a runner holding an expired lease as stuck")
+    func staleLeaseIsStuck() async throws {
+        let fixture = try SupervisorFixture(status: .importing)
+        try fixture.saveItem(status: .creatingSession, leaseOwner: "runner", leaseExpiresAt: Date().addingTimeInterval(-400))
+
+        #expect(try await fixture.coordinator.hasStaleRunnerLeases(jobID: "job", leaseDuration: 300) == true)
+    }
+
+    @Test("Treats a fresh lease as healthy even while the job runs")
+    func freshLeaseIsHealthy() async throws {
+        let fixture = try SupervisorFixture(status: .importing)
+        try fixture.saveItem(status: .creatingSession, leaseOwner: "runner", leaseExpiresAt: Date().addingTimeInterval(200))
+
+        #expect(try await fixture.coordinator.hasStaleRunnerLeases(jobID: "job", leaseDuration: 300) == false)
+    }
+
+    @Test("Never replaces a runner for a cancelled job")
+    func cancelledJobIsNotStale() async throws {
+        let fixture = try SupervisorFixture(status: .importing, cancelRequestedAt: Date())
+        try fixture.saveItem(status: .creatingSession, leaseOwner: "runner", leaseExpiresAt: Date().addingTimeInterval(-400))
+
+        #expect(try await fixture.coordinator.hasStaleRunnerLeases(jobID: "job", leaseDuration: 300) == false)
+    }
 }
 
 private struct SupervisorBackend: AgentBackend {
@@ -129,6 +153,21 @@ private final class SupervisorFixture: @unchecked Sendable {
             rawByteHash: note.rawByteHash,
             normalizedTextHash: note.normalizedTextHash,
             metadata: ["imported_note_payload": try encoder.encode(note).base64EncodedString()]
+        ))
+    }
+
+    func saveItem(status: NoteImportItemStatus, leaseOwner: String, leaseExpiresAt: Date) throws {
+        try ledger.saveItem(NoteImportItemRecord(
+            id: "item-\(UUID().uuidString)",
+            jobID: "job",
+            sourceID: "source",
+            sourceIdentity: "note-\(UUID().uuidString)",
+            title: "Note",
+            status: status,
+            rawByteHash: "raw",
+            normalizedTextHash: "text",
+            leaseOwner: leaseOwner,
+            leaseExpiresAt: leaseExpiresAt
         ))
     }
 

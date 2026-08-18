@@ -29,6 +29,7 @@ public struct NoteImportRuntimeSnapshot: Sendable, Equatable {
 public actor NoteImportExecutionSupervisor {
     private let coordinator: NoteImportCoordinator
     private var tasks: [String: Task<Void, Never>] = [:]
+    private var taskGenerations: [String: Int] = [:]
     private var states: [String: NoteImportRuntimeState] = [:]
     private var errors: [String: String] = [:]
 
@@ -53,9 +54,19 @@ public actor NoteImportExecutionSupervisor {
                 }
                 ensureRunning(jobID: job.id, recovering: true)
             }
+            await recoverStuckRunners()
         } catch {
             errors["recovery"] = String(describing: error)
             NoteImportPerformanceLog.event("Supervisor Recovery Failed", jobID: "startup")
+        }
+    }
+
+    /// 看门狗：替换持有过期租约的卡死 runner，让导入任务无需重启应用即可自愈。
+    public func recoverStuckRunners() async {
+        for jobID in tasks.keys {
+            guard let stuck = try? await coordinator.hasStaleRunnerLeases(jobID: jobID), stuck else { continue }
+            NoteImportPerformanceLog.event("Stuck Runner Replaced", jobID: jobID)
+            await replaceRunner(jobID: jobID)
         }
     }
 
@@ -108,11 +119,19 @@ public actor NoteImportExecutionSupervisor {
     private func ensureRunning(jobID: String, recovering: Bool) {
         guard tasks[jobID] == nil else {
             NoteImportPerformanceLog.event("Duplicate Runner Suppressed", jobID: jobID)
+            // 已有 runner 时仍做一次卡死检查：租约过期则替换，避免僵尸任务永久占坑。
+            Task { [weak self] in
+                guard let self, let stuck = try? await self.coordinator.hasStaleRunnerLeases(jobID: jobID), stuck else { return }
+                NoteImportPerformanceLog.event("Stuck Runner Replaced", jobID: jobID)
+                await self.replaceRunner(jobID: jobID)
+            }
             return
         }
         errors.removeValue(forKey: jobID)
         states[jobID] = recovering ? .recovering : .starting
         let coordinator = self.coordinator
+        let generation = (taskGenerations[jobID] ?? 0) + 1
+        taskGenerations[jobID] = generation
         if recovering {
             NoteImportPerformanceLog.event("Recovery Runner Registered", jobID: jobID)
         } else {
@@ -123,20 +142,28 @@ public actor NoteImportExecutionSupervisor {
             await self.markRunning(jobID: jobID)
             do {
                 _ = try await coordinator.execute(jobID: jobID)
-                await self.finish(jobID: jobID, error: nil)
+                await self.finish(jobID: jobID, error: nil, generation: generation)
             } catch is CancellationError {
-                await self.finish(jobID: jobID, error: nil)
+                await self.finish(jobID: jobID, error: nil, generation: generation)
             } catch {
-                await self.finish(jobID: jobID, error: error)
+                await self.finish(jobID: jobID, error: error, generation: generation)
             }
         }
+    }
+
+    private func replaceRunner(jobID: String) {
+        let zombie = tasks.removeValue(forKey: jobID)
+        zombie?.cancel()
+        ensureRunning(jobID: jobID, recovering: true)
     }
 
     private func markRunning(jobID: String) {
         states[jobID] = .running
     }
 
-    private func finish(jobID: String, error: Error?) {
+    private func finish(jobID: String, error: Error?, generation: Int) {
+        // 旧代（已被看门狗替换的僵尸）完成时忽略，避免清理新 runner 的状态。
+        guard taskGenerations[jobID] == generation else { return }
         tasks.removeValue(forKey: jobID)
         states.removeValue(forKey: jobID)
         if let error {

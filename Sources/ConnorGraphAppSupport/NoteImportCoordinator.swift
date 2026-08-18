@@ -330,6 +330,20 @@ public actor NoteImportCoordinator {
     }
     public func progress(jobID: String) throws -> NoteImportProgress { let job = try requireJob(jobID); let items = try ledger.items(jobID: jobID); return .init(jobID: jobID, status: job.status, discovered: job.discoveredCount, imported: job.importedCount, completed: items.filter { $0.status == .completed }.count, failed: job.failedCount) }
 
+    /// 看门狗：任务仍在运行，但存在租约已过期（且过期超过一个租约周期）的进行中条目，
+    /// 说明 runner 大概率卡死/已死，应该被 supervisor 接管重启。
+    public func hasStaleRunnerLeases(jobID: String, leaseDuration: TimeInterval = 300, now: Date = Date()) throws -> Bool {
+        let job = try requireJob(jobID)
+        guard job.cancelRequestedAt == nil, job.pauseRequestedAt == nil,
+              [.importing, .processing].contains(job.status) else { return false }
+        let items = try ledger.items(jobID: jobID)
+        return items.contains { item in
+            guard !item.status.isTerminal, let expiry = item.leaseExpiresAt else { return false }
+            // 过期超过一个完整租约周期才判定为卡死，避免误杀仍在复制大附件等长操作的 runner。
+            return now.timeIntervalSince(expiry) > leaseDuration
+        }
+    }
+
     private func reopenFailedItems(jobID: String) throws -> NoteImportJobRecord {
         for item in try ledger.items(jobID: jobID) {
             let reopened: NoteImportItemRecord
