@@ -168,6 +168,7 @@ struct AgentChatDateSeparatorRow: View {
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var isNoteBody = false
+    var contentFormat: NoteContentFormat = .markdown
     var allowsAssistantActions = true
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     var localAttachmentFileURL: (AgentMessageAttachmentRef) -> URL? = { _ in nil }
@@ -392,12 +393,17 @@ struct AgentChatMessageRow: View {
             ForwardedChatCard(bundle: bundle, onOpen: { if !isForwardSelectionMode { forwardedDetail = bundle } })
                 .frame(maxWidth: AgentChatLayout.userMessageMaxWidth)
         } else if isUser {
-            AgentMarkdownPreviewText(
-                markdown: row.message.content,
-                font: messageBodyFont,
-                bodyPointSize: messageBodyPointSize,
-                allowsDeferredPreview: !isMessageExpanded
-            )
+            if isNoteBody, contentFormat == .html {
+                NoteHTMLPreviewView(html: row.message.content)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                AgentMarkdownPreviewText(
+                    markdown: row.message.content,
+                    font: messageBodyFont,
+                    bodyPointSize: messageBodyPointSize,
+                    allowsDeferredPreview: !isMessageExpanded
+                )
+            }
         } else {
             assistantMarkdownBody
         }
