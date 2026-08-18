@@ -9,7 +9,12 @@ public enum AppAccountSyncSignal {
 
     public static func postLocalDataDidChange() {
         guard !suppressLocalChange else { return }
-        NotificationCenter.default.post(name: localDataDidChange, object: nil)
+        // 后台写线程（导入、会话保存等）不应阻塞等待主线程上的观察者：
+        // 主线程繁忙/卡在布局时，同步投递会让写路径在通知处永久等待。
+        // 改为异步投递，观察者仍按注册的 queue(.main) 收到通知。
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: localDataDidChange, object: nil)
+        }
     }
 }
 
