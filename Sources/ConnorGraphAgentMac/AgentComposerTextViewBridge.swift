@@ -33,6 +33,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
     var onAttachmentImportError: ((String) -> Void)? = nil
     var onTextFileDropped: ((String) -> Void)? = nil
     var isNoteMode: Bool = false
+    var isHTMLSourceMode: Bool = false
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -57,7 +58,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         guard let textView = scrollView.documentView as? SubmitAwareTextView else { return }
         textView.inputCommandRouter.configuration = textInputConfiguration
         textView.placeholderString = placeholder
-        textView.font = AgentChatTypography.composerNSFont
+        textView.font = isHTMLSourceMode ? AgentChatTypography.composerMonospacedNSFont : AgentChatTypography.composerNSFont
         if textView.string != text {
             textView.string = text
         }
@@ -98,7 +99,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         textView.isGrammarCheckingEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.enabledTextCheckingTypes = isSpellCheckEnabled ? NSTextCheckingResult.CheckingType.spelling.rawValue : 0
-        textView.font = AgentChatTypography.composerNSFont
+        textView.font = isHTMLSourceMode ? AgentChatTypography.composerMonospacedNSFont : AgentChatTypography.composerNSFont
         textView.textColor = .labelColor
         textView.backgroundColor = .clear
         textView.drawsBackground = false

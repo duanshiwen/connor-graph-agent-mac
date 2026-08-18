@@ -134,7 +134,11 @@ struct AgentChatComposerView: View {
             VStack(spacing: 0) {
                 VStack(spacing: 0) {
                     if composerState.displayMode == .note {
-                        noteFormatBar
+                        if isEditingHTMLNote {
+                            htmlSourceModeBadge
+                        } else {
+                            noteFormatBar
+                        }
                     }
 
                     if !composerState.pendingAttachments.isEmpty {
@@ -362,7 +366,8 @@ struct AgentChatComposerView: View {
                     }
                     chatActions.composer.updateSelectedChatInputDraft(localChatInput)
                 },
-                isNoteMode: composerState.displayMode == .note
+                isNoteMode: composerState.displayMode == .note,
+                isHTMLSourceMode: isEditingHTMLNote
             )
 
             slashSkillPickerAnchor
@@ -372,11 +377,38 @@ struct AgentChatComposerView: View {
 
     private var composerPlaceholder: String {
         let sendHint = chatActions.dependencies.inputSettings.composerSendShortcut == "cmd-return" ? "⌘ + Return 发送" : "Shift + Return 换行"
+        if isEditingHTMLNote { return "编辑 HTML 源码… 保存后按原样替换正文" }
         return ComposerPlaceholderPresentation.text(
             isNoteMode: composerState.displayMode == .note,
             hasWorkingDirectory: chatActions.dependencies.workspaceSettings.primaryRoot != nil,
             sendHint: sendHint
         )
+    }
+
+    private var isEditingHTMLNote: Bool {
+        guard let editing = model.noteBodyEditing,
+              editing.sessionID == model.sessions.selectedSessionID else { return false }
+        return editingNoteContentFormat == .html
+    }
+
+    private var editingNoteContentFormat: NoteContentFormat {
+        guard model.noteBodyEditing != nil,
+              let sessionID = model.sessions.selectedSessionID else { return .markdown }
+        let session = (model.sessions.sessions + model.sessions.allSessions).first { $0.id == sessionID }
+        return session?.governance.contentFormat ?? .markdown
+    }
+
+    private var htmlSourceModeBadge: some View {
+        HStack(spacing: AgentChatLayout.spaceXS) {
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(ConnorCraftPalette.accent)
+            Text("HTML 源码模式")
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.bottom, AgentChatLayout.spaceXS)
     }
 
     private var slashSkillPickerAnchor: some View {
