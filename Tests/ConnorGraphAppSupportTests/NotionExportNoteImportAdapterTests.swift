@@ -8,7 +8,7 @@ struct NotionExportNoteImportAdapterTests {
     @Test("Imports markdown page IDs and local resources")
     func markdownAndResources() async throws { let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }; let id = String(repeating: "a", count: 32); try Data("image".utf8).write(to: root.appendingPathComponent("image.png")); try "# Page\n![Image](image.png)".write(to: root.appendingPathComponent("Page \(id).md"), atomically: true, encoding: .utf8); let notes = try await collect(NotionExportNoteImportAdapter(), root: root); #expect(notes.count == 1); #expect(notes[0].externalID == id); #expect(notes[0].title == "Page"); #expect(notes[0].attachments.first?.displayName == "image.png") }
     @Test("Sanitizes HTML without executing script")
-    func html() async throws { let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }; try "<h1>Hello</h1><script>steal()</script><p>Body &amp; text</p>".write(to: root.appendingPathComponent("Page.html"), atomically: true, encoding: .utf8); let notes = try await collect(NotionExportNoteImportAdapter(), root: root); #expect(notes[0].markdownContent.contains("Hello")); #expect(notes[0].markdownContent.contains("Body & text")); #expect(!notes[0].markdownContent.contains("steal")) }
+    func html() async throws { let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }; try "<h1>Hello</h1><script>steal()</script><p onclick=\"evil()\">Body &amp; text</p>".write(to: root.appendingPathComponent("Page.html"), atomically: true, encoding: .utf8); let notes = try await collect(NotionExportNoteImportAdapter(), root: root); let note = try #require(notes.first); #expect(note.contentFormat == .html); #expect(note.markdownContent.contains("<h1>Hello</h1>")); #expect(note.markdownContent.contains("<p>Body &amp; text</p>")); #expect(!note.markdownContent.contains("steal")); #expect(!note.markdownContent.contains("onclick")) }
     @Test("Imports quoted multiline CSV rows as notes")
     func csvRows() async throws { let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }; try "Name,Description\nOne,\"Line 1\nLine 2\"\nTwo,Simple".write(to: root.appendingPathComponent("Database.csv"), atomically: true, encoding: .utf8); let notes = try await collect(NotionExportNoteImportAdapter(databaseStrategy: .rowAsNote), root: root); #expect(notes.count == 2); #expect(notes[0].markdownContent.contains("Line 1\nLine 2")); #expect(notes[1].title == "Two") }
 
@@ -96,11 +96,12 @@ struct NotionExportNoteImportAdapterTests {
         let childNote = try #require(notes.first { $0.title == "Child One" })
         #expect(parentNote.links.contains { $0.kind == .internalNote && $0.resolvedSourceIdentity == childNote.sourceIdentity })
         #expect(parentNote.attachments.map(\.displayName) == ["pic.png"])
-        #expect(parentNote.markdownContent.contains("![](pic.png)"))
+        #expect(parentNote.contentFormat == .html)
+        #expect(parentNote.markdownContent.contains("<img src=\"pic.png\">"))
     }
 
-    @Test("Preserves remote images in HTML exports as Markdown image syntax")
-    func htmlRemoteImagesStayInMarkdown() async throws {
+    @Test("Preserves remote images in HTML exports as HTML img tags")
+    func htmlRemoteImagesStayInHTML() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
         try """
         <h1>Page</h1>
@@ -110,8 +111,9 @@ struct NotionExportNoteImportAdapterTests {
 
         let notes = try await collect(NotionExportNoteImportAdapter(), root: root)
         let note = try #require(notes.first)
-        #expect(note.markdownContent.contains("![照片](https://example.com/photo.png)"))
-        #expect(note.markdownContent.contains("![](http://example.com/legacy.jpg)"))
+        #expect(note.contentFormat == .html)
+        #expect(note.markdownContent.contains("<img src=\"https://example.com/photo.png\" alt=\"照片\">"))
+        #expect(note.markdownContent.contains("<img src=\"http://example.com/legacy.jpg\">"))
     }
 
     @Test("Imports every note in nested folders plus CSV")
