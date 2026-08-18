@@ -217,7 +217,7 @@ public actor NoteImportCoordinator {
                                 authorizedRoot: sourceLease
                             )
                         }
-                        let renderedContent = Self.rewritingImageReferences(in: note.markdownContent, results: attachmentResults)
+                        let renderedContent = Self.rewritingImageReferences(in: note.markdownContent, results: attachmentResults, contentFormat: note.contentFormat)
                         let importedSession = try await sessionService.upsertImportedNoteMessage(
                             sessionID: boundSessionID,
                             messageID: messageID,
@@ -418,7 +418,7 @@ public actor NoteImportCoordinator {
     /// - 音频/视频/其它附件（Obsidian `![[音频/视频]]`）→ 改写为可读文本标记，
     ///   不把非图片误当图片显示；实际文件仍作为消息附件 chip 提供预览/播放。
     /// - Notion / Markdown 文件夹：`![alt](相对路径)` → `![alt](file://…/原始文件)`
-    static func rewritingImageReferences(in content: String, results: [NoteImportAttachmentImportResult]) -> String {
+    static func rewritingImageReferences(in content: String, results: [NoteImportAttachmentImportResult], contentFormat: NoteContentFormat = .markdown) -> String {
         var output = content
         for result in results {
             let attachment = result.attachment
@@ -428,6 +428,10 @@ public actor NoteImportCoordinator {
                 continue
             }
             guard let originalTarget = attachment.metadata["notion_target"] ?? attachment.metadata["markdown_target"] else { continue }
+            if contentFormat == .html {
+                output = replacingHTMLImageTarget(in: output, expected: normalizedReference(originalTarget), storedURL: storedURL)
+                continue
+            }
             output = replacingMarkdownImageTarget(in: output, expected: normalizedReference(originalTarget), storedURL: storedURL)
         }
         return output
@@ -491,6 +495,25 @@ public actor NoteImportCoordinator {
         let mutable = NSMutableString(string: content)
         for replacement in replacements.reversed() {
             mutable.replaceCharacters(in: replacement.range, with: "![\(replacement.alt)](\(storedURL))")
+        }
+        return mutable as String
+    }
+
+    /// 改写 HTML 笔记中 `<img src="相对路径">` 为已导入附件的 file:// URL。
+    private static func replacingHTMLImageTarget(in content: String, expected: String, storedURL: String) -> String {
+        let pattern = #"(?is)(<img\b[^>]*\bsrc\s*=\s*["'])([^"']*)(["'][^>]*>)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return content }
+        let ns = content as NSString
+        var replacements: [NSRange] = []
+        for match in regex.matches(in: content, range: NSRange(location: 0, length: ns.length)) {
+            let target = ns.substring(with: match.range(at: 2))
+            guard normalizedReference(target) == expected else { continue }
+            replacements.append(match.range(at: 2))
+        }
+        guard !replacements.isEmpty else { return content }
+        let mutable = NSMutableString(string: content)
+        for range in replacements.reversed() {
+            mutable.replaceCharacters(in: range, with: storedURL)
         }
         return mutable as String
     }
