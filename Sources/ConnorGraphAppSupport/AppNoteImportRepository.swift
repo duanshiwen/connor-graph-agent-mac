@@ -423,6 +423,15 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         try rows(Self.itemSelect + " WHERE source_id = ? AND source_identity = ? ORDER BY updated_at DESC LIMIT 1", bindings: [.text(sourceID), .text(sourceIdentity)]).first.map(decodeItem)
     }
 
+    /// 判断上次导入关联的会话是否仍存在且未删除。
+    /// 重复检测时若上次会话已被删除，说明笔记实际已消失，应重新导入而不是判重跳过。
+    public func sessionIsAlive(sessionID: String) throws -> Bool {
+        try !rows(
+            "SELECT 1 FROM agent_sessions WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+            bindings: [.text(sessionID)]
+        ).isEmpty
+    }
+
     public func items(jobID: String, statuses: Set<NoteImportItemStatus>? = nil) throws -> [NoteImportItemRecord] {
         var sql = Self.itemSelect + " WHERE job_id = ?"
         if let statuses, !statuses.isEmpty {

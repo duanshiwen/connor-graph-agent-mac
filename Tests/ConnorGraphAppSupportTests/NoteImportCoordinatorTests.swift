@@ -598,4 +598,38 @@ struct NoteImportCoordinatorTests {
         #expect(try await coordinator.execute(jobID: "job").status == .completed)
         #expect(!FileManager.default.fileExists(atPath: payloadRoot.appendingPathComponent("job").path))
     }
+
+    @Test("Reimports a note whose previous session was deleted instead of skipping it")
+    func reimportsWhenPreviousSessionDeleted() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let databasePath = root.appendingPathComponent("db.sqlite").path
+        let store = try SQLiteGraphKernelStore(path: databasePath)
+        try store.migrate()
+        let chat = AppChatSessionRepository(store: store)
+        let ledger = try AppNoteImportRepository(databasePath: databasePath)
+        let service = HeadlessNoteSessionService(repository: chat) { session in NativeSessionManager(backend: CoordinatorBackend(), sessionRepository: chat, session: session) }
+        let coordinator = NoteImportCoordinator(ledger: ledger, sessionService: service)
+
+        try ledger.saveSource(.init(id: "source", kind: .obsidianVault, displayName: "Vault"))
+        try ledger.saveJob(.init(id: "old", sourceID: "source", status: .completed, options: .init(llmMode: .disabled), discoveredCount: 1, importedCount: 1))
+        let session = try chat.createImportedNoteSession(id: "session-old", title: "Old", content: "Original")
+        try ledger.saveItem(.init(id: "old-item", jobID: "old", sourceID: "source", sourceIdentity: "vault:note.md", title: "Old", status: .completed, sessionID: session.id, rawByteHash: "raw", normalizedTextHash: "same"))
+        // 用户已删除上次导入的会话：笔记实际已消失，重导必须真正导入而不是判重跳过。
+        try chat.deleteSession(sessionID: session.id)
+
+        let options = NoteImportOptions(duplicatePolicy: .skipUnchanged, llmMode: .disabled)
+        try ledger.saveJob(.init(id: "new", sourceID: "source", options: options))
+        let note = ImportedNote(sourceKind: .obsidianVault, sourceIdentity: "vault:note.md", title: "Note", markdownContent: "Original", rawByteHash: "raw", normalizedTextHash: "same")
+        _ = try await coordinator.scan(jobID: "new", adapter: SingleNoteAdapter(note: note), request: .init(sourceID: "source", sourceURL: root, kind: .obsidianVault, options: options))
+        let item = try #require(ledger.items(jobID: "new").first)
+        #expect(item.status == .ready)
+
+        _ = try await coordinator.execute(jobID: "new")
+        let completed = try #require(try ledger.item(id: item.id))
+        #expect(completed.status == .completed)
+        #expect(try ledger.job(id: "new")?.importedCount == 1)
+        #expect(try ledger.job(id: "new")?.duplicateCount == 0)
+    }
 }

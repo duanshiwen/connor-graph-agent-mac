@@ -98,7 +98,9 @@ public actor NoteImportCoordinator {
                 // 只有上一次扫描真正建立了笔记会话（sessionID 非空）才算“已导入”。
                 // 此前任务被取消、尚未建会话的项只是扫描过，重导时必须真正导入，
                 // 否则会全部被跳过，用户看到“导入完成”却没有新增任何笔记。
-                if previousSessionID != nil, previous.normalizedTextHash == note.normalizedTextHash {
+                // 若上次会话已被删除，笔记实际已消失：必须重新导入，不能判重跳过。
+                let previousSessionAlive = try previousSessionID.map { try ledger.sessionIsAlive(sessionID: $0) } ?? false
+                if previousSessionAlive, previousSessionID != nil, previous.normalizedTextHash == note.normalizedTextHash {
                     status = .duplicateUnchanged
                 } else if request.options.duplicatePolicy == .appendUpdate {
                     status = .duplicateChanged
