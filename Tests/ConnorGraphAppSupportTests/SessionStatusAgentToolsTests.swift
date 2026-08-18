@@ -291,6 +291,42 @@ import ConnorGraphStore
     #expect(try repository.loadSession(id: "del-read-only") != nil)
 }
 
+@Test func sessionBatchDeleteToolEnforcesPerCallLimit() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporarySessionStatusToolDatabaseURL().path)
+    try store.migrate()
+    let tool = SessionBatchDeleteTool(repository: AppChatSessionRepository(store: store))
+    let ids = (0..<51).map { "\"sess-\($0)\"" }.joined(separator: ",")
+
+    await #expect(throws: AgentToolError.invalidArguments("sessionIDs accepts at most 50 items per call; delete in batches of at most 50 and continue until all selected sessions are handled.")) {
+        try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"sessionIDs":["# + ids + #"]}"#),
+            context: sessionStatusToolContext(sessionID: "del-current", toolCallID: "batch-delete-limit")
+        )
+    }
+}
+
+@Test func sessionBatchDeleteToolAllowsUpToLimitPerCall() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporarySessionStatusToolDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    let ids = (0..<50).map { "batch-limit-\($0)" }
+    for id in ids {
+        try repository.saveSession(AgentSession(id: id, title: id))
+    }
+    let tool = SessionBatchDeleteTool(repository: repository)
+    let jsonIDs = ids.map { "\"\($0)\"" }.joined(separator: ",")
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"sessionIDs":["# + jsonIDs + #"]}"#),
+        context: sessionStatusToolContext(sessionID: "del-current", toolCallID: "batch-delete-50")
+    )
+
+    let object = try resultJSONObject(result)
+    #expect(object["requestedItems"] as? Int == 50)
+    #expect(object["deletedItems"] as? Int == 50)
+    #expect(object["failedItems"] as? Int == 0)
+}
+
 private func temporarySessionStatusToolDatabaseURL(_ name: String = UUID().uuidString) -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }

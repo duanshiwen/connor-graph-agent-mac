@@ -98,7 +98,7 @@ public extension AgentToolRegistry {
 
 public struct SessionListByStatusTool: AgentTool {
     public let name = "session_list_by_status"
-    public let description = "List Connor sessions, optionally filtered by governance status, with stable pagination. The response contains a sessions array; every item has an operation-ready sessionID that can be copied directly into session_set_status or session_batch_set_status updates[].sessionID. page defaults to 1 and pageSize to 50. When nextPage is non-null, call this tool again with page set to exactly nextPage and keep status and pageSize unchanged."
+    public let description = "List Connor sessions, optionally filtered by governance status, with stable pagination. The response contains a sessions array; every item has an operation-ready sessionID that can be copied directly into session_set_status, session_batch_set_status updates[].sessionID, or session_batch_delete sessionIDs. " + AgentToolBatchPagination.paginationContract(listToolName: "session_list_by_status")
     public let permission: AgentPermissionCapability = .readSession
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "status": .string(description: "Optional exact status returned by session_list_statuses; copy the field without renaming it. Omit to list all sessions."),
@@ -118,9 +118,8 @@ public struct SessionListByStatusTool: AgentTool {
         let status = arguments.string("status")?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         if let status { try validateStatus(status, governanceConfig: governanceConfig) }
         let page = arguments.int("page") ?? 1
-        let pageSize = arguments.int("pageSize") ?? arguments.int("page_size") ?? 50
-        guard page >= 1 else { throw AgentToolError.invalidArguments("page must be at least 1") }
-        guard (1...100).contains(pageSize) else { throw AgentToolError.invalidArguments("pageSize must be between 1 and 100") }
+        try AgentToolBatchPagination.validate(page: page)
+        let pageSize = try AgentToolBatchPagination.validatedPageSize(arguments.int("pageSize") ?? arguments.int("page_size"))
         let sessions = try repository.loadSessionMetadata().filter { session in
             status == nil || session.governance.status.rawValue == status
         }.sorted {
@@ -167,7 +166,7 @@ public struct SessionListByStatusTool: AgentTool {
 
 public struct SessionBatchSetStatusTool: AgentTool {
     public let name = "session_batch_set_status"
-    public let description = "Set multiple Connor sessions to one status. Copy each sessionID directly from session_list_by_status. Each item returns updated, unchanged, not_found, conflict, or failed so partial success is explicit. Repeating the same request is idempotent: sessions already at the target status return unchanged. Optional expectedUpdatedAt enables caller-visible optimistic concurrency; updates are compare-and-set even when it is omitted."
+    public let description = "Set multiple Connor sessions to one status. Copy each sessionID directly from session_list_by_status. Each item returns updated, unchanged, not_found, conflict, or failed so partial success is explicit. Repeating the same request is idempotent: sessions already at the target status return unchanged. Optional expectedUpdatedAt enables caller-visible optimistic concurrency; updates are compare-and-set even when it is omitted. " + AgentToolBatchPagination.batchContract(toolName: "session_batch_set_status")
     public let permission: AgentPermissionCapability = .mutateSessionStatus
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "updates": .array(items: .closedObject(properties: [
@@ -180,10 +179,16 @@ public struct SessionBatchSetStatusTool: AgentTool {
 
     private let repository: AppChatSessionRepository
     private let governanceConfig: AppSessionGovernanceConfig
+    private let maxItemsPerCall: Int
 
-    public init(repository: AppChatSessionRepository, governanceConfig: AppSessionGovernanceConfig = .default) {
+    public init(
+        repository: AppChatSessionRepository,
+        governanceConfig: AppSessionGovernanceConfig = .default,
+        maxItemsPerCall: Int = AgentToolBatchPagination.defaultBatchSize
+    ) {
         self.repository = repository
         self.governanceConfig = governanceConfig
+        self.maxItemsPerCall = max(1, maxItemsPerCall)
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -193,6 +198,9 @@ public struct SessionBatchSetStatusTool: AgentTool {
         try validateStatus(status, governanceConfig: governanceConfig)
         guard let values = arguments.array("updates"), !values.isEmpty else {
             throw AgentToolError.invalidArguments("updates must not be empty")
+        }
+        guard values.count <= maxItemsPerCall else {
+            throw AgentToolError.invalidArguments("updates accepts at most \(maxItemsPerCall) items per call; split into batches of at most \(maxItemsPerCall) and continue until every item is handled.")
         }
         var seen = Set<String>()
         var results: [SessionBatchStatusItemResult] = []
@@ -294,26 +302,36 @@ public struct SessionListStatusesTool: AgentTool {
 
 public struct SessionBatchDeleteTool: AgentTool {
     public let name = "session_batch_delete"
-    public let description = "Delete one or more Connor sessions. Copy each sessionID exactly from session_list_by_status (follow nextPage until all pages are read). The current session can never be deleted through this tool. Each item returns deleted, not_found, running_tasks, or failed so partial results are explicit; do not claim the whole batch succeeded unless every item reports deleted. Deletion is destructive and gated by user approval — only call this tool after the user explicitly asks to delete sessions, and report failures/conflicts instead of retrying blindly."
+    public let description = "Delete one or more Connor sessions. Copy each sessionID exactly from session_list_by_status. The current session can never be deleted through this tool. Each item returns deleted, not_found, running_tasks, or failed so partial results are explicit; do not claim the whole batch succeeded unless every item reports deleted. Deletion is destructive and gated by user approval — only call this tool after the user explicitly asks to delete sessions, and report failures/conflicts instead of retrying blindly. " + AgentToolBatchPagination.batchContract(toolName: "session_batch_delete")
     public let permission: AgentPermissionCapability = .deleteSession
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "sessionIDs": .array(
             items: .string(description: "Exact sessionID returned by session_list_by_status; copy the field without renaming it."),
-            description: "One or more sessions to delete. Duplicate session IDs are processed once."
+            description: "One or more sessions to delete (at most 50 per call; delete in batches of 50 and continue until all selected sessions are handled). Duplicate session IDs are processed once."
         ),
         "reason": .string(description: "Optional human-readable reason for the deletion.")
     ], required: ["sessionIDs"])
 
-    private let repository: AppChatSessionRepository
+    public static let defaultMaxSessionIDsPerCall = AgentToolBatchPagination.defaultBatchSize
 
-    public init(repository: AppChatSessionRepository) {
+    private let repository: AppChatSessionRepository
+    private let maxSessionIDsPerCall: Int
+
+    public init(
+        repository: AppChatSessionRepository,
+        maxSessionIDsPerCall: Int = Self.defaultMaxSessionIDsPerCall
+    ) {
         self.repository = repository
+        self.maxSessionIDsPerCall = max(1, maxSessionIDsPerCall)
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let rawValues = arguments.array("sessionIDs") ?? arguments.array("session_ids") ?? []
         guard !rawValues.isEmpty else {
             throw AgentToolError.invalidArguments("sessionIDs must not be empty")
+        }
+        guard rawValues.count <= maxSessionIDsPerCall else {
+            throw AgentToolError.invalidArguments("sessionIDs accepts at most \(maxSessionIDsPerCall) items per call; delete in batches of at most \(maxSessionIDsPerCall) and continue until all selected sessions are handled.")
         }
         var seen = Set<String>()
         var requestedIDs = Set<String>()
