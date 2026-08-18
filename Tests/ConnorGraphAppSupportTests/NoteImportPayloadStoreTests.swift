@@ -49,4 +49,31 @@ struct NoteImportPayloadStoreTests {
             _ = try store.load(metadata: metadata)
         }
     }
+
+    @Test("Loads legacy payloads missing the contentFormat field as markdown")
+    func legacyPayloadDefaultsToMarkdown() throws {
+        let legacyJSON = """
+        {
+          "id": "note-1",
+          "sourceKind": "notion_export",
+          "sourceIdentity": "page-1",
+          "title": "Legacy",
+          "markdownContent": "<h1>Old HTML</h1>",
+          "tags": [],
+          "hierarchy": [],
+          "links": [],
+          "attachments": [],
+          "sourceMetadata": {"notion_format": "html"},
+          "rawByteHash": "raw",
+          "normalizedTextHash": "normalized",
+          "diagnostics": []
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let note = try decoder.decode(ImportedNote.self, from: Data(legacyJSON.utf8))
+        #expect(note.contentFormat == .markdown)
+        #expect(note.sourceKind == .notionExport)
+        #expect(note.markdownContent == "<h1>Old HTML</h1>")
+    }
 }

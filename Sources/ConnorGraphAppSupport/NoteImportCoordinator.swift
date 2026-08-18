@@ -392,6 +392,11 @@ public actor NoteImportCoordinator {
            accessError == .pathEscapesAuthorizedRoot {
             return (false, .unsafePath, nil)
         }
+        if error is DecodingError || error is NoteImportPayloadStoreError {
+            // payload 缺失/损坏/旧版不兼容属于永久性错误：重试不会成功，
+            // 直接失败并继续后续笔记，避免整批导入陷入指数退避重试的“卡住”假象。
+            return (false, .internalInvariantViolation, nil)
+        }
         if error is AppSessionAttachmentImportError || error is NoteImportAttachmentImporterError {
             // 附件被策略拒绝（超限/不支持）、源文件缺失或校验失败都是永久性错误：
             // 重试不会成功，直接判定失败并继续导入后续笔记，避免整批导入被退避重试卡住。
