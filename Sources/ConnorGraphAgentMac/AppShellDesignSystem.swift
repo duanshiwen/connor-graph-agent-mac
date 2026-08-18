@@ -142,7 +142,10 @@ enum AppShellLayout {
     static let radiusM: CGFloat = 12
     static let radiusL: CGFloat = 16
 
-    static let listColumnWidth: CGFloat = 260
+    // 主侧栏（最左侧导航）与列表列（会话/笔记列表）各自独立定宽：
+    // 列表列比主侧栏宽，保证可读性；两者均固定宽度，不允许用户拖动调整。
+    static let sidebarColumnWidth: CGFloat = 220
+    static let listColumnWidth: CGFloat = 280
 
     static let detailColumnMinWidth: CGFloat = 360
     // 最窄窗口（堆叠布局）下详情页返回按钮：稍大并加粗，便于点击与识别。
