@@ -258,6 +258,55 @@ public struct ImportedNote: Codable, Sendable, Equatable, Identifiable {
         self.normalizedTextHash = normalizedTextHash
         self.diagnostics = diagnostics
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case sourceKind
+        case sourceIdentity
+        case externalID
+        case sourcePath
+        case relativePath
+        case title
+        case markdownContent
+        case contentFormat
+        case createdAt
+        case updatedAt
+        case tags
+        case hierarchy
+        case hierarchyParent
+        case links
+        case attachments
+        case sourceMetadata
+        case rawByteHash
+        case normalizedTextHash
+        case diagnostics
+    }
+
+    /// 兼容旧版本 staged payload：`contentFormat` 缺省视为 Markdown，
+    /// 避免升级前已扫描但未完成的导入任务因解码失败而整批卡住。
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        sourceKind = try container.decode(NoteImportSourceKind.self, forKey: .sourceKind)
+        sourceIdentity = try container.decode(String.self, forKey: .sourceIdentity)
+        externalID = try container.decodeIfPresent(String.self, forKey: .externalID)
+        sourcePath = try container.decodeIfPresent(String.self, forKey: .sourcePath)
+        relativePath = try container.decodeIfPresent(String.self, forKey: .relativePath)
+        title = try container.decode(String.self, forKey: .title)
+        markdownContent = try container.decode(String.self, forKey: .markdownContent)
+        contentFormat = try container.decodeIfPresent(NoteContentFormat.self, forKey: .contentFormat) ?? .markdown
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        hierarchy = try container.decodeIfPresent([String].self, forKey: .hierarchy) ?? []
+        hierarchyParent = try container.decodeIfPresent(String.self, forKey: .hierarchyParent)
+        links = try container.decodeIfPresent([ImportedNoteLink].self, forKey: .links) ?? []
+        attachments = try container.decodeIfPresent([ImportedNoteAttachment].self, forKey: .attachments) ?? []
+        sourceMetadata = try container.decodeIfPresent([String: String].self, forKey: .sourceMetadata) ?? [:]
+        rawByteHash = try container.decode(String.self, forKey: .rawByteHash)
+        normalizedTextHash = try container.decode(String.self, forKey: .normalizedTextHash)
+        diagnostics = try container.decodeIfPresent([NoteImportDiagnostic].self, forKey: .diagnostics) ?? []
+    }
 }
 
 public struct NoteImportScanRequest: Sendable, Equatable {
