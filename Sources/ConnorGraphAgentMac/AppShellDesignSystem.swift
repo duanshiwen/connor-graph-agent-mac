@@ -142,7 +142,7 @@ enum AppShellLayout {
     static let radiusM: CGFloat = 12
     static let radiusL: CGFloat = 16
 
-    static let listColumnWidth: CGFloat = 300
+    static let listColumnWidth: CGFloat = 260
 
     static let detailColumnMinWidth: CGFloat = 360
     // 最窄窗口（堆叠布局）下详情页返回按钮：稍大并加粗，便于点击与识别。
