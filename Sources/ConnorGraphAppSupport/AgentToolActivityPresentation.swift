@@ -74,6 +74,7 @@ public enum AgentToolDisplayNameResolver {
         "interactive_web_set_access": "设置互动网页访问权限", "interactive_web_records_summary": "汇总互动网页记录",
         "interactive_web_export_records": "导出互动网页记录", "interactive_web_records_list": "查看互动网页记录",
         "interactive_web_collection_create": "创建互动网页集合",
+        "interactive_web_delete_project": "删除互动网页项目", "interactive_web_offline": "下线互动网页",
         "session_search": "搜索历史会话", "assistant_tool_search": "查找工具说明",
         "prepare_final_output": "生成最终答复", "agent_commit_strategy": "提交执行策略",
         "memory_query": "查询记忆", "attention_brief": "汇总关注事项",
