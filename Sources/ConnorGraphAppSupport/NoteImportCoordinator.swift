@@ -213,7 +213,9 @@ public actor NoteImportCoordinator {
                     if [.imported, .queuedForLLM, .runningLLM].contains(current.status) {
                         var attachmentResults: [NoteImportAttachmentImportResult] = []
                         if options.importAttachments, let attachmentImporter, !note.attachments.isEmpty {
-                            let authorizedRoot = note.sourceKind == .evernoteENEX ? enexLease : sourceLease
+                            // .enex 与新版 .notes 的资源都落在 connor-enex-resources 暂存目录，
+                            // 统一走受控租约，防止附件导入越权访问其它临时文件。
+                            let authorizedRoot = [.evernoteENEX, .yinxiangNotes].contains(note.sourceKind) ? enexLease : sourceLease
                             attachmentResults = try await attachmentImporter.importAttachments(
                                 note.attachments,
                                 sessionID: boundSessionID,

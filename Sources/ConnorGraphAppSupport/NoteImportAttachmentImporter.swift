@@ -29,7 +29,8 @@ public actor NoteImportAttachmentImporter {
             maxAcceptedBytes: 512_000,
             maxImageBytes: 100_000_000,
             maxDocumentBytes: 25_000_000,
-            maxAudioBytes: 50_000_000
+            maxAudioBytes: 50_000_000,
+            maxVideoBytes: 200_000_000
         )
     ) {
         self.store = store

@@ -106,6 +106,12 @@ final class NoteImportViewModel: ObservableObject {
             panel.canChooseFiles = false
             panel.prompt = "选择文件夹"
             panel.message = "请选择要导入的笔记文件夹"
+        case .yinxiangNotes:
+            panel.canChooseDirectories = false
+            panel.canChooseFiles = true
+            panel.allowedContentTypes = [UTType(filenameExtension: "notes") ?? .xml]
+            panel.prompt = "选择 .notes"
+            panel.message = "请选择新版印象笔记导出的 .notes 文件（一个笔记本可导出为一个文件）"
         case .evernoteENEX:
             panel.canChooseDirectories = false
             panel.canChooseFiles = true
@@ -386,6 +392,7 @@ final class NoteImportViewModel: ObservableObject {
         case .markdownFolder: MarkdownFolderNoteImportAdapter()
         case .obsidianVault: ObsidianVaultNoteImportAdapter()
         case .notionExport: NotionExportNoteImportAdapter()
+        case .yinxiangNotes: NotesNoteImportAdapter()
         case .evernoteENEX: ENEXNoteImportAdapter()
         }
     }
