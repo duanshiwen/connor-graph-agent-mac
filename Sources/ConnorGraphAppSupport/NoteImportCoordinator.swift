@@ -403,14 +403,18 @@ public actor NoteImportCoordinator {
             return (false, .attachmentMissing, nil)
         }
         if let code = error as? NoteImportErrorCode {
+            // 本地文件导入不使用 LLM/网络：只有明确的临时限流与服务不可用才重试，
+            // 其余错误（解析/解码/附件/会话/载荷等）一律快速失败，避免整批假卡死。
             switch code {
-            case .unsafePath, .llmContextExceeded, .internalInvariantViolation:
-                return (false, code, nil)
-            default:
+            case .llmRateLimited, .llmUnavailable:
                 return (true, code, nil)
+            default:
+                return (false, code, nil)
             }
         }
-        return (true, .llmUnavailable, nil)
+        // 未知错误按永久失败处理：本地导入的重试通常不会成功，
+        // 快速标记失败并继续后续笔记，而不是让整批陷入指数退避。
+        return (false, .internalInvariantViolation, nil)
     }
 
     private func requireJob(_ id: String) throws -> NoteImportJobRecord { guard let value = try ledger.job(id: id) else { throw AppNoteImportRepositoryError.jobNotFound(id) }; return value }
