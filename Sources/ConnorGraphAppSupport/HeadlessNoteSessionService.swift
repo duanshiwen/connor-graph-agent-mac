@@ -46,6 +46,7 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
         id: String = UUID().uuidString,
         title: String,
         content: String,
+        contentFormat: NoteContentFormat = .markdown,
         messageID: String = UUID().uuidString,
         attachments: [AgentMessageAttachmentRef] = [],
         createdAt: Date = Date()
@@ -54,6 +55,7 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
             id: id,
             title: title,
             content: content,
+            contentFormat: contentFormat,
             messageID: messageID,
             attachments: attachments,
             createdAt: createdAt
@@ -68,6 +70,7 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
         sessionID: String,
         messageID: String,
         content: String,
+        contentFormat: NoteContentFormat = .markdown,
         attachments: [AgentMessageAttachmentRef],
         createdAt: Date
     ) throws -> AgentSession {
@@ -76,6 +79,7 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
             messageID: messageID,
             expectedContent: content,
             content: content,
+            contentFormat: contentFormat,
             attachments: attachments,
             createdAt: createdAt
         )

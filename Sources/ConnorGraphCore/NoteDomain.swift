@@ -5,6 +5,12 @@ public enum NoteOriginKind: String, Codable, Sendable, Equatable {
     case imported
 }
 
+/** 笔记正文的内容格式：Markdown（默认）或 HTML（多态渲染/编辑分派依据）。 */
+public enum NoteContentFormat: String, Codable, Sendable, Equatable {
+    case markdown
+    case html
+}
+
 public enum NoteProjectionStatus: String, Codable, Sendable, Equatable {
     case pending
     case projecting
@@ -20,6 +26,8 @@ public struct NoteRecord: Codable, Sendable, Equatable, Identifiable {
     public var sourceMessageID: String
     public var title: String
     public var body: String
+    /** 正文格式；默认 Markdown，Notion HTML 导出等导入为 HTML。 */
+    public var format: NoteContentFormat
     public var contentHash: String
     public var sourceUpdatedAt: Date
     public var createdAt: Date
@@ -51,6 +59,7 @@ public struct NoteRecord: Codable, Sendable, Equatable, Identifiable {
         sourceMessageID: String,
         title: String,
         body: String,
+        format: NoteContentFormat = .markdown,
         contentHash: String,
         sourceUpdatedAt: Date,
         createdAt: Date,
@@ -79,6 +88,7 @@ public struct NoteRecord: Codable, Sendable, Equatable, Identifiable {
         self.sourceMessageID = sourceMessageID
         self.title = title
         self.body = body
+        self.format = format
         self.contentHash = contentHash
         self.sourceUpdatedAt = sourceUpdatedAt
         self.createdAt = createdAt
@@ -130,12 +140,14 @@ public struct NoteImportProjectionMetadata: Sendable, Equatable {
     public var externalID: String?
     public var relativePath: String?
     public var sourceCreatedAt: Date?
+    /** 导入笔记的正文格式（Notion HTML 导出为 .html，其余默认 Markdown）。 */
+    public var contentFormat: NoteContentFormat
     /** 导入来源的树形层级（如 Notion「笔记本/子分类/子页面」）。 */
     public var hierarchy: [String]
     /** 树形层级重建后的上级笔记 sourceIdentity（根节点为 nil）。 */
     public var parentSourceIdentity: String?
 
-    public init(itemID: String, sourceID: String, sourceKind: String, sourceIdentity: String, externalID: String? = nil, relativePath: String? = nil, sourceCreatedAt: Date? = nil, hierarchy: [String] = [], parentSourceIdentity: String? = nil) {
+    public init(itemID: String, sourceID: String, sourceKind: String, sourceIdentity: String, externalID: String? = nil, relativePath: String? = nil, sourceCreatedAt: Date? = nil, contentFormat: NoteContentFormat = .markdown, hierarchy: [String] = [], parentSourceIdentity: String? = nil) {
         self.itemID = itemID
         self.sourceID = sourceID
         self.sourceKind = sourceKind
@@ -143,6 +155,7 @@ public struct NoteImportProjectionMetadata: Sendable, Equatable {
         self.externalID = externalID
         self.relativePath = relativePath
         self.sourceCreatedAt = sourceCreatedAt
+        self.contentFormat = contentFormat
         self.hierarchy = hierarchy
         self.parentSourceIdentity = parentSourceIdentity
     }

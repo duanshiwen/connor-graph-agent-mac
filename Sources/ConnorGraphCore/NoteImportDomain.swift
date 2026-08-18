@@ -200,6 +200,8 @@ public struct ImportedNote: Codable, Sendable, Equatable, Identifiable {
     public var relativePath: String?
     public var title: String
     public var markdownContent: String
+    /** 正文格式：Notion HTML 导出为 .html，其余默认 Markdown。 */
+    public var contentFormat: NoteContentFormat
     public var createdAt: Date?
     public var updatedAt: Date?
     public var tags: [String]
@@ -222,6 +224,7 @@ public struct ImportedNote: Codable, Sendable, Equatable, Identifiable {
         relativePath: String? = nil,
         title: String,
         markdownContent: String,
+        contentFormat: NoteContentFormat = .markdown,
         createdAt: Date? = nil,
         updatedAt: Date? = nil,
         tags: [String] = [],
@@ -242,6 +245,7 @@ public struct ImportedNote: Codable, Sendable, Equatable, Identifiable {
         self.relativePath = relativePath
         self.title = title
         self.markdownContent = markdownContent
+        self.contentFormat = contentFormat
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.tags = tags

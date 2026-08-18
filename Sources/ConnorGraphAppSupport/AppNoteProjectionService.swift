@@ -29,6 +29,7 @@ public struct AppNoteProjectionService: NoteProjectionSynchronizing, Sendable {
         try repository.upsert(NoteRecord(
             id: existing?.id ?? Self.noteID(sessionID: session.id), sessionID: session.id,
             sourceMessageID: sourceMessage.id, title: session.title, body: sourceMessage.content,
+            format: existing?.format ?? session.governance.contentFormat,
             contentHash: hash, sourceUpdatedAt: session.updatedAt,
             createdAt: existing?.createdAt ?? session.createdAt, updatedAt: Date(),
             indexVersion: existing?.indexVersion ?? 0, projectionStatus: .projected,

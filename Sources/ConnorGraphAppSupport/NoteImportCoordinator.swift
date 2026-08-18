@@ -184,6 +184,7 @@ public actor NoteImportCoordinator {
                             id: sessionID,
                             title: current.title,
                             content: note.markdownContent,
+                            contentFormat: note.contentFormat,
                             messageID: messageID,
                             createdAt: note.createdAt ?? current.createdAt
                         )
@@ -192,6 +193,7 @@ public actor NoteImportCoordinator {
                             itemID: current.id, sourceID: current.sourceID,
                             sourceKind: sourceKind ?? note.sourceKind.rawValue, sourceIdentity: current.sourceIdentity,
                             externalID: current.externalID, relativePath: current.relativePath, sourceCreatedAt: note.createdAt,
+                            contentFormat: note.contentFormat,
                             hierarchy: note.hierarchy,
                             parentSourceIdentity: note.hierarchyParent
                         ))
@@ -220,6 +222,7 @@ public actor NoteImportCoordinator {
                             sessionID: boundSessionID,
                             messageID: messageID,
                             content: renderedContent,
+                            contentFormat: note.contentFormat,
                             attachments: attachmentResults.map(\.messageRef),
                             createdAt: note.createdAt ?? current.createdAt
                         )
@@ -228,6 +231,7 @@ public actor NoteImportCoordinator {
                             itemID: current.id, sourceID: current.sourceID,
                             sourceKind: sourceKind ?? note.sourceKind.rawValue, sourceIdentity: current.sourceIdentity,
                             externalID: current.externalID, relativePath: current.relativePath, sourceCreatedAt: note.createdAt,
+                            contentFormat: note.contentFormat,
                             hierarchy: note.hierarchy,
                             parentSourceIdentity: note.hierarchyParent
                         ))

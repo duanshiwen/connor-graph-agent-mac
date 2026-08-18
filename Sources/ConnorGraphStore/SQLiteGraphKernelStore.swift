@@ -151,7 +151,7 @@ public struct GraphSchemaHealthReport: Sendable, Equatable {
 }
 
 public final class SQLiteGraphKernelStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     private static let requiredSchemaTables: Set<String> = [
         "graph_episodes_v3",
@@ -414,7 +414,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             is_flagged INTEGER NOT NULL DEFAULT 0,
             archived_at TEXT,
             deleted_at TEXT,
-            read_state_json TEXT NOT NULL DEFAULT '{}'
+            read_state_json TEXT NOT NULL DEFAULT '{}',
+            content_format TEXT NOT NULL DEFAULT 'markdown'
         );
         """)
         let hasSessionMessageCount = try columnNames(table: "agent_sessions").contains("message_count")
@@ -430,6 +431,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         try addColumnIfMissing(table: "agent_sessions", column: "archived_at", definition: "TEXT")
         try addColumnIfMissing(table: "agent_sessions", column: "deleted_at", definition: "TEXT")
         try addColumnIfMissing(table: "agent_sessions", column: "read_state_json", definition: "TEXT NOT NULL DEFAULT '{}'")
+        try addColumnIfMissing(table: "agent_sessions", column: "content_format", definition: "TEXT NOT NULL DEFAULT 'markdown'")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated ON agent_sessions(updated_at DESC);")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated_page ON agent_sessions(updated_at DESC, id ASC);")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_governance ON agent_sessions(deleted_at, is_archived, status, updated_at DESC);")
@@ -469,6 +471,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             source_message_id TEXT NOT NULL,
             title TEXT NOT NULL,
             body TEXT NOT NULL,
+            content_format TEXT NOT NULL DEFAULT 'markdown',
             content_hash TEXT NOT NULL,
             source_updated_at TEXT NOT NULL,
             created_at TEXT NOT NULL,
@@ -495,6 +498,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
         try addColumnIfMissing(table: "notes", column: "import_hierarchy", definition: "TEXT")
         try addColumnIfMissing(table: "notes", column: "import_parent_identity", definition: "TEXT")
+        try addColumnIfMissing(table: "notes", column: "content_format", definition: "TEXT NOT NULL DEFAULT 'markdown'")
         try execute("CREATE INDEX IF NOT EXISTS idx_notes_source_message ON notes(source_message_id);")
         try execute("CREATE INDEX IF NOT EXISTS idx_notes_projection_queue ON notes(projection_status, next_retry_at, lease_expires_at, updated_at);")
         try execute("CREATE INDEX IF NOT EXISTS idx_notes_index_version ON notes(index_version, indexed_at);")
@@ -854,8 +858,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     public func upsertSession(_ session: AgentSession) throws {
         try execute("""
         INSERT INTO agent_sessions
-        (id, title, messages_json, message_count, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json)
-        VALUES (\(quote(session.id)), \(quote(session.title)), \(quote(json(session.messages))), \(session.messages.count), \(quote(iso(session.createdAt))), \(quote(iso(session.updatedAt))), \(quote(session.governance.status.rawValue)), \(quote(session.governance.kind.rawValue)), \(quote(json(session.governance.labels))), \(session.governance.isArchived ? 1 : 0), \(session.governance.isFlagged ? 1 : 0), \(quote(session.governance.archivedAt.map(iso))), \(quote(session.governance.deletedAt.map(iso))), \(quote(json(session.readState))))
+        (id, title, messages_json, message_count, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, content_format)
+        VALUES (\(quote(session.id)), \(quote(session.title)), \(quote(json(session.messages))), \(session.messages.count), \(quote(iso(session.createdAt))), \(quote(iso(session.updatedAt))), \(quote(session.governance.status.rawValue)), \(quote(session.governance.kind.rawValue)), \(quote(json(session.governance.labels))), \(session.governance.isArchived ? 1 : 0), \(session.governance.isFlagged ? 1 : 0), \(quote(session.governance.archivedAt.map(iso))), \(quote(session.governance.deletedAt.map(iso))), \(quote(json(session.readState))), \(quote(session.governance.contentFormat.rawValue)))
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             messages_json = excluded.messages_json,
@@ -869,7 +873,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             is_flagged = excluded.is_flagged,
             archived_at = excluded.archived_at,
             deleted_at = COALESCE(excluded.deleted_at, agent_sessions.deleted_at),
-            read_state_json = excluded.read_state_json
+            read_state_json = excluded.read_state_json,
+            content_format = excluded.content_format
         """)
         var messageStatements = ["DELETE FROM agent_session_messages WHERE session_id = \(quote(session.id))"]
         if !session.messages.isEmpty {
@@ -882,13 +887,13 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     }
 
     public func session(id: String) throws -> AgentSession? {
-        let rows = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions WHERE id = \(quote(id))")
+        let rows = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, content_format FROM agent_sessions WHERE id = \(quote(id))")
         guard let row = rows.first else { return nil }
         return try decodeSession(row)
     }
 
     public func sessionMetadata(id: String) throws -> AgentSession? {
-        let rows = try query(sql: "SELECT id, title, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions WHERE id = \(quote(id))")
+        let rows = try query(sql: "SELECT id, title, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, content_format FROM agent_sessions WHERE id = \(quote(id))")
         guard let row = rows.first else { return nil }
         return try decodeSessionMetadata(row)
     }
@@ -975,14 +980,14 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         _ = includeArchived
         if !includeDeleted { conditions.append("deleted_at IS NULL") }
         let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
-        return try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
+        return try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, content_format FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
     }
 
     public func recentSessionMetadata(limit: Int = 50, includeDeleted: Bool = false) throws -> [AgentSession] {
         var conditions: [String] = []
         if !includeDeleted { conditions.append("deleted_at IS NULL") }
         let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
-        return try query(sql: "SELECT id, title, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)")
+        return try query(sql: "SELECT id, title, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, content_format FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)")
             .map(decodeSessionMetadata)
     }
 
@@ -1009,7 +1014,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         }
         let boundedLimit = min(max(limit, 1), 101)
         return try query(sql: """
-        SELECT id, title, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, message_count
+        SELECT id, title, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, content_format, message_count
         FROM agent_sessions
         WHERE \(conditions.joined(separator: " AND "))
         ORDER BY updated_at DESC, id ASC
@@ -1080,7 +1085,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         if let archived { conditions.append("is_archived = \(archived ? 1 : 0)") }
         if !includeDeleted { conditions.append("deleted_at IS NULL") }
         let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
-        let sessions = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
+        let sessions = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, content_format FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
         guard let labelID else { return sessions }
         return sessions.filter { session in session.governance.labels.contains { $0.id == labelID } }
     }
@@ -1088,7 +1093,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     public func updateSessionGovernance(sessionID: String, governance: AgentSessionGovernanceMetadata, updatedAt: Date = Date()) throws {
         try execute("""
         UPDATE agent_sessions
-        SET status = \(quote(governance.status.rawValue)), labels_json = \(quote(json(governance.labels))), is_archived = \(governance.isArchived ? 1 : 0), is_flagged = \(governance.isFlagged ? 1 : 0), archived_at = \(quote(governance.archivedAt.map(iso))), deleted_at = \(quote(governance.deletedAt.map(iso))), updated_at = \(quote(iso(updatedAt)))
+        SET status = \(quote(governance.status.rawValue)), labels_json = \(quote(json(governance.labels))), is_archived = \(governance.isArchived ? 1 : 0), is_flagged = \(governance.isFlagged ? 1 : 0), archived_at = \(quote(governance.archivedAt.map(iso))), deleted_at = \(quote(governance.deletedAt.map(iso))), content_format = \(quote(governance.contentFormat.rawValue)), updated_at = \(quote(iso(updatedAt)))
         WHERE id = \(quote(sessionID))
         """)
     }
@@ -1174,12 +1179,12 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     public func upsertNote(_ note: NoteRecord) throws {
         try execute("""
         INSERT INTO notes
-        (id, session_id, source_message_id, title, body, content_hash, source_updated_at, created_at, updated_at,
+        (id, session_id, source_message_id, title, body, content_format, content_hash, source_updated_at, created_at, updated_at,
          index_version, projection_status, indexed_at, failure_count, next_retry_at, last_error_code, origin_kind,
          import_item_id, import_source_id, source_kind, source_identity, external_id, relative_path, source_created_at,
          lease_owner, lease_expires_at, import_hierarchy, import_parent_identity)
         VALUES (\(quote(note.id)), \(quote(note.sessionID)), \(quote(note.sourceMessageID)), \(quote(note.title)),
-         \(quote(note.body)), \(quote(note.contentHash)), \(quote(iso(note.sourceUpdatedAt))), \(quote(iso(note.createdAt))),
+         \(quote(note.body)), \(quote(note.format.rawValue)), \(quote(note.contentHash)), \(quote(iso(note.sourceUpdatedAt))), \(quote(iso(note.createdAt))),
          \(quote(iso(note.updatedAt))), \(note.indexVersion), \(quote(note.projectionStatus.rawValue)),
          \(quote(note.indexedAt.map(iso))), \(note.failureCount), \(quote(note.nextRetryAt.map(iso))),
          \(quote(note.lastErrorCode)), \(quote(note.originKind.rawValue)), \(quote(note.importItemID)),
@@ -1187,7 +1192,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
          \(quote(note.relativePath)), \(quote(note.sourceCreatedAt.map(iso))), \(quote(note.leaseOwner)),
          \(quote(note.leaseExpiresAt.map(iso))), \(quote(json(note.importHierarchy))), \(quote(note.importParentIdentity)))
         ON CONFLICT(session_id) DO UPDATE SET
-          source_message_id=excluded.source_message_id, title=excluded.title, body=excluded.body,
+          source_message_id=excluded.source_message_id, title=excluded.title, body=excluded.body, content_format=excluded.content_format,
           content_hash=excluded.content_hash, source_updated_at=excluded.source_updated_at, updated_at=excluded.updated_at,
           index_version=excluded.index_version, projection_status=excluded.projection_status, indexed_at=excluded.indexed_at,
           failure_count=excluded.failure_count, next_retry_at=excluded.next_retry_at, last_error_code=excluded.last_error_code,
@@ -1237,6 +1242,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
           import_source_id = \(quote(metadata.sourceID)), source_kind = \(quote(metadata.sourceKind)),
           source_identity = \(quote(metadata.sourceIdentity)), external_id = \(quote(metadata.externalID)),
           relative_path = \(quote(metadata.relativePath)), source_created_at = \(quote(metadata.sourceCreatedAt.map(iso))),
+          content_format = \(quote(metadata.contentFormat.rawValue)),
           import_hierarchy = \(quote(json(metadata.hierarchy))),
           import_parent_identity = \(quote(metadata.parentSourceIdentity)),
           index_version = 0, indexed_at = NULL, projection_status = 'projected'
@@ -1383,19 +1389,20 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         SELECT id, session_id, source_message_id, title, body, content_hash, source_updated_at, created_at, updated_at,
                index_version, projection_status, indexed_at, failure_count, next_retry_at, last_error_code, origin_kind,
                import_item_id, import_source_id, source_kind, source_identity, external_id, relative_path,
-               source_created_at, lease_owner, lease_expires_at, import_hierarchy, import_parent_identity
+               source_created_at, lease_owner, lease_expires_at, import_hierarchy, import_parent_identity, content_format
         FROM notes WHERE \(whereClause) LIMIT \(max(limit, 0))
         """).map(decodeNote)
     }
 
     private func decodeNote(_ row: [String]) throws -> NoteRecord {
-        guard row.count == 27,
+        guard row.count == 28,
               let status = NoteProjectionStatus(rawValue: row[10]), let origin = NoteOriginKind(rawValue: row[15]) else {
             throw SQLiteGraphKernelStoreError.decodeFailed("Invalid note projection row")
         }
         func optional(_ index: Int) -> String? { row[index].isEmpty ? nil : row[index] }
+        let format = NoteContentFormat(rawValue: row[27]) ?? .markdown
         return NoteRecord(
-            id: row[0], sessionID: row[1], sourceMessageID: row[2], title: row[3], body: row[4], contentHash: row[5],
+            id: row[0], sessionID: row[1], sourceMessageID: row[2], title: row[3], body: row[4], format: format, contentHash: row[5],
             sourceUpdatedAt: try date(row[6]), createdAt: try date(row[7]), updatedAt: try date(row[8]),
             indexVersion: Int(row[9]) ?? 0, projectionStatus: status, indexedAt: try optionalDate(row[11]),
             failureCount: Int(row[12]) ?? 0, nextRetryAt: try optionalDate(row[13]), lastErrorCode: optional(14),
@@ -1452,7 +1459,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             isArchived: (Int(row[safe: 8] ?? "0") ?? 0) != 0,
             isFlagged: (Int(row[safe: 9] ?? "0") ?? 0) != 0,
             archivedAt: try optionalDate(row[safe: 10] ?? ""),
-            deletedAt: try optionalDate(row[safe: 11] ?? "")
+            deletedAt: try optionalDate(row[safe: 11] ?? ""),
+            contentFormat: NoteContentFormat(rawValue: row[safe: 13] ?? "") ?? .markdown
         )
         let readStateJSON = row[safe: 12] ?? "{}"
         let readState = try decodeSessionReadState(readStateJSON, fallbackUpdatedAt: try date(row[4]))
@@ -1474,7 +1482,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             isArchived: (Int(row[safe: 7] ?? "0") ?? 0) != 0,
             isFlagged: (Int(row[safe: 8] ?? "0") ?? 0) != 0,
             archivedAt: try optionalDate(row[safe: 9] ?? ""),
-            deletedAt: try optionalDate(row[safe: 10] ?? "")
+            deletedAt: try optionalDate(row[safe: 10] ?? ""),
+            contentFormat: NoteContentFormat(rawValue: row[safe: 12] ?? "") ?? .markdown
         )
         return AgentSession(
             id: row[0],

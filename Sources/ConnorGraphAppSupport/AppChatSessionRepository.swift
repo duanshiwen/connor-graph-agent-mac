@@ -207,6 +207,7 @@ public struct AppChatSessionRepository: Sendable {
         id: String = UUID().uuidString,
         title: String,
         content: String,
+        contentFormat: NoteContentFormat = .markdown,
         messageID: String = UUID().uuidString,
         attachments: [AgentMessageAttachmentRef] = [],
         createdAt: Date = Date()
@@ -216,6 +217,7 @@ public struct AppChatSessionRepository: Sendable {
             existing.title = title
             existing.messages = [AgentMessage(id: messageID, role: .user, content: content, createdAt: createdAt, attachments: attachments)]
             existing.governance.kind = .note
+            existing.governance.contentFormat = contentFormat
             existing.updatedAt = max(existing.updatedAt, createdAt)
             let saved = try saveSession(existing, previousMessageCount: previousMessageCount)
             synchronizeNoteBestEffort(saved, origin: .imported)
@@ -223,6 +225,7 @@ public struct AppChatSessionRepository: Sendable {
         }
         var governance = AgentSessionGovernanceMetadata.default
         governance.kind = .note
+        governance.contentFormat = contentFormat
         let session = AgentSession(
             id: id,
             title: title,
@@ -243,6 +246,7 @@ public struct AppChatSessionRepository: Sendable {
         messageID: String,
         expectedContent: String,
         content: String,
+        contentFormat: NoteContentFormat = .markdown,
         attachments: [AgentMessageAttachmentRef],
         createdAt: Date
     ) throws -> AgentSession {
@@ -250,6 +254,7 @@ public struct AppChatSessionRepository: Sendable {
         let previousMessageCount = session.messages.count
         session.messages = [AgentMessage(id: messageID, role: .user, content: content, createdAt: createdAt, attachments: attachments)]
         session.governance.kind = .note
+        session.governance.contentFormat = contentFormat
         session.updatedAt = max(session.updatedAt, createdAt)
         return try saveSession(session, previousMessageCount: previousMessageCount)
     }

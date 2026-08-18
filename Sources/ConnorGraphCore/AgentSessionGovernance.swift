@@ -139,6 +139,8 @@ public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
     public var isFlagged: Bool
     public var archivedAt: Date?
     public var deletedAt: Date?
+    /** 笔记正文格式（仅 NOTE 会话有效）：Markdown 默认，Notion HTML 导入为 HTML。 */
+    public var contentFormat: NoteContentFormat
 
     public init(
         status: AgentSessionStatus = .todo,
@@ -147,7 +149,8 @@ public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
         isArchived: Bool = false,
         isFlagged: Bool = false,
         archivedAt: Date? = nil,
-        deletedAt: Date? = nil
+        deletedAt: Date? = nil,
+        contentFormat: NoteContentFormat = .markdown
     ) {
         self.status = status
         self.kind = kind
@@ -156,6 +159,7 @@ public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
         self.isFlagged = isFlagged
         self.archivedAt = archivedAt
         self.deletedAt = deletedAt
+        self.contentFormat = contentFormat
     }
 
     public init(from decoder: Decoder) throws {
@@ -167,6 +171,7 @@ public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
         self.isFlagged = try container.decodeIfPresent(Bool.self, forKey: .isFlagged) ?? false
         self.archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
         self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+        self.contentFormat = try container.decodeIfPresent(NoteContentFormat.self, forKey: .contentFormat) ?? .markdown
     }
 
     public var isDeleted: Bool { deletedAt != nil }
