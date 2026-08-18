@@ -42,6 +42,7 @@ struct NoteHTMLPreviewView: View {
             context.coordinator.load(document, in: webView)
         }
 
+        @MainActor
         final class Coordinator: NSObject, WKNavigationDelegate {
             private let document: String
             private var intrinsicHeight: Binding<CGFloat>
@@ -67,7 +68,7 @@ struct NoteHTMLPreviewView: View {
             func webView(
                 _ webView: WKWebView,
                 decidePolicyFor navigationAction: WKNavigationAction,
-                decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+                decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
             ) {
                 // 只读预览：允许初始 loadHTMLString，其余导航一律拦截（链接/表单等）。
                 if navigationAction.targetFrame?.isMainFrame == true,
