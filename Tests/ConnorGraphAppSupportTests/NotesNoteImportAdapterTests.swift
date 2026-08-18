@@ -134,6 +134,70 @@ struct NotesNoteImportAdapterTests {
         #expect(imported[0].diagnostics.contains { $0.code == .attachmentMissing && $0.severity == .warning })
     }
 
+    @Test("base64:aes 加密正文不导入密文，保留附件并给出说明")
+    func encryptedContentIsNotImportedAsGarbledText() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // 真实印象笔记加密文本：base64 解码后以 "ENC" 开头。
+        let encrypted = "RU5DMOuB2qjdbszpfJAST6/8hG3g/FKmdfDdPgtfGcp6Jjx7xqvbpIjos03NrkxfapXkO/U1tuUpOV3m3HRm4ub+2RWYdyeloNkIV5Cn6uyg/EDny3ixmVCppUXQwJn2QbuklYLsoVM7RyAWbpnIOuSDGITNmD6D/G9Suw+znvgukDB6OzNpdhoEvI7HJ3ZUDFXvY63JKqqdeaxK35wBa1onq80xzpUIZdo8J+3Ncy3A8cx453Kthy7SE2lf92uR72zyaQ/hFU/jvA4munXIcyqCljy1HugUghPM/+U3AQxS4te21I3N1l5PWE43dSH2V5HKaJmEA2W5spQCcuqaVsLX6gSfo/vT2ULQEwllfYc4h9GPfTPXBbegCCcTHM0hVMvw6bTUVuTlZ9HXArXNqbGAkA0TPaNC5f8ye3aLKkbJ+ohWFLSKET1YC2a5Dimm4sIkUWrdkWg0pZzBWYWnd2aIA"
+        let notes = """
+        <?xml version="1.0" encoding="UTF-8"?><en-export><note><title>加密笔记</title><content encoding="base64:aes"><![CDATA[\(encrypted)]]></content><guid>enc-1</guid></note></en-export>
+        """
+        let file = root.appendingPathComponent("加密.notes")
+        try notes.write(to: file, atomically: true, encoding: .utf8)
+        var imported: [ImportedNote] = []
+        for try await note in NotesNoteImportAdapter().scan(.init(sourceID: "n", sourceURL: file, kind: .yinxiangNotes, options: .init())) {
+            imported.append(note)
+        }
+        #expect(imported.count == 1)
+        #expect(imported[0].title == "加密笔记")
+        #expect(imported[0].markdownContent.contains("已加密"))
+        #expect(!imported[0].markdownContent.contains("RU5D"))
+        #expect(imported[0].attachments.count == 1)
+        #expect(imported[0].attachments[0].displayName.hasPrefix("加密正文-"))
+        #expect(imported[0].diagnostics.contains { $0.severity == .warning })
+    }
+
+    @Test("无 encoding 属性时也通过 ENC 前缀识别裸加密密文")
+    func encryptedPayloadDetectedWithoutEncodingAttribute() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let encrypted = "RU5DMKvN7xI0Vnia"
+        let notes = """
+        <?xml version="1.0" encoding="UTF-8"?><en-export><note><title>裸密文</title><content><![CDATA[\(encrypted)]]></content><guid>enc-2</guid></note></en-export>
+        """
+        let file = root.appendingPathComponent("Bare.notes")
+        try notes.write(to: file, atomically: true, encoding: .utf8)
+        var imported: [ImportedNote] = []
+        for try await note in NotesNoteImportAdapter().scan(.init(sourceID: "n", sourceURL: file, kind: .yinxiangNotes, options: .init())) {
+            imported.append(note)
+        }
+        #expect(imported[0].markdownContent.contains("已加密"))
+        #expect(!imported[0].markdownContent.contains("RU5DMKvN"))
+    }
+
+    @Test("encoding=base64 的正文按 ENML 解码后导入")
+    func base64EncodedENMLIsDecodedBeforeConversion() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let enml = "<en-note><div>解码后的正文</div></en-note>"
+        let encoded = enml.data(using: .utf8)!.base64EncodedString()
+        let notes = """
+        <?xml version="1.0" encoding="UTF-8"?><en-export><note><title>Base64 正文</title><content encoding="base64"><![CDATA[\(encoded)]]></content><guid>enc-3</guid></note></en-export>
+        """
+        let file = root.appendingPathComponent("Base64.notes")
+        try notes.write(to: file, atomically: true, encoding: .utf8)
+        var imported: [ImportedNote] = []
+        for try await note in NotesNoteImportAdapter().scan(.init(sourceID: "n", sourceURL: file, kind: .yinxiangNotes, options: .init())) {
+            imported.append(note)
+        }
+        #expect(imported[0].markdownContent.contains("解码后的正文"))
+        #expect(!imported[0].markdownContent.contains(encoded))
+    }
+
     private func md5Hex(_ data: Data) -> String {
         Insecure.MD5.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
