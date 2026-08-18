@@ -579,7 +579,8 @@ enum AgentMarkdownImageSourcePolicy {
     }
 
     /// 远程图片白名单（安全最佳实践）：
-    /// - 只允许 https；http 仅放行设备回环（localhost/127.0.0.1/::1），用于本地调试；
+    /// - 允许 https 与 http（互联网图片常见 http），其余安全措施照常生效：
+    ///   无 Cookie/凭据、字节与像素上限、真实图像格式校验、Content-Type 校验；
     /// - 拒绝 data:、javascript:、file:、ftp: 等其它 scheme；
     /// - 拒绝携带用户名/密码（userinfo）的 URL，避免把凭据发给第三方；
     /// - 必须包含非空主机名。
@@ -590,19 +591,7 @@ enum AgentMarkdownImageSourcePolicy {
               !host.isEmpty,
               url.user == nil,
               url.password == nil else { return nil }
-        switch scheme {
-        case "https":
-            return url
-        case "http":
-            return isLoopbackHost(host) ? url : nil
-        default:
-            return nil
-        }
-    }
-
-    static func isLoopbackHost(_ host: String) -> Bool {
-        let trimmed = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        return trimmed == "localhost" || trimmed == "127.0.0.1" || trimmed == "::1"
+        return ["https", "http"].contains(scheme) ? url : nil
     }
 }
 

@@ -9,12 +9,12 @@ struct AgentMarkdownImageSourcePolicyTests {
         #expect(AgentMarkdownImageSourcePolicy.remoteImageURL(source: "https://example.com/a.png")?.host == "example.com")
     }
 
-    @Test("Allows HTTP only for loopback hosts")
-    func allowsLoopbackHTTPOnly() {
+    @Test("Allows HTTP and HTTPS remote images")
+    func allowsHTTPAndHTTPS() {
+        #expect(AgentMarkdownImageSourcePolicy.remoteImageURL(source: "http://example.com/a.png") != nil)
         #expect(AgentMarkdownImageSourcePolicy.remoteImageURL(source: "http://localhost:8080/a.png") != nil)
         #expect(AgentMarkdownImageSourcePolicy.remoteImageURL(source: "http://127.0.0.1/a.png") != nil)
         #expect(AgentMarkdownImageSourcePolicy.remoteImageURL(source: "http://[::1]/a.png") != nil)
-        #expect(AgentMarkdownImageSourcePolicy.remoteImageURL(source: "http://example.com/a.png") == nil)
     }
 
     @Test("Rejects unsafe schemes")
@@ -39,7 +39,7 @@ struct AgentMarkdownImageSourcePolicyTests {
         #expect(AgentMarkdownImageSourcePolicy.resolvedSource(source: "file:///tmp/root/a.png", allowedRoot: root) == .local(URL(fileURLWithPath: "/tmp/root/a.png")))
         #expect(AgentMarkdownImageSourcePolicy.resolvedSource(source: "file:///tmp/outside/a.png", allowedRoot: root) == nil)
         #expect(AgentMarkdownImageSourcePolicy.resolvedSource(source: "https://example.com/a.png", allowedRoot: root) == .remote(URL(string: "https://example.com/a.png")!))
-        #expect(AgentMarkdownImageSourcePolicy.resolvedSource(source: "http://example.com/a.png", allowedRoot: root) == nil)
+        #expect(AgentMarkdownImageSourcePolicy.resolvedSource(source: "http://example.com/a.png", allowedRoot: root) == .remote(URL(string: "http://example.com/a.png")!))
     }
 
     @Test("Validates decoded image data before display")
