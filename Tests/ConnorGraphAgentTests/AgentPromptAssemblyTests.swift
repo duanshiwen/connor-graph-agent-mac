@@ -81,6 +81,7 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("session_batch_set_status"))
     #expect(assembly.instruction.text.contains("session_batch_delete"))
     #expect(assembly.instruction.text.contains("Never attempt to delete the current session"))
+    #expect(assembly.instruction.text.contains("at most 50 sessionIDs"))
     #expect(assembly.instruction.text.contains("`sessions[].sessionID` unchanged"))
     #expect(assembly.instruction.text.contains("`session_batch_set_status.updates[].sessionID`"))
     #expect(assembly.instruction.text.contains("Call `get_current_environment` only when current location, weather, or other environment context can materially affect"))
@@ -651,7 +652,8 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("Call `connor_skill_list` only when the user asks about available skills or the actual request plausibly matches"))
-    #expect(prompt.contains("immediately follow every exact non-null `nextPage` with the same `pageSize` until `nextPage` is null"))
+    #expect(prompt.contains("immediately follow every exact non-null `nextPage`"))
+    #expect(prompt.contains("repeat until `nextPage` is null"))
     #expect(prompt.contains("Do not load the complete skill catalog for an ordinary request with no plausible skill match"))
     #expect(prompt.contains("connor_skill_activate"))
     #expect(prompt.contains("All returned skills are visible skills"))
