@@ -79,6 +79,8 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("session_set_status"))
     #expect(assembly.instruction.text.contains("session_list_by_status"))
     #expect(assembly.instruction.text.contains("session_batch_set_status"))
+    #expect(assembly.instruction.text.contains("session_batch_delete"))
+    #expect(assembly.instruction.text.contains("Never attempt to delete the current session"))
     #expect(assembly.instruction.text.contains("`sessions[].sessionID` unchanged"))
     #expect(assembly.instruction.text.contains("`session_batch_set_status.updates[].sessionID`"))
     #expect(assembly.instruction.text.contains("Call `get_current_environment` only when current location, weather, or other environment context can materially affect"))

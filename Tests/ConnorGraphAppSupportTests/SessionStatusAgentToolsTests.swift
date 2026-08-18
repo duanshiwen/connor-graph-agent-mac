@@ -212,6 +212,85 @@ import ConnorGraphStore
     #expect(try repository.loadSession(id: "batch-read-only")?.governance.status == .todo)
 }
 
+@Test func sessionBatchDeleteToolDeletesSessionsAndReportsPartialResults() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporarySessionStatusToolDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    try repository.saveSession(AgentSession(id: "del-a", title: "Delete A"))
+    try repository.saveSession(AgentSession(id: "del-current", title: "Current"))
+    try repository.saveSession(AgentSession(id: "del-task", title: "Busy"))
+    try repository.saveBackgroundTask(PersistedSessionBackgroundTask(
+        id: "task-1",
+        sessionID: "del-task",
+        kind: "custom",
+        title: "Running",
+        detail: "",
+        status: .running,
+        createdAt: Date(),
+        updatedAt: Date()
+    ))
+    let tool = SessionBatchDeleteTool(repository: repository)
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"sessionIDs":["del-a","del-current","del-missing","del-task"]}"#),
+        context: sessionStatusToolContext(sessionID: "del-current", toolCallID: "batch-delete")
+    )
+
+    let object = try resultJSONObject(result)
+    let items = try #require(object["results"] as? [[String: Any]])
+    let outcomes = Dictionary(uniqueKeysWithValues: items.compactMap { item -> (String, String)? in
+        guard let id = item["sessionID"] as? String, let outcome = item["outcome"] as? String else { return nil }
+        return (id, outcome)
+    })
+    #expect(object["deletedItems"] as? Int == 1)
+    #expect(object["failedItems"] as? Int == 3)
+    #expect(outcomes["del-a"] == "deleted")
+    #expect(outcomes["del-current"] == "failed")
+    #expect(outcomes["del-missing"] == "not_found")
+    #expect(outcomes["del-task"] == "running_tasks")
+    #expect(try repository.loadSession(id: "del-a")?.governance.isDeleted == true)
+    #expect(try repository.loadSession(id: "del-current")?.governance.isDeleted != true)
+    #expect(try repository.loadSession(id: "del-task")?.governance.isDeleted != true)
+}
+
+@Test func sessionBatchDeleteToolRejectsEmptySessionIDs() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporarySessionStatusToolDatabaseURL().path)
+    try store.migrate()
+    let tool = SessionBatchDeleteTool(repository: AppChatSessionRepository(store: store))
+
+    await #expect(throws: AgentToolError.invalidArguments("sessionIDs must not be empty")) {
+        try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"sessionIDs":[]}"#),
+            context: sessionStatusToolContext(sessionID: "del-current", toolCallID: "batch-delete-empty")
+        )
+    }
+}
+
+@Test func sessionBatchDeleteIsDeniedInReadOnlyModeWithoutMutations() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporarySessionStatusToolDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    try repository.saveSession(AgentSession(id: "del-read-only"))
+    var registry = AgentToolRegistry()
+    registry.register(SessionBatchDeleteTool(repository: repository))
+    let context = AgentToolExecutionContext(
+        runID: "run-delete-ro",
+        sessionID: "del-read-only",
+        groupID: "default",
+        userPrompt: "delete",
+        toolCallID: "delete-ro-call",
+        policyEngine: AgentPolicyEngine(permissionMode: .readOnly)
+    )
+
+    await #expect(throws: AgentToolError.self) {
+        try await registry.execute(
+            AgentToolCall(name: "session_batch_delete", argumentsJSON: #"{"sessionIDs":["del-read-only"]}"#),
+            context: context
+        )
+    }
+    #expect(try repository.loadSession(id: "del-read-only") != nil)
+}
+
 private func temporarySessionStatusToolDatabaseURL(_ name: String = UUID().uuidString) -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
