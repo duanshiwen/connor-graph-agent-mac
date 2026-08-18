@@ -48,8 +48,8 @@ struct NoteSessionPresentationPolicyTests {
         ))
     }
 
-    @Test("note body row exposes the editor and revision action")
-    func noteBodyRowExposesEditorAndRevisionAction() throws {
+    @Test("note body row exposes the edit-mode entry action")
+    func noteBodyRowExposesEditModeEntryAction() throws {
         let sourceURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -58,7 +58,7 @@ struct NoteSessionPresentationPolicyTests {
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
         #expect(source.contains("Image(systemName: \"square.and.pencil\")"))
-        #expect(source.contains("AgentNoteBodyEditorSheet"))
-        #expect(source.contains("保存并分析变化"))
+        #expect(source.contains("onBeginEditingNoteBody"))
+        #expect(!source.contains("AgentNoteBodyEditorSheet"))
     }
 }

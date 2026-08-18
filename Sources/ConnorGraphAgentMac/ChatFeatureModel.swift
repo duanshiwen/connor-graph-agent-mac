@@ -180,6 +180,8 @@ final class ChatFeatureModel {
     let run = ChatRunModel()
     let approvals = ChatApprovalModel()
     let workspaceExplorer = WorkspaceExplorerFeatureModel()
+    /// 笔记正文“编辑模式”：复用新建笔记的全屏编辑器，发送时替换正文而不是追加消息。
+    var noteBodyEditing: AgentNoteBodyEditingTarget?
 
     func dismissPreviewsForSessionChange() {
         composer.attachmentPreviewModel = nil
@@ -188,4 +190,12 @@ final class ChatFeatureModel {
     }
 
     func shutdown() { workspaceExplorer.shutdown() }
+}
+
+@MainActor
+struct AgentNoteBodyEditingTarget: Equatable {
+    var sessionID: String
+    var messageID: String
+    var originalContent: String
+    var previousDraft: String
 }

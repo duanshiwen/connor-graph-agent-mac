@@ -23,6 +23,9 @@ public struct ICalendarEventSerializer: Sendable {
         if let location = draft.location { lines.append("LOCATION:\(escape(location))") }
         if let notes = draft.notes { lines.append("DESCRIPTION:\(escape(notes))") }
         if let url = draft.url { lines.append("URL:\(url.absoluteString)") }
+        if let recurrence = draft.recurrence, let rrule = recurrence.rruleString {
+            lines.append("RRULE:\(rrule)")
+        }
         lines.append("END:VEVENT")
         lines.append("END:VCALENDAR")
         return lines.flatMap(fold).joined(separator: "\r\n") + "\r\n"

@@ -62,10 +62,10 @@ enum NoteImportProgressAppearance {
 }
 
 extension NoteImportSourceKind {
-    var displayName: String { switch self { case .markdownFolder: "Markdown 文件夹"; case .obsidianVault: "Obsidian 仓库"; case .notionExport: "Notion 导出"; case .yinxiangNotes: "印象笔记（新版 .notes）"; case .evernoteENEX: "印象笔记（旧版 .enex）" } }
-    var detail: String { switch self { case .markdownFolder: "递归导入 .md 与本地附件"; case .obsidianVault: "保留双链、嵌入与别名"; case .notionExport: "Markdown、HTML 与数据库 CSV"; case .yinxiangNotes: "导入 .notes 富文本、标签与资源（含图片/视频/附件）"; case .evernoteENEX: "导入旧版 ENEX 笔记、标签与资源" } }
-    var selectionHint: String { switch self { case .markdownFolder, .obsidianVault: "请选择文件夹"; case .notionExport: "请选择导出文件夹或 .zip 文件"; case .yinxiangNotes: "请选择印象笔记导出的 .notes 文件"; case .evernoteENEX: "请选择 .enex 文件" } }
-    var systemImage: String { switch self { case .markdownFolder: "folder"; case .obsidianVault: "link"; case .notionExport: "square.grid.2x2"; case .yinxiangNotes, .evernoteENEX: "archivebox" } }
+    var displayName: String { switch self { case .markdownFolder: "Markdown 文件夹"; case .obsidianVault: "Obsidian 仓库"; case .notionExport: "Notion 导出" } }
+    var detail: String { switch self { case .markdownFolder: "递归导入 .md 与本地附件"; case .obsidianVault: "保留双链、嵌入与别名"; case .notionExport: "Markdown、HTML 与数据库 CSV" } }
+    var selectionHint: String { switch self { case .markdownFolder, .obsidianVault: "请选择文件夹"; case .notionExport: "请选择导出文件夹或 .zip 文件" } }
+    var systemImage: String { switch self { case .markdownFolder: "folder"; case .obsidianVault: "link"; case .notionExport: "square.grid.2x2" } }
 }
 
 extension NoteImportJobStatus {

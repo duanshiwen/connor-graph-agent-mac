@@ -23,4 +23,18 @@ struct ICalendarEventSerializerTests {
         #expect(value.contains("\r\n "))
         for line in value.components(separatedBy: "\r\n") where !line.isEmpty { #expect(line.utf8.count <= 75) }
     }
+
+    @Test func serializesRecurrenceRuleAndParsesItBack() throws {
+        let draft = CalendarEventDraft(
+            calendarID: .init(rawValue: "c"),
+            title: "周会",
+            start: .init(date: Date(timeIntervalSince1970: 1_782_276_400)),
+            end: .init(date: Date(timeIntervalSince1970: 1_782_280_000)),
+            recurrence: .init(frequency: .weekly, interval: 2, count: 10)
+        )
+        let value = try ICalendarEventSerializer().serialize(draft: draft, uid: "uid-recurring", timestamp: Date(timeIntervalSince1970: 1_782_270_000))
+        #expect(value.contains("RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=10\r\n"))
+        let parsed = try #require(try ICalendarParser().events(from: value).first)
+        #expect(parsed.recurrenceRule == "FREQ=WEEKLY;INTERVAL=2;COUNT=10")
+    }
 }

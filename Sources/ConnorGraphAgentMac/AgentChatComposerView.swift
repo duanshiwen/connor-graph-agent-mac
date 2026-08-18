@@ -595,6 +595,28 @@ struct AgentChatComposerView: View {
         let submittedMentions = composerPersonMentions
         let personReferences = ComposerPersonMentionResolver().personReferences(in: submittedText, mentions: submittedMentions)
         let submittingSessionID = model.sessions.selectedSessionID
+        if let editing = model.noteBodyEditing, editing.sessionID == submittingSessionID {
+            localChatInput = ""
+            composerPersonMentions = []
+            closePersonMentionPicker()
+            chatActions.composer.updateSelectedChatInputDraft("")
+            // 立即退出编辑模式：正文先乐观替换，LLM 的“分析变化”在后台继续。
+            model.noteBodyEditing = nil
+            Task {
+                let succeeded = await chatActions.run.reviseNoteBody(
+                    messageID: editing.messageID,
+                    expectedContent: editing.originalContent,
+                    content: prompt
+                )
+                if !succeeded, localChatInput.isEmpty {
+                    localChatInput = submittedText
+                    if let submittingSessionID {
+                        chatActions.composer.restoreDraftForFailedSubmission(sessionID: submittingSessionID, text: submittedText)
+                    }
+                }
+            }
+            return
+        }
         localChatInput = ""
         composerPersonMentions = []
         closePersonMentionPicker()

@@ -169,7 +169,7 @@ struct CalendarContactsAgentToolsTests {
         #expect(object["expectedVersion"] as? String == "W/\"etag-42\"")
     }
 
-    @Test func calendarReadGetEventExplainsIneligibleAndMissingEvents() async throws {
+    @Test func calendarReadGetEventMarksRecurringEventsMutationReadyAndExplainsMissingEvents() async throws {
         let recurring = CalendarEvent(
             id: .init(rawValue: "event-recurring"),
             calendarID: .init(rawValue: "calendar-work"),
@@ -180,9 +180,10 @@ struct CalendarContactsAgentToolsTests {
             sourceMetadata: .init(sourceKind: .macOSEventKit, etag: "42", isRecurring: true)
         )
         let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(events: [recurring]))
-        let ineligible = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"event-recurring\"}"), context: Self.context(toolCallID: "call-calendar-recurring"))
-        #expect(ineligible.contentText.contains("mutationEligibility: recurring"))
-        #expect(!ineligible.contentText.contains("Loaded mutation-ready"))
+        let ready = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"event-recurring\"}"), context: Self.context(toolCallID: "call-calendar-recurring"))
+        #expect(ready.contentText.contains("mutationEligibility: eligible"))
+        #expect(ready.contentText.contains("Loaded mutation-ready"))
+        #expect(ready.contentText.contains("recurrence: FREQ=WEEKLY"))
 
         let missing = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"guessed-id\"}"), context: Self.context(toolCallID: "call-calendar-missing"))
         #expect(missing.contentText.contains("Calendar event not found for eventID 'guessed-id'"))

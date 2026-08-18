@@ -7,7 +7,7 @@ import ConnorGraphAgent
     let document = AgentPromptModuleCatalog.document(from: prompt)
 
     #expect(AgentPromptModuleCatalog.unclassifiedHeadings(in: prompt).isEmpty)
-    #expect(AgentPromptModuleCatalog.specifications.count == 45)
+    #expect(AgentPromptModuleCatalog.specifications.count == 46)
     #expect(document.modules.count == AgentPromptModuleCatalog.specifications.count + 1)
     #expect(Set(document.moduleIDs).count == document.moduleIDs.count)
     #expect(Set(AgentPromptModuleCatalog.specifications.map(\.title)).count == AgentPromptModuleCatalog.specifications.count)
@@ -514,7 +514,8 @@ import ConnorGraphAgent
     #expect(!prompt.contains("Use the exact event ID and version from that detail read"))
     #expect(toolDescription.contains("first call calendar_read list_calendars and copy an exact writable ID"))
     #expect(toolDescription.contains("copy both exactly from a successful calendar_read get_event"))
-    #expect(toolDescription.contains("non-recurring calendar event"))
+    #expect(toolDescription.contains("including recurring events"))
+    #expect(toolDescription.contains("scope defaults to entireSeries"))
 }
 
 @Test func defaultSystemPromptDocumentsOutboundMailPermissionWorkflow() {

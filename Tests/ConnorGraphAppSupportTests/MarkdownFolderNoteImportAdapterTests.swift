@@ -18,11 +18,11 @@ struct MarkdownFolderNoteImportAdapterTests {
         #expect(notes[0].sourceMetadata["encoding"] == "utf-8")
     }
 
-    @Test("Flattens nested Markdown folders by default")
+    @Test("Flattens nested Markdown folders when hierarchy is disabled")
     func flattenedHierarchy() async throws {
         let fixture = try Fixture()
         try fixture.write("# Nested", at: "Projects/Connor/note.md")
-        let notes = try await fixture.scan()
+        let notes = try await fixture.scan(options: .init(preserveHierarchy: false))
         let note = try #require(notes.first)
         #expect(note.relativePath == "Projects/Connor/note.md")
         #expect(note.hierarchy.isEmpty)

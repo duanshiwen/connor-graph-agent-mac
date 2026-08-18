@@ -15,8 +15,9 @@ public struct CalendarSystemEventSnapshot: Sendable, Equatable {
     public var lastModifiedDate: Date?
     public var isRecurring: Bool
     public var hasAttendees: Bool
+    public var recurrenceRule: String?
 
-    public init(identifier: String, calendarIdentifier: String, title: String, startDate: Date, endDate: Date, isAllDay: Bool, location: String? = nil, notes: String? = nil, lastModifiedDate: Date? = nil, isRecurring: Bool = false, hasAttendees: Bool = false) {
+    public init(identifier: String, calendarIdentifier: String, title: String, startDate: Date, endDate: Date, isAllDay: Bool, location: String? = nil, notes: String? = nil, lastModifiedDate: Date? = nil, isRecurring: Bool = false, hasAttendees: Bool = false, recurrenceRule: String? = nil) {
         self.identifier = identifier
         self.calendarIdentifier = calendarIdentifier
         self.title = title
@@ -28,6 +29,7 @@ public struct CalendarSystemEventSnapshot: Sendable, Equatable {
         self.lastModifiedDate = lastModifiedDate
         self.isRecurring = isRecurring
         self.hasAttendees = hasAttendees
+        self.recurrenceRule = recurrenceRule
     }
 }
 
@@ -139,6 +141,7 @@ public struct CalendarEventKitAdapter: Sendable {
             isAllDay: snapshot.isAllDay,
             location: snapshot.location,
             notes: snapshot.notes,
+            recurrenceSummary: snapshot.recurrenceRule.map(CalendarRecurrenceSummary.init(ruleDescription:)),
             sourceMetadata: CalendarEventSourceMetadata(sourceKind: .macOSEventKit, remoteIdentifier: snapshot.identifier, etag: String(snapshot.lastModifiedDate?.timeIntervalSince1970 ?? 0), isRecurring: snapshot.isRecurring, hasAttendees: snapshot.hasAttendees),
             updatedAt: snapshot.lastModifiedDate ?? Date()
         )
@@ -156,7 +159,32 @@ public struct CalendarEventKitAdapter: Sendable {
             notes: event.notes,
             lastModifiedDate: event.lastModifiedDate,
             isRecurring: event.hasRecurrenceRules,
-            hasAttendees: !(event.attendees?.isEmpty ?? true)
+            hasAttendees: !(event.attendees?.isEmpty ?? true),
+            recurrenceRule: event.recurrenceRules?.first.map { rule in
+                let frequency: String
+                switch rule.frequency {
+                case .daily: frequency = "DAILY"
+                case .weekly: frequency = "WEEKLY"
+                case .monthly: frequency = "MONTHLY"
+                case .yearly: frequency = "YEARLY"
+                @unknown default: frequency = "DAILY"
+                }
+                var parts = ["FREQ=\(frequency)"]
+                if rule.interval > 1 { parts.append("INTERVAL=\(rule.interval)") }
+                if let end = rule.recurrenceEnd {
+                    if let date = end.endDate {
+                        let formatter = DateFormatter()
+                        formatter.calendar = Calendar(identifier: .gregorian)
+                        formatter.locale = Locale(identifier: "en_US_POSIX")
+                        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+                        parts.append("UNTIL=\(formatter.string(from: date))")
+                    } else if end.occurrenceCount > 0 {
+                        parts.append("COUNT=\(end.occurrenceCount)")
+                    }
+                }
+                return parts.joined(separator: ";")
+            }
         )
     }
 

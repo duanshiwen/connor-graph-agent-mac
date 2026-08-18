@@ -389,7 +389,7 @@ public struct CalendarWriteTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public let evidenceRegistry: CalendarDetailReadEvidenceRegistry?
     public var name: String { "calendar_write" }
-    public var description: String { "Create, update, or delete a non-recurring calendar event through the current session permission policy. Every call must include operation, even when the other fields make it seem obvious; for creation use {\"operation\":\"create_event\",\"calendarID\":\"<exact writable ID>\",\"title\":\"<title>\",\"start\":\"2026-07-29T05:03:12+08:00\",\"end\":\"2026-07-29T06:03:12+08:00\",\"isAllDay\":false}. start and end require timezone-qualified RFC 3339 timestamps; fractional seconds are accepted. calendarID is only for create_event; first call calendar_read list_calendars and copy an exact writable ID, because 'default', display names, and example IDs are invalid. eventID and expectedVersion are only for update_event and delete_event; copy both exactly from a successful calendar_read get_event and never overwrite a conflict." }
+    public var description: String { "Create, update, or delete calendar events, including recurring events, through the current session permission policy. Every call must include operation, even when the other fields make it seem obvious; for creation use {\"operation\":\"create_event\",\"calendarID\":\"<exact writable ID>\",\"title\":\"<title>\",\"start\":\"2026-07-29T05:03:12+08:00\",\"end\":\"2026-07-29T06:03:12+08:00\",\"isAllDay\":false}. start and end require timezone-qualified RFC 3339 timestamps; fractional seconds are accepted. For a recurring event, pass recurrence as an object like {\"frequency\":\"weekly\",\"interval\":1,\"count\":10} or {\"frequency\":\"monthly\",\"until\":\"2026-12-31T16:00:00Z\"}; frequency is daily/weekly/monthly/yearly, interval defaults to 1, until and count are mutually exclusive. calendarID is only for create_event; first call calendar_read list_calendars and copy an exact writable ID, because 'default', display names, and example IDs are invalid. eventID and expectedVersion are only for update_event and delete_event; copy both exactly from a successful calendar_read get_event and never overwrite a conflict. For update_event/delete_event on a recurring series, scope defaults to entireSeries; use scope thisEvent or futureEvents with instanceStart (an occurrence's start timestamp from calendar_read) to change only one instance or this and later instances where the source supports it." }
     public var permission: AgentPermissionCapability { .mutateCalendar }
     public var inputExamples: [[String: SendableJSONValue]] {
         [
@@ -399,7 +399,8 @@ public struct CalendarWriteTool: AgentTool {
                 "title": .string("Project review"),
                 "start": .string("2026-07-12T02:00:00Z"),
                 "end": .string("2026-07-12T03:00:00Z"),
-                "isAllDay": .bool(false)
+                "isAllDay": .bool(false),
+                "recurrence": .object(["frequency": .string("weekly"), "interval": .int(1), "count": .int(10)])
             ],
             [
                 "operation": .string("update_event"),
@@ -427,9 +428,18 @@ public struct CalendarWriteTool: AgentTool {
             "location": .string(description: "Event location"),
             "url": .string(description: "Event URL"),
             "notes": .string(description: "Event notes"),
+            "recurrence": .object(properties: [
+                "frequency": .stringEnumeration(values: ["daily", "weekly", "monthly", "yearly"], description: "Repeat frequency; required"),
+                "interval": .integer(description: "Repeat every N periods; default 1"),
+                "until": .string(description: "Optional end date-time (RFC 3339); mutually exclusive with count"),
+                "count": .integer(description: "Optional total occurrence count; mutually exclusive with until")
+            ], required: []),
+            "scope": .stringEnumeration(values: ["thisEvent", "futureEvents", "entireSeries"], description: "update/delete scope; entireSeries is default. thisEvent/futureEvents require instanceStart and are honored by EventKit-backed calendars"),
+            "instanceStart": .string(description: "Start timestamp of the specific occurrence to target when scope is thisEvent or futureEvents; copy from calendar_read"),
             "clearLocation": .boolean(description: "Clear the existing location on update"),
             "clearURL": .boolean(description: "Clear the existing URL on update"),
-            "clearNotes": .boolean(description: "Clear the existing notes on update")
+            "clearNotes": .boolean(description: "Clear the existing notes on update"),
+            "clearRecurrence": .boolean(description: "Clear recurrence on update, turning a recurring series into a single event")
         ], required: ["operation"])
     }
 
@@ -493,19 +503,25 @@ public struct CalendarWriteTool: AgentTool {
             let endText = arguments.string("end")!
             guard let start = AgentToolTimestampParser.parse(startText) else { throw AgentToolError.invalidArguments("Invalid ISO-8601 start timestamp; RFC 3339 with timezone is required: \(startText)") }
             guard let end = AgentToolTimestampParser.parse(endText) else { throw AgentToolError.invalidArguments("Invalid ISO-8601 end timestamp; RFC 3339 with timezone is required: \(endText)") }
-            request = CalendarMutationRequest(operation: .create, draft: CalendarEventDraft(calendarID: CalendarID(rawValue: calendarID), title: title, start: CalendarEventDateTime(date: start), end: CalendarEventDateTime(date: end), isAllDay: arguments.bool("isAllDay") ?? false, location: arguments.string("location"), url: arguments.string("url").flatMap(URL.init(string:)), notes: arguments.string("notes")), runID: context.runID, sessionID: context.sessionID)
+            request = CalendarMutationRequest(operation: .create, draft: CalendarEventDraft(calendarID: CalendarID(rawValue: calendarID), title: title, start: CalendarEventDateTime(date: start), end: CalendarEventDateTime(date: end), isAllDay: arguments.bool("isAllDay") ?? false, location: arguments.string("location"), url: arguments.string("url").flatMap(URL.init(string:)), notes: arguments.string("notes"), recurrence: recurrenceArgument(arguments)), runID: context.runID, sessionID: context.sessionID)
         case "update_event":
             let missingKeys = ["eventID", "expectedVersion"].filter { arguments.string($0) == nil }
             guard missingKeys.isEmpty else { throw AgentToolError.invalidArguments("Missing required update_event arguments: \(missingKeys.joined(separator: ", ")). Required fields are eventID, expectedVersion.") }
             let eventID = arguments.string("eventID")!
             let expectedVersion = arguments.string("expectedVersion")!
+            if mutationScope(arguments) != .entireSeries && arguments.string("instanceStart") == nil {
+                throw AgentToolError.invalidArguments("scope thisEvent/futureEvents requires instanceStart: copy the exact occurrence start from calendar_read get_event. Use entireSeries (default) to modify the whole series.")
+            }
             if let startText = arguments.string("start"), AgentToolTimestampParser.parse(startText) == nil { throw AgentToolError.invalidArguments("Invalid ISO-8601 start timestamp; RFC 3339 with timezone is required: \(startText)") }
             if let endText = arguments.string("end"), AgentToolTimestampParser.parse(endText) == nil { throw AgentToolError.invalidArguments("Invalid ISO-8601 end timestamp; RFC 3339 with timezone is required: \(endText)") }
-            request = CalendarMutationRequest(operation: .update, eventID: CalendarEventID(rawValue: eventID), expectedVersion: CalendarMutationVersion(value: expectedVersion), patch: CalendarEventPatch(title: arguments.string("title").map(CalendarPatchValue.set) ?? .unchanged, start: datePatch("start", arguments: arguments), end: datePatch("end", arguments: arguments), isAllDay: arguments.bool("isAllDay").map(CalendarPatchValue.set) ?? .unchanged, location: optionalPatch(value: arguments.string("location"), clear: arguments.bool("clearLocation") == true), url: optionalPatch(value: arguments.string("url").flatMap(URL.init(string:)), clear: arguments.bool("clearURL") == true), notes: optionalPatch(value: arguments.string("notes"), clear: arguments.bool("clearNotes") == true)), runID: context.runID, sessionID: context.sessionID)
+            request = CalendarMutationRequest(operation: .update, eventID: CalendarEventID(rawValue: eventID), expectedVersion: CalendarMutationVersion(value: expectedVersion), patch: CalendarEventPatch(title: arguments.string("title").map(CalendarPatchValue.set) ?? .unchanged, start: datePatch("start", arguments: arguments), end: datePatch("end", arguments: arguments), isAllDay: arguments.bool("isAllDay").map(CalendarPatchValue.set) ?? .unchanged, location: optionalPatch(value: arguments.string("location"), clear: arguments.bool("clearLocation") == true), url: optionalPatch(value: arguments.string("url").flatMap(URL.init(string:)), clear: arguments.bool("clearURL") == true), notes: optionalPatch(value: arguments.string("notes"), clear: arguments.bool("clearNotes") == true), recurrence: recurrencePatch(arguments)), scope: mutationScope(arguments), occurrenceDate: instanceStartArgument(arguments), runID: context.runID, sessionID: context.sessionID)
         case "delete_event":
             let missingKeys = ["eventID", "expectedVersion"].filter { arguments.string($0) == nil }
             guard missingKeys.isEmpty else { throw AgentToolError.invalidArguments("Missing required delete_event arguments: \(missingKeys.joined(separator: ", ")). Required fields are eventID, expectedVersion.") }
-            request = CalendarMutationRequest(operation: .delete, eventID: CalendarEventID(rawValue: arguments.string("eventID")!), expectedVersion: CalendarMutationVersion(value: arguments.string("expectedVersion")!), runID: context.runID, sessionID: context.sessionID)
+            if mutationScope(arguments) != .entireSeries && arguments.string("instanceStart") == nil {
+                throw AgentToolError.invalidArguments("scope thisEvent/futureEvents requires instanceStart: copy the exact occurrence start from calendar_read get_event. Use entireSeries (default) to delete the whole series.")
+            }
+            request = CalendarMutationRequest(operation: .delete, eventID: CalendarEventID(rawValue: arguments.string("eventID")!), expectedVersion: CalendarMutationVersion(value: arguments.string("expectedVersion")!), scope: mutationScope(arguments), occurrenceDate: instanceStartArgument(arguments), runID: context.runID, sessionID: context.sessionID)
         default:
             throw AgentToolError.invalidArguments("Unsupported calendar_write operation '\(String(operation.prefix(80)))'. Use create_event, update_event, or delete_event.")
         }
@@ -532,7 +548,7 @@ public struct CalendarWriteTool: AgentTool {
         case .readOnlyCollection(let reason):
             return .permissionDenied("The selected calendar is read-only\(reason.map { ": \($0)" } ?? ".")")
         case .recurrenceUnsupported:
-            return .invalidArguments("Recurring calendar events are not supported for mutation. No write was performed.")
+            return .invalidArguments("This calendar source does not support recurring event mutation for the requested scope. No write was performed.")
         case .schedulingUnsupported:
             return .invalidArguments("Events with organizer, attendee, invitation, or scheduling semantics are not supported for mutation. No write was performed.")
         case .conflict(let expected, let actual):
@@ -551,6 +567,42 @@ public struct CalendarWriteTool: AgentTool {
     private func datePatch(_ key: String, arguments: AgentToolArguments) -> CalendarPatchValue<CalendarEventDateTime> {
         guard let text = arguments.string(key), let date = AgentToolTimestampParser.parse(text) else { return .unchanged }
         return .set(CalendarEventDateTime(date: date))
+    }
+
+    private func recurrenceArgument(_ arguments: AgentToolArguments) -> CalendarRecurrence? {
+        recurrence(from: arguments.values["recurrence"])
+    }
+
+    private func recurrencePatch(_ arguments: AgentToolArguments) -> CalendarPatchValue<CalendarRecurrence> {
+        if let recurrence = recurrenceArgument(arguments) { return .set(recurrence) }
+        if arguments.bool("clearRecurrence") == true { return .clear }
+        return .unchanged
+    }
+
+    private func mutationScope(_ arguments: AgentToolArguments) -> CalendarMutationScope {
+        switch arguments.string("scope") {
+        case "thisEvent": return .thisEvent
+        case "futureEvents": return .futureEvents
+        default: return .entireSeries
+        }
+    }
+
+    private func instanceStartArgument(_ arguments: AgentToolArguments) -> Date? {
+        guard let text = arguments.string("instanceStart") else { return nil }
+        return AgentToolTimestampParser.parse(text)
+    }
+
+    private func recurrence(from value: SendableJSONValue?) -> CalendarRecurrence? {
+        guard case .object(let values)? = value else { return nil }
+        func string(_ key: String) -> String? { if case .string(let value)? = values[key] { return value }; return nil }
+        func int(_ key: String) -> Int? { if case .int(let value)? = values[key] { return value }; return nil }
+        guard let raw = string("frequency")?.lowercased(), let frequency = CalendarRecurrenceFrequency(rawValue: raw) else { return nil }
+        return CalendarRecurrence(
+            frequency: frequency,
+            interval: int("interval") ?? 1,
+            until: string("until").flatMap(AgentToolTimestampParser.parse),
+            count: int("count")
+        )
     }
 
     private func optionalPatch<Value>(value: Value?, clear: Bool) -> CalendarPatchValue<Value> where Value: Codable & Sendable & Equatable & Hashable {
@@ -574,6 +626,7 @@ private enum CalendarEventDetailTextRenderer {
             "start: \(formatter.string(from: event.start.date))",
             "end: \(formatter.string(from: event.end.date))",
             "isAllDay: \(event.isAllDay)",
+            "recurrence: \(event.recurrenceSummary?.ruleDescription ?? "none")",
             "mutationEligibility: \(version?.isEmpty == false ? eligibility : "version-unavailable")"
         ]
         if ready {
@@ -586,7 +639,6 @@ private enum CalendarEventDetailTextRenderer {
 }
 
 private func mutationEligibility(_ event: CalendarEvent) -> String {
-    if event.sourceMetadata?.isRecurring == true || event.recurrenceSummary != nil { return "recurring" }
     if event.sourceMetadata?.hasAttendees == true || !event.attendees.isEmpty || event.sourceMetadata?.organizerEmail != nil || event.sourceMetadata?.scheduleTag != nil { return "scheduling" }
     return "eligible"
 }

@@ -35,7 +35,6 @@ public struct CalendarMutationService: Sendable {
         guard let account = snapshot.accounts.first(where: { $0.id == collection.accountID }) else { throw CalendarMutationError.accountNotFound(collection.accountID) }
         guard account.configuration.syncMode == .bidirectional, account.sourceKind.supportsWrite else { throw CalendarMutationError.readOnlySource }
         guard !collection.isReadOnly else { throw CalendarMutationError.readOnlyCollection(collection.capabilities.readOnlyReason) }
-        if current?.sourceMetadata?.isRecurring == true || current?.recurrenceSummary != nil { throw CalendarMutationError.recurrenceUnsupported }
         if current?.sourceMetadata?.hasAttendees == true || !(current?.attendees.isEmpty ?? true) || current?.sourceMetadata?.organizerEmail != nil || current?.sourceMetadata?.scheduleTag != nil { throw CalendarMutationError.schedulingUnsupported }
         guard let adapter = adapters[account.sourceKind] else { throw CalendarMutationError.remoteFailure("No mutation adapter for source") }
         let result = try await adapter.mutate(request, account: account, collection: collection, currentEvent: current)

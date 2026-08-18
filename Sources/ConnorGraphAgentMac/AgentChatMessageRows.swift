@@ -176,14 +176,12 @@ struct AgentChatMessageRow: View {
     var onShareAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
-    var onEditNoteBody: ((String) async -> Bool)? = nil
+    var onBeginEditingNoteBody: (() -> Void)? = nil
     var isForwardSelectionMode = false
     var isForwardSelected = false
     var onEnterForwardSelection: () -> Void = {}
     var onToggleForwardSelection: () -> Void = {}
     @State private var isMessageExpanded = false
-    @State private var isNoteEditorPresented = false
-    @State private var noteEditorDraft = ""
     @State private var isHoveringMessageBubble = false
     @State private var forwardedDetail: ForwardedChatBundle?
 
@@ -254,18 +252,6 @@ struct AgentChatMessageRow: View {
             if !isForwardSelectionMode {
                 Button("选择转发", systemImage: "arrowshape.turn.up.right", action: onEnterForwardSelection)
             }
-        }
-        .sheet(isPresented: $isNoteEditorPresented) {
-            AgentNoteBodyEditorSheet(
-                originalContent: row.message.content,
-                draft: $noteEditorDraft,
-                onCancel: { isNoteEditorPresented = false },
-                onSave: { content in
-                    guard let onEditNoteBody else { return false }
-                    return await onEditNoteBody(content)
-                },
-                onSaved: { isNoteEditorPresented = false }
-            )
         }
         .sheet(item: $forwardedDetail) { bundle in
             ForwardedChatDetailView(bundle: bundle, onClose: { forwardedDetail = nil })
@@ -357,10 +343,9 @@ struct AgentChatMessageRow: View {
                 .font(AgentChatTypography.metaEmphasis)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            if onEditNoteBody != nil {
+            if onBeginEditingNoteBody != nil {
                 Button {
-                    noteEditorDraft = row.message.content
-                    isNoteEditorPresented = true
+                    onBeginEditingNoteBody?()
                 } label: {
                     Image(systemName: "square.and.pencil")
                 }
@@ -448,57 +433,6 @@ struct AgentChatMessageRow: View {
     private var messageBorder: Color {
         if isNoteBody { return ConnorCraftPalette.accent.opacity(0.20) }
         return .clear
-    }
-}
-
-private struct AgentNoteBodyEditorSheet: View {
-    var originalContent: String
-    @Binding var draft: String
-    var onCancel: () -> Void
-    var onSave: (String) async -> Bool
-    var onSaved: () -> Void
-
-    private var canSave: Bool {
-        draft != originalContent
-            && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
-            Text("编辑笔记正文")
-                .font(AgentChatTypography.sectionTitle)
-
-            TextEditor(text: $draft)
-                .font(.body)
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(Color(nsColor: .textBackgroundColor))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.24), lineWidth: 1)
-                )
-                .frame(minHeight: 360, maxHeight: 620)
-
-            HStack(spacing: AgentChatLayout.spaceS) {
-                Spacer()
-                Button("取消", action: onCancel)
-                Button {
-                    // 立即关窗：不在这里等待 LLM Agent Loop 完成。
-                    onSaved()
-                    // 后台继续：先乐观更新会话首条正文，再跑“分析变化”的 LLM 请求，
-                    // 会话内会渲染正在请求/流式处理的状态。
-                    Task { @MainActor in
-                        _ = await onSave(draft)
-                    }
-                } label: {
-                    Label("保存并分析变化", systemImage: "checkmark")
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canSave)
-            }
-        }
-        .padding(AgentChatLayout.spaceL)
-        .frame(minWidth: 620, idealWidth: 760, minHeight: 500)
     }
 }
 

@@ -67,18 +67,9 @@ struct NoteImportImageReferenceRewritingTests {
         #expect(rewritten.contains("file:///tmp/session/attachments/att-2/original/%E6%88%91%E7%9A%84%E7%85%A7%E7%89%87.png"))
     }
 
-    @Test("Rewrites Evernote attachment placeholders and Obsidian embeds")
-    func rewritesEnexAndObsidianReferences() {
+    @Test("Rewrites Obsidian embeds to stored file URLs")
+    func rewritesObsidianEmbeddedImages() {
         let stored = URL(fileURLWithPath: "/tmp/session/attachments/att-3/original/pic.png")
-        let enex = NoteImportCoordinator.rewritingImageReferences(
-            in: "![pic](attachment:abc123)",
-            results: [
-                result(metadata: ["enex_md5": "abc123"], storedURL: stored)
-            ]
-        )
-        #expect(enex.contains("attachment:abc123") == false)
-        #expect(enex.contains("file:///tmp/session/attachments/att-3/original/pic.png"))
-
         let obsidian = NoteImportCoordinator.rewritingImageReferences(
             in: "![[assets/pic.png]]",
             results: [
@@ -86,6 +77,35 @@ struct NoteImportImageReferenceRewritingTests {
             ]
         )
         #expect(obsidian.contains("![photo.png](file:///tmp/session/attachments/att-3/original/pic.png)"))
+    }
+
+    @Test("Keeps Obsidian audio/video embeds as readable markers")
+    func keepsNonImageAttachmentsAsMarkers() {
+        let audio = NoteImportCoordinator.rewritingImageReferences(
+            in: "![[voice.mp3]]",
+            results: [
+                result(
+                    displayName: "voice.mp3",
+                    metadata: ["obsidian_embed": "![[voice.mp3]]"],
+                    storedURL: URL(fileURLWithPath: "/tmp/session/attachments/att-4/original/voice.mp3")
+                )
+            ]
+        )
+        #expect(audio.contains("🎵 voice.mp3"))
+        #expect(!audio.contains("![voice.mp3]"))
+        #expect(!audio.contains("/attachments/att-4/"))
+
+        let video = NoteImportCoordinator.rewritingImageReferences(
+            in: "![[clip.mp4]]",
+            results: [
+                result(
+                    displayName: "clip.mp4",
+                    metadata: ["obsidian_embed": "![[clip.mp4]]"],
+                    storedURL: URL(fileURLWithPath: "/tmp/session/attachments/att-5/original/clip.mp4")
+                )
+            ]
+        )
+        #expect(video.contains("🎬 clip.mp4"))
     }
 
     @Test("Leaves non-matching images untouched")

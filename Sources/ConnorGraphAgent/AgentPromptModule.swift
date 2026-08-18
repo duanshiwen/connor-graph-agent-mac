@@ -144,6 +144,7 @@ public enum AgentPromptModuleCatalog {
         .init(id: "programming_precision", title: "Programming and Precision Work", requirement: .allOf([.workspace]), dependencies: ["workspace_execution_rules"], toolFamilies: ["workspace"]),
         .init(id: "memory_architecture", title: "Memory OS Architecture", requirement: .allOf([.memory]), toolFamilies: ["memory"]),
         .init(id: "note_reference_materials", title: "Note Reference Materials", requirement: .allOf([.note])),
+        .init(id: "session_internal_links", title: "Session Internal Links", requirement: .allOf([.sessions])),
         .init(id: "core_startup", title: "Core Startup and Continuity Checkpoint"),
         .init(id: "current_time_retrieval", title: "Current Time Retrieval Rules", requirement: .allOf([.currentTime])),
         .init(id: "memory_retrieval", title: "Memory Retrieval Rules", requirement: .allOf([.memory]), dependencies: ["memory_architecture"], toolFamilies: ["memory"]),
