@@ -77,6 +77,10 @@ private final class EnexStyleXMLStreamDelegate: NSObject, XMLParserDelegate, @un
         if elementName == "note" {
             note = EnexNoteBuilder()
         }
+        if elementName == "content" {
+            // 新版印象笔记（9.5.10+）导出的 .notes 正文可能是 encoding="base64:aes" 的加密密文。
+            note?.contentEncoding = attributeDict["encoding"] ?? ""
+        }
         if elementName == "resource" {
             resource = EnexResourceBuilder()
         }
@@ -202,37 +206,63 @@ private struct EnexNoteBuilder {
     var tags: [String] = []
     var resources: [String: EnexResource] = [:]
     var diagnostics: [NoteImportDiagnostic] = []
+    var contentEncoding = ""
 
     func build(sourceURL: URL, sourceKind: NoteImportSourceKind) throws -> ImportedNote {
-        let attachmentBox = MediaAttachmentBox()
-        let markdown = ENMLMarkdownConverter.convert(content) { media in
-            guard let resource = resources[media.hash] else {
-                attachmentBox.missingMediaHashes.insert(media.hash)
-                return nil
-            }
-            attachmentBox.attachments.append(ImportedNoteAttachment(
-                sourcePath: resource.url.path,
-                displayName: resource.filename,
-                mimeType: resource.mime,
-                byteCount: resource.bytes,
-                metadata: ["enex_md5": media.hash]
-            ))
-            let isImage = resource.mime.lowercased().hasPrefix("image/")
-            let label = (media.filename?.isEmpty == false ? media.filename : resource.filename) ?? "媒体"
-            if isImage {
-                return "![\(label)](attachment:\(media.hash))"
-            }
-            return "[\(label)](attachment:\(media.hash))"
-        }
-        let attachments = attachmentBox.attachments
         var allDiagnostics = diagnostics
-        for hash in attachmentBox.missingMediaHashes.sorted() {
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPayload = Self.normalizedEncryptedPayload(trimmedContent)
+        let isEncrypted = contentEncoding.lowercased() == "base64:aes"
+            || Self.looksLikeEncryptedPayload(normalizedPayload)
+
+        let markdown: String
+        var attachments: [ImportedNoteAttachment] = []
+        if isEncrypted {
+            markdown = Self.encryptedContentMessage
+            if !normalizedPayload.isEmpty, let url = try? Self.writeEncryptedPayload(normalizedPayload) {
+                let filename = "加密正文-" + url.deletingPathExtension().lastPathComponent + ".txt"
+                attachments.append(ImportedNoteAttachment(
+                    sourcePath: url.path,
+                    displayName: filename,
+                    mimeType: "text/plain",
+                    byteCount: Int64(normalizedPayload.utf8.count)
+                ))
+            }
             allDiagnostics.append(NoteImportDiagnostic(
-                code: .attachmentMissing,
                 severity: .warning,
-                message: "正文引用了缺失的媒体资源（MD5 \(hash.prefix(8))…），已保留占位说明",
-                metadata: ["enex_md5": hash]
+                message: "笔记正文已加密（印象笔记 base64:aes 格式），无法解密；正文已替换为说明，原始密文已保留为附件。"
             ))
+        } else {
+            let markdownSource = Self.base64DecodedENML(normalizedPayload) ?? content
+            let attachmentBox = MediaAttachmentBox()
+            markdown = ENMLMarkdownConverter.convert(markdownSource) { media in
+                guard let resource = resources[media.hash] else {
+                    attachmentBox.missingMediaHashes.insert(media.hash)
+                    return nil
+                }
+                attachmentBox.attachments.append(ImportedNoteAttachment(
+                    sourcePath: resource.url.path,
+                    displayName: resource.filename,
+                    mimeType: resource.mime,
+                    byteCount: resource.bytes,
+                    metadata: ["enex_md5": media.hash]
+                ))
+                let isImage = resource.mime.lowercased().hasPrefix("image/")
+                let label = (media.filename?.isEmpty == false ? media.filename : resource.filename) ?? "媒体"
+                if isImage {
+                    return "![\(label)](attachment:\(media.hash))"
+                }
+                return "[\(label)](attachment:\(media.hash))"
+            }
+            attachments = attachmentBox.attachments
+            for hash in attachmentBox.missingMediaHashes.sorted() {
+                allDiagnostics.append(NoteImportDiagnostic(
+                    code: .attachmentMissing,
+                    severity: .warning,
+                    message: "正文引用了缺失的媒体资源（MD5 \(hash.prefix(8))…），已保留占位说明",
+                    metadata: ["enex_md5": hash]
+                ))
+            }
         }
         let data = Data(markdown.utf8)
         let sourceIdentity = guid.isEmpty ? title + created : guid
@@ -254,6 +284,70 @@ private struct EnexNoteBuilder {
         )
     }
 
+    /// 加密正文的占位说明：不把密文当正文导入，引导用户在客户端解密或改用 HTML 导出。
+    static var encryptedContentMessage: String {
+        """
+        🔒 此笔记正文已加密（印象笔记 base64:aes 格式），导入时无法解密。
+
+        请在印象笔记客户端中为该笔记解密后重新导出，或改用「导出 HTML」后再导入。原始密文已保留为附件。
+        """
+    }
+
+    /// 去掉可能存在的 "base64:" / "base64:aes:" 前缀。
+    static func normalizedEncryptedPayload(_ text: String) -> String {
+        var candidate = text
+        for prefix in ["base64:aes:", "base64:"] where candidate.hasPrefix(prefix) {
+            candidate = String(candidate.dropFirst(prefix.count))
+        }
+        return candidate
+    }
+
+    /// 判断正文是否为印象笔记加密文本：base64 解码后以 "ENC" 开头且不是可读 UTF-8 文本。
+    static func looksLikeEncryptedPayload(_ text: String) -> Bool {
+        guard !text.isEmpty,
+              let data = Data(base64Encoded: text, options: [.ignoreUnknownCharacters]),
+              data.count >= 4,
+              String(data: data.prefix(3), encoding: .utf8) == "ENC" else {
+            return false
+        }
+        // 排除极少数恰好解码为可读文本的情况（例如普通 ASCII 正文）。
+        if let decoded = String(data: data, encoding: .utf8) {
+            let hasControl = decoded.unicodeScalars.contains {
+                CharacterSet.controlCharacters.contains($0)
+            }
+            if !decoded.isEmpty, !hasControl {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// 部分工具导出的 `<content encoding="base64">` 是纯 base64 编码的 ENML，解码后按 ENML 处理。
+    static func base64DecodedENML(_ text: String) -> String? {
+        guard !text.isEmpty,
+              let data = Data(base64Encoded: text, options: [.ignoreUnknownCharacters]),
+              let decoded = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        let trimmed = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("<") else { return nil }
+        return trimmed
+    }
+
+    static func writeEncryptedPayload(_ payload: String) throws -> URL {
+        let hash = SHA256.hash(data: Data(payload.utf8)).map { String(format: "%02x", $0) }.joined()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("connor-enex-resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("encrypted-" + String(hash.prefix(16)) + ".txt")
+        try payload.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    /*
+     * 原 build 逻辑已按「加密正文 / base64 ENML / 普通 ENML」分派到上方实现，
+     * 保留 date 解析等辅助方法。
+     */
     static func date(_ value: String) -> Date? {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
