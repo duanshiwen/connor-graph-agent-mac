@@ -141,6 +141,12 @@ private final class ENMLParser {
                 index = end + 1
                 continue
             }
+            if remaining.starts(with: Array("<?")), let end = findNextGreaterThan(chars, from: index + 2) {
+                // XML 声明/处理指令（真实导出在 <content> 里常带 <?xml ...?>），不能当元素解析，
+                // 否则会把后续块结构都挂到假节点下导致段落粘连。
+                index = end + 1
+                continue
+            }
             if let end = findNextGreaterThan(chars, from: index + 1) {
                 let raw = String(chars[(index + 1)..<end])
                 let isSelfClosing = raw.hasSuffix("/")
@@ -276,6 +282,10 @@ private final class ENMLRenderer {
             return renderBlocks(node.children)
         case "div", "p", "section", "article", "header", "footer", "main", "aside",
              "figure", "figcaption", "address", "center", "caption", "title":
+            // 真实导出的代码块通常不是 <pre>，而是带 monospace 字体样式的 <div>。
+            if isMonospaceStyled(node) {
+                return renderMonospaceCode(node)
+            }
             return inline(node)
         case "h1": return "# " + inline(node)
         case "h2": return "## " + inline(node)
@@ -386,9 +396,18 @@ private final class ENMLRenderer {
                 }
             }
             let content = normalizeWhitespace(inlineParts.joined())
-            let marker = ordered ? "\(orderedIndex). " : "- "
             let indent = String(repeating: "  ", count: depth)
-            var line = indent + marker + content
+            // <li><en-todo …/>任务</li> 里行内渲染已产生 "- [x] "，避免再拼列表标记变成 "- - [x]"。
+            let isTaskItem = content.hasPrefix("- [x] ")
+                || content.hasPrefix("- [X] ")
+                || content.hasPrefix("- [ ] ")
+            var line: String
+            if isTaskItem {
+                line = indent + content
+            } else {
+                let marker = ordered ? "\(orderedIndex). " : "- "
+                line = indent + marker + content
+            }
             if !nestedLists.isEmpty {
                 let nested = nestedLists
                     .map { renderList($0, ordered: $0.name == "ol", depth: depth + 1) }
@@ -503,16 +522,33 @@ private final class ENMLRenderer {
     }
 
     private func renderPreformatted(_ node: ENMLNode) -> String {
-        let text = rawText(node)
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        while lines.first?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-            lines.removeFirst()
+        fencedCode(rawText(node).split(separator: "\n", omittingEmptySubsequences: false).map(String.init))
+    }
+
+    private func renderMonospaceCode(_ node: ENMLNode) -> String {
+        let lines = codeText(node).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if lines.count > 1 {
+            return fencedCode(lines)
         }
-        while lines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-            lines.removeLast()
+        let single = normalizeWhitespace(codeText(node))
+        guard !single.isEmpty else { return "" }
+        return "`" + single.replacingOccurrences(of: "`", with: "\\`") + "`"
+    }
+
+    private func fencedCode(_ lines: [String]) -> String {
+        var trimmed = lines
+        while trimmed.first?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+            trimmed.removeFirst()
         }
-        guard !lines.isEmpty else { return "" }
-        return "```\n" + lines.joined(separator: "\n") + "\n```"
+        while trimmed.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+            trimmed.removeLast()
+        }
+        guard !trimmed.isEmpty else { return "" }
+        return "```\n" + trimmed.joined(separator: "\n") + "\n```"
+    }
+
+    private func isMonospaceStyled(_ node: ENMLNode) -> Bool {
+        (node.attributes["style"] ?? "").lowercased().contains("monospace")
     }
 
     private func renderDefinitionList(_ node: ENMLNode) -> String {
@@ -539,6 +575,26 @@ private final class ENMLRenderer {
                 output += "\n"
             } else if child.name != "script" && child.name != "style" {
                 output += rawText(child)
+            }
+        }
+        return output
+    }
+
+    /// 代码内容文本：块级子元素（div/p/pre）之间按行分隔，保留缩进与空白。
+    private func codeText(_ node: ENMLNode) -> String {
+        var output = ""
+        for child in node.children {
+            if child.name.isEmpty {
+                output += child.text
+            } else if child.name == "br" {
+                output += "\n"
+            } else if child.name == "div" || child.name == "p" || child.name == "pre" {
+                if !output.isEmpty, !output.hasSuffix("\n") {
+                    output += "\n"
+                }
+                output += codeText(child)
+            } else if child.name != "script" && child.name != "style" {
+                output += codeText(child)
             }
         }
         return output

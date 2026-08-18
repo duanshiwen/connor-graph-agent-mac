@@ -102,8 +102,15 @@ private final class EnexStyleXMLStreamDelegate: NSObject, XMLParserDelegate, @un
             case "file-name":
                 resource.filename = value
             case "resource":
-                if let built = try? resource.build() {
+                do {
+                    let built = try resource.build()
                     note?.resources[built.hash] = built
+                } catch {
+                    note?.diagnostics.append(NoteImportDiagnostic(
+                        code: .attachmentMissing,
+                        severity: .warning,
+                        message: "附件解码失败，已跳过该资源（\(resource.filename.isEmpty ? "未知文件" : resource.filename)）"
+                    ))
                 }
                 self.resource = nil
             default:
@@ -194,11 +201,15 @@ private struct EnexNoteBuilder {
     var guid = ""
     var tags: [String] = []
     var resources: [String: EnexResource] = [:]
+    var diagnostics: [NoteImportDiagnostic] = []
 
     func build(sourceURL: URL, sourceKind: NoteImportSourceKind) throws -> ImportedNote {
         let attachmentBox = MediaAttachmentBox()
         let markdown = ENMLMarkdownConverter.convert(content) { media in
-            guard let resource = resources[media.hash] else { return nil }
+            guard let resource = resources[media.hash] else {
+                attachmentBox.missingMediaHashes.insert(media.hash)
+                return nil
+            }
             attachmentBox.attachments.append(ImportedNoteAttachment(
                 sourcePath: resource.url.path,
                 displayName: resource.filename,
@@ -214,6 +225,15 @@ private struct EnexNoteBuilder {
             return "[\(label)](attachment:\(media.hash))"
         }
         let attachments = attachmentBox.attachments
+        var allDiagnostics = diagnostics
+        for hash in attachmentBox.missingMediaHashes.sorted() {
+            allDiagnostics.append(NoteImportDiagnostic(
+                code: .attachmentMissing,
+                severity: .warning,
+                message: "正文引用了缺失的媒体资源（MD5 \(hash.prefix(8))…），已保留占位说明",
+                metadata: ["enex_md5": hash]
+            ))
+        }
         let data = Data(markdown.utf8)
         let sourceIdentity = guid.isEmpty ? title + created : guid
         return ImportedNote(
@@ -229,7 +249,8 @@ private struct EnexNoteBuilder {
             attachments: attachments,
             sourceMetadata: ["enex_notebook": sourceURL.deletingPathExtension().lastPathComponent],
             rawByteHash: SHA256.hash(data: data).hexString,
-            normalizedTextHash: SHA256.hash(data: data).hexString
+            normalizedTextHash: SHA256.hash(data: data).hexString,
+            diagnostics: allDiagnostics
         )
     }
 
@@ -244,6 +265,7 @@ private struct EnexNoteBuilder {
 
 private final class MediaAttachmentBox: @unchecked Sendable {
     var attachments: [ImportedNoteAttachment] = []
+    var missingMediaHashes: Set<String> = []
 }
 
 private extension Digest {
