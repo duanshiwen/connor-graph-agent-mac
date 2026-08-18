@@ -319,21 +319,25 @@ struct AgentMarkdownPreviewText: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 2)
         case .quote(let text, let inline):
-            inlineText(
-                RenderCache.shared.inlineRendered(text, attributed: inline),
-                font: font,
-                nativeFont: bodyNSFont,
-                nativeColor: .secondaryLabelColor
-            )
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.leading, 11)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.28))
-                    .frame(width: 3)
-                }
+            HStack(alignment: .top, spacing: 8) {
+                inlineText(
+                    RenderCache.shared.inlineRendered(text, attributed: inline),
+                    font: font,
+                    nativeFont: bodyNSFont,
+                    nativeColor: .secondaryLabelColor
+                )
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 11)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.28))
+                            .frame(width: 3)
+                    }
+                AgentMarkdownBlockCopyButton(text: text, label: "复制引用", accessibilityLabel: "复制整段引用")
+                    .padding(.top, 2)
+            }
         case .image(let altText, let source):
             AgentMarkdownImageView(
                 altText: altText,
@@ -364,10 +368,16 @@ struct AgentMarkdownPreviewText: View {
             .padding(.leading, 4)
         case .code(let language, let text):
             VStack(alignment: .leading, spacing: 6) {
-                if let language, !language.isEmpty {
-                    Text(language)
-                        .font(monospacedLabelFont)
-                        .foregroundStyle(.secondary)
+                HStack(alignment: .center, spacing: 8) {
+                    if let language, !language.isEmpty {
+                        Text(language)
+                            .font(monospacedLabelFont)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer(minLength: 8)
+                    AgentMarkdownBlockCopyButton(text: text, label: "复制代码", accessibilityLabel: "复制整段代码")
                 }
                 Text(text)
                     .font(monospacedBodyFont)
@@ -763,5 +773,35 @@ struct AgentMarkdownLinkText: NSViewRepresentable {
 extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+/// 代码块 / 引用块右上角的复制按钮：复制整段文本，点击后短暂显示“已复制”。
+private struct AgentMarkdownBlockCopyButton: View {
+    let text: String
+    let label: String
+    let accessibilityLabel: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            copied = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.6))
+                copied = false
+            }
+        } label: {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(copied ? Color.green : Color.secondary)
+                .padding(4)
+                .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(accessibilityLabel)
+        .accessibilityLabel(copied ? "已复制" : accessibilityLabel)
+        .animation(.easeOut(duration: 0.15), value: copied)
     }
 }
