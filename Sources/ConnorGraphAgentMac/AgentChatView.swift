@@ -844,6 +844,7 @@ private struct AgentChatConversationView: View {
                 AgentChatMessageRow(
                     row: message,
                     isNoteBody: isNoteBodyMessage(message),
+                    contentFormat: noteBodyContentFormat,
                     allowsAssistantActions: !temporaryAssistantMessageIDs.contains(message.id),
                     persistentCacheContext: chatActions.run.markdownPersistentCacheContext(messageID: message.message.id),
                     localAttachmentFileURL: { attachment in
@@ -988,6 +989,12 @@ private struct AgentChatConversationView: View {
             firstMessageID: model.run.transcript.first?.id,
             messageID: message.message.id
         )
+    }
+
+    private var noteBodyContentFormat: NoteContentFormat {
+        guard let sessionID = model.sessions.selectedSessionID else { return .markdown }
+        let session = (model.sessions.sessions + model.sessions.allSessions).first { $0.id == sessionID }
+        return session?.governance.contentFormat ?? .markdown
     }
 
     private var isNoteModeBeforeFirstMessage: Bool {
