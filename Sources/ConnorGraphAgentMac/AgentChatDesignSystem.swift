@@ -68,6 +68,10 @@ enum AgentChatTypography {
     static var composerNSFont: NSFont {
         .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .body).pointSize + 1)
     }
+
+    static var composerMonospacedNSFont: NSFont {
+        .monospacedSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
+    }
 }
 
 struct AgentMessageExpansionButton: View {
