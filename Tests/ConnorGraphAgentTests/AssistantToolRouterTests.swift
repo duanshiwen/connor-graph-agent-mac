@@ -245,3 +245,90 @@ import Testing
     #expect(result.tools.contains { $0.name == "tasks_create_scheduled_session_message" })
     #expect(result.tools.contains { $0.name == "tasks_list" })
 }
+
+@Test func toolSearchRecallsSemanticSynonymsWithoutExactWords() {
+    let definitions = [
+        AgentToolDefinition(name: "science_compute", description: "Evaluate an expression", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "note_search", description: "Search notes", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let matches = AssistantToolRouter().discover(query: "please calculate this", definitions: definitions)
+
+    #expect(matches.map(\.name) == ["science_compute"])
+}
+
+@Test func toolSearchMatchesChineseParaphraseOfCapabilities() {
+    let definitions = [
+        AgentToolDefinition(name: "rss_list_items", description: "List RSS item summaries", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "rss_search_items", description: "Search RSS items", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "note_search", description: "Search notes", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let matches = AssistantToolRouter().discover(query: "帮我看看最近的新闻", definitions: definitions)
+
+    #expect(matches.first?.name == "rss_search_items")
+    #expect(!matches.contains { $0.name == "note_search" })
+}
+
+@Test func toolSearchToleratesEnglishTyposViaFuzzyMatching() {
+    let definitions = [
+        AgentToolDefinition(name: "calendar_search_events", description: "Search calendar events", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let matches = AssistantToolRouter().discover(query: "calender events", definitions: definitions)
+
+    #expect(matches.first?.name == "calendar_search_events")
+}
+
+@Test func toolSearchRanksReadToolsForFileReadingIntent() {
+    let definitions = [
+        AgentToolDefinition(name: "Read", description: "Read a workspace file", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "Glob", description: "List files matching a pattern", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "ApplyPatch", description: "Edit workspace files", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let matches = AssistantToolRouter().discover(query: "读取本地文件", definitions: definitions)
+
+    #expect(matches.first?.name == "Read")
+}
+
+@Test func toolSearchExpandsDomainSynonymsForRecall() {
+    let definitions = [
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "rss_search_items", description: "Search RSS items", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "calendar_search_events", description: "Search calendar events", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let mail = AssistantToolRouter().discover(query: "gmail 收件箱", definitions: definitions)
+    let news = AssistantToolRouter().discover(query: "news", definitions: definitions)
+
+    #expect(mail.map(\.name) == ["mail_search_messages"])
+    #expect(news.map(\.name) == ["rss_search_items"])
+}
+
+@Test func toolSearchFindsToolsByMixedLanguageSemanticSignals() {
+    let definitions = [
+        AgentToolDefinition(name: "web_fetch", description: "Fetch a web page", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "browser_navigate", description: "Navigate a browser page", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "note_search", description: "Search notes", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let matches = AssistantToolRouter().discover(query: "打开网页 online", definitions: definitions)
+
+    #expect(Set(matches.map(\.name)) == ["web_fetch", "browser_navigate"])
+}
+
+@Test func toolSearchKeepsPrecisionForGenericSearchQueries() {
+    let definitions = [
+        AgentToolDefinition(name: "note_search", description: "Search notes", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "calendar_upcoming_events", description: "Upcoming calendar events", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let matches = AssistantToolRouter().discover(query: "search", definitions: definitions, maximumResults: 2)
+
+    #expect(Set(matches.map(\.name)) == ["note_search", "mail_search_messages"])
+    #expect(!matches.contains { $0.name == "calendar_upcoming_events" })
+}

@@ -70,23 +70,23 @@ public struct AssistantToolRouter: Sendable, Equatable {
     public init() {}
 
     public static let namespaceDescriptors: [AssistantToolNamespaceDescriptor] = [
-        .init(name: "calendar", summary: "calendar events, agendas, availability, and changes / 日历、日程、会议与行程", aliases: ["calendar", "event", "agenda", "schedule", "meeting", "日历", "日程", "会议", "行程", "安排"]),
-        .init(name: "mail", summary: "mail accounts, recent messages, message details, drafts, and sending / 邮件、邮箱与收件箱", aliases: ["mail", "email", "inbox", "message", "邮件", "邮箱", "收件箱"]),
-        .init(name: "rss", summary: "RSS sources, feeds, recent articles, and item details / RSS、订阅源与文章", aliases: ["rss", "feed", "subscription", "订阅", "订阅源", "信息源"]),
-        .init(name: "session", summary: "session status and session listings / 会话状态与会话列表", aliases: ["session", "conversation", "chat", "会话", "对话", "聊天", "活动记录"]),
-        .init(name: "note", summary: "Note search and full Note reads / 笔记与便签", aliases: ["note", "notes", "notebook", "笔记", "便签", "备忘"]),
-        .init(name: "task", summary: "tasks, schedules, and task lifecycle operations / 任务、待办与计划", aliases: ["task", "tasks", "todo", "checklist", "任务", "待办", "清单"]),
-        .init(name: "contact", summary: "contacts and person records / 联系人与通讯录", aliases: ["contact", "contacts", "person", "people", "联系人", "通讯录"]),
-        .init(name: "browser", summary: "interactive browser navigation and page inspection / 浏览器页面操作", aliases: ["browser", "page", "website", "浏览器", "网页", "网站"]),
+        .init(name: "calendar", summary: "calendar events, agendas, availability, and changes / 日历、日程、会议与行程", aliases: ["calendar", "event", "agenda", "schedule", "meeting", "appointment", "availability", "日历", "日程", "会议", "行程", "安排", "事件", "预约", "排期", "日程安排"]),
+        .init(name: "mail", summary: "mail accounts, recent messages, message details, drafts, and sending / 邮件、邮箱与收件箱", aliases: ["mail", "email", "e-mail", "gmail", "outlook", "inbox", "message", "邮件", "邮箱", "收件箱", "电邮", "信件", "发信", "写信"]),
+        .init(name: "rss", summary: "RSS sources, feeds, recent articles, and item details / RSS、订阅源与文章", aliases: ["rss", "feed", "subscription", "article", "news", "订阅", "订阅源", "资讯", "新闻", "文章", "信息源"]),
+        .init(name: "session", summary: "session status and session listings / 会话状态与会话列表", aliases: ["session", "conversation", "chat", "会话", "对话", "聊天", "活动记录", "交谈"]),
+        .init(name: "note", summary: "Note search and full Note reads / 笔记与便签", aliases: ["note", "notes", "notebook", "memo", "笔记", "便签", "备忘", "手记"]),
+        .init(name: "task", summary: "tasks, schedules, and task lifecycle operations / 任务、待办与计划", aliases: ["task", "tasks", "todo", "checklist", "reminder", "任务", "待办", "提醒", "清单", "定时", "计划"]),
+        .init(name: "contact", summary: "contacts and person records / 联系人与通讯录", aliases: ["contact", "contacts", "person", "people", "联系人", "通讯录", "名片", "人脉"]),
+        .init(name: "browser", summary: "interactive browser navigation and page inspection / 浏览器页面操作", aliases: ["browser", "page", "website", "webpage", "浏览器", "网页", "网站", "页面", "浏览", "标签页"]),
         .init(name: "web", summary: "web search and web content retrieval / 网络搜索与网页读取", aliases: ["web", "online", "internet", "联网", "上网", "网络", "查资料"]),
-        .init(name: "memory", summary: "Memory OS records and durable knowledge / 记忆与长期知识", aliases: ["memory", "remember", "history", "记忆", "回忆", "历史"]),
-        .init(name: "science", summary: "scientific calculation, statistics, linear algebra, units, and optimization / 科学计算、统计、线性代数、单位与优化", aliases: ["science", "compute", "calculation", "statistics", "math", "科学", "计算", "统计", "数学", "公式"]),
-        .init(name: "image", summary: "image search, generation, editing, and presentation / 图片搜索、生成、编辑与展示", aliases: ["image", "photo", "picture", "illustration", "图片", "图像", "照片", "配图"]),
-        .init(name: "environment", summary: "current environment, location, and weather context / 当前环境、位置与天气", aliases: ["environment", "location", "weather", "环境", "位置", "地点", "天气"]),
-        .init(name: "skill", summary: "installed skills and reusable workflows / 已安装技能与工作流", aliases: ["skill", "workflow", "技能", "工作流"]),
-        .init(name: "graph", summary: "knowledge graph search and graph-backed records / 知识图谱搜索与图谱记录", aliases: ["graph", "knowledge graph", "图谱", "知识图谱"]),
-        .init(name: "workspace", summary: "workspace files, search, and local editing / 工作区文件、搜索与编辑", aliases: ["workspace", "local files", "code", "工作区", "本地文件", "代码", "文件"]),
-        .init(name: "knowledge", summary: "cloud knowledge-base search and retrieval / 云端知识库搜索与读取", aliases: ["knowledge", "knowledge base", "cloud knowledge", "知识", "知识库", "云知识库"])
+        .init(name: "memory", summary: "Memory OS records and durable knowledge / 记忆与长期知识", aliases: ["memory", "remember", "history", "记忆", "回忆", "历史", "印象", "记得"]),
+        .init(name: "science", summary: "scientific calculation, statistics, linear algebra, units, and optimization / 科学计算、统计、线性代数、单位与优化", aliases: ["science", "compute", "calculation", "statistics", "math", "mathematics", "unit", "科学", "计算", "统计", "数学", "公式", "单位", "代数", "方程", "概率"]),
+        .init(name: "image", summary: "image search, generation, editing, and presentation / 图片搜索、生成、编辑与展示", aliases: ["image", "photo", "picture", "illustration", "图片", "图像", "照片", "配图", "插图", "绘画"]),
+        .init(name: "environment", summary: "current environment, location, and weather context / 当前环境、位置与天气", aliases: ["environment", "location", "weather", "环境", "位置", "地点", "天气", "温度", "时区"]),
+        .init(name: "skill", summary: "installed skills and reusable workflows / 已安装技能与工作流", aliases: ["skill", "workflow", "技能", "工作流", "能力"]),
+        .init(name: "graph", summary: "knowledge graph search and graph-backed records / 知识图谱搜索与图谱记录", aliases: ["graph", "knowledge graph", "图谱", "知识图谱", "关系图", "实体关系"]),
+        .init(name: "workspace", summary: "workspace files, search, and local editing / 工作区文件、搜索与编辑", aliases: ["workspace", "local files", "code", "工作区", "本地文件", "本地", "代码", "文件", "目录", "文件夹", "项目", "工程"]),
+        .init(name: "knowledge", summary: "cloud knowledge-base search and retrieval / 云端知识库搜索与读取", aliases: ["knowledge", "knowledge base", "cloud knowledge", "知识", "知识库", "云知识库", "云端"])
     ]
 
     public func route(definitions: [AgentToolDefinition]) -> AssistantToolRoute {
@@ -133,20 +133,34 @@ public struct AssistantToolRouter: Sendable, Equatable {
         let candidates = (route.discoverableDefinitions + directDefinitions).sorted { $0.name < $1.name }
         let availableNamespaces = Array(Set(candidates.map { familyName(for: $0) })).sorted()
         let normalizedQuery = normalize(query)
-        let terms = normalizedQuery
-            .split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
-            .map(String.init)
-            .filter { $0.count >= 2 }
+        let queryTerms = tokenize(normalizedQuery).filter { $0.count >= 2 }
+        let queryConcepts = concepts(in: normalizedQuery, tokens: queryTerms)
         let requestedNamespaces = matchingNamespaces(in: normalizedQuery)
         let matchedNamespaces = requestedNamespaces
             .filter { availableNamespaces.contains($0.name) }
         let matchedNamespaceNames = Set(matchedNamespaces.map(\.name))
         let ranked = candidates.compactMap { definition -> (definition: AgentToolDefinition, score: Int, namespace: String)? in
             let namespace = familyName(for: definition)
-            let haystack = normalize("\(definition.name) \(definition.description)")
-            var score = terms.reduce(0) { $0 + (haystack.contains($1) ? 2 : 0) }
-            if haystack.contains(normalizedQuery), !normalizedQuery.isEmpty { score += 4 }
-            if definition.name.lowercased().contains(normalizedQuery), !normalizedQuery.isEmpty { score += 8 }
+            let normalizedName = normalize(definition.name)
+            let normalizedDescription = normalize(definition.description)
+            let nameTokens = Set(tokenize(normalizedName))
+            let descriptionTokens = Set(tokenize(normalizedDescription))
+            let haystack = "\(normalizedName) \(normalizedDescription)"
+            var score = 0
+            if !normalizedQuery.isEmpty, haystack.contains(normalizedQuery) { score += 4 }
+            if !normalizedQuery.isEmpty, normalizedName.contains(normalizedQuery) { score += 8 }
+            for term in queryTerms {
+                let nameHit = nameTokens.map { tokenMatchScore(queryTerm: term, haystackToken: $0, isName: true) }.max() ?? 0
+                let descriptionHit = descriptionTokens.map { tokenMatchScore(queryTerm: term, haystackToken: $0, isName: false) }.max() ?? 0
+                score += nameHit + descriptionHit
+            }
+            let toolConcepts = concepts(in: haystack, tokens: Array(nameTokens.union(descriptionTokens)))
+            let semanticOverlap = queryConcepts.intersection(toolConcepts)
+            if matchedNamespaceNames.contains(namespace) {
+                score += min(semanticOverlap.count, 3)
+            } else {
+                score += min(semanticOverlap.count, 3) * 3
+            }
             if matchedNamespaceNames.contains(namespace) {
                 score += 20
                 score += preferredOperationScore(
@@ -154,6 +168,13 @@ public struct AssistantToolRouter: Sendable, Equatable {
                     namespace: namespace,
                     query: normalizedQuery
                 )
+                if let preference = operationPreferenceKey(for: normalizedQuery) {
+                    score += preferredOperationScore(
+                        forPreference: preference,
+                        toolName: definition.name.lowercased(),
+                        namespace: namespace
+                    )
+                }
             }
             return score > 0 ? (definition, score, namespace) : nil
         }
@@ -183,10 +204,13 @@ public struct AssistantToolRouter: Sendable, Equatable {
         var selected: [AgentToolDefinition] = []
         var selectedNames = Set<String>()
         for namespace in matchedNamespaces {
-            guard selected.count < limit,
-                  let best = sorted.first(where: { $0.namespace == namespace.name }) else { continue }
-            selected.append(best.definition)
-            selectedNames.insert(best.definition.name)
+            guard selected.count < limit else { break }
+            let namespaceItems = sorted.filter { $0.namespace == namespace.name }
+            let take = min(2, namespaceItems.count, limit - selected.count)
+            for item in namespaceItems.prefix(take) {
+                selected.append(item.definition)
+                selectedNames.insert(item.definition.name)
+            }
         }
         for item in sorted where selected.count < limit && !selectedNames.contains(item.definition.name) {
             selected.append(item.definition)
@@ -257,7 +281,9 @@ public struct AssistantToolRouter: Sendable, Equatable {
     }
 
     private func preferredOperationScore(toolName: String, namespace: String, query: String) -> Int {
-        let hasRecentWindow = ["today", "recent", "latest", "upcoming", "今天", "今日", "最近", "近期", "近两日", "小时", "每日简报"]
+        let hasRecentWindow = ["today", "recent", "latest", "upcoming", "yesterday", "tomorrow", "daily",
+                               "今天", "今日", "今晚", "最近", "近期", "近两日", "近48", "小时", "每日", "每天",
+                               "昨天", "明日", "明天", "本周", "上周", "下周", "未来", "过去", "近"]
             .contains(where: query.contains)
         guard hasRecentWindow else { return 0 }
         switch namespace {
@@ -265,7 +291,262 @@ public struct AssistantToolRouter: Sendable, Equatable {
         case "mail": return toolName.contains("list_recent") ? 8 : (toolName.contains("search") ? 4 : 0)
         case "rss": return toolName.contains("search_items") ? 8 : (toolName.contains("list_items") ? 4 : 0)
         case "session": return toolName.contains("list_by_status") ? 8 : (toolName.contains("list") ? 4 : 0)
+        case "memory": return toolName.contains("recent_context") ? 8 : (toolName.contains("search") ? 4 : 0)
         default: return 0
+        }
+    }
+
+    private func preferredOperationScore(forPreference key: String, toolName: String, namespace: String) -> Int {
+        switch key {
+        case "create":
+            switch namespace {
+            case "task": return toolName.contains("create") ? 8 : 0
+            case "note": return toolName.contains("create") ? 8 : 0
+            case "mail": return toolName.contains("create_draft") ? 8 : (toolName.contains("send_draft") ? 6 : 0)
+            case "calendar": return toolName.contains("write") ? 8 : 0
+            case "contact": return toolName.contains("create") ? 8 : 0
+            case "rss": return toolName.contains("add_source") ? 8 : 0
+            case "skill": return toolName.contains("create") ? 8 : 0
+            case "image": return (toolName.contains("generate") || toolName.contains("create")) ? 8 : 0
+            case "workspace": return toolName == "write" ? 8 : (toolName == "edit" ? 6 : 0)
+            default: return 0
+            }
+        case "delete":
+            switch namespace {
+            case "task": return toolName.contains("delete") ? 8 : 0
+            case "note": return toolName.contains("delete") ? 8 : 0
+            case "rss": return toolName.contains("remove_source") ? 8 : 0
+            case "skill": return toolName.contains("delete") ? 8 : 0
+            default: return 0
+            }
+        case "edit":
+            switch namespace {
+            case "workspace": return (toolName == "edit" || toolName == "multiedit" || toolName == "applypatch") ? 8 : 0
+            case "note": return toolName.contains("edit") ? 8 : 0
+            case "rss": return toolName.contains("update_source") ? 8 : 0
+            case "contact": return toolName.contains("update") ? 8 : 0
+            default: return 0
+            }
+        case "list":
+            switch namespace {
+            case "task": return toolName.contains("list") ? 6 : 0
+            case "session": return toolName.contains("list") ? 6 : 0
+            case "skill": return toolName.contains("list") ? 6 : 0
+            case "contact": return (toolName.contains("list") || toolName.contains("read")) ? 4 : 0
+            case "mail": return toolName.contains("list") ? 4 : 0
+            case "calendar": return (toolName.contains("search") || toolName.contains("upcoming")) ? 4 : 0
+            case "rss": return toolName.contains("list") ? 4 : 0
+            default: return 0
+            }
+        case "search":
+            switch namespace {
+            case "mail", "rss", "note", "contact", "memory", "session", "browser", "web", "workspace", "knowledge", "graph", "calendar":
+                return toolName.contains("search") ? 6 : ((toolName.contains("find") || toolName.contains("glob") || toolName.contains("grep")) ? 4 : 0)
+            default: return 0
+            }
+        case "read":
+            switch namespace {
+            case "workspace": return (toolName == "read" || toolName == "readmany") ? 8 : (toolName == "ls" ? 4 : 0)
+            case "note": return toolName.contains("get") ? 8 : 0
+            case "web": return toolName.contains("fetch") ? 8 : 0
+            case "contact": return (toolName.contains("get") || toolName.contains("read")) ? 6 : 0
+            case "mail": return toolName.contains("get_message") ? 8 : 0
+            case "rss": return toolName.contains("get_item") ? 8 : 0
+            default: return 0
+            }
+        default:
+            return 0
+        }
+    }
+
+    private func operationPreferenceKey(for query: String) -> String? {
+        let create = ["create", "add", "new", "compose", "send", "schedule", "draft", "创建", "新建", "添加", "新增", "发送", "撰写", "写", "生成", "定时", "提醒", "计划"]
+        if containsAny(in: query, create) { return "create" }
+        let delete = ["delete", "remove", "取消", "删除", "移除"]
+        if containsAny(in: query, delete) { return "delete" }
+        let edit = ["edit", "update", "modify", "change", "编辑", "修改", "更新", "更改", "改动"]
+        if containsAny(in: query, edit) { return "edit" }
+        let list = ["list", "show", "display", "status", "列表", "列出", "查看", "显示", "状态", "有多少"]
+        if containsAny(in: query, list) { return "list" }
+        let search = ["search", "find", "query", "lookup", "检索", "搜索", "查找", "查询", "找"]
+        if containsAny(in: query, search) { return "search" }
+        let read = ["read", "get", "fetch", "open", "view", "detail", "inspect", "读取", "获取", "详情", "打开", "预览", "看"]
+        if containsAny(in: query, read) { return "read" }
+        return nil
+    }
+
+    private func containsAny(in text: String, _ needles: [String]) -> Bool {
+        needles.contains { text.contains($0) }
+    }
+
+    private struct SemanticConcept: Sendable {
+        let name: String
+        let forms: [String]
+
+        init(_ name: String, _ forms: [String]) {
+            self.name = name
+            self.forms = forms
+        }
+    }
+
+    private static let semanticConcepts: [SemanticConcept] = [
+        .init("mail", ["mail", "email", "gmail", "outlook", "inbox", "message", "letter", "邮件", "邮箱", "收件箱", "电邮", "信件", "发信", "写信"]),
+        .init("calendar", ["calendar", "event", "agenda", "schedule", "appointment", "meeting", "日历", "日程", "会议", "行程", "事件", "预约", "安排", "排期"]),
+        .init("rss", ["rss", "feed", "subscription", "article", "news", "订阅", "订阅源", "资讯", "新闻", "文章", "信息源"]),
+        .init("task", ["task", "todo", "reminder", "checklist", "deadline", "任务", "待办", "提醒", "清单", "定时", "截止", "计划"]),
+        .init("note", ["note", "memo", "notebook", "笔记", "便签", "备忘", "手记", "摘记"]),
+        .init("contact", ["contact", "person", "people", "address", "联系人", "通讯录", "名片", "人脉", "通讯"]),
+        .init("browser", ["browser", "webpage", "website", "page", "tab", "浏览器", "网页", "网站", "页面", "标签页", "浏览"]),
+        .init("web", ["web", "online", "internet", "network", "网络", "联网", "上网", "在线", "互联网"]),
+        .init("search", ["search", "find", "query", "lookup", "retrieve", "搜索", "查找", "查询", "检索", "找"]),
+        .init("recent", ["recent", "latest", "today", "upcoming", "new", "最近", "最新", "今日", "今天", "即将", "近期", "近"]),
+        .init("memory", ["memory", "remember", "history", "记忆", "回忆", "历史", "记得", "印象"]),
+        .init("science", ["science", "math", "mathematics", "statistics", "compute", "calculate", "calculation", "unit", "科学", "数学", "统计", "计算", "公式", "单位", "方程", "概率", "代数", "线性", "算"]),
+        .init("image", ["image", "photo", "picture", "illustration", "icon", "图片", "图像", "照片", "配图", "插图", "绘画", "画"]),
+        .init("environment", ["environment", "location", "weather", "temperature", "环境", "位置", "地点", "天气", "温度", "时区"]),
+        .init("skill", ["skill", "workflow", "capability", "技能", "工作流", "能力"]),
+        .init("graph", ["graph", "knowledge", "relation", "entity", "图谱", "知识图谱", "关系", "实体"]),
+        .init("workspace", ["workspace", "file", "folder", "directory", "code", "project", "local", "工作区", "文件", "文件夹", "目录", "代码", "项目", "本地"]),
+        .init("session", ["session", "conversation", "chat", "会话", "对话", "聊天", "交谈"]),
+        .init("send", ["send", "compose", "draft", "reply", "forward", "发送", "撰写", "回复", "转发"]),
+        .init("read", ["read", "view", "open", "get", "detail", "inspect", "读取", "查看", "打开", "获取", "详情", "预览", "看"]),
+        .init("create", ["create", "add", "new", "schedule", "generate", "创建", "新建", "添加", "新增", "生成", "制作"]),
+        .init("list", ["list", "enumerate", "列表", "列举", "列出"]),
+        .init("edit", ["edit", "update", "modify", "delete", "remove", "编辑", "修改", "更新", "删除", "移除", "更改"]),
+        .init("time", ["time", "date", "day", "hour", "week", "month", "时间", "日期", "小时", "周", "月", "天"])
+    ]
+
+    private func concepts(in text: String, tokens: [String]) -> Set<String> {
+        var matched = Set<String>()
+        for concept in Self.semanticConcepts {
+            for form in concept.forms {
+                let normalizedForm = normalize(form)
+                if normalizedForm.containsCJKCharacter {
+                    if text.contains(normalizedForm) {
+                        matched.insert(concept.name)
+                        break
+                    }
+                } else if tokens.contains(normalizedForm)
+                    || tokens.contains(where: { stem($0) == stem(normalizedForm) }) {
+                    matched.insert(concept.name)
+                    break
+                }
+            }
+        }
+        return matched
+    }
+
+    private func tokenize(_ text: String) -> [String] {
+        var tokens: [String] = []
+        var latin: [Character] = []
+        var cjkRun: [Character] = []
+
+        func flushLatin() {
+            if !latin.isEmpty {
+                tokens.append(String(latin))
+                latin.removeAll(keepingCapacity: true)
+            }
+        }
+
+        func flushCJK() {
+            if cjkRun.count >= 2 {
+                for index in 0..<(cjkRun.count - 1) {
+                    tokens.append(String(cjkRun[index...index + 1]))
+                }
+            }
+            cjkRun.removeAll(keepingCapacity: true)
+        }
+
+        for character in text {
+            if character.isASCII, character.isLetter || character.isNumber {
+                flushCJK()
+                latin.append(character)
+            } else if character.isCJKCharacter {
+                flushLatin()
+                cjkRun.append(character)
+            } else {
+                flushLatin()
+                flushCJK()
+            }
+        }
+        flushLatin()
+        flushCJK()
+        return tokens
+    }
+
+    private func stem(_ token: String) -> String {
+        var value = token
+        if value.count > 5, value.hasSuffix("ing") {
+            value = String(value.dropLast(3))
+        } else if value.count > 4, value.hasSuffix("ies") {
+            value = String(value.dropLast(3)) + "y"
+        } else if value.count > 4, value.hasSuffix("es") {
+            value = String(value.dropLast(2))
+        } else if value.count > 4, value.hasSuffix("s"),
+                  !value.hasSuffix("ss"), !value.hasSuffix("us"), !value.hasSuffix("is") {
+            value = String(value.dropLast())
+        }
+        return value
+    }
+
+    private func tokenMatchScore(queryTerm: String, haystackToken: String, isName: Bool) -> Int {
+        if queryTerm == haystackToken { return isName ? 6 : 2 }
+        if stem(queryTerm) == stem(haystackToken) { return isName ? 4 : 1 }
+        if queryTerm.count >= 4, haystackToken.hasPrefix(queryTerm) { return isName ? 4 : 1 }
+        if haystackToken.count >= 4, queryTerm.hasPrefix(haystackToken) { return isName ? 3 : 1 }
+        if queryTerm.count >= 5, haystackToken.count >= 5,
+           levenshteinDistance(queryTerm, haystackToken, maximum: 1) != nil {
+            return isName ? 3 : 1
+        }
+        if queryTerm.count >= 6, haystackToken.count >= 6,
+           levenshteinDistance(queryTerm, haystackToken, maximum: 2) != nil {
+            return isName ? 2 : 1
+        }
+        return 0
+    }
+
+    private func levenshteinDistance(_ lhs: String, _ rhs: String, maximum: Int) -> Int? {
+        let a = Array(lhs)
+        let b = Array(rhs)
+        guard abs(a.count - b.count) <= maximum else { return nil }
+        if a == b { return 0 }
+        var previous = Array(0...b.count)
+        for (index, left) in a.enumerated() {
+            var current = [index + 1]
+            var rowMinimum = current[0]
+            for (j, right) in b.enumerated() {
+                let substitution = previous[j] + (left == right ? 0 : 1)
+                let insertion = previous[j + 1] + 1
+                let deletion = current[j] + 1
+                let value = min(substitution, insertion, deletion)
+                current.append(value)
+                rowMinimum = min(rowMinimum, value)
+            }
+            if rowMinimum > maximum { return nil }
+            previous = current
+        }
+        let distance = previous[b.count]
+        return distance <= maximum ? distance : nil
+    }
+}
+
+private extension Character {
+    var isCJKCharacter: Bool {
+        guard let scalar = unicodeScalars.first, unicodeScalars.count == 1 else { return false }
+        let value = scalar.value
+        return (0x3400...0x4DBF).contains(value)
+            || (0x4E00...0x9FFF).contains(value)
+            || (0xF900...0xFAFF).contains(value)
+    }
+}
+
+private extension String {
+    var containsCJKCharacter: Bool {
+        unicodeScalars.contains { scalar in
+            let value = scalar.value
+            return (0x3400...0x4DBF).contains(value)
+                || (0x4E00...0x9FFF).contains(value)
+                || (0xF900...0xFAFF).contains(value)
         }
     }
 }
