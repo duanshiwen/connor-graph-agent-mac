@@ -30,9 +30,11 @@ struct AppRouteViewDependencyTests {
         let designSource = try String(contentsOf: projectSourceURL(named: "AppShellDesignSystem.swift"), encoding: .utf8)
 
         #expect(shellSource.contains("width: AppShellLayout.listColumnWidth"))
+        #expect(shellSource.contains("width: AppShellLayout.sidebarColumnWidth"))
         #expect(!shellSource.contains("listColumnMinWidth"))
         #expect(!shellSource.contains("listColumnMaxWidth"))
-        #expect(designSource.contains("static let listColumnWidth: CGFloat = 300"))
+        #expect(designSource.contains("static let sidebarColumnWidth: CGFloat = 220"))
+        #expect(designSource.contains("static let listColumnWidth: CGFloat = 280"))
     }
 
     @Test func listAndDetailSwitchesCoverEverySidebarRoute() throws {

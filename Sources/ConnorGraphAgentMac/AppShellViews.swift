@@ -145,8 +145,8 @@ struct AppShellView: View {
                                 selection: selectionBinding,
                                 sendCommand: sendCommand
                             )
-                            // 主侧栏固定为与列表列相同的宽度，不允许用户拖动更改。
-                            .frame(width: AppShellLayout.listColumnWidth)
+                            // 主侧栏固定宽度，不允许用户拖动更改。
+                            .frame(width: AppShellLayout.sidebarColumnWidth)
                             .frame(maxHeight: .infinity)
                             .background(.bar)
                             .controlSize(AppButtonLayout.controlSize)
