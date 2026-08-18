@@ -276,9 +276,29 @@ public struct AgentMarkdownBlockParser: Sendable {
         var value = line.trimmingCharacters(in: .whitespaces)
         if value.hasPrefix("|") { value.removeFirst() }
         if value.hasSuffix("|") { value.removeLast() }
-        return value.split(separator: "|", omittingEmptySubsequences: false).map {
-            String($0).trimmingCharacters(in: .whitespaces)
+        var cells: [String] = []
+        var current = ""
+        var index = value.startIndex
+        while index < value.endIndex {
+            let character = value[index]
+            if character == "\\" {
+                let next = value.index(after: index)
+                if next != value.endIndex, value[next] == "|" {
+                    current.append("|")
+                    index = next
+                } else {
+                    current.append(character)
+                }
+            } else if character == "|" {
+                cells.append(current)
+                current = ""
+            } else {
+                current.append(character)
+            }
+            index = value.index(after: index)
         }
+        cells.append(current)
+        return cells.map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
     private func isTableSeparatorCell(_ cell: String) -> Bool {
