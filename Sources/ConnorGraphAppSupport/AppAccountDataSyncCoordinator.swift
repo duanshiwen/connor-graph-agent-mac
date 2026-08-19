@@ -244,14 +244,15 @@ public actor AppAccountDataSyncCoordinator {
         repeat {
             let page = try await identity.pullSyncChanges(cursor: state.cursor)
             for change in page.changes where isSyncableRecord(change.collection, change.recordId) {
-                // 合并同步：除技能包与 L0/L1 记忆层（按“最新操作优先”应用删除）外，
-                // 标签定义也按“最新操作优先”应用删除；其它记忆/会话等记录不会被同步删除。
+                // 合并同步：技能包、L0/L1 记忆层、会话标签定义、RSS 订阅源与会话
+                // 按“最新操作优先”应用删除；其它记忆/设置等记录不会被同步删除。
                 let isTombstoneCollection = change.collection == SyncCollection.skills
                     || change.collection == SyncCollection.memoryL0
                     || change.collection == SyncCollection.memoryL0Spans
                     || change.collection == SyncCollection.memoryL1
                     || change.collection == SyncCollection.governanceLabels
                     || change.collection == SyncCollection.rssSubscriptions
+                    || change.collection == SyncCollection.sessions
                 guard !change.deleted || isTombstoneCollection else { continue }
                 do {
                     let clear: (change: ConnorSyncChange, encrypted: Bool)
@@ -300,12 +301,12 @@ public actor AppAccountDataSyncCoordinator {
             }
             mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: encrypted))
         }
-        // 技能包与 L0/L1/标签按“最新操作优先”：本地已删除且此前同步过的记录回推 tombstone（载荷带删除时间）。
+        // 技能包、L0/L1/标签与会话按“最新操作优先”：本地已删除且此前同步过的记录回推 tombstone（载荷带删除时间）。
         // 集合级防护：本机该集合投影完全为空时不回推 tombstone——空列表更可能是本地数据
         // 丢失/列表被清空，而不是“删光了全部”，避免一台空设备把其它端的数据也清掉。
         // RSS 订阅源不走这里：它使用显式删除标记（pendingDeletes），见下方单独逻辑。
         let nowMillis = Int64(Date().timeIntervalSince1970 * 1_000)
-        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|"]
+        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|", "sessions|"]
         let projectedCollections = Set(projected.keys.map { String($0.split(separator: "|", maxSplits: 1)[0]) })
         for key in state.records.keys where tombstonePrefixes.contains(where: { key.hasPrefix($0) }) {
             guard state.records[key]?.deleted != true, projected[key] == nil else { continue }
@@ -437,11 +438,23 @@ public actor AppAccountDataSyncCoordinator {
 
     private func apply(_ change: ConnorSyncChange) async throws -> AppliedChangeKind? {
         switch (change.collection, change.recordId) {
-        // 合并同步：任何端都不会因同步删除记录；远端变化一律合并落库。
+        // 合并同步：tombstone 集合（技能包、L0/L1 记忆层、标签、RSS 订阅源与会话）
+        // 按“最新操作优先”应用删除；其它集合的远端变化一律合并落库。
         case ("sessions", let id):
-            let portable: ConnorPortableSession = try decode(change.payload)
-            _ = try sessions.saveSession(portable.merging(into: try sessions.loadSession(id: id)))
-            return .session(id)
+            if change.deleted {
+                // 删除按“最新操作优先”：远端删除时间比本地编辑时间新才删除。
+                let tombstone: SyncTombstone = try decode(change.payload)
+                let local = (try? sessions.loadSession(id: id)) ?? nil
+                if tombstone.updatedAt > Int64((local?.updatedAt ?? .distantPast).timeIntervalSince1970 * 1_000) {
+                    try sessions.deleteSession(sessionID: id)
+                    return .session(id)
+                }
+            } else {
+                let portable: ConnorPortableSession = try decode(change.payload)
+                _ = try sessions.saveSession(portable.merging(into: try sessions.loadSession(id: id)))
+                return .session(id)
+            }
+            return nil
         case ("settings", "macos_runtime") where !change.deleted:
             var synced: AgentRuntimeSettings = try decode(change.payload)
             synced.preferences = try settings.loadOrCreateDefault().preferences
