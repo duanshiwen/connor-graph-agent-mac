@@ -13,7 +13,7 @@ import ConnorGraphCore
     #expect(suffix.contains("豁免本条消息的用户意图 LLM 规范化"))
     #expect(suffix.contains("后续用户消息仍按常规流程处理"))
     #expect(suffix.contains("不要声称原文已被改写、润色、摘要后保存"))
-    #expect(suffix.contains("不要为了保存这条笔记调用 `Write`、`Edit`、shell、知识库写入或 Memory 写入工具"))
+    #expect(suffix.contains("不要为了保存这条笔记调用 `ApplyPatch`、shell、知识库写入或 Memory 写入工具"))
     #expect(suffix.contains("明确要求创建文件、导出到路径或修改现有文件"))
     #expect(suffix.contains("# 📝 笔记已保存"))
 }
@@ -67,7 +67,7 @@ import ConnorGraphCore
     #expect(prompt.contains("persistence: already_updated_by_session_os"))
     #expect(prompt.contains("append_assistant_message_only"))
     #expect(prompt.contains("Do not restart the original full-note analysis"))
-    #expect(prompt.contains("Do not call Write, Edit, shell"))
+    #expect(prompt.contains("Do not call ApplyPatch, shell"))
     #expect(prompt.contains("<previous_note>\n旧内容\n</previous_note>"))
     #expect(prompt.contains("<updated_note>\n新内容\n</updated_note>"))
     #expect(!prompt.contains(NoteSessionPromptBuilder.noteInstructionSuffix))

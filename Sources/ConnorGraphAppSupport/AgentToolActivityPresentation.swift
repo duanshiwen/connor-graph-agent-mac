@@ -35,7 +35,7 @@ public enum AgentToolSemanticKind: String, Codable, Sendable, Equatable {
 public enum AgentToolDisplayNameResolver {
     private static let catalog: [String: String] = [
         "read": "读取文件", "ls": "查看目录", "glob": "查找文件", "grep": "搜索文件内容",
-        "bash": "执行终端命令", "write": "写入文件", "edit": "编辑文件", "multiedit": "批量编辑文件",
+        "bash": "执行终端命令",
         "get_current_time": "获取当前时间", "time_analyze_ranges": "分析时间范围",
         "graph_search": "搜索知识图谱", "web_search": "搜索网页", "web_fetch": "读取网页内容",
         "note_search": "搜索笔记", "note_get": "读取笔记详情",
@@ -45,7 +45,7 @@ public enum AgentToolDisplayNameResolver {
         "connor_skill_create": "创建技能", "connor_skill_update": "更新技能", "connor_skill_delete": "删除技能",
         "session_get_status": "查看会话状态", "session_set_status": "更新会话状态", "session_list_statuses": "查看可用会话状态",
         "session_batch_delete": "批量删除会话",
-        "personality_get_current": "查看康纳同学性格", "personality_propose_update": "生成人格变更提议", "personality_commit_proposal": "应用人格变更",
+        "personality_get_current": "查看康纳同学性格",
         "tasks_list": "查看任务", "tasks_create_scheduled_session_message": "创建定时会话任务", "tasks_create_session_status_message": "创建状态触发任务", "tasks_update_scheduled_session_message": "修改定时会话任务", "tasks_delete": "删除任务",
         "contact_search": "搜索联系人", "contact_create_draft": "创建联系人草稿", "contact_commit_draft": "保存联系人",
         "contacts_read": "读取联系人", "contacts_write": "更新联系人",
@@ -56,7 +56,7 @@ public enum AgentToolDisplayNameResolver {
         "rss_list_sources": "查看 RSS 订阅源", "rss_add_source": "添加 RSS 订阅源", "rss_update_source": "修改 RSS 订阅源", "rss_remove_source": "删除 RSS 订阅源", "rss_sync_source": "同步 RSS 订阅源",
         "rss_list_items": "查看 RSS 文章", "rss_search_items": "搜索 RSS 文章", "rss_get_item": "读取 RSS 文章",
         "rss_set_read_state": "更新 RSS 阅读状态", "rss_set_star_state": "更新 RSS 收藏状态", "rss_set_hidden_state": "更新 RSS 隐藏状态",
-        "rss_import_opml": "导入 RSS 订阅", "rss_export_opml": "导出 RSS 订阅", "rss_create_evidence_candidate": "保存 RSS 证据",
+        "rss_create_evidence_candidate": "保存 RSS 证据",
         "memory_os_recent_context": "查询近期记忆", "memory_os_knowledge_context": "查询长期记忆", "memory_os_search": "搜索记忆",
         "memory_os_get_current_user_profile": "读取用户偏好", "memory_os_update_current_user_profile": "更新用户偏好",
         "memory_os_l2_find_entities": "查找近期记忆实体", "memory_os_l2_find_statements": "查找近期记忆事实", "memory_os_l2_update_entities": "更新近期记忆实体",

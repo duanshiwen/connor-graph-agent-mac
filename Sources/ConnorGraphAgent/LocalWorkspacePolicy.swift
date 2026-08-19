@@ -67,7 +67,7 @@ public struct LocalWorkspacePolicy: Sendable, Equatable {
         workingDirectory: URL,
         additionalAllowedDirectories: [URL] = [],
         maxReadBytes: Int = 1_048_576,
-        maxWriteBytes: Int = 1_048_576,
+        maxWriteBytes: Int = 10_485_760,
         maxSearchResults: Int = 100,
         maxToolOutputBytes: Int = 32_768
     ) {
@@ -156,11 +156,17 @@ public struct LocalWorkspacePolicy: Sendable, Equatable {
         }
     }
 
-    public func validateWritableSize(path: URL, content: String) throws {
+    public func validateWritableSize(path: URL, content: String, allowOversize: Bool = false) throws {
         let bytes = content.data(using: .utf8)?.count ?? content.utf8.count
-        if bytes > maxWriteBytes {
+        if bytes > maxWriteBytes, !allowOversize {
             throw LocalWorkspacePolicyError.writeTooLarge(path: path.path, bytes: bytes, limit: maxWriteBytes)
         }
+    }
+
+    /// 返回超过写入上限的字节数（未超过返回 nil），供工具决定是否请求超大写入审批。
+    public func writeSizeExceedsLimit(_ content: String) -> Int? {
+        let bytes = content.data(using: .utf8)?.count ?? content.utf8.count
+        return bytes > maxWriteBytes ? bytes : nil
     }
 
     public func classifyCommand(_ command: String) -> ShellCommandClassification {

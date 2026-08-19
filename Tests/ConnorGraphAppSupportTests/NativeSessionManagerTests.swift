@@ -494,12 +494,12 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: workspace) }
     var registry = AgentToolRegistry()
-    registry.register(LocalWriteFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    registry.register(LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
     let loop = AgentLoopController(
         modelProvider: NativeSessionScriptedProvider(responses: [
             AgentModelResponse(
                 text: nil,
-                toolCalls: [AgentToolCall(id: "native-write-call", name: "Write", argumentsJSON: #"{"filePath":"approved.txt","content":"ok"}"#)],
+                toolCalls: [AgentToolCall(id: "native-write-call", name: "ApplyPatch", argumentsJSON: #"{"operations":[{"op":"create","filePath":"approved.txt","content":"ok"}]}"#)],
                 usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
                 finishReason: .toolCalls
             ),
@@ -525,12 +525,12 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         let pending = try #require(approval)
-        #expect(pending.capability == .writeWorkspaceFile)
-        #expect(pending.toolName == "Write")
+        #expect(pending.capability == .editWorkspaceFile)
+        #expect(pending.toolName == "ApplyPatch")
         await loop.resolveApproval(pending, status: .approved)
     }
 
-    let response = try await manager.submit("Write with approval")
+    let response = try await manager.submit("ApplyPatch with approval")
     try await approvalTask.value
     let approvals = try store.pendingApprovals(runID: try #require(response.events.first?.runID))
 

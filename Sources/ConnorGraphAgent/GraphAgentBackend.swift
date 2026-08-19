@@ -124,11 +124,13 @@ public protocol AgentBackend: Sendable {
     func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error>
     func abort(runID: String)
     func resolveApproval(_ approval: AgentPendingApproval, status: AgentPendingApprovalStatus, reason: String, actor: String) async throws
+    func updatePermissionMode(_ mode: AgentPermissionMode) async
 }
 
 public extension AgentBackend {
     func abort(runID: String) {}
     func resolveApproval(_ approval: AgentPendingApproval, status: AgentPendingApprovalStatus, reason: String, actor: String = "human-reviewer") async throws {}
+    func updatePermissionMode(_ mode: AgentPermissionMode) async {}
 }
 
 public typealias GraphAgentBackend = AgentBackend
@@ -150,5 +152,9 @@ public struct AgentLoopBackend<Provider: AgentModelProvider>: AgentBackend {
 
     public func resolveApproval(_ approval: AgentPendingApproval, status: AgentPendingApprovalStatus, reason _: String, actor _: String) async throws {
         await loopController.resolveApproval(approval, status: status)
+    }
+
+    public func updatePermissionMode(_ mode: AgentPermissionMode) async {
+        await loopController.updatePermissionMode(mode)
     }
 }

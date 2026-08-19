@@ -16,12 +16,17 @@ public actor InMemoryAgentAuditLog: AgentAuditLog {
 }
 
 public actor AgentPolicyEngine: Sendable {
-    public let permissionMode: AgentPermissionMode
+    public private(set) var permissionMode: AgentPermissionMode
     private let auditLog: any AgentAuditLog
 
     public init(permissionMode: AgentPermissionMode, auditLog: any AgentAuditLog = InMemoryAgentAuditLog()) {
         self.permissionMode = permissionMode
         self.auditLog = auditLog
+    }
+
+    /// 让正在运行的 run 也能切换权限模式：后续工具调用按新模式判定。
+    public func updatePermissionMode(_ mode: AgentPermissionMode) {
+        permissionMode = mode
     }
 
     public func evaluate(
@@ -85,14 +90,14 @@ public actor AgentPolicyEngine: Sendable {
             switch capability {
             case .readGraph, .readSession, .modelCall, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML, .readBrowserPage:
                 return .approved
-            case .mutateSessionStatus, .deleteSession, .mutatePersonality, .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .externalNetwork, .navigateBrowser, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML, .createInteractiveWebDraft, .publishInteractiveWeb:
+            case .mutateSessionStatus, .deleteSession, .mutatePersonality, .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .externalNetwork, .navigateBrowser, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML, .createInteractiveWebDraft, .publishInteractiveWeb, .largeWorkspaceWrite:
                 return .denied
             }
         case .askToWrite:
             switch capability {
             case .readGraph, .readSession, .mutatePersonality, .modelCall, .proposeGraphWrite, .externalNetwork, .readBrowserPage, .navigateBrowser, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .createMailDraft, .readContacts, .readCalendar, .readRSS, .readRSSContent, .syncRSSSources, .exportRSSOPML, .createInteractiveWebDraft:
                 return .approved
-            case .mutateSessionStatus, .deleteSession, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .importRSSOPML, .publishInteractiveWeb:
+            case .mutateSessionStatus, .deleteSession, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .importRSSOPML, .publishInteractiveWeb, .largeWorkspaceWrite:
                 return .needsApproval
             }
         case .trustedWrite:

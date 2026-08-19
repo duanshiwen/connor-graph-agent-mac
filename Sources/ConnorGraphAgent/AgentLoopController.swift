@@ -168,6 +168,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     private let approvalRegistry: AgentLoopApprovalRegistry
     private let assistantCheckpointStore: any AssistantRunCheckpointStore
     private let assistantEffectLedger: any AssistantEffectLedger
+    /// 与 backend 共享的当前 run 策略盒：run 内安装策略，切换权限时由 backend 直接更新。
+    private let policyBox = AgentLoopPolicyBox()
     private let logger = Logger(subsystem: "com.connor.agent", category: "tool-loop")
 
     public init(
@@ -271,6 +273,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         await approvalRegistry.resolve(requestID: approval.requestID, status: status)
     }
 
+    /// 切换权限模式并立即作用于当前正在运行的 run（下一次工具调用按新模式判定）。
+    /// 注意：控制器是值类型，运行时模式始终以 policyBox 内的策略引擎为准；
+    /// 每个会话拥有独立的控制器与策略盒，互不影响。
+    public func updatePermissionMode(_ mode: AgentPermissionMode) async {
+        await policyBox.updatePermissionMode(mode)
+    }
+
     public func run(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
         AsyncThrowingStream(AgentEvent.self, bufferingPolicy: .bufferingNewest(4_096)) { continuation in
             let startGate = AgentLoopStartGate()
@@ -294,6 +303,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 yield(.runStarted(AgentRunStartedEvent(run: run)), to: continuation, recorder: eventRecorder)
 
                 let policy = AgentPolicyEngine(permissionMode: request.permissionMode, auditLog: auditLog)
+                await policyBox.install(policy)
                 let budgetMeter = AgentBudgetMeter(configuration: configuration.budget)
                 let environmentSnapshot: AgentEnvironmentSnapshot?
                 if let environmentProvider, let environmentStore {
@@ -2902,6 +2912,19 @@ private enum AgentParallelQueryOutcome: Sendable {
     case needsApproval(call: AgentToolCall, request: AgentPermissionRequest, resourceURI: String?)
 }
 
+/// 共享当前 run 的策略引擎（引用语义），让 backend 在 run 运行中也能切换权限模式。
+private actor AgentLoopPolicyBox {
+    private var policy: AgentPolicyEngine?
+
+    func install(_ policy: AgentPolicyEngine) {
+        self.policy = policy
+    }
+
+    func updatePermissionMode(_ mode: AgentPermissionMode) async {
+        await policy?.updatePermissionMode(mode)
+    }
+}
+
 private extension AgentPermissionCapability {
     var isSafeForParallelNativeToolExecution: Bool {
         switch self {
@@ -2915,7 +2938,7 @@ private extension AgentPermissionCapability {
              .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .importMailAttachment,
              .mutateContacts, .mutateCalendar,
              .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML,
-             .createInteractiveWebDraft:
+             .createInteractiveWebDraft, .largeWorkspaceWrite:
             return false
         case .publishInteractiveWeb:
             return false

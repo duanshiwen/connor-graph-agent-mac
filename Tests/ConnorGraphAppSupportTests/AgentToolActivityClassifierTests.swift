@@ -21,38 +21,6 @@ import ConnorGraphAgent
     #expect(activity?.icon == "doc.text.magnifyingglass")
 }
 
-@Test func classifiesWriteToolAsWriteFileWithPencilIcon() {
-    let call = AgentToolCall(
-        id: "write-1",
-        name: "Write",
-        argumentsJSON: "{\"filePath\":\"README.md\",\"content\":\"hello\"}"
-    )
-
-    let activity = AgentToolActivityClassifier().activity(forRequestedCall: call)
-
-    #expect(activity?.semanticKind == .writeFile)
-    #expect(activity?.title == "写入文件")
-    #expect(activity?.target == "README.md")
-    #expect(activity?.icon == "square.and.pencil")
-}
-
-@Test func classifiesEditResultWithEditCount() {
-    let result = AgentToolResult(
-        toolCallID: "edit-1",
-        toolName: "MultiEdit",
-        contentText: "Applied 3 edits to file: /tmp/BrowserHistoryPanelView.swift",
-        contentJSON: "{\"path\":\"/tmp/BrowserHistoryPanelView.swift\",\"edits\":3}"
-    )
-
-    let activity = AgentToolActivityClassifier().activity(forFinishedResult: result)
-
-    #expect(activity?.semanticKind == .editFile)
-    #expect(activity?.title == "编辑文件")
-    #expect(activity?.target == "BrowserHistoryPanelView.swift")
-    #expect(activity?.subtitle == "3 处修改")
-    #expect(activity?.icon == "pencil")
-}
-
 @Test func classifiesSwiftBuildAndSwiftTestBashCommands() {
     let build = AgentToolCall(
         id: "bash-build",

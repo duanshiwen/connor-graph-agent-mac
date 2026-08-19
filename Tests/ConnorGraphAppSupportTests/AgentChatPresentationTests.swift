@@ -446,7 +446,7 @@ import ConnorGraphAppSupport
         runID: "run-1",
         sessionID: "session-1",
         toolCallID: "tool-1",
-        toolName: "Write",
+        toolName: "ApplyPatch",
         message: "Denied by Connor policy"
     )
 
@@ -463,7 +463,7 @@ import ConnorGraphAppSupport
         "Permission requested: readSession",
         "Tool running: Read",
         "Tool finished: Read",
-        "Tool failed: Write"
+        "Tool failed: ApplyPatch"
     ])
     #expect(rows.map(\.severity) == [.info, .warning, .info, .success, .error])
     #expect(rows[0].detail == "Call tool-1 · Arguments: {\"filePath\":\"README.md\"}")
