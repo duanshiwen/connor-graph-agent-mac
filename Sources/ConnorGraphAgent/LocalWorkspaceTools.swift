@@ -3,6 +3,49 @@ import Foundation
 import Darwin
 #endif
 
+/// 超大写入审批：内容超过工作区写入上限时按策略决策——
+/// 询问模式发起人工审批，执行/全部允许直接放行，只读模式拒绝；
+/// 返回 true 表示本轮允许超大写入。审批请求的 payload 只包含路径与字节数，不携带正文。
+@discardableResult
+private func requireLargeWriteApprovalIfNeeded(
+    context: AgentToolExecutionContext,
+    toolName: String,
+    filePath: String,
+    bytes: Int,
+    limit: Int
+) async throws -> Bool {
+    guard bytes > limit else { return false }
+    if context.approvedCapabilities.contains(.largeWorkspaceWrite) { return true }
+    let payload = LocalToolJSON.encode([
+        "operation": "oversize_write",
+        "filePath": filePath,
+        "bytes": bytes,
+        "limitBytes": limit,
+    ]) ?? "{}"
+    let decision = await context.policyEngine.evaluate(
+        capability: .largeWorkspaceWrite,
+        runID: context.runID,
+        sessionID: context.sessionID,
+        toolName: toolName,
+        payloadJSON: payload
+    )
+    switch decision.outcome {
+    case .approved:
+        return true
+    case .needsApproval:
+        throw AgentToolError.permissionNeedsApproval(AgentPermissionRequest(
+            id: decision.requestID,
+            runID: context.runID,
+            sessionID: context.sessionID,
+            capability: .largeWorkspaceWrite,
+            toolName: toolName,
+            payloadJSON: payload
+        ))
+    case .denied:
+        throw AgentToolError.permissionDenied(decision.reason)
+    }
+}
+
 public struct LocalReadFileTool: AgentTool {
     public let name = "Read"
     public let description = "Read a text file from the configured local workspace. A small file is returned completely in a single call. A larger file is read from the start (or from the given 1-based offset) and automatically truncated to the output budget, returning nextOffset when more lines remain so you can continue with Read(filePath, offset: nextOffset). Optional offset/limit only create an explicit window on large files; do not pass a small limit for a small file. Paths must stay inside allowed workspace roots."
@@ -331,125 +374,6 @@ public struct LocalShellTool: AgentTool {
         case .destructive: return .runDestructiveShellCommand
         case .unknown: return .runWorkspaceShellCommand
         }
-    }
-}
-
-public struct LocalWriteFileTool: AgentTool {
-    public let name = "Write"
-    public let description = "Create or overwrite a text file inside the configured local workspace. Protected paths are denied."
-    public let permission: AgentPermissionCapability = .writeWorkspaceFile
-    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "filePath": .string(description: "Path to write inside the workspace."),
-        "content": .string(description: "Complete file content to write.")
-    ], required: ["filePath", "content"])
-
-    private let policy: LocalWorkspacePolicy
-
-    public init(policy: LocalWorkspacePolicy) { self.policy = policy }
-
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path") ?? arguments.string("path"), let content = arguments.string("content") else {
-            throw AgentToolError.invalidArguments("filePath and content are required")
-        }
-        let path = try policy.resolvePath(rawPath)
-        let existed = FileManager.default.fileExists(atPath: path.path)
-        try policy.validateWritablePath(path, operation: existed ? .overwriteFile : .createFile)
-        try policy.validateWritableSize(path: path, content: content)
-        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try content.write(to: path, atomically: true, encoding: .utf8)
-        let json = LocalToolJSON.encode([
-            "path": path.path,
-            "operation": existed ? "overwritten" : "created",
-            "bytesWritten": content.utf8.count,
-            "afterHash": LocalFileHash.sha256(content)
-        ])
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "File \(existed ? "overwritten" : "created"): \(path.path)", contentJSON: json)
-    }
-}
-
-public struct LocalEditFileTool: AgentTool {
-    public let name = "Edit"
-    public let description = "Replace a unique oldText occurrence in a text file inside the configured local workspace. Fails if oldText is missing or not unique."
-    public let permission: AgentPermissionCapability = .editWorkspaceFile
-    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "filePath": .string(description: "Path to edit inside the workspace."),
-        "oldText": .string(description: "Exact text to replace. Must occur exactly once."),
-        "newText": .string(description: "Replacement text.")
-    ], required: ["filePath", "oldText", "newText"])
-
-    private let policy: LocalWorkspacePolicy
-
-    public init(policy: LocalWorkspacePolicy) { self.policy = policy }
-
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path") ?? arguments.string("path"),
-              let oldText = arguments.string("oldText") ?? arguments.string("old_text") ?? arguments.string("old_string"),
-              let newText = arguments.string("newText") ?? arguments.string("new_text") ?? arguments.string("new_string") else {
-            throw AgentToolError.invalidArguments("filePath, oldText, and newText are required")
-        }
-        let path = try policy.resolvePath(rawPath)
-        try policy.validateReadablePath(path)
-        try policy.validateWritablePath(path, operation: .editFile)
-        let original = try String(contentsOf: path, encoding: .utf8)
-        let updated = try LocalTextEditor.replacingUnique(original: original, oldText: oldText, newText: newText)
-        try policy.validateWritableSize(path: path, content: updated)
-        try updated.write(to: path, atomically: true, encoding: .utf8)
-        let json = LocalToolJSON.encode([
-            "path": path.path,
-            "beforeHash": LocalFileHash.sha256(original),
-            "afterHash": LocalFileHash.sha256(updated),
-            "edits": 1
-        ])
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Edited file: \(path.path)", contentJSON: json)
-    }
-}
-
-public struct LocalMultiEditTool: AgentTool {
-    public let name = "MultiEdit"
-    public let description = "Apply multiple exact text replacements atomically to one workspace file. Every oldText must occur exactly once in the original file."
-    public let permission: AgentPermissionCapability = .editWorkspaceFile
-    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "filePath": .string(description: "Path to edit inside the workspace."),
-        "edits": .array(
-            items: .closedObject(properties: [
-                "oldText": .string(description: "Exact text to replace. Must occur exactly once in the original file."),
-                "newText": .string(description: "Replacement text.")
-            ], required: ["oldText", "newText"]),
-            description: "Ordered list of exact replacements to validate against the original file and then apply atomically."
-        )
-    ], required: ["filePath", "edits"])
-
-    private let policy: LocalWorkspacePolicy
-
-    public init(policy: LocalWorkspacePolicy) { self.policy = policy }
-
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path") ?? arguments.string("path"), let rawEdits = arguments.array("edits") else {
-            throw AgentToolError.invalidArguments("filePath and edits are required")
-        }
-        let edits: [(oldText: String, newText: String)] = try rawEdits.map { value in
-            guard let object = value.objectValue,
-                  let oldText = object["oldText"]?.stringValue ?? object["old_text"]?.stringValue ?? object["old_string"]?.stringValue,
-                  let newText = object["newText"]?.stringValue ?? object["new_text"]?.stringValue ?? object["new_string"]?.stringValue else {
-                throw AgentToolError.invalidArguments("Each edit requires oldText and newText")
-            }
-            return (oldText, newText)
-        }
-        guard !edits.isEmpty else { throw AgentToolError.invalidArguments("edits must not be empty") }
-        let path = try policy.resolvePath(rawPath)
-        try policy.validateReadablePath(path)
-        try policy.validateWritablePath(path, operation: .editFile)
-        let original = try String(contentsOf: path, encoding: .utf8)
-        let updated = try LocalTextEditor.applyingAtomicEdits(original: original, edits: edits)
-        try policy.validateWritableSize(path: path, content: updated)
-        try updated.write(to: path, atomically: true, encoding: .utf8)
-        let json = LocalToolJSON.encode([
-            "path": path.path,
-            "beforeHash": LocalFileHash.sha256(original),
-            "afterHash": LocalFileHash.sha256(updated),
-            "edits": edits.count
-        ])
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Applied \(edits.count) edits to file: \(path.path)", contentJSON: json)
     }
 }
 
@@ -816,7 +740,14 @@ public struct LocalApplyPatchTool: AgentTool {
             guard let content = projected[key] else {
                 throw AgentToolError.invalidArguments("No projected content for \(key)")
             }
-            try policy.validateWritableSize(path: URL(fileURLWithPath: key), content: content)
+            let allowOversize = try await requireLargeWriteApprovalIfNeeded(
+                context: context,
+                toolName: name,
+                filePath: key,
+                bytes: policy.writeSizeExceedsLimit(content) ?? 0,
+                limit: policy.maxWriteBytes
+            )
+            try policy.validateWritableSize(path: URL(fileURLWithPath: key), content: content, allowOversize: allowOversize)
         }
 
         var originals: [String: OriginalFileState] = [:]

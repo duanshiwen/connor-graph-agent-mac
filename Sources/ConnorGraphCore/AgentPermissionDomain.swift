@@ -24,6 +24,7 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     case writeWorkspaceFile
     case editWorkspaceFile
     case deleteWorkspaceFile
+    case largeWorkspaceWrite
     case computeScientific
     case runReadOnlyShellCommand
     case runWorkspaceShellCommand

@@ -296,32 +296,6 @@ public struct RSSSetHiddenStateTool: AgentTool {
     }
 }
 
-public struct RSSImportOPMLTool: AgentTool {
-    public let runtime: any AgentRSSRuntime
-    public var name: String { "rss_import_opml" }
-    public var description: String { "Import OPML subscriptions into Connor RSS source registry." }
-    public var permission: AgentPermissionCapability { .importRSSOPML }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["opmlXML": .string(description: "OPML XML content")], required: ["opmlXML"]) }
-    public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let document = try await runtime.importOPML(arguments.string("opmlXML") ?? "", runID: context.runID, sessionID: context.sessionID)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Imported \(document.outlines.count) RSS subscriptions", contentJSON: try RSSJSON.encode(document))
-    }
-}
-
-public struct RSSExportOPMLTool: AgentTool {
-    public let runtime: any AgentRSSRuntime
-    public var name: String { "rss_export_opml" }
-    public var description: String { "Export Connor RSS subscriptions as OPML text." }
-    public var permission: AgentPermissionCapability { .exportRSSOPML }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: [:], required: []) }
-    public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let xml = try await runtime.exportOPML(runID: context.runID, sessionID: context.sessionID)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: xml)
-    }
-}
-
 public struct RSSCreateEvidenceCandidateTool: AgentTool {
     public let runtime: any AgentRSSRuntime
     public var name: String { "rss_create_evidence_candidate" }

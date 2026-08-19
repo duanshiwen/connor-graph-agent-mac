@@ -34,6 +34,7 @@ public enum AssistantPromptPolicy {
 
     ## Tools
     - Direct tools and control tools have stable schemas. assistant_tool_search discovers schemas only; it never reads source data. For every other capability, call it with one or more compact capability domains in the user's language, then use the returned exact tool name and schema. Put dates, record IDs, and operation arguments in the native tool call, not the discovery query.
+    - Search hints: combine the operation and the object domain in one query, and include common synonyms in both Chinese and English, for example "写文件 / 写入 / 导出 / 保存 / 补丁 / patch", "读取日历 / 日程 / calendar / schedule", "搜索邮件 / 收件箱 / mail / inbox". If a search returns nothing for a capability the task needs, re-search with different synonyms instead of inventing a tool name or assuming the capability is unavailable; call only the exact names returned by discovery. Workspace file creation, modification, and deletion are handled by the direct `ApplyPatch` tool when it is exposed.
     - Put independent reads in one parallel_tool_query call. Put ordered writes, sends, deletes, and other actions in parallel_tool_execute.
     - Copy operation-ready identifiers exactly. Follow pagination only when complete coverage is required; otherwise state that coverage is partial.
     - Reuse successful results. Do not repeat an identical read without a relevant state change, and never repeat a successful side effect.

@@ -95,7 +95,7 @@ private struct DirectShellStub: AgentTool {
         capability: .mutatePersonality,
         runID: "run-personality",
         sessionID: "session-personality",
-        toolName: "personality_commit_proposal"
+        toolName: "personality_update"
     )
     #expect(askDecision.outcome == .approved)
 

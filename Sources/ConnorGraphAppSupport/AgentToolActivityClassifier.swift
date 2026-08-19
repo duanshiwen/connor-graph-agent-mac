@@ -130,23 +130,6 @@ public struct AgentToolActivityClassifier: Sendable {
                 subtitle: lineRange(offset: offset, limit: limit),
                 icon: "doc.text.magnifyingglass"
             )
-        case "Write":
-            let operation = string(result["operation"])
-            return ToolDescriptor(
-                semanticKind: .writeFile,
-                title: "写入文件",
-                target: basename(string(arguments["filePath"]) ?? string(arguments["file_path"]) ?? string(result["path"])),
-                subtitle: operation,
-                icon: "square.and.pencil"
-            )
-        case "Edit", "MultiEdit":
-            return ToolDescriptor(
-                semanticKind: .editFile,
-                title: "编辑文件",
-                target: basename(string(arguments["filePath"]) ?? string(arguments["file_path"]) ?? string(result["path"])),
-                subtitle: editSubtitle(arguments: arguments, result: result),
-                icon: "pencil"
-            )
         case "LS":
             return ToolDescriptor(
                 semanticKind: .listDirectory,

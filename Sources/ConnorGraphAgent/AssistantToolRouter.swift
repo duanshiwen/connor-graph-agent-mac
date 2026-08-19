@@ -85,7 +85,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
         .init(name: "environment", summary: "current environment, location, and weather context / 当前环境、位置与天气", aliases: ["environment", "location", "weather", "环境", "位置", "地点", "天气", "温度", "时区"]),
         .init(name: "skill", summary: "installed skills and reusable workflows / 已安装技能与工作流", aliases: ["skill", "workflow", "技能", "工作流", "能力"]),
         .init(name: "graph", summary: "knowledge graph search and graph-backed records / 知识图谱搜索与图谱记录", aliases: ["graph", "knowledge graph", "图谱", "知识图谱", "关系图", "实体关系"]),
-        .init(name: "workspace", summary: "workspace files, search, and local editing / 工作区文件、搜索与编辑", aliases: ["workspace", "local files", "code", "工作区", "本地文件", "本地", "代码", "文件", "目录", "文件夹", "项目", "工程"]),
+        .init(name: "workspace", summary: "workspace files, search, and local editing / 工作区文件、搜索与编辑", aliases: ["workspace", "local files", "code", "file", "write", "save", "export", "patch", "工作区", "本地文件", "本地", "代码", "文件", "目录", "文件夹", "项目", "工程", "写", "写入", "导出", "保存", "落盘", "补丁", "修改", "编辑"]),
         .init(name: "knowledge", summary: "cloud knowledge-base search and retrieval / 云端知识库搜索与读取", aliases: ["knowledge", "knowledge base", "cloud knowledge", "知识", "知识库", "云知识库", "云端"])
     ]
 
@@ -235,6 +235,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
         return ([
             "## Tool Discovery",
             "Direct workspace tools, core interactive webpage tools, and control tools have stable schemas in this request. assistant_tool_search discovers schemas only; it does not read data. For any other capability, search once using one or more compact capability domains in the user's language, then invoke returned exact names and schemas through parallel_tool_query or parallel_tool_execute. Keep dates, record IDs, and operation arguments for the native tool call.",
+            "Discovery tips: put the operation and the domain together and try synonyms in both languages, e.g. \"写文件 / 写入 / 导出 / 保存 / 补丁 / patch\". If one phrasing returns nothing, re-search with synonyms rather than inventing a tool name. Workspace file changes are the direct ApplyPatch tool.",
             "Available families:"
         ] + lines).joined(separator: "\n")
     }
@@ -406,7 +407,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
         .init("environment", ["environment", "location", "weather", "temperature", "环境", "位置", "地点", "天气", "温度", "时区"]),
         .init("skill", ["skill", "workflow", "capability", "技能", "工作流", "能力"]),
         .init("graph", ["graph", "knowledge", "relation", "entity", "图谱", "知识图谱", "关系", "实体"]),
-        .init("workspace", ["workspace", "file", "folder", "directory", "code", "project", "local", "工作区", "文件", "文件夹", "目录", "代码", "项目", "本地"]),
+        .init("workspace", ["workspace", "file", "folder", "directory", "code", "project", "local", "write", "save", "export", "patch", "工作区", "文件", "文件夹", "目录", "代码", "项目", "本地", "写", "写入", "导出", "保存", "落盘", "补丁", "修改", "编辑"]),
         .init("session", ["session", "conversation", "chat", "会话", "对话", "聊天", "交谈"]),
         .init("send", ["send", "compose", "draft", "reply", "forward", "发送", "撰写", "回复", "转发"]),
         .init("read", ["read", "view", "open", "get", "detail", "inspect", "读取", "查看", "打开", "获取", "详情", "预览", "看"]),

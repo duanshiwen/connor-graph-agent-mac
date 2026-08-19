@@ -248,7 +248,11 @@ final class AppRuntimeLifecycle {
         guard mode != .allowAll else { return }
         agentPermissionMode = mode
         persistPermissionMode(mode)
-        chatRunCoordinator.mutateManager { $0.permissionMode = mode }
+        chatRunCoordinator.mutateManager { manager in
+            manager.permissionMode = mode
+            let backend = manager.backend
+            Task { await backend.updatePermissionMode(mode) }
+        }
         chatApprovalCoordinator.permissionModeDidChange()
     }
 
@@ -1307,7 +1311,11 @@ final class AppRuntimeLifecycle {
             guard let self else { return }
             self.agentPermissionMode = .trustedWrite
             self.persistPermissionMode(.trustedWrite)
-            self.chatRunCoordinator.mutateManager { $0.permissionMode = .trustedWrite }
+            self.chatRunCoordinator.mutateManager { manager in
+                manager.permissionMode = .trustedWrite
+                let backend = manager.backend
+                Task { await backend.updatePermissionMode(.trustedWrite) }
+            }
         }
         chatApprovalCoordinator.onError = { [weak self] message in self?.errorMessage = message }
         chatComposerCoordinator.selectedSessionID = { [weak self] in self?.chatFeatureModel.sessions.selectedSessionID }
@@ -3678,7 +3686,7 @@ struct NoteSessionPromptBuilder {
 
 这是笔记正文的首次捕获：系统会保留并直接摄取用户原文，豁免本条消息的用户意图 LLM 规范化。不要声称原文已被改写、润色、摘要后保存；同一笔记会话的后续用户消息仍按常规流程处理。
 
-不要为了保存这条笔记调用 `Write`、`Edit`、shell、知识库写入或 Memory 写入工具，也不要生成文件名、创建 Markdown 文件或选择保存路径。只有当用户在笔记内容中明确要求创建文件、导出到路径或修改现有文件时，才按普通工具权限规则执行相应操作。
+不要为了保存这条笔记调用 `ApplyPatch`、shell、知识库写入或 Memory 写入工具，也不要生成文件名、创建 Markdown 文件或选择保存路径。只有当用户在笔记内容中明确要求创建文件、导出到路径或修改现有文件时，才按普通工具权限规则执行相应操作。
 
 完成本轮强制上下文与搜索 Bootstrap 后，请对用户的输入进行以下处理：
 
@@ -3721,7 +3729,7 @@ struct NoteSessionPromptBuilder {
         - persistence: already_updated_by_session_os
         - response_placement: append_assistant_message_only
 
-        The edited first message and its Notes database projection are already saved. Do not call Write, Edit, shell, note, knowledge-base, or Memory mutation tools to save them again. Do not restart the original full-note analysis and do not claim that you changed the note yourself.
+        The edited first message and its Notes database projection are already saved. Do not call ApplyPatch, shell, note, knowledge-base, or Memory mutation tools to save them again. Do not restart the original full-note analysis and do not claim that you changed the note yourself.
 
         Compare only this revision with the immediately previous version. Summarize what was added, removed, clarified, or reorganized and explain any material change in meaning or follow-up implications. Do not reproduce the complete note. If the change is purely cosmetic, say so briefly. Respond in the user's language using this compact structure:
 

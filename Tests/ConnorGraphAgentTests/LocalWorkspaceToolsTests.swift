@@ -200,35 +200,6 @@ private func makeLargeReadableFile(_ name: String = "large.txt") throws -> (URL,
     #expect(tail.contentJSON?.contains(#""truncated":false"#) == true)
 }
 
-@Test func writeToolCreatesWorkspaceFile() async throws {
-    let workspace = try makeToolTempWorkspace()
-    let tool = LocalWriteFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
-
-    let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"filePath":"Sources/New.swift","content":"let value = 42\n"}"#),
-        context: .localToolTestContext(toolCallID: "write-1")
-    )
-
-    let file = workspace.appendingPathComponent("Sources/New.swift")
-    #expect(try String(contentsOf: file, encoding: .utf8) == "let value = 42\n")
-    #expect(result.toolName == "Write")
-    #expect(result.contentText.contains("created"))
-}
-
-@Test func editToolRequiresUniqueOldText() async throws {
-    let workspace = try makeToolTempWorkspace()
-    let file = workspace.appendingPathComponent("App.swift")
-    try "let a = 1\nlet a = 1\n".write(to: file, atomically: true, encoding: .utf8)
-    let tool = LocalEditFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
-
-    await #expect(throws: AgentToolError.self) {
-        _ = try await tool.execute(
-            arguments: try AgentToolArguments(json: #"{"filePath":"App.swift","oldText":"let a = 1","newText":"let a = 2"}"#),
-            context: .localToolTestContext(toolCallID: "edit-dup")
-        )
-    }
-}
-
 @Test func readToolAcceptsPathAlias() async throws {
     let workspace = try makeToolTempWorkspace()
     let file = workspace.appendingPathComponent("README.md")
@@ -241,32 +212,6 @@ private func makeLargeReadableFile(_ name: String = "large.txt") throws -> (URL,
     )
 
     #expect(result.contentText.contains("hello"))
-}
-
-@Test func writeToolAcceptsPathAlias() async throws {
-    let workspace = try makeToolTempWorkspace()
-    let tool = LocalWriteFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
-
-    _ = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"path":"out.txt","content":"data"}"#),
-        context: .localToolTestContext(toolCallID: "write-path")
-    )
-
-    #expect(try String(contentsOf: workspace.appendingPathComponent("out.txt"), encoding: .utf8) == "data")
-}
-
-@Test func editToolAcceptsLegacyStringAliases() async throws {
-    let workspace = try makeToolTempWorkspace()
-    let file = workspace.appendingPathComponent("App.swift")
-    try "let a = 1\nlet b = 2\n".write(to: file, atomically: true, encoding: .utf8)
-    let tool = LocalEditFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
-
-    let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"path":"App.swift","old_string":"let a = 1","new_string":"let a = 10"}"#),
-        context: .localToolTestContext(toolCallID: "edit-alias")
-    )
-
-    #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 10\nlet b = 2\n")
 }
 
 @Test func applyPatchToolAcceptsLegacyAliasesInOperations() async throws {
@@ -337,55 +282,6 @@ private func makeLargeReadableFile(_ name: String = "large.txt") throws -> (URL,
     )
 
     #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 10\n")
-}
-
-@Test func editToolReplacesUniqueOldText() async throws {
-    let workspace = try makeToolTempWorkspace()
-    let file = workspace.appendingPathComponent("App.swift")
-    try "let a = 1\nlet b = 2\n".write(to: file, atomically: true, encoding: .utf8)
-    let tool = LocalEditFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
-
-    let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"filePath":"App.swift","oldText":"let a = 1","newText":"let a = 10"}"#),
-        context: .localToolTestContext(toolCallID: "edit-1")
-    )
-
-    #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 10\nlet b = 2\n")
-    #expect(result.contentJSON?.contains("beforeHash") == true)
-}
-
-@Test func multiEditToolAppliesAtomically() async throws {
-    let workspace = try makeToolTempWorkspace()
-    let file = workspace.appendingPathComponent("App.swift")
-    try "one\ntwo\nthree\n".write(to: file, atomically: true, encoding: .utf8)
-    let tool = LocalMultiEditTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
-
-    let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"filePath":"App.swift","edits":[{"oldText":"one","newText":"ONE"},{"oldText":"three","newText":"THREE"}]}"#),
-        context: .localToolTestContext(toolCallID: "multi-1")
-    )
-
-    #expect(try String(contentsOf: file, encoding: .utf8) == "ONE\ntwo\nTHREE\n")
-    #expect(result.contentText.contains("2 edits"))
-}
-
-@Test func multiEditToolDoesNotPartiallyWriteWhenInvalid() async throws {
-    let workspace = try makeToolTempWorkspace()
-    let file = workspace.appendingPathComponent("App.swift")
-    try "one\ntwo\n".write(to: file, atomically: true, encoding: .utf8)
-    let tool = LocalMultiEditTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
-
-    do {
-        _ = try await tool.execute(
-            arguments: try AgentToolArguments(json: #"{"filePath":"App.swift","edits":[{"oldText":"one","newText":"ONE"},{"oldText":"missing","newText":"MISSING"}]}"#),
-            context: .localToolTestContext(toolCallID: "multi-invalid")
-        )
-        Issue.record("Expected an invalidArguments error")
-    } catch let error as AgentToolError {
-        #expect(error.description.contains("oldText must occur exactly once"))
-        #expect(!error.description.contains("old_text"))
-    }
-    #expect(try String(contentsOf: file, encoding: .utf8) == "one\ntwo\n")
 }
 
 @Test func readManyToolReadsMultipleFilesInRequestOrder() async throws {

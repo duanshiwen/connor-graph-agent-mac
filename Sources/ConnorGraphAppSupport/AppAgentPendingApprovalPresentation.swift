@@ -41,10 +41,6 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
             self.title = calendar.title
             self.detail = calendar.detail
             self.allowsAlwaysAllow = false
-        } else if approval.toolName == "personality_commit_proposal", let personality = Self.personalityPayload(approval.payloadJSON) {
-            self.title = personality.title
-            self.detail = personality.detail
-            self.allowsAlwaysAllow = false
         } else if approval.capability == .publishInteractiveWeb {
             self.title = approval.toolName == "interactive_web_publish" ? "发布互动网页" : "管理已发布网页"
             self.detail = Self.compactJSON(approval.payloadJSON)
@@ -73,18 +69,6 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         let calendarID = object["verifiedCalendarID"] as? String ?? object["calendarID"] as? String
         let fields = [eventTitle, eventID.map { "日程 ID：\($0)" }, calendarID.map { "日历 ID：\($0)" }].compactMap { $0 }
         return (title, fields.joined(separator: " · "))
-    }
-
-    private static func personalityPayload(_ json: String) -> (title: String, detail: String)? {
-        guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        let title = object["title"] as? String ?? "更新康纳同学性格"
-        let before = (object["beforeSummary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let after = (object["afterSummary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let beforeText = before.isEmpty ? "默认性格" : before
-        let afterText = after.isEmpty ? "默认性格" : after
-        return (title, "固定姓名：康纳同学 · \(beforeText) → \(afterText)")
     }
 
     private static func statusLabel(_ status: AgentPendingApprovalStatus) -> String {
@@ -121,6 +105,7 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         case .writeWorkspaceFile: "写入工作目录文件"
         case .editWorkspaceFile: "编辑工作目录文件"
         case .deleteWorkspaceFile: "删除工作目录文件"
+        case .largeWorkspaceWrite: "写入超大文件"
         case .computeScientific: "执行科学计算"
         case .runReadOnlyShellCommand: "运行只读终端命令"
         case .runWorkspaceShellCommand: "运行工作目录命令"
@@ -166,6 +151,8 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         case .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand,
              .runNetworkShellCommand, .runDestructiveShellCommand:
             "允许在本机执行可能修改文件、访问网络或产生其他副作用的操作。"
+        case .largeWorkspaceWrite:
+            "文件超过工作区写入上限（默认 10MB），询问模式下需人工确认；执行模式自动放行。"
         case .interactBrowser, .commitBrowserAction, .transferBrowserFile:
             "允许操作网页、提交页面动作或传输文件，可能对外部服务产生影响。"
         default:
