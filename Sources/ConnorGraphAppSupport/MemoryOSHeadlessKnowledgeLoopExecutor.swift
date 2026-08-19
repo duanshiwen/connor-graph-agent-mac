@@ -2,6 +2,7 @@ import Foundation
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
+import ConnorGraphAgent
 
 public struct MemoryOSBackgroundToolLoopConfiguration: Codable, Sendable, Equatable {
     public var maxToolIterations: Int
@@ -61,14 +62,27 @@ public struct MemoryOSBackgroundLoopMessage: Codable, Sendable, Equatable, Ident
     public var toolCallID: String?
     public var toolName: String?
     public var toolCalls: [MemoryOSBackgroundToolCall]?
+    /// Raw provider output (thinking blocks/signatures, reasoning_content, or
+    /// Responses output items) captured from the assistant turn. Providers in
+    /// thinking mode require it to be echoed back verbatim on the next request.
+    public var providerMetadata: AgentModelProviderMetadata?
 
-    public init(id: String = UUID().uuidString, role: MemoryOSBackgroundMessageRole, content: String, toolCallID: String? = nil, toolName: String? = nil, toolCalls: [MemoryOSBackgroundToolCall]? = nil) {
+    public init(
+        id: String = UUID().uuidString,
+        role: MemoryOSBackgroundMessageRole,
+        content: String,
+        toolCallID: String? = nil,
+        toolName: String? = nil,
+        toolCalls: [MemoryOSBackgroundToolCall]? = nil,
+        providerMetadata: AgentModelProviderMetadata? = nil
+    ) {
         self.id = id
         self.role = role
         self.content = content
         self.toolCallID = toolCallID
         self.toolName = toolName
         self.toolCalls = toolCalls
+        self.providerMetadata = providerMetadata
     }
 }
 
@@ -90,11 +104,18 @@ public struct MemoryOSBackgroundLoopModelResponse: Sendable, Equatable {
     public var assistantText: String
     public var toolCalls: [MemoryOSBackgroundToolCall]
     public var metadata: [String: String]
+    public var providerMetadata: AgentModelProviderMetadata?
 
-    public init(assistantText: String = "", toolCalls: [MemoryOSBackgroundToolCall] = [], metadata: [String: String] = [:]) {
+    public init(
+        assistantText: String = "",
+        toolCalls: [MemoryOSBackgroundToolCall] = [],
+        metadata: [String: String] = [:],
+        providerMetadata: AgentModelProviderMetadata? = nil
+    ) {
         self.assistantText = assistantText
         self.toolCalls = toolCalls
         self.metadata = metadata
+        self.providerMetadata = providerMetadata
     }
 }
 
@@ -218,9 +239,23 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                 let joinedToolNames = calls.map(\.name).joined(separator: ",")
                 let truncatedToolName = String(joinedToolNames.prefix(64))
                 let memoryOSToolCalls: [MemoryOSBackgroundToolCall] = calls.map { MemoryOSBackgroundToolCall(id: $0.id, name: $0.name, argumentsJSON: $0.argumentsJSON) }
-                let assistantMessage = MemoryOSBackgroundLoopMessage(role: .assistant, content: response.assistantText, toolName: truncatedToolName, toolCalls: memoryOSToolCalls)
+                let assistantMessage = MemoryOSBackgroundLoopMessage(
+                    role: .assistant,
+                    content: response.assistantText,
+                    toolName: truncatedToolName,
+                    toolCalls: memoryOSToolCalls,
+                    providerMetadata: response.providerMetadata
+                )
                 messages.append(assistantMessage)
-                try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(id: assistantMessage.id, runID: runID, sequence: sequence, role: assistantMessage.role, content: assistantMessage.content, toolName: assistantMessage.toolName, metadata: ["iteration": String(iteration)]))
+                try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(
+                    id: assistantMessage.id,
+                    runID: runID,
+                    sequence: sequence,
+                    role: assistantMessage.role,
+                    content: assistantMessage.content,
+                    toolName: assistantMessage.toolName,
+                    metadata: ["iteration": String(iteration)].merging(providerMetadataAuditJSON(assistantMessage.providerMetadata)) { current, _ in current }
+                ))
                 sequence += 1
                 if !response.assistantText.isEmpty {
                     log("Assistant response (\(response.assistantText.count) chars):")
@@ -275,6 +310,12 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
         for (index, message) in messages.enumerated() {
             try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(id: message.id, runID: runID, sequence: index, role: message.role, content: message.content, toolCallID: message.toolCallID, toolName: message.toolName, metadata: ["scope": "initial_stateless_batch"] ))
         }
+    }
+
+    private func providerMetadataAuditJSON(_ metadata: AgentModelProviderMetadata?) -> [String: String] {
+        guard let metadata,
+              let data = try? JSONEncoder().encode(metadata) else { return [:] }
+        return ["provider_metadata_json": String(decoding: data, as: UTF8.self)]
     }
 
     private func replayableToolResult(for call: MemoryOSBackgroundToolCall, runID: String) throws -> MemoryOSBackgroundToolResult? {

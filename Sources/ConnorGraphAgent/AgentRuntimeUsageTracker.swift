@@ -20,8 +20,11 @@ public actor AgentRuntimeUsageTracker: Sendable {
     public func snapshot() -> AgentBudgetSnapshot {
         let total = promptTokens + completionTokens
         let warning = Int(Double(configuration.maxTotalTokens) * configuration.warningThresholdRatio)
+        let hardThreshold = configuration.hardThresholdTokens
         let status: AgentBudgetStatus
-        if total > configuration.maxTotalTokens {
+        if total > hardThreshold {
+            status = .hardExceeded
+        } else if total > configuration.maxTotalTokens {
             status = .exceeded
         } else if total >= warning {
             status = .warning
@@ -34,7 +37,8 @@ public actor AgentRuntimeUsageTracker: Sendable {
             totalTokens: total,
             status: status,
             warningThresholdTokens: warning,
-            maxTotalTokens: configuration.maxTotalTokens
+            maxTotalTokens: configuration.maxTotalTokens,
+            hardThresholdTokens: hardThreshold
         )
     }
 }

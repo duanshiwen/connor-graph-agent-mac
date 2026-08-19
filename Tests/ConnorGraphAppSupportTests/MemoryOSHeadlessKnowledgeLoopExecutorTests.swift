@@ -3,6 +3,7 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
+import ConnorGraphAgent
 import ConnorGraphAppSupport
 
 @Suite("Memory OS Headless Knowledge Loop Executor Tests")
@@ -176,6 +177,37 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
         #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l3_beliefs;").first?.first == "1")
         #expect(try store.backgroundToolCalls(runID: "retry-run").contains { $0.metadata["idempotent_replay"] == "true" })
     }
+
+    @Test func assistantThinkingMetadataSurvivesMultiTurnBackgroundLoop() async throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryHeadlessLoopDatabaseURL().path)
+        try store.migrate()
+        let model = ThinkingLoopModel()
+        let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
+            model: model,
+            toolExecutor: MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store)),
+            store: store
+        )
+
+        let response = try await executor.execute(MemoryOSBackgroundModelRequest(
+            jobID: "job-thinking",
+            kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
+            schemaName: "MemoryOSL1UnifiedProjectionOutput",
+            artifactType: "memory_os_l1_unified_projection",
+            prompt: "Process the batch.",
+            metadata: ["background_run_id": "run-thinking"]
+        ))
+
+        #expect(response.rawArtifactJSON == "{}")
+        let followUp = try #require(model.capturedFollowUpMessages)
+        let assistant = try #require(followUp.last { $0.role == .assistant })
+        #expect(assistant.toolCalls?.map(\.id) == ["tool-1"])
+        #expect(assistant.providerMetadata?.providerID == "anthropic-compatible")
+        #expect(assistant.providerMetadata?.rawAssistantContentJSON?.contains(#""signature":"sig""#) == true)
+        let record = try #require(try store.backgroundMessages(runID: "run-thinking").first {
+            $0.role == .assistant && $0.metadata["provider_metadata_json"] != nil
+        })
+        #expect(record.metadata["provider_metadata_json"]?.contains("rawAssistantContentJSON") == true)
+    }
 }
 
 private final class ScriptedLoopModel: MemoryOSBackgroundToolLoopModel, @unchecked Sendable {
@@ -220,6 +252,33 @@ private final class RetryWriteLoopModel: MemoryOSBackgroundToolLoopModel, @unche
         case 3:
             return MemoryOSBackgroundLoopModelResponse(toolCalls: [MemoryOSBackgroundToolCall(id: "write-2", name: "memory_os_l3_update_beliefs", argumentsJSON: canonicalArguments)])
         default:
+            return MemoryOSBackgroundLoopModelResponse(assistantText: "{}")
+        }
+    }
+}
+
+private final class ThinkingLoopModel: MemoryOSBackgroundToolLoopModel, @unchecked Sendable {
+    let modelID = "thinking-loop-model"
+    private var invocation = 0
+    var capturedFollowUpMessages: [MemoryOSBackgroundLoopMessage]?
+
+    func complete(_ request: MemoryOSBackgroundLoopModelRequest) async throws -> MemoryOSBackgroundLoopModelResponse {
+        invocation += 1
+        switch invocation {
+        case 1:
+            return MemoryOSBackgroundLoopModelResponse(
+                assistantText: "I need to search existing memory first.",
+                toolCalls: [
+                    MemoryOSBackgroundToolCall(id: "tool-1", name: "memory_os_search", argumentsJSON: #"{"query":"stateless batch","layers":["L2","L3","L4"],"limit":5}"#)
+                ],
+                providerMetadata: AgentModelProviderMetadata(
+                    providerID: "anthropic-compatible",
+                    rawAssistantContentJSON: #"[{"type":"thinking","thinking":"Search first","signature":"sig"},{"type":"tool_use","id":"tool-1","name":"memory_os_search","input":{"query":"stateless batch"}}]"#,
+                    stopReason: "tool_use"
+                )
+            )
+        default:
+            capturedFollowUpMessages = request.messages
             return MemoryOSBackgroundLoopModelResponse(assistantText: "{}")
         }
     }

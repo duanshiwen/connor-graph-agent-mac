@@ -18,7 +18,7 @@ public struct AgentLoopCompactionConfiguration: Codable, Sendable, Equatable {
         compactionRatio: Double = 0.80,
         emergencyRatio: Double = 0.90,
         targetRatio: Double = 0.45,
-        minimumTokenGrowth: Int = 20_000,
+        minimumTokenGrowth: Int = 15_000,
         retainedRecentToolResults: Int = 2,
         largeResultByteThreshold: Int = 8 * 1_024
     ) {
@@ -46,7 +46,7 @@ public struct AgentLoopCompactionConfiguration: Codable, Sendable, Equatable {
             compactionRatio: try container.decodeIfPresent(Double.self, forKey: .compactionRatio) ?? 0.80,
             emergencyRatio: try container.decodeIfPresent(Double.self, forKey: .emergencyRatio) ?? 0.90,
             targetRatio: try container.decodeIfPresent(Double.self, forKey: .targetRatio) ?? 0.45,
-            minimumTokenGrowth: try container.decodeIfPresent(Int.self, forKey: .minimumTokenGrowth) ?? 20_000,
+            minimumTokenGrowth: try container.decodeIfPresent(Int.self, forKey: .minimumTokenGrowth) ?? 15_000,
             retainedRecentToolResults: try container.decodeIfPresent(Int.self, forKey: .retainedRecentToolResults) ?? 2,
             largeResultByteThreshold: try container.decodeIfPresent(Int.self, forKey: .largeResultByteThreshold) ?? 8 * 1_024
         )

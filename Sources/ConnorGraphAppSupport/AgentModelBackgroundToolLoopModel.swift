@@ -47,7 +47,8 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
         return MemoryOSBackgroundLoopModelResponse(
             assistantText: response.text ?? "",
             toolCalls: response.toolCalls.map(Self.memoryOSToolCall),
-            metadata: metadata
+            metadata: metadata,
+            providerMetadata: response.providerMetadata
         )
     }
 
@@ -67,7 +68,8 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
             content: message.content,
             toolCallID: message.toolCallID,
             name: message.toolName,
-            toolCalls: message.toolCalls?.map { AgentToolCall(id: $0.id, name: $0.name, argumentsJSON: $0.argumentsJSON) }
+            toolCalls: message.toolCalls?.map { AgentToolCall(id: $0.id, name: $0.name, argumentsJSON: $0.argumentsJSON) },
+            providerMetadata: message.providerMetadata
         )
     }
 

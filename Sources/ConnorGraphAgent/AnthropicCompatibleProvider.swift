@@ -45,7 +45,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         self.explicitVisionSupport = explicitVisionSupport
     }
 
-    private static func effectiveMaxTokens(requested: Int, thinking: AnthropicThinkingConfig?) -> Int {
+    static func effectiveMaxTokens(requested: Int, thinking: AnthropicThinkingConfig?) -> Int {
         guard case .enabled(let budgetTokens, _) = thinking else { return requested }
         return max(requested, budgetTokens + 10_000)
     }
@@ -335,7 +335,10 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         try validateVisionSendAllowed(request)
         var body: [String: Any] = [
             "model": config.requestModel,
-            "max_tokens": request.maxTokens ?? config.maxTokens,
+            "max_tokens": AnthropicCompatibleConfig.effectiveMaxTokens(
+                requested: request.maxTokens ?? config.maxTokens,
+                thinking: config.featureOptions.thinking
+            ),
             "messages": anthropicMessages(for: AgentModelMessageProtocolRepair.repairing(request.messages))
         ]
         if stream { body["stream"] = true }
