@@ -7,10 +7,26 @@ import UniformTypeIdentifiers
 
 struct AgentAttachmentContextPlanBuilder: Sendable {
     var storagePaths: AppStoragePaths?
-    var perAttachmentCharacterLimit: Int = 20_000
-    var totalCharacterLimit: Int = 60_000
+    var totalCharacterLimit: Int = Int(AttachmentImportPolicy.defaultTotalAcceptedCharacters)
     var maximumImageContextPixelSize: Int = 2_048
     var maximumImageContextBytes: Int = 4_000_000
+
+    /// 已提取文本附件的内容字符数；尚未提取或读取失败返回 nil。
+    static func extractedContentCharacterCount(
+        store: AppSessionAttachmentStore,
+        sessionID: String,
+        attachmentID: String
+    ) -> Int? {
+        guard let manifest = try? store.loadManifest(sessionID: sessionID, attachmentID: attachmentID),
+              manifest.extractionStatus == .extracted,
+              let relativePath = manifest.extractedTextRelativePath
+        else { return nil }
+        let url = store.paths.sessionArtifactDirectories(sessionID: sessionID)
+            .root
+            .appendingPathComponent(relativePath)
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        return content.count
+    }
 
     static func conversationAttachments(
         messages: [AgentMessage],
@@ -113,17 +129,23 @@ struct AgentAttachmentContextPlanBuilder: Sendable {
                 }
                 let url = storagePaths.sessionArtifactDirectories(sessionID: sessionID).root.appendingPathComponent(relativePath)
                 let content = try String(contentsOf: url, encoding: .utf8)
-                let limit = min(perAttachmentCharacterLimit, remainingBudget)
-                let isTruncated = content.count > limit
-                let inlineContent = isTruncated ? String(content.prefix(limit)) : content
-                remainingBudget -= inlineContent.count
+                // 附件要么完整纳入，要么明确拒绝：绝不截断后“半读”。
+                guard content.count <= remainingBudget else {
+                    omissions.append(AttachmentOmission(
+                        attachmentID: manifest.id,
+                        displayName: manifest.displayName,
+                        reason: "Total attachment prompt budget (\(totalCharacterLimit) characters) exhausted; remove earlier attachments to include this one in full."
+                    ))
+                    continue
+                }
+                remainingBudget -= content.count
                 inlineBlocks.append(AttachmentInlineBlock(
                     attachmentID: manifest.id,
                     displayName: manifest.displayName,
                     kind: manifest.kind,
-                    content: inlineContent,
+                    content: content,
                     sourceRelativePath: relativePath,
-                    isTruncated: isTruncated
+                    isTruncated: false
                 ))
             } catch {
                 omissions.append(AttachmentOmission(attachmentID: attachment.id, displayName: attachment.displayName, reason: "Failed to read extracted text: \(error)"))

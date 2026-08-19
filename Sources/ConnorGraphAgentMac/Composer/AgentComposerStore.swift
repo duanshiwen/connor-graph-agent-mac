@@ -1,6 +1,7 @@
 import Foundation
 import ConnorGraphCore
 import ConnorGraphAgent
+import ConnorGraphAppSupport
 
 @MainActor
 struct AgentComposerStore {
@@ -19,6 +20,7 @@ struct AgentComposerStore {
         return AgentComposerState(
             input: input,
             pendingAttachments: model.composer.pendingAttachmentRefs,
+            pendingAttachmentRejections: model.composer.pendingAttachmentRejections,
             activeSkillSlug: model.composer.activeSkillSlug,
             activeSkillDisplayName: model.composer.activeSkillDisplayName,
             canSubmit: canSubmit && !actions.session.isLoadingSelectedChatSessionDetail,

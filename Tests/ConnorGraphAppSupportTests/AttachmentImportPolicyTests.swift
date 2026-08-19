@@ -168,4 +168,41 @@ struct AttachmentImportPolicyTests {
         let unknown = AttachmentImportPolicy.rejectionReason(forExtension: "weird")
         #expect(unknown == .unsupportedUnknownExtension("weird"))
     }
+
+    @Test func rejectsTextContentAboveTotalTokenBudget() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let overBudget = root.appendingPathComponent("over-budget.txt")
+        try String(repeating: "x", count: 120_001).write(to: overBudget, atomically: true, encoding: .utf8)
+
+        let policy = AttachmentImportPolicy()
+        let expected = AttachmentImportRejectionReason.totalAttachmentBudgetExceeded(Int64(AttachmentImportPolicy.defaultTotalAcceptedCharacters))
+        #expect(policy.validate(url: overBudget) == .rejected(expected))
+
+        // 字节数 > 4×字符上限时内容必然超限，无需读盘直接拒绝。
+        let huge = root.appendingPathComponent("huge.txt")
+        try Data(repeating: 0x61, count: 600_000).write(to: huge)
+        #expect(policy.validate(url: huge) == .rejected(expected))
+    }
+
+    @Test func rejectsFilesAboveSingleFile512MBLimitAndImagesAbove5MB() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        func sparseFile(name: String, bytes: UInt64) throws -> URL {
+            let url = root.appendingPathComponent(name)
+            try Data([0x61]).write(to: url)
+            let handle = try FileHandle(forWritingTo: url)
+            try handle.truncate(atOffset: bytes)
+            try handle.close()
+            return url
+        }
+
+        let oversizedText = try sparseFile(name: "oversized.txt", bytes: 512_000_001)
+        #expect(AttachmentImportPolicy().validate(url: oversizedText) == .rejected(.fileTooLarge(512_000_000)))
+
+        let oversizedImage = try sparseFile(name: "oversized.png", bytes: 5_000_001)
+        #expect(AttachmentImportPolicy().validate(url: oversizedImage) == .rejected(.fileTooLarge(5_000_000)))
+        let edgeImage = try sparseFile(name: "edge.png", bytes: 5_000_000)
+        #expect(AttachmentImportPolicy().validate(url: edgeImage) == .accepted(kind: .image))
+    }
 }

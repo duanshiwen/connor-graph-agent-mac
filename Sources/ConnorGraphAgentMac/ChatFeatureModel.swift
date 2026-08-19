@@ -126,6 +126,10 @@ final class ChatSessionListModel {
 final class ChatComposerModel {
     var input = "" { didSet { if !isApplyingInput { onInputChanged(input) } } }
     var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
+    /// 当前会话中“已加入但未生效”的附件（附件ID → 拒绝原因），用于在附件条上标记。
+    var pendingAttachmentRejections: [String: AttachmentImportRejectionReason] = [:]
+    /// 要求用户确认已了解附件未生效的弹窗载荷。
+    var attachmentRejectionAlert: AgentAttachmentRejectionAlert?
     var attachmentPreviewModel: AttachmentPreviewModel?
     var attachmentToast: AgentChatToast?
     var speechTranscriptionStatus: SessionSpeechTranscriptionStatus = .idle
@@ -138,6 +142,19 @@ final class ChatComposerModel {
     @ObservationIgnored var onInputChanged: (String) -> Void = { _ in }
 
     func applyInput(_ value: String) { isApplyingInput = true; input = value; isApplyingInput = false }
+
+    /// 排除未生效附件后的待发送附件（未生效附件保留在条上供用户查看/移除，但不会发送）。
+    var pendingActiveAttachmentRefs: [AgentMessageAttachmentRef] {
+        pendingAttachmentRefs.filter { pendingAttachmentRejections[$0.id] == nil }
+    }
+}
+
+/// 附件未生效确认弹窗：用户必须明确“知道了”，避免误以为静默丢失是程序问题。
+struct AgentAttachmentRejectionAlert: Identifiable, Equatable {
+    var id = UUID()
+    var title: String
+    var message: String
+    var rejected: [AttachmentRejectedFile]
 }
 
 @MainActor

@@ -20,6 +20,33 @@ struct ChatFeatureModelTests {
         #expect(changes == ["manual draft"])
     }
 
+    @Test func rejectedAttachmentsStayVisibleButAreExcludedFromSubmission() {
+        let model = ChatComposerModel()
+        let active = AgentMessageAttachmentRef(
+            id: "active",
+            displayName: "active.md",
+            kind: .markdown,
+            byteCount: 10,
+            lifecycleStatus: .ready,
+            extractionStatus: .extracted,
+            manifestRelativePath: "active/manifest.json"
+        )
+        let rejected = AgentMessageAttachmentRef(
+            id: "rejected",
+            displayName: "rejected.pdf",
+            kind: .pdf,
+            byteCount: 10,
+            lifecycleStatus: .ready,
+            extractionStatus: .skippedOversize,
+            manifestRelativePath: "rejected/manifest.json"
+        )
+        model.pendingAttachmentRefs = [active, rejected]
+        model.pendingAttachmentRejections = [rejected.id: .contentTooLargeForExtraction]
+
+        #expect(model.pendingAttachmentRefs.count == 2)
+        #expect(model.pendingActiveAttachmentRefs.map(\.id) == ["active"])
+    }
+
     @Test func sessionListOwnsSelectionFilteringReadAndArtifactState() {
         let model = ChatSessionListModel()
         let artifacts = AgentSessionArtifactDirectories(root: URL(fileURLWithPath: "/tmp/session"))

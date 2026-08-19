@@ -21,17 +21,11 @@ public actor NoteImportAttachmentImporter {
     private let policy: AttachmentImportPolicy
     private var importedBySessionAndHash: [String: AgentAttachmentManifest] = [:]
 
-    /// 笔记导入使用比日常聊天更宽松的附件策略：
-    /// Notion/Obsidian 等导出的图片可能超过默认 10 MB 上限，放宽图片限制避免导入被拒绝。
+    /// 笔记导入与日常聊天共用同一附件策略：
+    /// 单文件上限 512MB（图片 5MB），内容总量按 token 上限校验，超限拒绝而非截断。
     public init(
         store: AppSessionAttachmentStore,
-        policy: AttachmentImportPolicy = AttachmentImportPolicy(
-            maxAcceptedBytes: 512_000,
-            maxImageBytes: 100_000_000,
-            maxDocumentBytes: 25_000_000,
-            maxAudioBytes: 50_000_000,
-            maxVideoBytes: 200_000_000
-        )
+        policy: AttachmentImportPolicy = AttachmentImportPolicy()
     ) {
         self.store = store
         self.policy = policy

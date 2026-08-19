@@ -39,6 +39,54 @@ struct AppSessionAttachmentStoreImportPolicyTests {
         #expect(!FileManager.default.fileExists(atPath: ledgerURL.path))
     }
 
+    @Test func rejectsTextAttachmentWhoseContentExceedsTotalBudgetWithoutLeavingArtifacts() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let source = root.appendingPathComponent("long.txt")
+        try String(repeating: "长", count: 120_001).write(to: source, atomically: true, encoding: .utf8)
+
+        do {
+            _ = try AppSessionAttachmentStore(paths: paths).importFile(at: source, sessionID: "s")
+            Issue.record("Expected total-budget import to be rejected")
+        } catch let error as AppSessionAttachmentImportError {
+            if case .rejected(let filename, let reason) = error {
+                #expect(filename == "long.txt")
+                if case .totalAttachmentBudgetExceeded = reason {} else {
+                    Issue.record("Expected .totalAttachmentBudgetExceeded, got \(reason)")
+                }
+            } else {
+                Issue.record("Expected .rejected, got \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+
+        let attachmentsDir = paths.sessionArtifactDirectories(sessionID: "s").attachments
+        #expect(!FileManager.default.fileExists(atPath: attachmentsDir.path))
+    }
+
+    @Test func acceptsTextAttachmentBelowTotalBudgetWithoutPerFileCharacterLimit() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let source = root.appendingPathComponent("medium.txt")
+        // 30,000 字符远大于旧的单附件上限，但在 60,000 字符总量内，应完整导入。
+        try String(repeating: "中", count: 30_000).write(to: source, atomically: true, encoding: .utf8)
+
+        let manifest = try AppSessionAttachmentStore(paths: paths).importFile(at: source, sessionID: "s")
+
+        #expect(manifest.kind == .text)
+        #expect(manifest.extractionStatus == .extracted)
+        #expect(manifest.extractedTextRelativePath != nil)
+        let stored = try String(
+            contentsOf: paths.sessionArtifactDirectories(sessionID: "s").root
+                .appendingPathComponent(manifest.extractedTextRelativePath!),
+            encoding: .utf8
+        )
+        #expect(stored.count == 30_000)
+    }
+
     @Test func importsImageAsStoredAttachmentWithoutTextDerivative() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let paths = AppStoragePaths(applicationSupportDirectory: root)

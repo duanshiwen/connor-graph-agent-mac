@@ -394,12 +394,10 @@ final class AppRuntimeLifecycle {
     private func buildAttachmentContextPlan(
         sessionID: String,
         attachments: [AgentMessageAttachmentRef],
-        perAttachmentCharacterLimit: Int = 20_000,
-        totalCharacterLimit: Int = 60_000
+        totalCharacterLimit: Int = Int(AttachmentImportPolicy.defaultTotalAcceptedCharacters)
     ) -> AttachmentContextPlan {
         AgentAttachmentContextPlanBuilder(
             storagePaths: storagePaths,
-            perAttachmentCharacterLimit: perAttachmentCharacterLimit,
             totalCharacterLimit: totalCharacterLimit
         ).build(sessionID: sessionID, attachments: attachments)
     }
@@ -409,12 +407,10 @@ final class AppRuntimeLifecycle {
         attachments: [AgentMessageAttachmentRef],
         preservingAttachmentIDs: Set<String> = [],
         deferredMediaAttachmentIDs: Set<String> = [],
-        perAttachmentCharacterLimit: Int = 20_000,
-        totalCharacterLimit: Int = 60_000
+        totalCharacterLimit: Int = Int(AttachmentImportPolicy.defaultTotalAcceptedCharacters)
     ) async -> AttachmentContextPlan {
         let builder = AgentAttachmentContextPlanBuilder(
             storagePaths: storagePaths,
-            perAttachmentCharacterLimit: perAttachmentCharacterLimit,
             totalCharacterLimit: totalCharacterLimit
         )
         return await Task.detached(priority: .utility) {
@@ -3409,7 +3405,7 @@ final class AppRuntimeLifecycle {
     ) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let attachmentsForSubmission = explicitAttachments ?? chatFeatureModel.composer.pendingAttachmentRefs
+        let attachmentsForSubmission = explicitAttachments ?? chatFeatureModel.composer.pendingActiveAttachmentRefs
         guard !prompt.isEmpty || !attachmentsForSubmission.isEmpty else { return nil }
         guard !isLoadingSelectedChatSessionDetail else { return nil }
         guard var manager = chatRunCoordinator.manager else {
