@@ -24,7 +24,7 @@ public struct AppSessionAttachmentStore: Sendable {
         policy: AttachmentImportPolicy? = nil
     ) throws -> AgentAttachmentManifest {
         let fileManager = FileManager.default
-        let importPolicy = policy ?? AttachmentImportPolicy(maxAcceptedBytes: maxTextExtractionBytes)
+        let importPolicy = policy ?? AttachmentImportPolicy()
         let originalFilename = sourceURL.lastPathComponent
         let validation = importPolicy.validate(url: sourceURL, fileManager: fileManager)
         let kind: AgentAttachmentKind

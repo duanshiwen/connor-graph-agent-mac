@@ -43,6 +43,9 @@ public enum AttachmentImportRejectionReason: Sendable, Equatable, CustomStringCo
     case unsupportedExecutableOrBinary
     case unsupportedUnknownExtension(String)
     case fileTooLarge(Int64)
+    case totalAttachmentBudgetExceeded(Int64)
+    case contentTooLargeForExtraction
+    case extractionFailed
     case invalidMediaContainer
 
     public var description: String { userMessage }
@@ -63,12 +66,21 @@ public enum AttachmentImportRejectionReason: Sendable, Equatable, CustomStringCo
         case .unsupportedExecutableOrBinary: return "暂不支持可执行、安装包或二进制文件"
         case .unsupportedUnknownExtension(let ext): return "暂不支持 .\(ext) 文件"
         case .fileTooLarge(let maxBytes): return "文件超过当前附件大小限制（\(ByteCountFormatter.string(fromByteCount: maxBytes, countStyle: .file))）"
+        case .totalAttachmentBudgetExceeded(let maxCharacters): return "附件内容超过本轮总量上限（\(maxCharacters) 个字符，约 \(maxCharacters / 4) token），无法完整纳入本次会话，请移除部分附件后再添加"
+        case .contentTooLargeForExtraction: return "附件内容过大，无法完整解析，未纳入本次会话"
+        case .extractionFailed: return "附件解析失败，未纳入本次会话"
         case .invalidMediaContainer: return "文件内容与音频格式不匹配或已损坏"
         }
     }
 }
 
 public struct AttachmentImportPolicy: Sendable {
+    /// 每次提交可完整纳入模型上下文的全部附件内容总上限（token 数）。
+    /// 代码库统一按“约 4 字符 ≈ 1 token”估算，故字符上限 = token × 4。
+    public static let defaultTotalAcceptedTokens: Int = 30_000
+    /// 与 [defaultTotalAcceptedTokens] 对应的字符上限（估算口径与上下文预算一致）。
+    public static let defaultTotalAcceptedCharacters: Int = defaultTotalAcceptedTokens * 4
+
     public var maxAcceptedBytes: Int64
     public var maxImageBytes: Int64
     public var maxDocumentBytes: Int64
@@ -76,11 +88,11 @@ public struct AttachmentImportPolicy: Sendable {
     public var maxVideoBytes: Int64
 
     public init(
-        maxAcceptedBytes: Int64 = 512_000,
-        maxImageBytes: Int64 = 10_000_000,
-        maxDocumentBytes: Int64 = 25_000_000,
-        maxAudioBytes: Int64 = 50_000_000,
-        maxVideoBytes: Int64 = 100_000_000
+        maxAcceptedBytes: Int64 = 512_000_000,
+        maxImageBytes: Int64 = 5_000_000,
+        maxDocumentBytes: Int64 = 512_000_000,
+        maxAudioBytes: Int64 = 512_000_000,
+        maxVideoBytes: Int64 = 512_000_000
     ) {
         self.maxAcceptedBytes = maxAcceptedBytes
         self.maxImageBytes = maxImageBytes
@@ -100,6 +112,19 @@ public struct AttachmentImportPolicy: Sendable {
         let byteLimit = byteLimit(for: kind)
         if let byteCount = try? byteCount(url: url, fileManager: fileManager), byteCount > byteLimit {
             return .rejected(.fileTooLarge(byteLimit))
+        }
+        if isTextLike(kind) {
+            let characterLimit = Int64(Self.defaultTotalAcceptedCharacters)
+            if let byteCount = try? byteCount(url: url, fileManager: fileManager), byteCount > 4 * characterLimit {
+                // UTF-8 最多 4 字节/字符：字节数超过 4×字符上限时内容必然超限，直接拒绝，无需读盘。
+                return .rejected(.totalAttachmentBudgetExceeded(characterLimit))
+            }
+            if let extracted = try? AttachmentTextExtraction.extract(fileURL: url, kind: kind, maxBytes: 4 * characterLimit),
+               extracted.status == .extracted,
+               let markdown = extracted.markdown,
+               Int64(markdown.count) > characterLimit {
+                return .rejected(.totalAttachmentBudgetExceeded(characterLimit))
+            }
         }
         if kind == .audio, fileManager.fileExists(atPath: url.path), !Self.hasValidAudioSignature(url: url, extension: ext) {
             return .rejected(.invalidMediaContainer)
@@ -156,6 +181,15 @@ public struct AttachmentImportPolicy: Sendable {
             return maxVideoBytes
         default:
             return maxAcceptedBytes
+        }
+    }
+
+    private func isTextLike(_ kind: AgentAttachmentKind) -> Bool {
+        switch kind {
+        case .text, .markdown, .json, .csv, .code:
+            return true
+        default:
+            return false
         }
     }
 

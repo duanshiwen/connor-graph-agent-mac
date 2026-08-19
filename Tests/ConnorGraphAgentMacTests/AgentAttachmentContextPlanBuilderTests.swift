@@ -24,6 +24,60 @@ struct AgentAttachmentContextPlanBuilderTests {
         #expect(plan.imageBlocks.isEmpty)
     }
 
+    @Test func omitsAttachmentThatDoesNotFitTotalBudgetInsteadOfTruncating() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("attachment-total-budget-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        let store = AppSessionAttachmentStore(paths: paths)
+        let sessionID = "session"
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        func importText(name: String, content: String) throws -> AgentAttachmentManifest {
+            let url = root.appendingPathComponent(name)
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            return try store.importFile(at: url, sessionID: sessionID)
+        }
+
+        let first = try importText(name: "first.md", content: String(repeating: "a", count: 12))
+        let second = try importText(name: "second.md", content: String(repeating: "b", count: 12))
+        let builder = AgentAttachmentContextPlanBuilder(
+            storagePaths: paths,
+            totalCharacterLimit: 15
+        )
+
+        let plan = builder.build(sessionID: sessionID, attachments: [first.messageRef, second.messageRef])
+
+        #expect(plan.inlineBlocks.count == 1)
+        #expect(plan.inlineBlocks.first?.attachmentID == first.id)
+        #expect(plan.inlineBlocks.first?.isTruncated == false)
+        #expect(plan.inlineBlocks.first?.content == String(repeating: "a", count: 12))
+        #expect(plan.omittedAttachments.count == 1)
+        #expect(plan.omittedAttachments.first?.attachmentID == second.id)
+        #expect(plan.omittedAttachments.first?.reason.contains("Total attachment prompt budget") == true)
+    }
+
+    @Test func includesSingleAttachmentWithinTotalBudgetInFull() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("attachment-in-budget-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        let sessionID = "session"
+        let source = root.appendingPathComponent("medium.md")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // 单个附件内容超过旧的 20,000 字符单附件上限，但只要低于总量上限就应完整纳入。
+        let content = String(repeating: "中", count: 30_000)
+        try content.write(to: source, atomically: true, encoding: .utf8)
+        let manifest = try AppSessionAttachmentStore(paths: paths).importFile(at: source, sessionID: sessionID)
+
+        let plan = AgentAttachmentContextPlanBuilder(storagePaths: paths)
+            .build(sessionID: sessionID, attachments: [manifest.messageRef])
+
+        #expect(plan.inlineBlocks.count == 1)
+        #expect(plan.inlineBlocks.first?.attachmentID == manifest.id)
+        #expect(plan.inlineBlocks.first?.isTruncated == false)
+        #expect(plan.inlineBlocks.first?.content.count == 30_000)
+        #expect(plan.omittedAttachments.isEmpty)
+    }
+
     @Test func rebuildsHistoricalImageFromStoredBytesAndDeduplicatesConversationAttachments() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("attachment-history-builder-\(UUID().uuidString)", isDirectory: true)
         let paths = AppStoragePaths(applicationSupportDirectory: root)

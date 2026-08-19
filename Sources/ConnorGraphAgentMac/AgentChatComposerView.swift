@@ -144,6 +144,7 @@ struct AgentChatComposerView: View {
                     if !composerState.pendingAttachments.isEmpty {
                         AgentAttachmentShelfView(
                             attachments: composerState.pendingAttachments,
+                            rejections: composerState.pendingAttachmentRejections,
                             onPreview: { attachment in sendComposerAction(.previewAttachment(attachment)) },
                             onRemove: { id in sendComposerAction(.removeAttachment(id)) }
                         )
@@ -264,6 +265,25 @@ struct AgentChatComposerView: View {
         .padding(0)
         .background(Color.clear)
         .animation(.easeInOut(duration: 0.22), value: attachmentLibraryModel != nil)
+        .alert(
+            model.composer.attachmentRejectionAlert?.title ?? "部分附件未生效",
+            isPresented: Binding(
+                get: { model.composer.attachmentRejectionAlert != nil },
+                set: { isPresented in
+                    if !isPresented { chatActions.composer.dismissAttachmentRejectionAlert(removeRejected: false) }
+                }
+            ),
+            presenting: model.composer.attachmentRejectionAlert
+        ) { _ in
+            Button("知道了") {
+                chatActions.composer.dismissAttachmentRejectionAlert(removeRejected: false)
+            }
+            Button("移除这些附件", role: .destructive) {
+                chatActions.composer.dismissAttachmentRejectionAlert(removeRejected: true)
+            }
+        } message: { alert in
+            Text(alert.message)
+        }
         .onAppear {
             localChatInput = model.composer.input
             installSpeechKeyboardMonitorIfNeeded()
@@ -552,7 +572,7 @@ struct AgentChatComposerView: View {
     }
 
     private var canSubmitLocalChat: Bool {
-        !localChatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.composer.pendingAttachmentRefs.isEmpty
+        !localChatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.composer.pendingActiveAttachmentRefs.isEmpty
     }
 
     private func removeSlashSkillPickerTriggerIfNeeded() {

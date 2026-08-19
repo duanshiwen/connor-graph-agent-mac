@@ -35,6 +35,7 @@ extension ChatSessionCommanding {
     func importAttachments(urls: [URL]) async -> AttachmentImportBatchResult
     func showAttachmentToast(title: String, message: String, systemImage: String)
     func removePendingAttachment(id: String)
+    func dismissAttachmentRejectionAlert(removeRejected: Bool)
     func previewAttachment(_ attachment: AgentMessageAttachmentRef)
     func localAttachmentFileURL(_ attachment: AgentMessageAttachmentRef) -> URL?
     func retryAttachmentExtraction(attachmentID: String)

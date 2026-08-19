@@ -11,6 +11,7 @@ enum ComposerDisplayMode: Equatable {
 struct AgentComposerState {
     var input: String
     var pendingAttachments: [AgentMessageAttachmentRef]
+    var pendingAttachmentRejections: [String: AttachmentImportRejectionReason] = [:]
     var activeSkillSlug: String?
     var activeSkillDisplayName: String?
     var canSubmit: Bool
@@ -30,6 +31,7 @@ struct AgentComposerState {
     init(
         input: String,
         pendingAttachments: [AgentMessageAttachmentRef],
+        pendingAttachmentRejections: [String: AttachmentImportRejectionReason] = [:],
         activeSkillSlug: String?,
         activeSkillDisplayName: String?,
         canSubmit: Bool,
@@ -48,6 +50,7 @@ struct AgentComposerState {
     ) {
         self.input = input
         self.pendingAttachments = pendingAttachments
+        self.pendingAttachmentRejections = pendingAttachmentRejections
         self.activeSkillSlug = activeSkillSlug
         self.activeSkillDisplayName = activeSkillDisplayName
         self.canSubmit = canSubmit

@@ -18,6 +18,7 @@ final class ChatComposerCoordinator {
     private var liveDraftSessionID: String?
     private var liveDraft = ""
     private var pendingAttachmentsBySessionID: [String: [AgentMessageAttachmentRef]] = [:]
+    private var pendingAttachmentRejectionsBySessionID: [String: [String: AttachmentImportRejectionReason]] = [:]
     private var toastTask: Task<Void, Never>?
     private var importTasks: [UUID: Task<Void, Never>] = [:]
     private var extractionTasksBySessionID: [String: Task<Void, Never>] = [:]
@@ -45,7 +46,7 @@ final class ChatComposerCoordinator {
     }
 
     var canSubmit: Bool {
-        !model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.pendingAttachmentRefs.isEmpty
+        !model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.pendingActiveAttachmentRefs.isEmpty
     }
 
     var isSpeechRunningForSelectedSession: Bool { speech.isRunning(sessionID: selectedSessionID()) }
@@ -87,6 +88,8 @@ final class ChatComposerCoordinator {
         else { draft = "" }
         setPublishedDraft(draft, sessionID: sessionID)
         model.pendingAttachmentRefs = sessionID.flatMap { pendingAttachmentsBySessionID[$0] } ?? []
+        model.pendingAttachmentRejections = sessionID.flatMap { pendingAttachmentRejectionsBySessionID[$0] } ?? [:]
+        model.attachmentRejectionAlert = nil
         // 技能与草稿/附件一样按会话隔离：切换会话时恢复该会话自己选中的技能，
         // 避免上一个会话的技能“跟随”到新会话，也避免回到原会话后技能丢失。
         model.activeSkillSlug = sessionID.flatMap { activeSkillSlugBySessionID[$0] }
@@ -97,9 +100,12 @@ final class ChatComposerCoordinator {
         draftsBySessionID[sessionID] = ""
         draftPersistence?.remove(sessionID: sessionID)
         pendingAttachmentsBySessionID[sessionID] = []
+        pendingAttachmentRejectionsBySessionID[sessionID] = [:]
         if selectedSessionID() == sessionID {
             setPublishedDraft("", sessionID: sessionID)
             model.pendingAttachmentRefs = []
+            model.pendingAttachmentRejections = [:]
+            model.attachmentRejectionAlert = nil
         }
     }
 
@@ -108,6 +114,7 @@ final class ChatComposerCoordinator {
         draftsBySessionID.removeValue(forKey: sessionID)
         draftPersistence?.remove(sessionID: sessionID)
         pendingAttachmentsBySessionID.removeValue(forKey: sessionID)
+        pendingAttachmentRejectionsBySessionID.removeValue(forKey: sessionID)
         activeSkillSlugBySessionID.removeValue(forKey: sessionID)
         activeSkillDisplayNameBySessionID.removeValue(forKey: sessionID)
         if liveDraftSessionID == sessionID { liveDraftSessionID = nil; liveDraft = "" }
@@ -155,7 +162,11 @@ final class ChatComposerCoordinator {
 
     func removePendingAttachment(id: String) {
         model.pendingAttachmentRefs.removeAll { $0.id == id }
-        if let sessionID = selectedSessionID() { pendingAttachmentsBySessionID[sessionID] = model.pendingAttachmentRefs }
+        if let sessionID = selectedSessionID() {
+            pendingAttachmentsBySessionID[sessionID] = model.pendingAttachmentRefs
+            pendingAttachmentRejectionsBySessionID[sessionID]?.removeValue(forKey: id)
+            model.pendingAttachmentRejections = pendingAttachmentRejectionsBySessionID[sessionID] ?? [:]
+        }
     }
 
     func preview(_ attachment: AgentMessageAttachmentRef) {
@@ -186,11 +197,30 @@ final class ChatComposerCoordinator {
         let store = AppSessionAttachmentStore(paths: storagePaths)
         var imported: [AgentMessageAttachmentRef] = []
         var rejected: [AttachmentRejectedFile] = []
+        var usedCharacters = pendingAttachmentCharacterTotal(sessionID: sessionID, store: store)
+        let totalCharacterLimit = Int(AttachmentImportPolicy.defaultTotalAcceptedCharacters)
         for url in urls {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-            do { imported.append(try store.importFile(at: url, sessionID: sessionID).messageRef) }
-            catch let error as AppSessionAttachmentImportError {
+            do {
+                let manifest = try store.importFile(at: url, sessionID: sessionID)
+                let ref = manifest.messageRef
+                if let characters = AgentAttachmentContextPlanBuilder.extractedContentCharacterCount(
+                    store: store,
+                    sessionID: sessionID,
+                    attachmentID: manifest.id
+                ) {
+                    guard usedCharacters + characters <= totalCharacterLimit else {
+                        rejected.append(AttachmentRejectedFile(
+                            filename: url.lastPathComponent,
+                            reason: .totalAttachmentBudgetExceeded(Int64(totalCharacterLimit))
+                        ))
+                        continue
+                    }
+                    usedCharacters += characters
+                }
+                imported.append(ref)
+            } catch let error as AppSessionAttachmentImportError {
                 if case .rejected(let filename, let reason) = error { rejected.append(AttachmentRejectedFile(filename: filename, reason: reason)) }
             } catch {
                 rejected.append(AttachmentRejectedFile(filename: url.lastPathComponent, reason: .unsupportedUnknownExtension(url.pathExtension.isEmpty ? "unknown" : url.pathExtension.lowercased())))
@@ -206,7 +236,7 @@ final class ChatComposerCoordinator {
             AttachmentLibraryRegistration.register(urls: urls, paths: storagePaths)
         }
         let result = AttachmentImportBatchResult(accepted: imported, rejected: rejected)
-        if !rejected.isEmpty { showImportToast(result) }
+        if !rejected.isEmpty { presentAttachmentRejectionAlert(rejected) }
         return result
     }
 
@@ -316,7 +346,11 @@ final class ChatComposerCoordinator {
                 try await queue.drain(sessionID: sessionID)
                 try Task.checkCancellation()
                 guard self.generation == currentGeneration else { return }
+                let rejections = self.rejectOversizePendingAttachments(sessionID: sessionID)
                 self.refreshPendingAttachments(sessionID: sessionID)
+                if !rejections.isEmpty {
+                    self.presentAttachmentRejectionAlert(rejections)
+                }
             } catch is CancellationError { return }
             catch { self.showToast(title: "附件解析失败", message: String(describing: error), systemImage: "exclamationmark.triangle") }
         }
@@ -335,12 +369,103 @@ final class ChatComposerCoordinator {
         }
     }
 
-    private func showImportToast(_ result: AttachmentImportBatchResult) {
-        let supported = "Connor 当前支持添加文本、Markdown、日志、JSON/JSONL、CSV/TSV、XML/YAML、代码文件、常见图片（PNG/JPEG/GIF/WebP/HEIC/BMP/ICO/TIFF），以及 PDF、Word、Excel、PowerPoint 和 Apple iWork（Pages/Numbers/Keynote）文档附件。暂不支持 HTML、音频、视频、压缩包、SVG/AVIF、数据库、可执行文件或未知格式。"
-        let lines = result.rejected.prefix(8).map { "- \($0.filename)：\($0.reason.userMessage)" }.joined(separator: "\n")
-        let remaining = result.rejected.count > 8 ? "\n…另有 \(result.rejected.count - 8) 个文件未添加" : ""
-        let message = result.accepted.isEmpty ? "\(supported)\n\n未添加：\n\(lines)\(remaining)" : "已添加 \(result.accepted.count) 个附件，\(result.rejected.count) 个文件未添加。\n\n\(supported)\n\n未添加：\n\(lines)\(remaining)"
-        showToast(title: result.accepted.isEmpty ? "附件未添加" : "部分附件未添加", message: message, systemImage: result.accepted.isEmpty ? "xmark.circle" : "exclamationmark.triangle")
+    /// 已提取附件的内容字符数之和（尚未提取的文档先按 0 计，提取完成后会再次校验）。
+    private func pendingAttachmentCharacterTotal(sessionID: String, store: AppSessionAttachmentStore) -> Int {
+        (pendingAttachmentsBySessionID[sessionID] ?? []).reduce(into: 0) { total, ref in
+            if let characters = AgentAttachmentContextPlanBuilder.extractedContentCharacterCount(
+                store: store,
+                sessionID: sessionID,
+                attachmentID: ref.id
+            ) {
+                total += characters
+            }
+        }
+    }
+
+    /// 提取完成后校验：无法完整解析或推高总量上限的附件在附件条上标记“未生效”，
+    /// 保留在列表中供用户查看/移除，绝不静默取消；返回本次新增的拒绝项用于弹窗确认。
+    @discardableResult
+    private func rejectOversizePendingAttachments(sessionID: String) -> [AttachmentRejectedFile] {
+        guard let storagePaths else { return [] }
+        let store = AppSessionAttachmentStore(paths: storagePaths)
+        let totalCharacterLimit = Int(AttachmentImportPolicy.defaultTotalAcceptedCharacters)
+        var pending = pendingAttachmentsBySessionID[sessionID] ?? []
+        var rejectionsByID = pendingAttachmentRejectionsBySessionID[sessionID] ?? [:]
+        var newlyRejected: [AttachmentRejectedFile] = []
+
+        // 1) 无法完整解析的附件（内容过大被跳过 / 解析失败）标记未生效。
+        for ref in pending where rejectionsByID[ref.id] == nil {
+            let reason: AttachmentImportRejectionReason?
+            switch ref.extractionStatus {
+            case .skippedOversize:
+                reason = .contentTooLargeForExtraction
+            case .failed:
+                reason = .extractionFailed
+            default:
+                reason = nil
+            }
+            if let reason {
+                rejectionsByID[ref.id] = reason
+                newlyRejected.append(AttachmentRejectedFile(id: ref.id, filename: ref.displayName, reason: reason))
+            }
+        }
+
+        // 2) 总量超限：按添加顺序保留先加入的附件，标记后续放不下的；被标记的附件不再占用预算。
+        var usedCharacters = 0
+        for ref in pending {
+            if rejectionsByID[ref.id] != nil { continue }
+            let characters = AgentAttachmentContextPlanBuilder.extractedContentCharacterCount(
+                store: store,
+                sessionID: sessionID,
+                attachmentID: ref.id
+            ) ?? 0
+            if usedCharacters + characters > totalCharacterLimit {
+                rejectionsByID[ref.id] = .totalAttachmentBudgetExceeded(Int64(totalCharacterLimit))
+                newlyRejected.append(AttachmentRejectedFile(
+                    id: ref.id,
+                    filename: ref.displayName,
+                    reason: .totalAttachmentBudgetExceeded(Int64(totalCharacterLimit))
+                ))
+            } else {
+                usedCharacters += characters
+            }
+        }
+        pendingAttachmentRejectionsBySessionID[sessionID] = rejectionsByID
+        syncPendingAttachmentRejections(sessionID: sessionID)
+        return newlyRejected
+    }
+
+    /// 未生效附件确认弹窗：要求用户明确知道附件不会被发送，避免误以为是程序问题。
+    func dismissAttachmentRejectionAlert(removeRejected: Bool) {
+        let alert = model.attachmentRejectionAlert
+        if removeRejected, let sessionID = selectedSessionID(), let alert {
+            let rejectedIDs = Set(alert.rejected.map(\.id))
+            model.pendingAttachmentRefs.removeAll { rejectedIDs.contains($0.id) }
+            pendingAttachmentsBySessionID[sessionID] = model.pendingAttachmentRefs
+            for id in rejectedIDs {
+                pendingAttachmentRejectionsBySessionID[sessionID]?.removeValue(forKey: id)
+            }
+            model.pendingAttachmentRejections = pendingAttachmentRejectionsBySessionID[sessionID] ?? [:]
+        }
+        model.attachmentRejectionAlert = nil
+    }
+
+    private func presentAttachmentRejectionAlert(_ rejected: [AttachmentRejectedFile]) {
+        guard !isShutdown, !rejected.isEmpty else { return }
+        let lines = rejected.prefix(8)
+            .map { "- \($0.filename)：\($0.reason.userMessage)" }
+            .joined(separator: "\n")
+        let remaining = rejected.count > 8 ? "\n…还有 \(rejected.count - 8) 个附件未发送" : ""
+        model.attachmentRejectionAlert = AgentAttachmentRejectionAlert(
+            title: "部分附件不会发送",
+            message: "以下附件不会随消息发送给助手：\n\(lines)\(remaining)\n\n它们会保留在附件栏并标记“未发送”，你可以移除，或先移除部分附件后再重新添加。",
+            rejected: rejected
+        )
+    }
+
+    private func syncPendingAttachmentRejections(sessionID: String) {
+        guard selectedSessionID() == sessionID else { return }
+        model.pendingAttachmentRejections = pendingAttachmentRejectionsBySessionID[sessionID] ?? [:]
     }
 
     func shutdown() {
