@@ -150,6 +150,7 @@ struct AttachmentLibraryPickerView: View {
     /// 内嵌形态下点击关闭/返回时调用；缺省时走系统 dismiss（弹窗形态）。
     var onCollapse: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @State private var previewTarget: AttachmentLibraryPreviewTarget?
 
     private var selectedURLs: [URL] {
         model.items.filter { model.selectedIDs.contains($0.fileID) }.map { model.localURL(for: $0) }
@@ -171,6 +172,9 @@ struct AttachmentLibraryPickerView: View {
         .frame(maxWidth: 600)
         .frame(height: preferredHeight)
         .onAppear { if !model.hasLoadedOnce { model.reload() } }
+        .sheet(item: $previewTarget) { target in
+            AttachmentLibraryQuickPreviewSheet(url: target.url, title: target.title)
+        }
     }
 
     private var header: some View {
@@ -306,40 +310,59 @@ struct AttachmentLibraryPickerView: View {
 
     private func row(_ record: FileArtifactRecord) -> some View {
         let isSelected = model.selectedIDs.contains(record.fileID)
-        return Button {
-            model.toggle(record)
-            if !model.allowsMultipleSelection {
-                onPick([model.localURL(for: record)])
-            }
-        } label: {
-            HStack(spacing: 10) {
-                if model.allowsMultipleSelection {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+        return HStack(spacing: 0) {
+            Button {
+                model.toggle(record)
+                if !model.allowsMultipleSelection {
+                    onPick([model.localURL(for: record)])
                 }
-                Image(systemName: Self.systemImage(for: record.kind))
-                    .foregroundStyle(.tint)
-                    .frame(width: 26)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(record.originalName).lineLimit(1).truncationMode(.middle)
-                    if let summary = record.summary, !summary.isEmpty {
-                        Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            } label: {
+                HStack(spacing: 10) {
+                    if model.allowsMultipleSelection {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     }
-                    HStack(spacing: 8) {
-                        Text(Self.byteCountText(record.byteCount))
-                        Text(Self.dateText(record.lastSeenAt))
-                        Text(record.source.title)
+                    Image(systemName: Self.systemImage(for: record.kind))
+                        .foregroundStyle(.tint)
+                        .frame(width: 26)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(record.originalName).lineLimit(1).truncationMode(.middle)
+                        if let summary = record.summary, !summary.isEmpty {
+                            Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        HStack(spacing: 8) {
+                            Text(Self.byteCountText(record.byteCount))
+                            Text(Self.dateText(record.lastSeenAt))
+                            Text(record.source.title)
+                        }
+                        .font(.caption2).foregroundStyle(.tertiary)
                     }
-                    .font(.caption2).foregroundStyle(.tertiary)
+                    Spacer()
                 }
-                Spacer()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+                .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-            .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
+            .buttonStyle(.plain)
+
+            Button {
+                previewTarget = AttachmentLibraryPreviewTarget(
+                    url: model.localURL(for: record),
+                    title: record.originalName
+                )
+            } label: {
+                Image(systemName: "eye")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("预览附件")
+            .accessibilityLabel("预览附件 \(record.originalName)")
+            .padding(.trailing, 12)
         }
-        .buttonStyle(.plain)
         .onAppear { model.loadMoreIfNeeded(current: record) }
     }
 
@@ -485,5 +508,50 @@ enum AttachmentLibraryRegistration {
     /// 单聊/群聊只把文件与视频纳入附件库；图片与语音不进（避免图片/录音刷屏附件库）。
     static func shouldRegister(imMessageType: ImMessageType) -> Bool {
         imMessageType != .image && imMessageType != .audio
+    }
+}
+
+/// 附件库预览目标：从列表行点击“预览”时暂存，供 sheet 展示。
+private struct AttachmentLibraryPreviewTarget: Identifiable {
+    let id = UUID()
+    let url: URL
+    let title: String
+}
+
+/// 附件库内嵌的附件预览窗口：使用系统 Quick Look 渲染任意可预览文件。
+private struct AttachmentLibraryQuickPreviewSheet: View {
+    let url: URL
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "eye")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.tint)
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .help("关闭预览")
+            }
+            .padding(12)
+            Divider()
+            NativeFileQuickLookPreview(fileURL: url)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(minWidth: 520, minHeight: 460)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
