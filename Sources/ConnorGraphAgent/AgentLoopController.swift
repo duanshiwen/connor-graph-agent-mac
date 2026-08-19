@@ -6,6 +6,8 @@ import os.log
 public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var maxToolIterations: Int
     public var maxToolCallsPerIteration: Int
+    /// 同一阶段内允许的最大模型轮次；超过后运行时注入阶段收敛提示，防止研究/执行阶段空转。
+    public var maxToolIterationsPerPhase: Int
     public var maxRunDurationSeconds: Int
     public var toolExecutionTimeoutSeconds: Int
     public var maxToolResultBytes: Int
@@ -17,6 +19,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var promptMaxEstimatedTokens: Int
     public var modelContextWindowTokens: Int?
     public var reservedOutputTokens: Int
+    /// 单次模型请求的默认输出 token 上限；nil 以外的显式 maxTokens 优先。互动网页等长代码任务另行放大。
+    public var defaultMaxOutputTokens: Int
     public var permissionMode: AgentPermissionMode
     public var instructionAppendix: String
     public var budget: AgentBudgetConfiguration
@@ -26,7 +30,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
 
     public init(
         maxToolIterations: Int = 100,
-        maxToolCallsPerIteration: Int = 4,
+        maxToolCallsPerIteration: Int = 8,
+        maxToolIterationsPerPhase: Int = 60,
         maxRunDurationSeconds: Int = 1800,
         toolExecutionTimeoutSeconds: Int = 300,
         maxToolResultBytes: Int = 32 * 1_024,
@@ -38,6 +43,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         promptMaxEstimatedTokens: Int = 128_000,
         modelContextWindowTokens: Int? = nil,
         reservedOutputTokens: Int = 8_192,
+        defaultMaxOutputTokens: Int = 16_384,
         permissionMode: AgentPermissionMode = .askToWrite,
         instructionAppendix: String = "",
         budget: AgentBudgetConfiguration = AgentBudgetConfiguration(),
@@ -47,6 +53,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     ) {
         self.maxToolIterations = max(1, maxToolIterations)
         self.maxToolCallsPerIteration = max(1, maxToolCallsPerIteration)
+        self.maxToolIterationsPerPhase = max(1, maxToolIterationsPerPhase)
         self.maxRunDurationSeconds = max(1, maxRunDurationSeconds)
         self.toolExecutionTimeoutSeconds = max(1, toolExecutionTimeoutSeconds)
         self.maxToolResultBytes = max(0, maxToolResultBytes)
@@ -60,6 +67,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.promptMaxEstimatedTokens = max(1, promptMaxEstimatedTokens)
         self.modelContextWindowTokens = modelContextWindowTokens.map { max(1, $0) }
         self.reservedOutputTokens = max(1, reservedOutputTokens)
+        self.defaultMaxOutputTokens = max(1, defaultMaxOutputTokens)
         self.permissionMode = permissionMode
         self.instructionAppendix = instructionAppendix
         self.budget = budget
@@ -84,6 +92,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case maxToolIterations
         case maxToolCallsPerIteration
+        case maxToolIterationsPerPhase
         case maxRunDurationSeconds
         case toolExecutionTimeoutSeconds
         case maxToolResultBytes
@@ -95,6 +104,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         case promptMaxEstimatedTokens
         case modelContextWindowTokens
         case reservedOutputTokens
+        case defaultMaxOutputTokens
         case permissionMode
         case instructionAppendix
         case budget
@@ -106,7 +116,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.maxToolIterations = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 100)
-        self.maxToolCallsPerIteration = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 4)
+        self.maxToolCallsPerIteration = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 8)
+        self.maxToolIterationsPerPhase = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterationsPerPhase) ?? 60)
         self.maxRunDurationSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800)
         self.toolExecutionTimeoutSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .toolExecutionTimeoutSeconds) ?? 300)
         self.maxToolResultBytes = max(0, try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1_024)
@@ -119,6 +130,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.promptMaxEstimatedTokens = max(1, try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 128_000)
         self.modelContextWindowTokens = try container.decodeIfPresent(Int.self, forKey: .modelContextWindowTokens).map { max(1, $0) }
         self.reservedOutputTokens = max(1, try container.decodeIfPresent(Int.self, forKey: .reservedOutputTokens) ?? 8_192)
+        self.defaultMaxOutputTokens = max(1, try container.decodeIfPresent(Int.self, forKey: .defaultMaxOutputTokens) ?? 16_384)
         self.permissionMode = try container.decodeIfPresent(AgentPermissionMode.self, forKey: .permissionMode) ?? .askToWrite
         self.instructionAppendix = try container.decodeIfPresent(String.self, forKey: .instructionAppendix) ?? ""
         self.budget = try container.decodeIfPresent(AgentBudgetConfiguration.self, forKey: .budget) ?? AgentBudgetConfiguration()
@@ -131,6 +143,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(maxToolIterations, forKey: .maxToolIterations)
         try container.encode(maxToolCallsPerIteration, forKey: .maxToolCallsPerIteration)
+        try container.encode(maxToolIterationsPerPhase, forKey: .maxToolIterationsPerPhase)
         try container.encode(maxRunDurationSeconds, forKey: .maxRunDurationSeconds)
         try container.encode(toolExecutionTimeoutSeconds, forKey: .toolExecutionTimeoutSeconds)
         try container.encode(maxToolResultBytes, forKey: .maxToolResultBytes)
@@ -142,6 +155,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         try container.encode(promptMaxEstimatedTokens, forKey: .promptMaxEstimatedTokens)
         try container.encodeIfPresent(modelContextWindowTokens, forKey: .modelContextWindowTokens)
         try container.encode(reservedOutputTokens, forKey: .reservedOutputTokens)
+        try container.encode(defaultMaxOutputTokens, forKey: .defaultMaxOutputTokens)
         try container.encode(permissionMode, forKey: .permissionMode)
         try container.encode(instructionAppendix, forKey: .instructionAppendix)
         try container.encode(budget, forKey: .budget)
@@ -431,6 +445,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     var consecutiveToolResultErrors = 0
                     var forceFinalSynthesisWithoutTools = false
                     var didInjectBudgetConvergence = false
+                    var didInjectBudgetHardStop = false
+                    var phaseRoundCounts: [AgentLoopPhase: Int] = [:]
+                    var didPhaseConvergenceNudge: Set<AgentLoopPhase> = []
                     var phasedResearchSignatures = Set<String>()
                     var correctionContinueCounts: [String: Int] = [:]
                     let maxCorrectionContinuesPerCategory = 3
@@ -481,6 +498,18 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }
                         }
                         iterationCount += 1
+                        phaseRoundCounts[phasedState.phase, default: 0] += 1
+                        if phaseRoundCounts[phasedState.phase, default: 0] > configuration.maxToolIterationsPerPhase,
+                           !didPhaseConvergenceNudge.contains(phasedState.phase) {
+                            didPhaseConvergenceNudge.insert(phasedState.phase)
+                            messages.append(AgentModelMessage(
+                                role: .system,
+                                content: Self.phaseConvergenceInstruction(
+                                    phase: phasedState.phase,
+                                    roundLimit: configuration.maxToolIterationsPerPhase
+                                )
+                            ))
+                        }
                         logger.info("Assistant turn \(iterationCount)/\(configuration.maxToolIterations + 1)")
                         yield(.turnStarted(AgentTurnStartedEvent(
                             runID: run.id,
@@ -703,17 +732,38 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         logger.info("Model response: \(modelResponse.toolCalls.count) tool calls, has text: \(modelResponse.text != nil)")
 
                         let budgetSnapshot = await budgetMeter.record(modelResponse.usage)
-                        let budgetExceeded = budgetSnapshot.status == .exceeded
+                        let budgetHardExceeded = budgetSnapshot.status == .hardExceeded
+                        let budgetExceeded = budgetHardExceeded || budgetSnapshot.status == .exceeded
                         if budgetSnapshot.status == .warning || budgetExceeded {
-                            let label = budgetExceeded ? "Token budget exceeded" : "Token budget warning"
-                            let suffix = budgetExceeded
-                                ? " Continuing toward task completion with compaction and only indispensable remaining work."
-                                : ""
+                            let label: String
+                            let suffix: String
+                            if budgetHardExceeded {
+                                label = "Hard token budget exceeded"
+                                suffix = " Forcing final synthesis without further tool calls."
+                            } else if budgetExceeded {
+                                label = "Token budget exceeded"
+                                suffix = " Continuing toward task completion with compaction and only indispensable remaining work."
+                            } else {
+                                label = "Token budget warning"
+                                suffix = ""
+                            }
                             yield(.budgetWarning(AgentBudgetWarning(
                                 runID: run.id,
                                 sessionID: run.sessionID,
-                                message: "\(label): \(budgetSnapshot.totalTokens)/\(budgetSnapshot.maxTotalTokens) tokens used.\(suffix)"
+                                message: "\(label): \(budgetSnapshot.totalTokens)/\(budgetSnapshot.maxTotalTokens) tokens used (hard limit \(budgetSnapshot.hardThresholdTokens)).\(suffix)"
                             )), to: continuation, recorder: eventRecorder)
+                        }
+                        if budgetHardExceeded, !didInjectBudgetHardStop, !modelResponse.toolCalls.isEmpty {
+                            // 硬预算：丢弃本轮尚未执行的工具调用，注入硬收敛指令，
+                            // 下一轮不再下发工具并直接产出进度检查点 + 最终答案。
+                            didInjectBudgetHardStop = true
+                            messages.append(AgentModelMessage(role: .user, content: """
+                            [TRUSTED RUNTIME HARD BUDGET STOP]
+                            The hard token budget has been reached. Do not call more tools. First produce a concise progress checkpoint listing completed side effects and any remaining work, then produce the best accurate final answer from existing evidence. If an essential operation is genuinely blocked, give a precise partial-completion report instead of claiming success. Never mention internal budget limits.
+                            """))
+                            phasedState.convergeToFinalSynthesis()
+                            forceFinalSynthesisWithoutTools = true
+                            continue
                         }
 
                         if modelResponse.toolCalls.isEmpty {
@@ -830,7 +880,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }
                             if continuityCalls.isEmpty {
                                 if shouldApplyCorrectionContinue("continuity") {
-                                    messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                    messages.append(Self.assistantHistoryMessage(from: modelResponse))
                                     let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools)
                                     if let correction {
                                         messages.append(AgentModelMessage(role: .system, content: correction))
@@ -855,7 +905,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }) {
                                 calls = [noteSearchCall]
                             } else if shouldApplyCorrectionContinue("note_search") {
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(Self.assistantHistoryMessage(from: modelResponse))
                                 messages.append(AgentModelMessage(role: .system, content: noteSearchPreflightPolicy.correctionInstruction()))
                                 continue
                             }
@@ -870,7 +920,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }) {
                                 calls = [sessionSearchCall]
                             } else if shouldApplyCorrectionContinue("session_search") {
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(Self.assistantHistoryMessage(from: modelResponse))
                                 messages.append(AgentModelMessage(role: .system, content: sessionSearchPreflightPolicy.correctionInstruction()))
                                 continue
                             }
@@ -887,7 +937,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             let unavailable = Set(discovery.unavailableNamespaces)
                             let repeatedUnavailable = unavailable.intersection(unavailableDiscoveryNamespaces)
                             if !repeatedUnavailable.isEmpty {
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(Self.assistantHistoryMessage(from: modelResponse))
                                 messages.append(AgentModelMessage(role: .system, content: "Tool discovery was not repeated because these capability namespaces are unavailable in the current run: \(repeatedUnavailable.sorted().joined(separator: ", ")). Do not search for them again with different wording. Continue with available capabilities, or report the concrete blocker if the missing capability is essential."))
                                 continue
                             }
@@ -902,7 +952,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 )
                             } catch {
                                 if shouldApplyCorrectionContinue("strategy_validation") {
-                                    messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                    messages.append(Self.assistantHistoryMessage(from: modelResponse))
                                     messages.append(AgentModelMessage(role: .system, content: """
                                     The strategy commit was not executed because it is incomplete: \(String(describing: error)). For taskMode production, provide non-empty deliverables, acceptanceCriteria, and verificationSteps that are concrete enough to review later. Re-issue agent_commit_strategy with a valid complete plan.
                                     """))
@@ -923,7 +973,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 )
                             } catch {
                                 if shouldApplyCorrectionContinue("delivery_review") {
-                                    messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                    messages.append(Self.assistantHistoryMessage(from: modelResponse))
                                     messages.append(AgentModelMessage(role: .system, content: """
                                     Final synthesis was not prepared because the production delivery review is incomplete: \(String(describing: error)). Continue the quality loop if evidence is missing or defects remain. Then re-issue prepare_final_output with a deliveryReview that repeats every committed deliverable, acceptance criterion, and verification step exactly, attaches concrete evidence to each result, and reports remaining issues honestly.
                                     """))
@@ -940,7 +990,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 !phasedResearchSignatures.insert("\(call.name):\(call.argumentsJSON)").inserted
                             }
                             if hasDuplicateResearch, shouldApplyCorrectionContinue("duplicate_research") {
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(Self.assistantHistoryMessage(from: modelResponse))
                                 messages.append(AgentModelMessage(role: .system, content: "The runtime blocked a duplicate research batch because it cannot add marginal information. Refine the requests, deep-read a different candidate, commit the strategy, or stop researching."))
                                 continue
                             }
@@ -1322,10 +1372,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentModelResponse {
         var request = request
-        // 互动网页等长代码任务：放大单次输出上限，避免模型因 max_tokens 被迫压缩页面。
-        if request.maxTokens == nil,
-           request.tools.contains(where: { AssistantToolRouter.interactiveWebDirectToolNames.contains($0.name) }) {
-            request.maxTokens = 32_768
+        if request.maxTokens == nil {
+            // 互动网页等长代码任务：放大单次输出上限；其余任务使用默认上限，
+            // 避免思考模型在工具循环里输出不可控的长文本/思考链。
+            if request.tools.contains(where: { AssistantToolRouter.interactiveWebDirectToolNames.contains($0.name) }) {
+                request.maxTokens = 32_768
+            } else {
+                request.maxTokens = configuration.defaultMaxOutputTokens
+            }
         }
         let maxTransientAttempts = 1 + configuration.providerRetryCount
         var attempt = 1
@@ -1571,6 +1625,26 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             toolCalls: response.toolCalls.isEmpty ? nil : response.toolCalls,
             providerMetadata: response.providerMetadata
         )
+    }
+
+    /// 阶段轮次上限触达时的收敛指令：先收敛（进入最终综合），不强制关闭工具，
+    /// 真正的硬停止仍由 maxToolIterations 与硬预算负责。
+    private static func phaseConvergenceInstruction(phase: AgentLoopPhase, roundLimit: Int) -> String {
+        let phaseGuidance: String
+        switch phase {
+        case .strategyResearch:
+            phaseGuidance = "Stop further exploration and commit the strategy now using the evidence already gathered. Move to execution; run at most one more batch only if a specific missing result is required."
+        case .memoryPreparation:
+            phaseGuidance = "Finish memory preparation now with the evidence already gathered and proceed to execution. Do not re-run preparation searches."
+        case .taskExecution:
+            phaseGuidance = "Finish the current batch, then call prepare_final_output and produce the final answer. Stop optional exploration and re-verification loops."
+        case .finalSynthesis:
+            phaseGuidance = "Produce the final answer now without more tools."
+        }
+        return """
+        [TRUSTED RUNTIME PHASE CONVERGENCE]
+        The \(phase.rawValue) phase has used \(roundLimit) model turns, its runtime round budget. \(phaseGuidance) Preserve completed work and report honestly; never mention internal round limits.
+        """
     }
 
     private static func classifyProviderError(_ error: Error) -> AgentModelProviderErrorClass {

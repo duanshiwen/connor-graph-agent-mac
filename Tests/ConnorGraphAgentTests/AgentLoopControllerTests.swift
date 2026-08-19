@@ -360,7 +360,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     let configuration = AgentLoopConfiguration()
 
     #expect(configuration.maxToolIterations == 100)
-    #expect(configuration.maxToolCallsPerIteration == 4)
+    #expect(configuration.maxToolCallsPerIteration == 8)
     #expect(configuration.maxConsecutiveToolResultErrors == 3)
     #expect(!configuration.stopAfterTurnWhenBudgetExceeded)
     #expect(configuration.preflightMode == .contextual)
@@ -3332,6 +3332,41 @@ func agentLoopUsesContextualRetrievalPlanInsideStrategyPhase() async throws {
     #expect(assistant.providerMetadata?.rawOutputItemsJSON?.contains("limited-call-3") == true)
     #expect(followUp.messages.contains {
         $0.role == .system && $0.content.contains("deferred 1 calls")
+    })
+}
+
+@Test func agentLoopStrategyCorrectionPreservesProviderThinkingMetadata() async throws {
+    let rawContent = #"[{"type":"thinking","thinking":"Plan the strategy commit","signature":"sig"},{"type":"tool_use","id":"strategy-invalid","name":"agent_commit_strategy","input":{"provisionalApproach":"x"}}]"#
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "strategy-invalid", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"x"}"#)
+            ],
+            finishReason: .toolCalls,
+            providerMetadata: AgentModelProviderMetadata(
+                providerID: "anthropic-compatible",
+                rawAssistantContentJSON: rawContent,
+                stopReason: "tool_use"
+            )
+        ),
+        AgentModelResponse(text: "done")
+    ])
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+
+    for try await _ in loop.run(.init(sessionID: "session-strategy-correction", userMessage: "Plan and build the feature")) {}
+
+    let correctionRequest = try #require(await provider.requests.first { request in
+        request.messages.contains { $0.role == .system && $0.content.contains("strategy commit was not executed") }
+    })
+    let assistant = try #require(correctionRequest.messages.prefix { message in
+        !(message.role == .system && message.content.contains("strategy commit was not executed"))
+    }.last { $0.role == .assistant })
+    #expect(assistant.toolCalls?.map(\.id) == ["strategy-invalid"])
+    #expect(assistant.providerMetadata?.providerID == "anthropic-compatible")
+    #expect(assistant.providerMetadata?.rawAssistantContentJSON?.contains(#""signature":"sig""#) == true)
+    #expect(correctionRequest.messages.contains {
+        $0.role == .tool && $0.content.hasPrefix(AgentModelMessageProtocolRepair.interruptedToolResultPrefix)
     })
 }
 

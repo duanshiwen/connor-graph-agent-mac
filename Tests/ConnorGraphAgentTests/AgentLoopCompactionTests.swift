@@ -205,12 +205,17 @@ import Testing
 }
 
 @Test func resolvedPromptLimitDerivesFromModelWindowAndRespectsExplicitOverride() {
-    // 默认 64_000 视为自动：1M 窗口 → min(1M×0.8, 512k) = 512k；200k 窗口 → 160k。
+    // 当前默认 128_000 是显式值（此前已上调避免回复被提前收敛）：直接原样生效，不做窗口推导。
     let automatic = AgentLoopConfiguration()
-    #expect(automatic.resolvedPromptMaxEstimatedTokens(modelWindowTokens: 1_000_000) == 512_000)
-    #expect(automatic.resolvedPromptMaxEstimatedTokens(modelWindowTokens: 200_000) == 160_000)
+    #expect(automatic.resolvedPromptMaxEstimatedTokens(modelWindowTokens: 1_000_000) == 128_000)
+    #expect(automatic.resolvedPromptMaxEstimatedTokens(modelWindowTokens: 200_000) == 128_000)
 
-    // 显式配置原样生效。
+    // 显式配置 64_000（自动哨兵）时按模型窗口推导：1M → min(1M×0.8, 512k) = 512k；200k → 160k。
+    let auto = AgentLoopConfiguration(promptMaxEstimatedTokens: AgentLoopConfiguration.autoPromptLimitDefault)
+    #expect(auto.resolvedPromptMaxEstimatedTokens(modelWindowTokens: 1_000_000) == 512_000)
+    #expect(auto.resolvedPromptMaxEstimatedTokens(modelWindowTokens: 200_000) == 160_000)
+
+    // 其他显式配置原样生效。
     let explicit = AgentLoopConfiguration(promptMaxEstimatedTokens: 100_000)
     #expect(explicit.resolvedPromptMaxEstimatedTokens(modelWindowTokens: 1_000_000) == 100_000)
 }
