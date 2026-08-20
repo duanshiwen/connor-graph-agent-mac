@@ -264,6 +264,30 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     #expect(response.providerMetadata?.rawOutputItemsJSON?.contains("function_call") == true)
 }
 
+@Test func openAIResponsesProviderMapsIncompleteStatusToLength() async throws {
+    let body = """
+    {
+      "id": "resp_trunc",
+      "status": "incomplete",
+      "output": [
+        {"id":"msg_1","type":"message","content":[{"type":"output_text","text":"Half of the answer..."}]}
+      ],
+      "usage": {"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}
+    }
+    """.data(using: .utf8)!
+    let client = ResponsesCapturingHTTPClient(responseBody: body, statusCode: 200)
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+
+    let response = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "answer")]))
+
+    #expect(response.finishReason == .length)
+    #expect(response.text?.hasPrefix("Half of the answer") == true)
+    #expect(response.providerMetadata?.stopReason == "incomplete")
+}
+
 @Test func openAIResponsesProviderSerializesFunctionCallOutputs() async throws {
     let body = #"{"id":"resp_2","output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}]}"#.data(using: .utf8)!
     let client = ResponsesCapturingHTTPClient(responseBody: body, statusCode: 200)

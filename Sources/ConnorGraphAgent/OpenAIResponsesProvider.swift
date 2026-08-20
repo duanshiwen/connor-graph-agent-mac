@@ -482,11 +482,21 @@ private enum OpenAIResponsesParser {
         let usage = usage(from: object["usage"] as? [String: Any])
         let rawOutputItemsJSON = try? jsonString(output)
         let responseID = object["id"] as? String
-        let finishReason: AgentModelFinishReason = toolCalls.isEmpty ? .stop : .toolCalls
+        let status = object["status"] as? String
+        let finishReason: AgentModelFinishReason
+        if !toolCalls.isEmpty {
+            finishReason = .toolCalls
+        } else if status == "incomplete" {
+            // status == "incomplete" 表示响应被 max_output_tokens 等输出上限截断，
+            // 必须保留为 .length，避免运行时把半截文本当成完整最终答复。
+            finishReason = .length
+        } else {
+            finishReason = .stop
+        }
         let metadata = AgentModelProviderMetadata(
             providerID: "openai-responses",
             rawOutputItemsJSON: rawOutputItemsJSON,
-            stopReason: object["status"] as? String,
+            stopReason: status,
             responseID: responseID,
             reasoningEncryptedContentPresent: rawOutputItemsJSON?.contains("encrypted_content") == true
         )
