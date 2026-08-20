@@ -1063,7 +1063,8 @@ private struct InterruptedStreamProvider: StreamingAgentModelProvider {
         if case .textComplete(let payload) = event { return payload }
         return nil
     }.last)
-    #expect(textComplete.text == "Completed full answer.")
+    // 截断的前半段必须拼回最终答复，不能只发布“断点之后”的续写内容。
+    #expect(textComplete.text == "Partial answer cut off mid-\n\nCompleted full answer.")
     #expect(events.last?.kind == .runCompleted)
 }
 
@@ -1090,7 +1091,8 @@ private struct InterruptedStreamProvider: StreamingAgentModelProvider {
         if case .textComplete(let payload) = event { return payload }
         return nil
     }.last)
-    #expect(textComplete.text == "third cut")
+    // 连续截断时累计所有片段，最后一段即使仍被截断也作为最终边界拼入。
+    #expect(textComplete.text == "first cut\n\nsecond cut\n\nthird cut")
     #expect(events.last?.kind == .runCompleted)
 }
 
