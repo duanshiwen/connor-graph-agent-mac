@@ -47,6 +47,8 @@ final class BrowserAutomationRuntime {
     }
 
     private static let automationWorld = WKContentWorld.world(name: "cn.connor.browser-automation")
+    private static let fixedJSTimeoutSeconds: TimeInterval = 15
+    private static let qualityAuditJSTimeoutSeconds: TimeInterval = 30
     private let liveStore: BrowserLiveWebViewStore
     private let snapshotProvider: SnapshotProvider
     private let snapshotSaver: SnapshotSaver
@@ -123,6 +125,55 @@ final class BrowserAutomationRuntime {
         }
     }
 
+    /// 页面 JavaScript 执行受独立超时保护：页面主线程卡死或 WebKit 进程无响应时，
+    /// 按超时失败返回，而不是无限挂起。失败信息会进入工具结果，由模型决定重试。
+    private static func callPageJavaScript(
+        _ webView: WKWebView,
+        script: String,
+        arguments: [String: Any],
+        timeoutSeconds: TimeInterval,
+        contentWorld: WKContentWorld? = nil
+    ) async throws -> String? {
+        try await withCheckedThrowingContinuation { continuation in
+            var didResolve = false
+            func finish(_ result: Result<String?, Error>) {
+                guard !didResolve else { return }
+                didResolve = true
+                continuation.resume(with: result)
+            }
+            var operationTask: Task<Void, Never>?
+            let timeoutTask = Task { @MainActor in
+                do {
+                    try await Task.sleep(for: .seconds(timeoutSeconds))
+                } catch {
+                    return
+                }
+                operationTask?.cancel()
+                finish(.failure(BrowserAutomationRuntimeError.timedOut(
+                    "Page JavaScript did not respond within \(Int(timeoutSeconds))s"
+                )))
+            }
+            operationTask = Task { @MainActor in
+                defer { timeoutTask.cancel() }
+                do {
+                    let value = try await webView.callAsyncJavaScript(
+                        script,
+                        arguments: arguments,
+                        in: nil,
+                        contentWorld: contentWorld ?? Self.automationWorld
+                    )
+                    finish(.success(value as? String))
+                } catch {
+                    finish(.failure(BrowserAutomationRuntimeError.pageRejected(error.localizedDescription)))
+                }
+            }
+        }
+    }
+
+    private static func pageJSTimeoutSeconds(_ request: BrowserControlRequest) -> TimeInterval {
+        TimeInterval(min(max(request.timeoutMilliseconds, 1_000), 120_000)) / 1_000
+    }
+
     private func listTabs(sessionID: String) throws -> BrowserControlResponse {
         let snapshot = snapshotProvider(sessionID) ?? AppBrowserStateSnapshot()
         let tabs: [[String: Any]] = snapshot.tabs.map { tab in
@@ -159,13 +210,13 @@ final class BrowserAutomationRuntime {
             initialURLString: resolved.tab.restoredURLString
         ).webView
         let token = UUID().uuidString
-        let value = try await webView.callAsyncJavaScript(
-            Self.snapshotScript,
+        let value = try await Self.callPageJavaScript(
+            webView,
+            script: Self.snapshotScript,
             arguments: ["maxNodes": request.maxNodes, "snapshotToken": token],
-            in: nil,
-            contentWorld: Self.automationWorld
+            timeoutSeconds: Self.pageJSTimeoutSeconds(request)
         )
-        guard let json = value as? String else {
+        guard let json = value else {
             throw BrowserAutomationRuntimeError.pageRejected("The page did not return a semantic browser snapshot.")
         }
         let summary = await Task.detached(priority: .utility) {
@@ -255,13 +306,13 @@ final class BrowserAutomationRuntime {
             guard let nodeReference = request.nodeReference else {
                 throw BrowserAutomationRuntimeError.invalidRequest("browser_wait node requires nodeRef")
             }
-            let value = try await webView.callAsyncJavaScript(
-                Self.waitForNodeScript,
+            let value = try await Self.callPageJavaScript(
+                webView,
+                script: Self.waitForNodeScript,
                 arguments: ["nodeRef": nodeReference, "timeoutMs": request.timeoutMilliseconds],
-                in: nil,
-                contentWorld: Self.automationWorld
+                timeoutSeconds: Self.pageJSTimeoutSeconds(request)
             )
-            guard let json = value as? String, Self.jsonObject(json)?["found"] as? Bool == true else {
+            guard let json = value, Self.jsonObject(json)?["found"] as? Bool == true else {
                 throw BrowserAutomationRuntimeError.timedOut("node \(nodeReference)")
             }
             return BrowserControlResponse(contentText: "Browser node is available.", contentJSON: json, citations: webView.url.map { [$0.absoluteString] } ?? [])
@@ -302,13 +353,12 @@ final class BrowserAutomationRuntime {
         let webView = ensureWebView(sessionID: request.sessionID, tabID: resolved.tab.id, initialURLString: resolved.tab.restoredURLString).webView
         let configuration = WKSnapshotConfiguration()
         if request.fullPage,
-           let value = try? await webView.callAsyncJavaScript(
-               "return JSON.stringify({ width: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0), height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0) });",
+           let json = try? await Self.callPageJavaScript(
+               webView,
+               script: "return JSON.stringify({ width: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0), height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0) });",
                arguments: [:],
-               in: nil,
-               contentWorld: Self.automationWorld
+               timeoutSeconds: Self.fixedJSTimeoutSeconds
            ),
-           let json = value as? String,
            let size = Self.jsonObject(json),
            let width = size["width"] as? Double,
            let height = size["height"] as? Double,
@@ -358,13 +408,14 @@ final class BrowserAutomationRuntime {
         defer { webView.frame = originalFrame }
 
         try await Task.sleep(for: .milliseconds(120))
-        let value = try await webView.callAsyncJavaScript(
-            Self.qualityAuditScript,
+        let value = try await Self.callPageJavaScript(
+            webView,
+            script: Self.qualityAuditScript,
             arguments: [:],
-            in: nil,
+            timeoutSeconds: Self.qualityAuditJSTimeoutSeconds,
             contentWorld: .page
         )
-        guard let auditJSON = value as? String,
+        guard let auditJSON = value,
               var audit = Self.jsonObject(auditJSON)
         else {
             throw BrowserAutomationRuntimeError.pageRejected("The page did not return a web quality audit.")
@@ -406,13 +457,13 @@ final class BrowserAutomationRuntime {
         let webView = ensureWebView(sessionID: request.sessionID, tabID: resolved.tab.id, initialURLString: resolved.tab.restoredURLString).webView
         if uploadOnly { showWorkspace(request.sessionID) }
         let action = allowSubmit ? "submit" : (uploadOnly ? "upload" : (downloadOnly ? "download" : request.action?.lowercased() ?? ""))
-        let value = try await webView.callAsyncJavaScript(
-            Self.interactionScript,
+        let value = try await Self.callPageJavaScript(
+            webView,
+            script: Self.interactionScript,
             arguments: ["nodeRef": nodeReference, "action": action, "actionValue": request.value ?? ""],
-            in: nil,
-            contentWorld: Self.automationWorld
+            timeoutSeconds: Self.pageJSTimeoutSeconds(request)
         )
-        guard let json = value as? String, let object = Self.jsonObject(json) else {
+        guard let json = value, let object = Self.jsonObject(json) else {
             throw BrowserAutomationRuntimeError.pageRejected("The page did not return a browser interaction result.")
         }
         if object["stale"] as? Bool == true { throw BrowserAutomationRuntimeError.staleNode }
@@ -427,13 +478,13 @@ final class BrowserAutomationRuntime {
         let resolved = try resolveTab(request)
         let webView = ensureWebView(sessionID: request.sessionID, tabID: resolved.tab.id, initialURLString: resolved.tab.restoredURLString).webView
         if let nodeReference = request.nodeReference {
-            let value = try await webView.callAsyncJavaScript(
-                Self.handoffScript,
+            let value = try await Self.callPageJavaScript(
+                webView,
+                script: Self.handoffScript,
                 arguments: ["nodeRef": nodeReference],
-                in: nil,
-                contentWorld: Self.automationWorld
+                timeoutSeconds: Self.fixedJSTimeoutSeconds
             )
-            guard let json = value as? String, Self.jsonObject(json)?["ok"] as? Bool == true else {
+            guard let json = value, Self.jsonObject(json)?["ok"] as? Bool == true else {
                 throw BrowserAutomationRuntimeError.staleNode
             }
         }
@@ -452,13 +503,13 @@ final class BrowserAutomationRuntime {
             throw BrowserAutomationRuntimeError.invalidRequest("Browser action approval requires nodeRef")
         }
         let webView = ensureWebView(sessionID: request.sessionID, tabID: resolved.tab.id, initialURLString: resolved.tab.restoredURLString).webView
-        let value = try await webView.callAsyncJavaScript(
-            Self.describeNodeScript,
+        let value = try await Self.callPageJavaScript(
+            webView,
+            script: Self.describeNodeScript,
             arguments: ["nodeRef": nodeReference],
-            in: nil,
-            contentWorld: Self.automationWorld
+            timeoutSeconds: Self.fixedJSTimeoutSeconds
         )
-        guard let nodeJSON = value as? String, var object = Self.jsonObject(nodeJSON) else {
+        guard let nodeJSON = value, var object = Self.jsonObject(nodeJSON) else {
             throw BrowserAutomationRuntimeError.staleNode
         }
         if object["stale"] as? Bool == true { throw BrowserAutomationRuntimeError.staleNode }
