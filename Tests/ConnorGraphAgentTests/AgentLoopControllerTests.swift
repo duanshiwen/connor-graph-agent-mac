@@ -3635,6 +3635,47 @@ private actor TransientFailureThenSuccessProvider: AgentModelProvider {
     #expect(events.last?.kind == .runCompleted)
 }
 
+@Test func agentLoopTimesOutPhaseBatchToolAndDeliversFailureToModel() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(
+                id: "call-phase-timeout",
+                name: AgentPhaseToolContract.externalSearchBatchName,
+                argumentsJSON: #"{"calls":[{"toolName":"stubborn_tool","arguments":{}}]}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Recovered after the batch timeout.", finishReason: .stop)
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(CancellationIgnoringDelayTool(name: "stubborn_tool", delayNanoseconds: 30_000_000_000))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(toolExecutionTimeoutSeconds: 1)
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(sessionID: "session-phase-tool-timeout", userMessage: "Run a slow batch tool")) {
+        events.append(event)
+    }
+
+    // parallel_tool_query 批量内的嵌套原生工具同样受工具执行超时约束：
+    // 超时后失败信息进入批量结果，模型收到失败后自行重试或收尾。
+    let batchResult = try #require(events.compactMap { event -> AgentToolResult? in
+        if case .toolFinished(let result) = event, result.toolName == AgentPhaseToolContract.externalSearchBatchName {
+            return result
+        }
+        return nil
+    }.first)
+    let failureText = batchResult.contentText + (batchResult.contentJSON ?? "")
+    #expect(failureText.contains("timed out"))
+    #expect(failureText.contains("stubborn_tool"))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+}
+
 @Test(.disabled("Environment-sensitive: under full-suite load this machine delays Task.sleep timers 10s+, so the wall-clock assertion flakes; the hard-timeout path itself passes in isolation."))
 func agentLoopTimeoutDoesNotWaitForCancellationIgnoringTool() async throws {
     let provider = ScriptedModelProvider(responses: [

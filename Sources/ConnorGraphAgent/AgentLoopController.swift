@@ -2029,7 +2029,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         payloadJSON: nestedAuditPayload
                     ))
                     do {
-                        let result = try await toolRegistry.execute(nestedCall, context: context)
+                        // 嵌套原生工具（含浏览器读操作）同样受工具执行超时约束：
+                        // 页面或上游卡死时按超时失败返回，由模型决定重试。
+                        let result = try await executeWithToolTimeout(toolName: sourceID) {
+                            try await toolRegistry.execute(nestedCall, context: context)
+                        }
                         if sourceID == "connor_skill_activate", let promotion = result.instructionPromotion {
                             await promotionCollector.record(promotion)
                         }
@@ -2445,7 +2449,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         _ call: AgentToolCall,
         context: AgentToolExecutionContext
     ) async throws -> AgentToolResult {
-        let timeoutSeconds = configuration.toolExecutionTimeoutSeconds
         let registry = toolRegistry
         let capability = registry.permission(named: call.name)
         let effectKey = AssistantEffectIdentity.key(runID: context.runID, call: call)
@@ -2460,13 +2463,30 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 contentJSON: "{\"duplicatePrevented\":true,\"effectKey\":\(Self.jsonStringLiteral(effectKey))}"
             )
         }
+        let result = try await executeWithToolTimeout(toolName: call.name) {
+            try await registry.execute(call, context: context)
+        }
+        if capability?.assistantHasExternalSideEffect == true, result.error == nil {
+            try await assistantEffectLedger.record(effectKey)
+        }
+        return result
+    }
+
+    /// 统一为单个工具调用（含 phase 批量内的嵌套原生工具）施加硬超时：
+    /// 超时后返回明确失败给调用方，由调用方把错误呈现给模型重试。
+    /// 该超时覆盖工具自身的实现，不依赖工具是否响应取消。
+    private func executeWithToolTimeout(
+        toolName: String,
+        operation: @escaping @Sendable () async throws -> AgentToolResult
+    ) async throws -> AgentToolResult {
+        let timeoutSeconds = configuration.toolExecutionTimeoutSeconds
         let race = AgentToolExecutionRace()
-        let result = try await withTaskCancellationHandler {
+        return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 race.install(continuation: continuation)
                 let executionTask = Task {
                     do {
-                        race.resolve(.success(try await registry.execute(call, context: context)))
+                        race.resolve(.success(try await operation()))
                     } catch {
                         race.resolve(.failure(error))
                     }
@@ -2474,7 +2494,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 let timeoutTask = Task {
                     do {
                         try await Task.sleep(for: .seconds(timeoutSeconds))
-                        race.resolve(.failure(AgentToolExecutionTimeoutError(toolName: call.name, seconds: timeoutSeconds)))
+                        race.resolve(.failure(AgentToolExecutionTimeoutError(toolName: toolName, seconds: timeoutSeconds)))
                     } catch is CancellationError {
                         return
                     } catch {
@@ -2486,10 +2506,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         } onCancel: {
             race.resolve(.failure(CancellationError()))
         }
-        if capability?.assistantHasExternalSideEffect == true, result.error == nil {
-            try await assistantEffectLedger.record(effectKey)
-        }
-        return result
     }
 
     private static func invalidToolArgumentsMessage(for call: AgentToolCall) -> String? {
