@@ -441,6 +441,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     var iterationCount = 0
                     var outputTruncationContinues = 0
                     let maxOutputTruncationContinues = 2
+                    // 输出被截断后，模型续写的内容只包含断点之后的部分；
+                    // 这里累计已截断的文本，最终答复发布时拼回前半段，避免用户看到
+                    // “结果在上面”却没有上面内容。
+                    var pendingTruncatedOutputText = ""
                     var phasedResearchSignatures = Set<String>()
                     var correctionContinueCounts: [String: Int] = [:]
                     let maxCorrectionContinuesPerCategory = 3
@@ -723,6 +727,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             && modelResponse.providerMetadata?.stopReason != "model_context_window_exceeded"
                         if wasOutputTruncated, outputTruncationContinues < maxOutputTruncationContinues {
                             outputTruncationContinues += 1
+                            if let truncatedText = modelResponse.text, !truncatedText.isEmpty {
+                                if pendingTruncatedOutputText.isEmpty {
+                                    pendingTruncatedOutputText = truncatedText
+                                } else {
+                                    let separator = pendingTruncatedOutputText.hasSuffix("\n") ? "" : "\n\n"
+                                    pendingTruncatedOutputText += separator + truncatedText
+                                }
+                            }
                             messages.append(Self.assistantHistoryMessage(from: modelResponse))
                             messages.append(AgentModelMessage(role: .user, content: """
                             The previous response was cut off by the output token limit before it finished. Continue exactly from where it stopped and complete the remainder; do not repeat content already delivered. If an artifact or tool sequence was incomplete, finish it now.
@@ -778,7 +790,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                         role: .user,
                                         content: [
                                             AssistantAttentionCoordinator().render(pack),
-                                            "Review these final attention items and update the answer only where genuinely urgent; preserve the completed task result."
+                                            "Review these final attention items. Then produce the complete final answer as one self-contained response: restate the full completed result and add only genuinely urgent attention items. Do not refer to an earlier draft as if the user can already see it."
                                         ].joined(separator: "\n\n")
                                     ))
                                     phasedState.convergeToFinalSynthesis()
@@ -797,7 +809,21 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 continue
                             }
                             let finalText = modelResponse.text
-                            if let text = finalText {
+                            let publishedFinalText: String?
+                            if pendingTruncatedOutputText.isEmpty {
+                                publishedFinalText = finalText
+                            } else if let finalText, !finalText.isEmpty {
+                                if finalText.contains(pendingTruncatedOutputText) {
+                                    // 模型重写了完整内容，直接采用最终文本。
+                                    publishedFinalText = finalText
+                                } else {
+                                    let separator = pendingTruncatedOutputText.hasSuffix("\n") ? "" : "\n\n"
+                                    publishedFinalText = pendingTruncatedOutputText + separator + finalText
+                                }
+                            } else {
+                                publishedFinalText = pendingTruncatedOutputText
+                            }
+                            if let text = publishedFinalText {
                                 let webCitationsUsed = webEvidenceCitations.filter(text.contains)
                                 let memoryCitationsUsed = isPureMemoryTask ? memoryCitations : memoryCitations.filter(text.contains)
                                 var outputCitations: [String] = []
@@ -816,7 +842,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 runID: run.id,
                                 sessionID: run.sessionID,
                                 turnIndex: iterationCount,
-                                assistantText: finalText,
+                                assistantText: publishedFinalText,
                                 toolCallCount: 0,
                                 toolResultCount: 0,
                                 stoppedAfterTurn: false
