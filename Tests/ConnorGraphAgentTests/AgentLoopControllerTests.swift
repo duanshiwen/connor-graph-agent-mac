@@ -136,8 +136,12 @@ private actor ScriptedModelProvider: AgentModelProvider {
             return automatic
         }
         requests.append(request)
-        if request.tools.isEmpty,
-           request.messages.contains(where: { $0.role == .system && $0.content.contains("[TRUSTED RUNTIME CONVERGENCE]") }) {
+        if request.tools.isEmpty {
+            // 运行时移除工具列表后，模型无法再发起工具调用：若下一条脚本仍是工具调用则跳过，
+            // 否则按脚本返回；都没有时给出兜底文本答复。
+            if let next = responses.first, next.toolCalls.isEmpty {
+                return responses.removeFirst()
+            }
             return AgentModelResponse(text: "Completed from the available results.")
         }
         return responses.removeFirst()
@@ -986,6 +990,107 @@ private struct InterruptedStreamProvider: StreamingAgentModelProvider {
 
     #expect(events.map(\.kind).contains(.budgetWarning))
     #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopExceededBudgetDoesNotForceFinalAndKeepsExecuting() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-hard-1", name: "echo_args", argumentsJSON: #"{"value":"first"}"#)],
+            usage: AgentModelUsage(promptTokens: 200, completionTokens: 50),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-hard-2", name: "echo_args", argumentsJSON: #"{"value":"second"}"#)],
+            usage: AgentModelUsage(promptTokens: 100, completionTokens: 10),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "Completed after hard budget.",
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(
+            maxToolIterations: 6,
+            budget: AgentBudgetConfiguration(maxTotalTokens: 100, warningThresholdRatio: 0.8)
+        )
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-hard-budget", userMessage: "Keep going")) {
+        events.append(event)
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 3)
+    // 预算超限只做成本收敛提醒：后续轮次仍下发工具，而不是被强制交卷。
+    #expect(requests[1].tools.isEmpty == false)
+    // 预算属于运行时内部状态，不得注入给模型。
+    #expect(requests[1].messages.contains { $0.content.contains("[TRUSTED RUNTIME COMPLETION PRIORITY]") } == false)
+    #expect(requests[1].messages.contains { $0.content.lowercased().contains("token budget") } == false)
+    #expect(events.map(\.kind).contains(.budgetWarning))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopContinuesAfterTruncatedOutput() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: "Partial answer cut off mid-", finishReason: .length),
+        AgentModelResponse(text: "Completed full answer.", finishReason: .stop)
+    ])
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(maxToolIterations: 6)
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-truncated", userMessage: "Answer fully")) {
+        events.append(event)
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 2)
+    let textComplete = try #require(events.compactMap { event -> AgentTextCompleteEvent? in
+        if case .textComplete(let payload) = event { return payload }
+        return nil
+    }.last)
+    #expect(textComplete.text == "Completed full answer.")
+    #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopCapsRepeatedOutputTruncationContinues() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: "first cut", finishReason: .length),
+        AgentModelResponse(text: "second cut", finishReason: .length),
+        AgentModelResponse(text: "third cut", finishReason: .length)
+    ])
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(maxToolIterations: 6)
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-truncated-cap", userMessage: "Answer fully")) {
+        events.append(event)
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 3)
+    let textComplete = try #require(events.compactMap { event -> AgentTextCompleteEvent? in
+        if case .textComplete(let payload) = event { return payload }
+        return nil
+    }.last)
+    #expect(textComplete.text == "third cut")
     #expect(events.last?.kind == .runCompleted)
 }
 
@@ -2859,7 +2964,7 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
     #expect(events.last?.kind == .runCompleted)
 }
 
-@Test func agentLoopConvergesAfterConfiguredConsecutiveToolResultErrorLimit() async throws {
+@Test func agentLoopKeepsToolsAfterConsecutiveToolResultErrors() async throws {
     let provider = ScriptedModelProvider(responses: (1...3).map { index in
         AgentModelResponse(
             text: nil,
@@ -2867,7 +2972,9 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
             usage: AgentModelUsage(promptTokens: 1, completionTokens: 1),
             finishReason: .toolCalls
         )
-    })
+    } + [
+        AgentModelResponse(text: "Final answer after repeated failures.", usage: AgentModelUsage(promptTokens: 1, completionTokens: 1))
+    ])
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: AgentToolRegistry(),
@@ -2879,13 +2986,15 @@ func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async th
         events.append(event)
     }
 
-    #expect(events.map(\.kind).filter { $0 == .toolFailed }.count == 2)
+    // 连续工具错误不会触发“没收工具”的收敛：模型一直保有工具，
+    // 直到它自己给出最终答复为止。
+    #expect(events.map(\.kind).filter { $0 == .toolFailed }.count == 3)
     #expect(!events.map(\.kind).contains(.runFailed))
     #expect(events.map(\.kind).contains(.textComplete))
     #expect(events.last?.kind == .runCompleted)
 }
 
-@Test func successfulToolResultResetsConsecutiveErrorCount() async throws {
+@Test func agentLoopRecoversAfterInterleavedToolResultErrors() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
             text: nil,
@@ -3392,8 +3501,8 @@ func agentLoopUsesContextualRetrievalPlanInsideStrategyPhase() async throws {
     #expect(events.last?.kind == .runFailed)
 }
 
-@Test func alternatingIdenticalToolCallsConvergeWithoutRunFailure() async throws {
-    let responses = (0..<24).map { index in
+@Test func alternatingIdenticalToolCallsKeepToolsUntilModelStops() async throws {
+    let responses = (0..<6).map { index in
         AgentModelResponse(
             text: nil,
             toolCalls: [.init(
@@ -3403,7 +3512,9 @@ func agentLoopUsesContextualRetrievalPlanInsideStrategyPhase() async throws {
             )],
             finishReason: .toolCalls
         )
-    }
+    } + [
+        AgentModelResponse(text: "Final answer after alternating reads.", finishReason: .stop)
+    ]
     let provider = ScriptedModelProvider(responses: responses)
     var registry = AgentToolRegistry()
     registry.register(NamedDelayTool(name: "slow_tool", delayNanoseconds: 0))
@@ -3425,17 +3536,19 @@ func agentLoopUsesContextualRetrievalPlanInsideStrategyPhase() async throws {
         }
         return nil
     }
-    #expect(repeatedBusinessToolStarts.count == 5)
+    // 重复调用不会触发运行时收敛：工具始终保留，模型自行决定何时结束。
+    #expect(repeatedBusinessToolStarts.count == 6)
     #expect(!events.map(\.kind).contains(.runFailed))
     #expect(events.map(\.kind).contains(.textComplete))
     #expect(events.last?.kind == .runCompleted)
 }
 
-@Test func reorderedJSONArgumentsCannotBypassRepeatedCallConvergence() async throws {
+@Test func reorderedJSONArgumentsKeepToolsAvailableUntilModelStops() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(text: nil, toolCalls: [.init(id: "ordered-1", name: "echo_args", argumentsJSON: #"{"value":"same","other":"field"}"#)], finishReason: .toolCalls),
         AgentModelResponse(text: nil, toolCalls: [.init(id: "ordered-2", name: "echo_args", argumentsJSON: #"{"other":"field","value":"same"}"#)], finishReason: .toolCalls),
-        AgentModelResponse(text: nil, toolCalls: [.init(id: "ordered-3", name: "echo_args", argumentsJSON: #"{"value":"same","other":"field"}"#)], finishReason: .toolCalls)
+        AgentModelResponse(text: nil, toolCalls: [.init(id: "ordered-3", name: "echo_args", argumentsJSON: #"{"value":"same","other":"field"}"#)], finishReason: .toolCalls),
+        AgentModelResponse(text: "Final answer after repeated calls.", finishReason: .stop)
     ])
     var registry = AgentToolRegistry()
     registry.register(EchoArgumentsTool())
@@ -3450,8 +3563,10 @@ func agentLoopUsesContextualRetrievalPlanInsideStrategyPhase() async throws {
         if case .toolStarted(let call) = event, call.name == "echo_args" { return call }
         return nil
     }
+    // 参数顺序不同不算“重复调用”：不做任何运行时干预，模型自己收尾。
     #expect(echoStarts.count == 3)
     #expect(!events.map(\.kind).contains(.runFailed))
+    #expect(events.map(\.kind).contains(.textComplete))
     #expect(events.last?.kind == .runCompleted)
 }
 

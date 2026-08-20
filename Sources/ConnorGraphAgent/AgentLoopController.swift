@@ -439,15 +439,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                 do {
                     var iterationCount = 0
-                    var recentToolCallSignatures: [String] = []
-                    let repeatedToolCallConvergenceThreshold = 3
-                    let toolCallSignatureWindowSize = 16
-                    var consecutiveToolResultErrors = 0
-                    var forceFinalSynthesisWithoutTools = false
-                    var didInjectBudgetConvergence = false
-                    var didInjectBudgetHardStop = false
-                    var phaseRoundCounts: [AgentLoopPhase: Int] = [:]
-                    var didPhaseConvergenceNudge: Set<AgentLoopPhase> = []
+                    var outputTruncationContinues = 0
+                    let maxOutputTruncationContinues = 2
                     var phasedResearchSignatures = Set<String>()
                     var correctionContinueCounts: [String: Int] = [:]
                     let maxCorrectionContinuesPerCategory = 3
@@ -469,14 +462,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         return true
                     }
 
-                    func recordToolCallSignature(_ signature: String) -> Bool {
-                        recentToolCallSignatures.append(signature)
-                        if recentToolCallSignatures.count > toolCallSignatureWindowSize {
-                            recentToolCallSignatures.removeFirst(recentToolCallSignatures.count - toolCallSignatureWindowSize)
-                        }
-                        return recentToolCallSignatures.lazy.filter { $0 == signature }.count >= repeatedToolCallConvergenceThreshold
-                    }
-
                     while true {
                         if iterationCount >= configuration.maxToolIterations {
                             if finalAttentionPack == nil {
@@ -489,27 +474,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(
                                     role: .user,
                                     content: AssistantAttentionCoordinator().render(pack)
-                                        + "\n\nThe model-turn budget is exhausted. Produce the best accurate final answer now without more tools."
                                 ))
                                 phasedState.convergeToFinalSynthesis()
-                                forceFinalSynthesisWithoutTools = true
                             } else if iterationCount >= configuration.maxToolIterations + 1 {
                                 throw AssistantRunLimitError(maximumModelTurns: configuration.maxToolIterations)
                             }
                         }
                         iterationCount += 1
-                        phaseRoundCounts[phasedState.phase, default: 0] += 1
-                        if phaseRoundCounts[phasedState.phase, default: 0] > configuration.maxToolIterationsPerPhase,
-                           !didPhaseConvergenceNudge.contains(phasedState.phase) {
-                            didPhaseConvergenceNudge.insert(phasedState.phase)
-                            messages.append(AgentModelMessage(
-                                role: .system,
-                                content: Self.phaseConvergenceInstruction(
-                                    phase: phasedState.phase,
-                                    roundLimit: configuration.maxToolIterationsPerPhase
-                                )
-                            ))
-                        }
                         logger.info("Assistant turn \(iterationCount)/\(configuration.maxToolIterations + 1)")
                         yield(.turnStarted(AgentTurnStartedEvent(
                             runID: run.id,
@@ -548,7 +519,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         // Keep the definition bundle byte-for-byte stable across the run so the
                         // provider can reuse the prompt prefix. Phase safety is enforced before
                         // execution instead of by mutating the advertised tool array.
-                        modelRequest.tools = forceFinalSynthesisWithoutTools ? [] : modelFacingToolDefinitions
+                        modelRequest.tools = modelFacingToolDefinitions
                         modelRequest.toolChoice = .auto
                         let localContextGuard = AgentModelContextGuard()
                         let localContextWindowTokens = configuration.modelContextWindowTokens
@@ -732,37 +703,36 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         logger.info("Model response: \(modelResponse.toolCalls.count) tool calls, has text: \(modelResponse.text != nil)")
 
                         let budgetSnapshot = await budgetMeter.record(modelResponse.usage)
-                        let budgetHardExceeded = budgetSnapshot.status == .hardExceeded
-                        let budgetExceeded = budgetHardExceeded || budgetSnapshot.status == .exceeded
+                        let budgetExceeded = budgetSnapshot.status == .exceeded
                         if budgetSnapshot.status == .warning || budgetExceeded {
-                            let label: String
-                            let suffix: String
-                            if budgetHardExceeded {
-                                label = "Hard token budget exceeded"
-                                suffix = " Forcing final synthesis without further tool calls."
-                            } else if budgetExceeded {
-                                label = "Token budget exceeded"
-                                suffix = " Continuing toward task completion with compaction and only indispensable remaining work."
-                            } else {
-                                label = "Token budget warning"
-                                suffix = ""
-                            }
+                            let label = budgetExceeded ? "Token budget exceeded" : "Token budget warning"
+                            let suffix = budgetExceeded
+                                ? " Continuing toward task completion with compaction and only indispensable remaining work."
+                                : ""
                             yield(.budgetWarning(AgentBudgetWarning(
                                 runID: run.id,
                                 sessionID: run.sessionID,
-                                message: "\(label): \(budgetSnapshot.totalTokens)/\(budgetSnapshot.maxTotalTokens) tokens used (hard limit \(budgetSnapshot.hardThresholdTokens)).\(suffix)"
+                                message: "\(label): \(budgetSnapshot.totalTokens)/\(budgetSnapshot.maxTotalTokens) tokens used (warning at \(budgetSnapshot.warningThresholdTokens)).\(suffix)"
                             )), to: continuation, recorder: eventRecorder)
                         }
-                        if budgetHardExceeded, !didInjectBudgetHardStop, !modelResponse.toolCalls.isEmpty {
-                            // 硬预算：丢弃本轮尚未执行的工具调用，注入硬收敛指令，
-                            // 下一轮不再下发工具并直接产出进度检查点 + 最终答案。
-                            didInjectBudgetHardStop = true
+
+                        // 输出被单次 max tokens 截断时，不得当作最终答案：要求模型从断点继续，
+                        // 并放大后续输出上限；连续截断多次后接受当前文本作为最终边界。
+                        let wasOutputTruncated = modelResponse.toolCalls.isEmpty
+                            && modelResponse.finishReason == .length
+                            && modelResponse.providerMetadata?.stopReason != "model_context_window_exceeded"
+                        if wasOutputTruncated, outputTruncationContinues < maxOutputTruncationContinues {
+                            outputTruncationContinues += 1
+                            messages.append(Self.assistantHistoryMessage(from: modelResponse))
                             messages.append(AgentModelMessage(role: .user, content: """
-                            [TRUSTED RUNTIME HARD BUDGET STOP]
-                            The hard token budget has been reached. Do not call more tools. First produce a concise progress checkpoint listing completed side effects and any remaining work, then produce the best accurate final answer from existing evidence. If an essential operation is genuinely blocked, give a precise partial-completion report instead of claiming success. Never mention internal budget limits.
+                            The previous response was cut off by the output token limit before it finished. Continue exactly from where it stopped and complete the remainder; do not repeat content already delivered. If an artifact or tool sequence was incomplete, finish it now.
                             """))
-                            phasedState.convergeToFinalSynthesis()
-                            forceFinalSynthesisWithoutTools = true
+                            if (modelRequest.maxTokens ?? 0) <= configuration.defaultMaxOutputTokens {
+                                modelRequest.maxTokens = max(
+                                    2 * configuration.defaultMaxOutputTokens,
+                                    configuration.defaultMaxOutputTokens
+                                )
+                            }
                             continue
                         }
 
@@ -808,11 +778,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                         role: .user,
                                         content: [
                                             AssistantAttentionCoordinator().render(pack),
-                                            "Produce the final answer now. Preserve the completed task result and add only genuinely urgent attention items. Do not call more tools."
+                                            "Review these final attention items and update the answer only where genuinely urgent; preserve the completed task result."
                                         ].joined(separator: "\n\n")
                                     ))
                                     phasedState.convergeToFinalSynthesis()
-                                    forceFinalSynthesisWithoutTools = true
                                     continue
                                 }
                             }
@@ -1045,15 +1014,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             providerMetadata: modelResponse.providerMetadata
                         ))
 
-                        var repeatedToolCallDetected = false
-                        for call in calls {
-                            let toolCallSignature = Self.normalizedToolCallSignature(call)
-                            if recordToolCallSignature(toolCallSignature) {
-                                repeatedToolCallDetected = true
-                                logger.warning("Repeated identical tool call detected; converging after this batch: \(call.name)")
-                            }
-                        }
-
                         let batchResults = try await executeToolBatch(
                             calls: calls,
                             request: request,
@@ -1176,11 +1136,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     runtimeToolResultNote = runtimeToolResultNote.map { "\($0)\n\(renewedResearchNote)" } ?? renewedResearchNote
                                 }
                             }
-                            if batchResult.result.error == nil {
-                                consecutiveToolResultErrors = 0
-                            } else if batchResult.call.name != AgentCurrentTimePreflightPolicy.requiredToolName {
-                                consecutiveToolResultErrors += 1
-                            }
                             var requestBeforeToolResult = modelRequest
                             requestBeforeToolResult.messages = messages
                             let tokensBeforeToolResult = contextGuard.estimatedInputTokens(requestBeforeToolResult)
@@ -1298,8 +1253,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             ))
                         }
 
-                        let reachedToolErrorLimit = configuration.maxConsecutiveToolResultErrors > 0
-                            && consecutiveToolResultErrors >= configuration.maxConsecutiveToolResultErrors
                         yield(.turnCompleted(AgentTurnCompletedEvent(
                             runID: run.id,
                             sessionID: run.sessionID,
@@ -1309,25 +1262,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             toolResultCount: batchResults.count,
                             stoppedAfterTurn: false
                         )), to: continuation, recorder: eventRecorder)
-
-                        if repeatedToolCallDetected || reachedToolErrorLimit {
-                            phasedState.convergeToFinalSynthesis()
-                            forceFinalSynthesisWithoutTools = true
-                            let reason = repeatedToolCallDetected
-                                ? "The same completed tool request has repeated without material progress."
-                                : "The configured consecutive tool-error threshold has been reached."
-                            messages.append(AgentModelMessage(role: .system, content: """
-                            [TRUSTED RUNTIME CONVERGENCE]
-                            \(reason) Do not call more tools. Complete the user's task now from successful current-run evidence and completed side effects. If an essential operation is genuinely blocked, give a precise partial-completion report and concrete blocker instead of claiming success. Never mention internal iteration limits.
-                            """))
-                            consecutiveToolResultErrors = 0
-                        } else if budgetExceeded, !didInjectBudgetConvergence {
-                            didInjectBudgetConvergence = true
-                            messages.append(AgentModelMessage(role: .system, content: """
-                            [TRUSTED RUNTIME COMPLETION PRIORITY]
-                            The soft token budget has been exceeded, but the run must not end early. Reuse existing evidence, stop optional exploration, batch only indispensable remaining operations, and complete the original task. Do not mention the budget unless it creates a real user-visible limitation.
-                            """))
-                        }
                     }
                 } catch is CancellationError {
                     let didTimeOut = cancellationRegistry.isTimedOut(runID: run.id)
@@ -1625,26 +1559,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             toolCalls: response.toolCalls.isEmpty ? nil : response.toolCalls,
             providerMetadata: response.providerMetadata
         )
-    }
-
-    /// 阶段轮次上限触达时的收敛指令：先收敛（进入最终综合），不强制关闭工具，
-    /// 真正的硬停止仍由 maxToolIterations 与硬预算负责。
-    private static func phaseConvergenceInstruction(phase: AgentLoopPhase, roundLimit: Int) -> String {
-        let phaseGuidance: String
-        switch phase {
-        case .strategyResearch:
-            phaseGuidance = "Stop further exploration and commit the strategy now using the evidence already gathered. Move to execution; run at most one more batch only if a specific missing result is required."
-        case .memoryPreparation:
-            phaseGuidance = "Finish memory preparation now with the evidence already gathered and proceed to execution. Do not re-run preparation searches."
-        case .taskExecution:
-            phaseGuidance = "Finish the current batch, then call prepare_final_output and produce the final answer. Stop optional exploration and re-verification loops."
-        case .finalSynthesis:
-            phaseGuidance = "Produce the final answer now without more tools."
-        }
-        return """
-        [TRUSTED RUNTIME PHASE CONVERGENCE]
-        The \(phase.rawValue) phase has used \(roundLimit) model turns, its runtime round budget. \(phaseGuidance) Preserve completed work and report honestly; never mention internal round limits.
-        """
     }
 
     private static func classifyProviderError(_ error: Error) -> AgentModelProviderErrorClass {
@@ -2329,18 +2243,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         guard let data = try? JSONSerialization.data(withJSONObject: [value]),
               let encoded = String(data: data, encoding: .utf8) else { return "\"\"" }
         return String(encoded.dropFirst().dropLast())
-    }
-
-    private static func normalizedToolCallSignature(_ call: AgentToolCall) -> String {
-        guard let data = call.argumentsJSON.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data),
-              JSONSerialization.isValidJSONObject(object),
-              let normalizedData = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-              let normalizedArguments = String(data: normalizedData, encoding: .utf8)
-        else {
-            return "\(call.name)\u{1F}\(call.argumentsJSON)"
-        }
-        return "\(call.name)\u{1F}\(normalizedArguments)"
     }
 
     private static func nativeToolCatalogPrompt(from definitions: [AgentToolDefinition]) -> String {
