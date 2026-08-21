@@ -7,7 +7,7 @@ public enum SessionTokenBudgetStatus: Int, Comparable, Sendable, CaseIterable {
     case normal = 0
     /// Approaching compression zone (25% of context window).
     case warning = 1
-    /// Compression should be triggered (35% of context window).
+    /// Compression should be triggered (50% of context window).
     case shouldCompress = 2
     /// Emergency — force compression immediately (60% of context window).
     case safetyNet = 3
@@ -34,40 +34,53 @@ public enum SessionTokenBudgetStatus: Int, Comparable, Sendable, CaseIterable {
 /// | Claude Code (CLI)      | 95%       | 190K   |
 /// | Claude Code (VSCode)   | ~65%      | ~130K  |
 /// | MorphLLM recommendation| 80%       | 160K   |
-/// | **This implementation**| **35%**   | 70K    |
+/// | **This implementation**| **50%**   | 100K   |
 ///
-/// The 35% default leaves room for the rolling summary, current input,
+/// The 50% default leaves room for the rolling summary, current input,
 /// tool definitions, and the active run. Warning fires at 25%.
+/// All three ratios are configurable; they are clamped to keep the
+/// warning ≤ compression ≤ safety-net ordering valid.
 public struct SessionContextBudget: Sendable, Equatable {
     /// The model's total context window in tokens.
     public let contextWindowSize: Int
 
     /// Fraction of the context window that triggers a warning.
-    public static let warningRatio: Double = 0.25
+    public var warningRatio: Double
 
     /// Fraction of the context window that triggers compression.
-    public static let compressionRatio: Double = 0.35
+    public var compressionRatio: Double
 
     /// Fraction of the context window that forces emergency compression.
-    public static let safetyNetRatio: Double = 0.60
+    public var safetyNetRatio: Double
 
-    public init(contextWindowSize: Int) {
-        self.contextWindowSize = contextWindowSize
+    public init(
+        contextWindowSize: Int,
+        warningRatio: Double = 0.25,
+        compressionRatio: Double = 0.50,
+        safetyNetRatio: Double = 0.60
+    ) {
+        self.contextWindowSize = max(1, contextWindowSize)
+        let warning = min(max(warningRatio, 0.01), 0.99)
+        let compression = min(max(compressionRatio, 0.01), 0.99)
+        let safetyNet = min(max(safetyNetRatio, 0.01), 0.99)
+        self.warningRatio = min(warning, compression)
+        self.compressionRatio = max(compression, self.warningRatio)
+        self.safetyNetRatio = max(safetyNet, self.compressionRatio)
     }
 
     /// Token count at which the UI should start showing a warning.
     public var warningThreshold: Int {
-        Int(Double(contextWindowSize) * Self.warningRatio)
+        Int(Double(contextWindowSize) * warningRatio)
     }
 
     /// Token count at which compression should be triggered.
     public var compressionThreshold: Int {
-        Int(Double(contextWindowSize) * Self.compressionRatio)
+        Int(Double(contextWindowSize) * compressionRatio)
     }
 
     /// Token count at which emergency compression is forced.
     public var safetyNetThreshold: Int {
-        Int(Double(contextWindowSize) * Self.safetyNetRatio)
+        Int(Double(contextWindowSize) * safetyNetRatio)
     }
 
     /// Determine the current budget status for a given token count.

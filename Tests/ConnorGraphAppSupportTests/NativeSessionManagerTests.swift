@@ -166,6 +166,30 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     return store
 }
 
+/// 3 条历史消息，每条约 17 tokens（60 个非 CJK 字符 / 3.8 ≈ 16.3，向上取整），合计约 51 tokens。
+/// 配合 `maximumInputTokens: 100`，默认 50% 阈值（50）应触发压缩，80% 阈值（80）不应触发。
+private func makeRollingSummaryRatioScenario() throws -> (repository: AppChatSessionRepository, session: AgentSession) {
+    let store = try makeNativeSessionStore()
+    let repository = AppChatSessionRepository(store: store)
+    let segment = String(repeating: "a", count: 60)
+    let messages = (0..<3).map { index in
+        AgentMessage(
+            id: "ratio-history-\(index)",
+            role: index.isMultiple(of: 2) ? .user : .assistant,
+            content: "\(index):\(segment)",
+            createdAt: Date(timeIntervalSince1970: Double(index))
+        )
+    }
+    let session = AgentSession(
+        id: "native-session-ratio-\(UUID().uuidString)",
+        title: "Ratio Scenario",
+        messages: messages,
+        createdAt: Date(timeIntervalSince1970: 1_000)
+    )
+    try repository.saveSession(session)
+    return (repository, session)
+}
+
 @Test func nativeSessionManagerConvenienceInitializerUsesLoopInputBudget() throws {
     let store = try makeNativeSessionStore()
     let loop = AgentLoopController(
@@ -231,6 +255,47 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(summaryState.payload.currentGoal == "Handle the current request")
     #expect(manager.session.messages.last?.role == .assistant)
     #expect(manager.session.messages.last?.content == "Connor-owned assistant response")
+}
+
+@Test func nativeSessionManagerRollingSummaryUsesDefaultFiftyPercentRatio() async throws {
+    let scenario = try makeRollingSummaryRatioScenario()
+    let compressionProvider = NativeSessionRecordingLLMProvider()
+    let loop = AgentLoopController(modelProvider: NativeSessionFinalAnswerProvider(), toolRegistry: AgentToolRegistry())
+    var manager = NativeSessionManager(
+        backend: AgentLoopBackend(loopController: loop),
+        sessionRepository: scenario.repository,
+        session: scenario.session,
+        maximumInputTokens: 100,
+        rollingSummaryProvider: AnyLLMProvider(compressionProvider),
+        rollingSummaryModelID: "summary-test-model"
+    )
+
+    _ = try await manager.submit("Handle the current request")
+
+    // 历史消息约 51 tokens ≥ 100 × 50%，触发滚动摘要。
+    #expect(await compressionProvider.count() == 1)
+    #expect(try scenario.repository.loadConversationSummaryState(sessionID: scenario.session.id) != nil)
+}
+
+@Test func nativeSessionManagerRollingSummaryHonorsConfiguredCompressionRatio() async throws {
+    let scenario = try makeRollingSummaryRatioScenario()
+    let compressionProvider = NativeSessionRecordingLLMProvider()
+    let loop = AgentLoopController(modelProvider: NativeSessionFinalAnswerProvider(), toolRegistry: AgentToolRegistry())
+    var manager = NativeSessionManager(
+        backend: AgentLoopBackend(loopController: loop),
+        sessionRepository: scenario.repository,
+        session: scenario.session,
+        maximumInputTokens: 100,
+        rollingSummaryProvider: AnyLLMProvider(compressionProvider),
+        rollingSummaryModelID: "summary-test-model",
+        rollingSummaryCompressionRatio: 0.80
+    )
+
+    _ = try await manager.submit("Handle the current request")
+
+    // 历史+本轮约 66 tokens < 100 × 80%，不触发滚动摘要。
+    #expect(await compressionProvider.count() == 0)
+    #expect(try scenario.repository.loadConversationSummaryState(sessionID: scenario.session.id) == nil)
 }
 
 @Test func nativeSessionManagerPreservesSessionStatusChangedByAgentTool() async throws {

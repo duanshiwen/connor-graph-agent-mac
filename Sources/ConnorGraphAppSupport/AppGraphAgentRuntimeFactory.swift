@@ -181,7 +181,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: intentProvider)),
             maximumInputTokens: maximumInputTokens,
             rollingSummaryProvider: summaryProvider,
-            rollingSummaryModelID: intentProvider.modelID
+            rollingSummaryModelID: intentProvider.modelID,
+            rollingSummaryCompressionRatio: configuration.compaction.rollingSummaryCompressionRatio
         )
     }
 
