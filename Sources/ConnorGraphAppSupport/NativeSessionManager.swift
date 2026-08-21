@@ -76,6 +76,8 @@ public struct NativeSessionManager: Sendable {
 
     /// Maximum tokens available to the assembled model input after prompt and output limits.
     public var maximumInputTokens: Int
+    /// 跨轮滚动摘要的触发比例（对话+已有摘要占输入预算的百分比）。
+    public var rollingSummaryCompressionRatio: Double
     public private(set) var conversationSummaryState: ConversationSummaryState?
     private let rollingSummaryProvider: AnyLLMProvider?
     private let rollingSummaryModelID: String?
@@ -100,7 +102,8 @@ public struct NativeSessionManager: Sendable {
         maximumInputTokens: Int = 64_000,
         conversationSummaryState: ConversationSummaryState? = nil,
         rollingSummaryProvider: AnyLLMProvider? = nil,
-        rollingSummaryModelID: String? = nil
+        rollingSummaryModelID: String? = nil,
+        rollingSummaryCompressionRatio: Double = 0.50
     ) {
         self.backend = AnyAgentBackend(backend)
         self.sessionRepository = sessionRepository
@@ -117,6 +120,7 @@ public struct NativeSessionManager: Sendable {
         self.eventRecorder = eventRecorder
         self.pendingApprovalRepository = pendingApprovalRepository
         self.maximumInputTokens = max(1, maximumInputTokens)
+        self.rollingSummaryCompressionRatio = min(max(rollingSummaryCompressionRatio, 0.01), 0.99)
         self.conversationSummaryState = conversationSummaryState
         self.rollingSummaryProvider = rollingSummaryProvider
         self.rollingSummaryModelID = rollingSummaryModelID
@@ -145,7 +149,8 @@ public struct NativeSessionManager: Sendable {
             permissionMode: loopController.configuration.permissionMode,
             memoryOSFacade: memoryOSFacade,
             memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: AnyAgentModelProvider(loopController.modelProvider))),
-            maximumInputTokens: maximumInputTokens
+            maximumInputTokens: maximumInputTokens,
+            rollingSummaryCompressionRatio: configuration.compaction.rollingSummaryCompressionRatio
         )
     }
 
@@ -643,7 +648,10 @@ public struct NativeSessionManager: Sendable {
             let validState = selection.summaryState
             let liveTokenCount = SessionTokenCounter().estimate(messages: selection.messages).totalTokenCount
                 + (validState?.summaryTokenEstimate ?? 0)
-            let budget = SessionContextBudget(contextWindowSize: maximumInputTokens)
+            let budget = SessionContextBudget(
+                contextWindowSize: maximumInputTokens,
+                compressionRatio: rollingSummaryCompressionRatio
+            )
             guard budget.status(tokenCount: liveTokenCount) >= .shouldCompress else { return }
             let plan = try ConversationCompactionPlanner().plan(
                 messages: conversation,

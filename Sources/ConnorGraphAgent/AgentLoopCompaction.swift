@@ -11,6 +11,9 @@ public struct AgentLoopCompactionConfiguration: Codable, Sendable, Equatable {
     /// 工具结果超过该字节数时，即使是“最近 N 条”也一律压成 checkpoint 占位符。
     /// 避免超大结果（例如整页草稿 15k–30k 字符）永远留在上下文里，导致压缩无效。
     public var largeResultByteThreshold: Int
+    /// 跨轮滚动摘要的触发比例（对话+已有摘要占输入预算的百分比）。
+    /// 只影响 NativeSessionManager 的滚动摘要，与单轮内工具结果压缩无关。
+    public var rollingSummaryCompressionRatio: Double
 
     public init(
         isEnabled: Bool = true,
@@ -20,7 +23,8 @@ public struct AgentLoopCompactionConfiguration: Codable, Sendable, Equatable {
         targetRatio: Double = 0.45,
         minimumTokenGrowth: Int = 15_000,
         retainedRecentToolResults: Int = 2,
-        largeResultByteThreshold: Int = 8 * 1_024
+        largeResultByteThreshold: Int = 8 * 1_024,
+        rollingSummaryCompressionRatio: Double = 0.50
     ) {
         self.isEnabled = isEnabled
         self.checkpointRatio = Self.clamped(checkpointRatio)
@@ -30,6 +34,7 @@ public struct AgentLoopCompactionConfiguration: Codable, Sendable, Equatable {
         self.minimumTokenGrowth = max(0, minimumTokenGrowth)
         self.retainedRecentToolResults = max(0, retainedRecentToolResults)
         self.largeResultByteThreshold = max(1, largeResultByteThreshold)
+        self.rollingSummaryCompressionRatio = Self.clamped(rollingSummaryCompressionRatio)
     }
 
     private static func clamped(_ ratio: Double) -> Double {
@@ -48,7 +53,8 @@ public struct AgentLoopCompactionConfiguration: Codable, Sendable, Equatable {
             targetRatio: try container.decodeIfPresent(Double.self, forKey: .targetRatio) ?? 0.45,
             minimumTokenGrowth: try container.decodeIfPresent(Int.self, forKey: .minimumTokenGrowth) ?? 15_000,
             retainedRecentToolResults: try container.decodeIfPresent(Int.self, forKey: .retainedRecentToolResults) ?? 2,
-            largeResultByteThreshold: try container.decodeIfPresent(Int.self, forKey: .largeResultByteThreshold) ?? 8 * 1_024
+            largeResultByteThreshold: try container.decodeIfPresent(Int.self, forKey: .largeResultByteThreshold) ?? 8 * 1_024,
+            rollingSummaryCompressionRatio: try container.decodeIfPresent(Double.self, forKey: .rollingSummaryCompressionRatio) ?? 0.50
         )
     }
 }
