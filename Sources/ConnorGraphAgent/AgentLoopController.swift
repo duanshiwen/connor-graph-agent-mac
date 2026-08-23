@@ -2933,13 +2933,24 @@ private enum AgentParallelQueryOutcome: Sendable {
 /// 共享当前 run 的策略引擎（引用语义），让 backend 在 run 运行中也能切换权限模式。
 private actor AgentLoopPolicyBox {
     private var policy: AgentPolicyEngine?
+    /// run 尚未启动（策略引擎未安装）时先暂存，启动后立即生效，
+    /// 避免“提交后、run 真正启动前”的权限切换丢失。
+    private var pendingPermissionMode: AgentPermissionMode?
 
-    func install(_ policy: AgentPolicyEngine) {
+    func install(_ policy: AgentPolicyEngine) async {
         self.policy = policy
+        if let pendingPermissionMode {
+            await policy.updatePermissionMode(pendingPermissionMode)
+            self.pendingPermissionMode = nil
+        }
     }
 
     func updatePermissionMode(_ mode: AgentPermissionMode) async {
-        await policy?.updatePermissionMode(mode)
+        if let policy {
+            await policy.updatePermissionMode(mode)
+        } else {
+            pendingPermissionMode = mode
+        }
     }
 }
 

@@ -73,6 +73,8 @@ final class AppRuntimeLifecycle {
     let maintenanceCoordinator = AppMaintenanceCoordinator()
     private let searchIndexDrainer = AppMemoryOSSearchIndexDrainer()
     private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
+    /// 审批请求系统通知的会话级冷却，避免同一会话反复打扰。
+    private var lastApprovalNotificationAt: [String: Date] = [:]
     private lazy var chatSessionCoordinator = ChatSessionCoordinator(
         model: chatFeatureModel.sessions,
         repository: chatSessionRepository
@@ -1316,6 +1318,10 @@ final class AppRuntimeLifecycle {
                 let backend = manager.backend
                 Task { await backend.updatePermissionMode(.trustedWrite) }
             }
+        }
+        chatApprovalCoordinator.onNewPendingApprovals = { [weak self] approvals in
+            guard let self else { return }
+            self.surfacePendingApprovalRequests(approvals)
         }
         chatApprovalCoordinator.onError = { [weak self] message in self?.errorMessage = message }
         chatComposerCoordinator.selectedSessionID = { [weak self] in self?.chatFeatureModel.sessions.selectedSessionID }
@@ -3194,6 +3200,42 @@ final class AppRuntimeLifecycle {
 
     private func backendForPendingApproval(_ approval: AgentPendingApproval) -> AnyAgentBackend? {
         chatRunCoordinator.backend(for: approval)
+    }
+
+    /// 新待审批请求到达时立即把用户带到对应会话（并激活窗口），
+    /// 避免任务因审批请求“藏”在后台无人处理而卡住。
+    private func surfacePendingApprovalRequests(_ approvals: [AgentPendingApproval]) {
+        guard let approval = approvals.first(where: { $0.status == .pending }),
+              !approval.sessionID.isEmpty else { return }
+        let sessionID = approval.sessionID
+        let alreadyFocused = selection == .agentChat
+            && chatFeatureModel.sessions.selectedSessionID == sessionID
+        if !alreadyFocused {
+            shellFeatureModel.select(.agentChat)
+            chatSessionCoordinator.select(sessionID)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        postApprovalRequestNotification(sessionID: sessionID, approval: approval)
+    }
+
+    private func postApprovalRequestNotification(sessionID: String, approval: AgentPendingApproval) {
+        guard appSettingsModel.desktopNotificationsEnabled,
+              Bundle.main.bundleURL.pathExtension == "app" else { return }
+        let now = Date()
+        if let last = lastApprovalNotificationAt[sessionID],
+           now.timeIntervalSince(last) < 300 { return }
+        lastApprovalNotificationAt[sessionID] = now
+        let displayTitle = chatFeatureModel.sessions.title(for: sessionID) ?? "当前会话"
+        let toolLine = approval.toolName?.isEmpty == false ? "（调用工具：\(approval.toolName!)）" : ""
+        let content = UNMutableNotificationContent()
+        content.title = "康纳同学：有权限请求等待审批"
+        content.body = "会话「\(displayTitle)」正在等待权限审批\(toolLine)，任务已暂停。"
+        content.sound = .default
+        content.interruptionLevel = .timeSensitive
+        content.userInfo = ["sessionID": sessionID, "bundlePath": Bundle.main.bundlePath]
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: "approval-\(sessionID)-\(UUID().uuidString)", content: content, trigger: nil)
+        )
     }
 
     func saveBrowserSelectionAsEpisode(_ selection: BrowserSelectionContext) async {

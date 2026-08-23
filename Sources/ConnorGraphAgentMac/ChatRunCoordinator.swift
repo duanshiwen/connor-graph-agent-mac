@@ -287,7 +287,9 @@ final class ChatRunCoordinator {
     }
 
     func backend(for approval: AgentPendingApproval) -> AnyAgentBackend? {
-        backendsByRunID[approval.runID] ?? backendsBySessionID[approval.sessionID] ?? manager?.backend
+        // 只认当前仍在线注册的 run/session 后端；不要回退到当前可见会话的 manager，
+        // 否则审批可能被发给错误的 agent loop，导致 run 永远无法恢复。
+        backendsByRunID[approval.runID] ?? backendsBySessionID[approval.sessionID]
     }
 
     enum CancellationRequest {
