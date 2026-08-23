@@ -1306,7 +1306,11 @@ final class AppRuntimeLifecycle {
         chatBackgroundTaskCoordinator.onSessionRenamed = { [weak self] session in self?.synchronizeRenamedChatSession(session) }
         chatBackgroundTaskCoordinator.onRequestListRefresh = { [weak self] reason in self?.scheduleChatSessionListRefresh(reason: reason) }
         chatBackgroundTaskCoordinator.onError = { [weak self] message in self?.errorMessage = message }
-        chatApprovalCoordinator.activeSessionID = { [weak self] in self?.chatRunCoordinator.activeSession.id ?? "" }
+        // 审批卡片跟随用户当前选中的会话渲染；切换会话后卡片立即可见，
+        // 而不是跟随运行管理器（可能与选中会话不同步）。
+        chatApprovalCoordinator.activeSessionID = { [weak self] in
+            self?.chatFeatureModel.sessions.selectedSessionID ?? ""
+        }
         chatApprovalCoordinator.permissionMode = { [weak self] in self?.agentPermissionMode ?? .askToWrite }
         chatApprovalCoordinator.backendForApproval = { [weak self] approval in self?.backendForPendingApproval(approval) }
         chatApprovalCoordinator.onAlwaysAllow = { [weak self] in
@@ -1321,7 +1325,7 @@ final class AppRuntimeLifecycle {
         }
         chatApprovalCoordinator.onNewPendingApprovals = { [weak self] approvals in
             guard let self else { return }
-            self.surfacePendingApprovalRequests(approvals)
+            self.notifyPendingApprovalRequests(approvals)
         }
         chatApprovalCoordinator.onError = { [weak self] message in self?.errorMessage = message }
         chatComposerCoordinator.selectedSessionID = { [weak self] in self?.chatFeatureModel.sessions.selectedSessionID }
@@ -3202,20 +3206,12 @@ final class AppRuntimeLifecycle {
         chatRunCoordinator.backend(for: approval)
     }
 
-    /// 新待审批请求到达时立即把用户带到对应会话（并激活窗口），
-    /// 避免任务因审批请求“藏”在后台无人处理而卡住。
-    private func surfacePendingApprovalRequests(_ approvals: [AgentPendingApproval]) {
+    /// 新待审批请求到达时发送系统通知提醒。不自动切换会话、不抢焦点：
+    /// 审批卡片始终跟随用户当前选中的会话渲染，切到待审批会话即可看到。
+    private func notifyPendingApprovalRequests(_ approvals: [AgentPendingApproval]) {
         guard let approval = approvals.first(where: { $0.status == .pending }),
               !approval.sessionID.isEmpty else { return }
-        let sessionID = approval.sessionID
-        let alreadyFocused = selection == .agentChat
-            && chatFeatureModel.sessions.selectedSessionID == sessionID
-        if !alreadyFocused {
-            shellFeatureModel.select(.agentChat)
-            chatSessionCoordinator.select(sessionID)
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        postApprovalRequestNotification(sessionID: sessionID, approval: approval)
+        postApprovalRequestNotification(sessionID: approval.sessionID, approval: approval)
     }
 
     private func postApprovalRequestNotification(sessionID: String, approval: AgentPendingApproval) {
