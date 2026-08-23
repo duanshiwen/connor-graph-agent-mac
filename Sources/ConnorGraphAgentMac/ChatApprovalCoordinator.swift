@@ -15,11 +15,14 @@ final class ChatApprovalCoordinator {
     private var generation = 0
     private var reloadGeneration = 0
     private var isShutdown = false
+    /// 已对外提示过的 pending 请求，避免同一请求被反复弹窗/通知。
+    private var lastReportedPendingRequestIDs: Set<String> = []
 
     @ObservationIgnored var activeSessionID: () -> String = { "" }
     @ObservationIgnored var permissionMode: () -> AgentPermissionMode = { .askToWrite }
     @ObservationIgnored var backendForApproval: (AgentPendingApproval) -> AnyAgentBackend? = { _ in nil }
     @ObservationIgnored var onAlwaysAllow: () -> Void = {}
+    @ObservationIgnored var onNewPendingApprovals: ([AgentPendingApproval]) -> Void = { _ in }
     @ObservationIgnored var onError: (String) -> Void = { _ in }
 
     init(model: ChatApprovalModel, repository: AppAgentPendingApprovalRepository?) {
@@ -33,9 +36,7 @@ final class ChatApprovalCoordinator {
 
     func install(_ approvals: [AgentPendingApproval]) {
         guard !isShutdown else { return }
-        model.pendingApprovals = approvals
-        model.nextPageCursor = nil
-        autoApproveCurrentPolicy()
+        applyLoadedApprovals(approvals, nextCursor: nil)
     }
 
     func reload() {
@@ -58,9 +59,7 @@ final class ChatApprovalCoordinator {
                 }.value
                 try Task.checkCancellation()
                 guard let self, !self.isShutdown, self.reloadGeneration == currentGeneration else { return }
-                self.model.pendingApprovals = approvals.approvals
-                self.model.nextPageCursor = approvals.nextCursor
-                self.autoApproveCurrentPolicy()
+                self.applyLoadedApprovals(approvals.approvals, nextCursor: approvals.nextCursor)
             } catch is CancellationError {
                 return
             } catch {
@@ -168,6 +167,22 @@ final class ChatApprovalCoordinator {
         }
     }
 
+    /// 统一入口：替换待审批列表、执行自动批准策略，并把「新到达且需要人工处理」
+    /// 的请求通过 onNewPendingApprovals 通知外层（用于弹窗/通知/自动切换到对应会话）。
+    private func applyLoadedApprovals(_ approvals: [AgentPendingApproval], nextCursor: String?) {
+        let previouslySeen = lastReportedPendingRequestIDs
+        let loadedPendingIDs = Set(approvals.filter { $0.status == .pending }.map(\.requestID))
+        let newlyArrived = approvals.filter { $0.status == .pending && !previouslySeen.contains($0.requestID) }
+        lastReportedPendingRequestIDs = loadedPendingIDs
+        model.pendingApprovals = approvals
+        model.nextPageCursor = nextCursor
+        autoApproveCurrentPolicy()
+        let toSurface = newlyArrived.filter { !shouldAutoApprove($0) }
+        if !toSurface.isEmpty {
+            onNewPendingApprovals(toSurface)
+        }
+    }
+
     private func shouldAutoApprove(_ approval: AgentPendingApproval) -> Bool {
         guard approval.status == .pending else { return false }
         switch permissionMode() {
@@ -189,21 +204,33 @@ final class ChatApprovalCoordinator {
                 }
             }
             do {
+                var resolvedStatus = status
                 let resolved: AgentPendingApproval?
-                switch status {
-                case .approved:
-                    resolved = try self.repository?.approve(requestID: approval.requestID, reason: reason, actor: actor)
-                case .denied:
-                    resolved = try self.repository?.deny(requestID: approval.requestID, reason: reason, actor: actor)
-                case .cancelled:
-                    resolved = try self.repository?.cancel(requestID: approval.requestID, reason: reason, actor: actor)
-                case .pending:
-                    resolved = approval
+                if status == .pending || self.backendForApproval(approval) != nil {
+                    switch status {
+                    case .approved:
+                        resolved = try self.repository?.approve(requestID: approval.requestID, reason: reason, actor: actor)
+                    case .denied:
+                        resolved = try self.repository?.deny(requestID: approval.requestID, reason: reason, actor: actor)
+                    case .cancelled:
+                        resolved = try self.repository?.cancel(requestID: approval.requestID, reason: reason, actor: actor)
+                    case .pending:
+                        resolved = approval
+                    }
+                } else {
+                    // 审批时找不到仍在线等待的 agent run（例如应用重启、run 已结束）：
+                    // 直接把请求标记为取消，避免“已批准但永远无法恢复”的悬空状态。
+                    resolvedStatus = .cancelled
+                    resolved = try self.repository?.cancel(
+                        requestID: approval.requestID,
+                        reason: "未找到仍在线的 agent run，无法恢复执行；待审批请求已取消，请重新执行任务",
+                        actor: "system"
+                    )
                 }
                 try Task.checkCancellation()
                 let sent: Bool
                 if let resolved, let backend = self.backendForApproval(resolved) {
-                    try await backend.resolveApproval(resolved, status: status, reason: reason, actor: actor)
+                    try await backend.resolveApproval(resolved, status: resolvedStatus, reason: reason, actor: actor)
                     sent = true
                 } else {
                     sent = false
@@ -211,7 +238,7 @@ final class ChatApprovalCoordinator {
                 try Task.checkCancellation()
                 guard self.generation == currentGeneration else { return }
                 self.reload()
-                self.model.lastResultSummary = Self.resultSummary(approval: approval, status: status, sentToLiveBackend: sent)
+                self.model.lastResultSummary = Self.resultSummary(approval: approval, status: resolvedStatus, sentToLiveBackend: sent)
             } catch is CancellationError {
                 return
             } catch {

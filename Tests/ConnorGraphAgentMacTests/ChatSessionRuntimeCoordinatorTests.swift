@@ -218,6 +218,41 @@ struct ChatSessionRuntimeCoordinatorTests {
         #expect(model.pendingApprovals.count == 3)
     }
 
+    @Test func approvalCoordinatorSurfacesNewlyArrivedPendingApprovals() {
+        let model = ChatApprovalModel()
+        let coordinator = ChatApprovalCoordinator(model: model, repository: nil)
+        var surfaced: [[AgentPendingApproval]] = []
+        coordinator.onNewPendingApprovals = { surfaced.append($0) }
+        let first = AgentPendingApproval(requestID: "approval-1", runID: "run", sessionID: "session", capability: .readSession)
+        let second = AgentPendingApproval(requestID: "approval-2", runID: "run", sessionID: "session", capability: .writeWorkspaceFile)
+
+        coordinator.install([first])
+        #expect(surfaced.count == 1)
+        #expect(surfaced[0].map(\.requestID) == ["approval-1"])
+
+        // 同一批请求再次加载（例如刷新）不应重复提示。
+        coordinator.install([first])
+        #expect(surfaced.count == 1)
+
+        // 只有新到达的请求才提示。
+        coordinator.install([first, second])
+        #expect(surfaced.count == 2)
+        #expect(surfaced[1].map(\.requestID) == ["approval-2"])
+    }
+
+    @Test func approvalCoordinatorDoesNotSurfaceAutoApprovedRequests() {
+        let model = ChatApprovalModel()
+        let coordinator = ChatApprovalCoordinator(model: model, repository: nil)
+        coordinator.permissionMode = { .trustedWrite }
+        var surfaced = false
+        coordinator.onNewPendingApprovals = { _ in surfaced = true }
+        coordinator.install([
+            AgentPendingApproval(requestID: "auto-approve", runID: "run", sessionID: "session", capability: .deleteGraphObject)
+        ])
+        #expect(!surfaced)
+        #expect(coordinator.activeApprovals(sessionID: "session").isEmpty)
+    }
+
     @Test func approvalCoordinatorCancelsPersistedApprovalsWhenRunStops() throws {
         let fixture = try RepositoryFixture()
         defer { fixture.cleanup() }

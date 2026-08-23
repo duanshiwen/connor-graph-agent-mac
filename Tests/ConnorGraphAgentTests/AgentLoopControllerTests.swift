@@ -801,6 +801,52 @@ private struct InterruptedStreamProvider: StreamingAgentModelProvider {
     #expect(try String(contentsOf: workspace.appendingPathComponent("note.txt"), encoding: .utf8) == "approved")
 }
 
+@Test func permissionModeSwitchBeforeRunStartAppliesToRun() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-patch-pre-switch", name: "ApplyPatch", argumentsJSON: #"{"operations":[{"op":"create","filePath":"note.txt","content":"trusted"}]}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "Patch completed.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorAgentLoopPreSwitch-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    var registry = AgentToolRegistry()
+    registry.register(LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(permissionMode: .askToWrite)
+    )
+    // 在 run 真正启动前切换为执行模式：后续 run 应直接放行写工具。
+    await loop.updatePermissionMode(.trustedWrite)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(
+        runID: "run-pre-switch",
+        sessionID: "session-pre-switch",
+        userMessage: "Write note",
+        permissionMode: .askToWrite
+    )) {
+        events.append(event)
+    }
+
+    #expect(!events.map(\.kind).contains(.permissionRequested))
+    #expect(events.map(\.kind).contains(.toolFinished))
+    #expect(events.last?.kind == .runCompleted)
+    #expect(try String(contentsOf: workspace.appendingPathComponent("note.txt"), encoding: .utf8) == "trusted")
+}
+
 @Test func agentLoopRequestsApprovalForWorkspaceShellCommand() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
