@@ -29,6 +29,8 @@ struct AgentChatView: View {
         .onChange(of: model.sessions.selectedSessionID) { _, _ in
             model.workspaceExplorer.dismissTree()
             model.dismissPreviewsForSessionChange()
+            // 切到其它会话时刷新待审批列表，保证审批卡片在目标会话立即可见。
+            chatActions.approval.reloadPendingApprovals()
         }
     }
 
