@@ -704,15 +704,61 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         if connection.connectionKind == .githubCopilot {
             extraHeaders = GitHubCopilotRequestHeaders.applying(to: extraHeaders)
         }
+        let model = modelOverride ?? connection.effectiveModel
+        let isArkEndpoint = Self.isArkEndpointURL(urlString)
+        var reasoningEffort: String?
+        var thinkingEnabled: Bool?
+        if isArkEndpoint {
+            let thinkingLevel = thinkingLevelOverride ?? settings.defaultThinkingLevel
+            // 方舟文档：Agent 场景 reasoning_effort 建议 high 及以上。
+            // 思考强度低于 high 时按 high 处理；off 保持不开启思考。
+            let effectiveLevel: AppLLMThinkingLevel = {
+                guard thinkingLevel != .off else { return .off }
+                let order = AppLLMThinkingLevel.allCases
+                guard let selected = order.firstIndex(of: thinkingLevel),
+                      let highIndex = order.firstIndex(of: .high) else { return .high }
+                return order[max(selected, highIndex)]
+            }()
+            reasoningEffort = effectiveLevel.openAIReasoningEffort
+            thinkingEnabled = effectiveLevel != .off && Self.arkModelSupportsThinking(model)
+        }
         return OpenAICompatibleConfig(
             baseURL: baseURL,
             apiKey: apiKey,
-            model: modelOverride ?? connection.effectiveModel,
+            model: model,
             extraHeaders: extraHeaders,
             apiKeyHeaderKind: apiKeyHeaderKind,
-            reasoningEffort: nil,
-            explicitVisionSupport: connection.explicitVisionSupport
+            reasoningEffort: reasoningEffort,
+            explicitVisionSupport: connection.explicitVisionSupport,
+            thinkingEnabled: thinkingEnabled,
+            topP: isArkEndpoint ? 0.95 : nil,
+            temperatureOverride: isArkEndpoint ? 1.0 : nil
         )
+    }
+
+    /// 方舟（火山方舟 · 豆包）OpenAI 兼容端点：标准 v3 与 Coding Plan 均在 volces.com 域名下。
+    public static func isArkEndpointURL(_ urlString: String) -> Bool {
+        urlString.lowercased().contains("volces.com")
+    }
+
+    /// 判断方舟模型是否为思考模型（支持 thinking 参数与思考内容回传）。
+    /// 非思考模型（flash/vision/embedding/tts 等）不发送 thinking，避免参数不兼容报错。
+    public static func arkModelSupportsThinking(_ modelID: String) -> Bool {
+        let model = modelID.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if model.hasPrefix("doubao-") || model.hasPrefix("doubao-seed") {
+            let nonThinkingMarkers = ["-flash", "-vision", "-embedding", "-tts", "-asr", "-image", "-voice", "-realtime", "-music", "-video"]
+            if nonThinkingMarkers.contains(where: { model.contains($0) }) { return false }
+            if model == "doubao-seed-1-6" { return false }
+            if model.hasPrefix("doubao-1-5") || model.hasPrefix("doubao-1-6") { return false }
+            if model.hasPrefix("doubao-seed") { return true }
+            return false
+        }
+        if model.hasPrefix("ark-") { return true }
+        if model.hasPrefix("deepseek-v3") || model.hasPrefix("deepseek-v4") { return true }
+        if model.hasPrefix("glm-5") { return true }
+        if model.hasPrefix("kimi-k2") || model.hasPrefix("kimi-k3") { return true }
+        if model.hasPrefix("minimax-m") { return true }
+        return false
     }
 
     public func anthropicCompatibleConfig(
