@@ -45,6 +45,9 @@ public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
     public var responseID: String?
     public var reasoningEncryptedContentPresent: Bool
     public var reasoningContent: String?
+    /// OpenAI 兼容协议（火山方舟豆包等）的思考内容加密原文（`encrypted_content`），
+    /// 原样、完整回传给下一轮请求，保证 Agent 多轮工具调用的推理连续性。
+    public var encryptedContent: String?
 
     public init(
         providerID: String,
@@ -54,7 +57,8 @@ public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
         stopReason: String? = nil,
         responseID: String? = nil,
         reasoningEncryptedContentPresent: Bool = false,
-        reasoningContent: String? = nil
+        reasoningContent: String? = nil,
+        encryptedContent: String? = nil
     ) {
         self.providerID = providerID
         self.rawAssistantContentJSON = rawAssistantContentJSON
@@ -64,6 +68,7 @@ public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
         self.responseID = responseID
         self.reasoningEncryptedContentPresent = reasoningEncryptedContentPresent
         self.reasoningContent = reasoningContent
+        self.encryptedContent = encryptedContent
     }
 }
 

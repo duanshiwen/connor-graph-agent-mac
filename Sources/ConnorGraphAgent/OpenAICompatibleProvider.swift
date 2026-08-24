@@ -375,6 +375,10 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                 reasoningContent: message.providerMetadata?.providerID == "openai-compatible"
                     ? message.providerMetadata?.reasoningContent
                     : nil,
+                // 方舟豆包等模型的思考内容加密原文：原样、完整回传，否则不报错但推理效果下降。
+                encryptedContent: message.providerMetadata?.providerID == "openai-compatible"
+                    ? message.providerMetadata?.encryptedContent
+                    : nil,
                 toolCalls: message.toolCalls?.map { call in
                     OpenAIToolCall(
                         id: call.id,
@@ -455,15 +459,22 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             ? AgentModelFinishReason.openAICompatible(finishReason: choice?.finishReason)
             : .toolCalls
         let usage = decoded.usage.map(\.agentModelUsage)
+        let reasoning = message?.reasoningContent
+        let encrypted = message?.encryptedContent
+        let metadata: AgentModelProviderMetadata? = (reasoning == nil && encrypted == nil)
+            ? nil
+            : AgentModelProviderMetadata(
+                providerID: "openai-compatible",
+                reasoningContent: reasoning,
+                encryptedContent: encrypted
+            )
         return AgentModelResponse(
             text: recovered.toolCalls.isEmpty ? message?.content : recovered.text,
             toolCalls: toolCalls,
             usage: usage,
             finishReason: finishReason,
             rawResponseJSON: String(data: data, encoding: .utf8),
-            providerMetadata: message?.reasoningContent.map {
-                AgentModelProviderMetadata(providerID: "openai-compatible", reasoningContent: $0)
-            }
+            providerMetadata: metadata
         )
     }
 
@@ -544,6 +555,7 @@ private struct OpenAIChatMessage: Codable {
     var toolCallID: String?
     var name: String?
     var reasoningContent: String?
+    var encryptedContent: String?
     var toolCalls: [OpenAIToolCall]?
 
     init(
@@ -553,6 +565,7 @@ private struct OpenAIChatMessage: Codable {
         toolCallID: String? = nil,
         name: String? = nil,
         reasoningContent: String? = nil,
+        encryptedContent: String? = nil,
         toolCalls: [OpenAIToolCall]? = nil
     ) {
         self.role = role
@@ -561,6 +574,7 @@ private struct OpenAIChatMessage: Codable {
         self.toolCallID = toolCallID
         self.name = name
         self.reasoningContent = reasoningContent
+        self.encryptedContent = encryptedContent
         self.toolCalls = toolCalls
     }
 
@@ -570,6 +584,7 @@ private struct OpenAIChatMessage: Codable {
         case toolCallID = "tool_call_id"
         case name
         case reasoningContent = "reasoning_content"
+        case encryptedContent = "encrypted_content"
         case toolCalls = "tool_calls"
     }
 
@@ -581,6 +596,7 @@ private struct OpenAIChatMessage: Codable {
         toolCallID = try container.decodeIfPresent(String.self, forKey: .toolCallID)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         reasoningContent = try container.decodeIfPresent(String.self, forKey: .reasoningContent)
+        encryptedContent = try container.decodeIfPresent(String.self, forKey: .encryptedContent)
         toolCalls = try container.decodeIfPresent([OpenAIToolCall].self, forKey: .toolCalls)
     }
 
@@ -595,6 +611,7 @@ private struct OpenAIChatMessage: Codable {
         try container.encodeIfPresent(toolCallID, forKey: .toolCallID)
         try container.encodeIfPresent(name, forKey: .name)
         try container.encodeIfPresent(reasoningContent, forKey: .reasoningContent)
+        try container.encodeIfPresent(encryptedContent, forKey: .encryptedContent)
         try container.encodeIfPresent(toolCalls, forKey: .toolCalls)
     }
 }
@@ -747,12 +764,14 @@ private struct OpenAIChatCompletionStreamChunk: Decodable {
         var role: String?
         var content: String?
         var reasoningContent: String?
+        var encryptedContent: String?
         var toolCalls: [ToolCallDelta]?
 
         enum CodingKeys: String, CodingKey {
             case role
             case content
             case reasoningContent = "reasoning_content"
+            case encryptedContent = "encrypted_content"
             case toolCalls = "tool_calls"
         }
     }
@@ -779,6 +798,7 @@ private struct OpenAIChatCompletionStreamAccumulator {
 
     private var text = ""
     private var reasoningContent = ""
+    private var encryptedContent = ""
     private var finishReason: AgentModelFinishReason = .unknown
     private var usage: AgentModelUsage?
     private var rawEvents: [String] = []
@@ -806,6 +826,11 @@ private struct OpenAIChatCompletionStreamAccumulator {
                 reasoningContent += reasoning
                 events.append(.thinkingDelta(reasoning))
             }
+            // 方舟豆包：思考内容加密块由独立 chunk 下发，此时 content 与 reasoning_content
+            // 可能均为空。必须捕获 encrypted_content 原文，用于下一轮原样回传。
+            if let encrypted = choice.delta.encryptedContent, !encrypted.isEmpty {
+                encryptedContent = encrypted
+            }
             for toolCall in choice.delta.toolCalls ?? [] {
                 var state = toolCalls[toolCall.index] ?? ToolCallState()
                 if let id = toolCall.id { state.id = id }
@@ -828,15 +853,21 @@ private struct OpenAIChatCompletionStreamAccumulator {
         }
         let recovered = OpenAITextualToolCallParser.parse(text.isEmpty ? nil : text)
         let calls = structuredCalls.isEmpty ? recovered.toolCalls : structuredCalls
+        let hasReasoning = !reasoningContent.isEmpty
+        let hasEncrypted = !encryptedContent.isEmpty
         return AgentModelResponse(
             text: recovered.toolCalls.isEmpty ? (text.isEmpty ? nil : text) : recovered.text,
             toolCalls: calls,
             usage: usage,
             finishReason: calls.isEmpty ? finishReason : .toolCalls,
             rawResponseJSON: rawEvents.joined(separator: "\n"),
-            providerMetadata: reasoningContent.isEmpty
-                ? nil
-                : AgentModelProviderMetadata(providerID: "openai-compatible", reasoningContent: reasoningContent)
+            providerMetadata: (hasReasoning || hasEncrypted)
+                ? AgentModelProviderMetadata(
+                    providerID: "openai-compatible",
+                    reasoningContent: hasReasoning ? reasoningContent : nil,
+                    encryptedContent: hasEncrypted ? encryptedContent : nil
+                )
+                : nil
         )
     }
 
