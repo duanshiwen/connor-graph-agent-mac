@@ -389,7 +389,7 @@ final class ChatComposerCoordinator {
         guard let storagePaths else { return [] }
         let store = AppSessionAttachmentStore(paths: storagePaths)
         let totalCharacterLimit = Int(AttachmentImportPolicy.defaultTotalAcceptedCharacters)
-        var pending = pendingAttachmentsBySessionID[sessionID] ?? []
+        let pending = pendingAttachmentsBySessionID[sessionID] ?? []
         var rejectionsByID = pendingAttachmentRejectionsBySessionID[sessionID] ?? [:]
         var newlyRejected: [AttachmentRejectedFile] = []
 
