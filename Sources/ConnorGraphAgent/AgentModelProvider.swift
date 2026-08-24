@@ -36,6 +36,29 @@ public struct AgentModelMessageContentPart: Codable, Sendable, Equatable {
     }
 }
 
+/// 方舟（火山方舟 · 豆包）思考模型判定，供请求参数注入与输出预算调整共用。
+public enum AgentModelArkSupport {
+    /// 模型是否为方舟思考模型（支持 thinking 参数、加密思考回传与大输出预算）。
+    /// 非思考模型（flash/vision/embedding/tts 等）不发送 thinking，避免参数不兼容报错。
+    public static func arkModelSupportsThinking(_ modelID: String) -> Bool {
+        let model = modelID.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if model.hasPrefix("doubao-") || model.hasPrefix("doubao-seed") {
+            let nonThinkingMarkers = ["-flash", "-vision", "-embedding", "-tts", "-asr", "-image", "-voice", "-realtime", "-music", "-video"]
+            if nonThinkingMarkers.contains(where: { model.contains($0) }) { return false }
+            if model == "doubao-seed-1-6" { return false }
+            if model.hasPrefix("doubao-1-5") || model.hasPrefix("doubao-1-6") { return false }
+            if model.hasPrefix("doubao-seed") { return true }
+            return false
+        }
+        if model.hasPrefix("ark-") { return true }
+        if model.hasPrefix("deepseek-v3") || model.hasPrefix("deepseek-v4") { return true }
+        if model.hasPrefix("glm-5") { return true }
+        if model.hasPrefix("kimi-k2") || model.hasPrefix("kimi-k3") { return true }
+        if model.hasPrefix("minimax-m") { return true }
+        return false
+    }
+}
+
 public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
     public var providerID: String
     public var rawAssistantContentJSON: String?
@@ -45,6 +68,9 @@ public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
     public var responseID: String?
     public var reasoningEncryptedContentPresent: Bool
     public var reasoningContent: String?
+    /// OpenAI 兼容协议（火山方舟豆包等）的思考内容加密原文（`encrypted_content`），
+    /// 原样、完整回传给下一轮请求，保证 Agent 多轮工具调用的推理连续性。
+    public var encryptedContent: String?
 
     public init(
         providerID: String,
@@ -54,7 +80,8 @@ public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
         stopReason: String? = nil,
         responseID: String? = nil,
         reasoningEncryptedContentPresent: Bool = false,
-        reasoningContent: String? = nil
+        reasoningContent: String? = nil,
+        encryptedContent: String? = nil
     ) {
         self.providerID = providerID
         self.rawAssistantContentJSON = rawAssistantContentJSON
@@ -64,6 +91,7 @@ public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
         self.responseID = responseID
         self.reasoningEncryptedContentPresent = reasoningEncryptedContentPresent
         self.reasoningContent = reasoningContent
+        self.encryptedContent = encryptedContent
     }
 }
 
