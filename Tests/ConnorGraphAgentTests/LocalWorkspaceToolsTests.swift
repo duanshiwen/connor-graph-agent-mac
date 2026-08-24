@@ -9,24 +9,102 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     return root
 }
 
-@Test func readToolReturnsSmallFileInFullDespiteLimit() async throws {
-    // 小文件整读：即使调用方传了很小的 offset/limit，Read 也返回全文，不截断。
+@Test func readToolHonorsExplicitWindowOnSmallFile() async throws {
+    // 显式窗口：即使小文件能整读，也必须从指定 offset 开始、按 limit 截取，不能从头返回全文。
     let workspace = try makeToolTempWorkspace()
     let file = workspace.appendingPathComponent("README.md")
-    try "one\ntwo\nthree\nfour\n".write(to: file, atomically: true, encoding: .utf8)
+    try "one\ntwo\nthree\nfour".write(to: file, atomically: true, encoding: .utf8)
     let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     let result = try await tool.execute(
         arguments: try AgentToolArguments(json: #"{"filePath":"README.md","offset":2,"limit":2}"#),
-        context: .localToolTestContext(toolCallID: "read-small-full")
+        context: .localToolTestContext(toolCallID: "read-small-window")
     )
 
     #expect(result.toolName == "Read")
-    #expect(result.contentText.contains("1: one"))
     #expect(result.contentText.contains("2: two"))
     #expect(result.contentText.contains("3: three"))
-    #expect(result.contentText.contains("4: four"))
+    #expect(!result.contentText.contains("1: one"))
+    #expect(!result.contentText.contains("4: four"))
+    #expect(result.contentJSON?.contains(#""offset":2"#) == true)
+    #expect(result.contentJSON?.contains(#""limit":2"#) == true)
     #expect(result.contentJSON?.contains(#""truncated":false"#) == true)
+    #expect(result.contentJSON?.contains("nextOffset") == false)
+}
+
+@Test func readToolReturnsWholeSmallFileWhenNoWindow() async throws {
+    // 无显式窗口：小文件整读仍返回全文，不压缩。
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("README.md")
+    try "one\ntwo\nthree\nfour".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"filePath":"README.md"}"#),
+        context: .localToolTestContext(toolCallID: "read-small-full")
+    )
+
+    #expect(result.contentText.contains("1: one"))
+    #expect(result.contentText.contains("4: four"))
+    #expect(result.contentJSON?.contains(#""offset":1"#) == true)
+    #expect(result.contentJSON?.contains(#""limit":4"#) == true)
+    #expect(result.contentJSON?.contains(#""truncated":false"#) == true)
+}
+
+@Test func readToolContinuesSmallFileFromOffsetWithoutLimit() async throws {
+    // 只传 offset：从该行读到文件末尾。
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("README.md")
+    try "one\ntwo\nthree\nfour".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"filePath":"README.md","offset":3}"#),
+        context: .localToolTestContext(toolCallID: "read-small-offset")
+    )
+
+    #expect(result.contentText == "3: three\n4: four")
+    #expect(result.contentJSON?.contains(#""offset":3"#) == true)
+    #expect(result.contentJSON?.contains(#""limit":2"#) == true)
+    #expect(result.contentJSON?.contains(#""truncated":false"#) == true)
+}
+
+@Test func readToolWindowFullyDeliveredOnLargeFileIsNotTruncated() async throws {
+    // 大文件显式窗口完整送达：恰好返回 limit 行，不算截断，无 nextOffset。
+    let (file, _) = try makeLargeReadableFile()
+    let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: file.deletingLastPathComponent()))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"filePath":"large.txt","offset":100,"limit":50}"#),
+        context: .localToolTestContext(toolCallID: "read-large-window")
+    )
+
+    #expect(result.contentText.hasPrefix("100: line-100-"))
+    #expect(result.contentText.contains("149: line-149-"))
+    #expect(!result.contentText.contains("99: line-99-"))
+    #expect(result.contentJSON?.contains(#""offset":100"#) == true)
+    #expect(result.contentJSON?.contains(#""limit":50"#) == true)
+    #expect(result.contentJSON?.contains(#""truncated":false"#) == true)
+    #expect(result.contentJSON?.contains("nextOffset") == false)
+}
+
+@Test func readToolWindowBudgetTruncatedReturnsNextOffset() async throws {
+    // 窗口未送完但输出预算先耗尽：标记 truncated 并返回 nextOffset 供续读。
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("budget.txt")
+    let content = (1...10).map { "line-\($0)-\(String(repeating: "x", count: 40))" }.joined(separator: "\n")
+    try content.write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace, maxToolOutputBytes: 300))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"filePath":"budget.txt","offset":1,"limit":10}"#),
+        context: .localToolTestContext(toolCallID: "read-window-truncated")
+    )
+
+    #expect(result.contentText.hasPrefix("1: line-1-"))
+    #expect(!result.contentText.contains("10: line-10-"))
+    #expect(result.contentJSON?.contains(#""truncated":true"#) == true)
+    #expect(result.contentJSON?.contains("nextOffset") == true)
 }
 
 private func makeLargeReadableFile(_ name: String = "large.txt") throws -> (URL, String) {
