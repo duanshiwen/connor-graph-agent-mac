@@ -18,6 +18,12 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
     public var reasoningEffort: String?
     public var requestTimeout: TimeInterval
     public var explicitVisionSupport: Bool?
+    /// 显式发送 `thinking: {"type": "enabled"}`（方舟豆包思考模型）。nil 不发送。
+    public var thinkingEnabled: Bool?
+    /// 采样参数 `top_p`，nil 不发送（方舟推荐 0.95）。
+    public var topP: Double?
+    /// 采样参数 `temperature` 覆盖值，nil 沿用请求自带值（方舟推荐 1.0）。
+    public var temperatureOverride: Double?
 
     public init(
         baseURL: URL,
@@ -48,7 +54,10 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
         apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
         reasoningEffort: String? = nil,
         requestTimeout: TimeInterval,
-        explicitVisionSupport: Bool? = nil
+        explicitVisionSupport: Bool? = nil,
+        thinkingEnabled: Bool? = nil,
+        topP: Double? = nil,
+        temperatureOverride: Double? = nil
     ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
@@ -58,6 +67,9 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
         self.reasoningEffort = reasoningEffort
         self.requestTimeout = requestTimeout
         self.explicitVisionSupport = explicitVisionSupport
+        self.thinkingEnabled = thinkingEnabled
+        self.topP = topP
+        self.temperatureOverride = temperatureOverride
     }
 
     public var requestModel: String {
@@ -309,7 +321,9 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
         let endpoint = config.baseURL.appendingPathComponent("chat/completions")
         let body = OpenAIChatCompletionRequest(
             model: config.requestModel,
-            messages: [OpenAIChatMessage(role: "user", content: "Reply with exactly: OK")],
+            messages: [
+                OpenAIChatMessage(role: "user", content: "Reply with exactly: OK")
+            ],
             temperature: nil
         )
         let encoder = JSONEncoder()
@@ -331,8 +345,10 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                 OpenAIChatMessage(role: "system", content: systemPrompt),
                 OpenAIChatMessage(role: "user", content: "Question:\n\(prompt)")
             ],
-            temperature: 0.2,
-            reasoningEffort: config.reasoningEffort
+            temperature: resolvedTemperature(requestTemperature: 0.2),
+            reasoningEffort: config.reasoningEffort,
+            thinking: config.thinkingEnabled == true ? OpenAIThinkingConfig() : nil,
+            topP: config.topP
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -398,7 +414,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
         let body = OpenAIChatCompletionRequest(
             model: config.requestModel,
             messages: messages,
-            temperature: request.temperature,
+            temperature: resolvedTemperature(requestTemperature: request.temperature),
             tools: tools.isEmpty ? nil : tools,
             toolChoice: tools.isEmpty || request.toolChoice == .auto
                 ? nil
@@ -406,6 +422,8 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             reasoningEffort: config.reasoningEffort,
             // 默认不发送 max_tokens（由服务端默认决定）；互动网页等长任务显式放大。
             maxTokens: request.maxTokens,
+            thinking: config.thinkingEnabled == true ? OpenAIThinkingConfig() : nil,
+            topP: config.topP,
             stream: stream
         )
         let data = try JSONSerialization.data(withJSONObject: try body.jsonObject(), options: [.sortedKeys])
@@ -426,6 +444,12 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
         case .denied(let reason):
             throw OpenAICompatibleProviderError.unsupportedVisionInput(model: profile.modelID, reason: reason)
         }
+    }
+
+    /// 方舟等供应商配置了 temperature 覆盖值时优先使用覆盖值；否则沿用请求自带值。
+    private func resolvedTemperature(requestTemperature: Double?) -> Double? {
+        if let temperatureOverride = config.temperatureOverride { return temperatureOverride }
+        return requestTemperature
     }
 
     private func projectedRole(for message: AgentModelMessage, index: Int, instructionPlacement: AgentInstructionPlacement) -> String {
@@ -518,9 +542,11 @@ private struct OpenAIChatCompletionRequest: Encodable {
     var toolChoice: String?
     var reasoningEffort: String?
     var maxTokens: Int?
+    var thinking: OpenAIThinkingConfig?
+    var topP: Double?
     var stream: Bool?
 
-    init(model: String, messages: [OpenAIChatMessage], temperature: Double? = nil, tools: [OpenAIToolDefinition]? = nil, toolChoice: String? = nil, reasoningEffort: String? = nil, maxTokens: Int? = nil, stream: Bool? = nil) {
+    init(model: String, messages: [OpenAIChatMessage], temperature: Double? = nil, tools: [OpenAIToolDefinition]? = nil, toolChoice: String? = nil, reasoningEffort: String? = nil, maxTokens: Int? = nil, thinking: OpenAIThinkingConfig? = nil, topP: Double? = nil, stream: Bool? = nil) {
         self.model = model
         self.messages = messages
         self.temperature = temperature
@@ -528,6 +554,8 @@ private struct OpenAIChatCompletionRequest: Encodable {
         self.toolChoice = toolChoice
         self.reasoningEffort = reasoningEffort
         self.maxTokens = maxTokens
+        self.thinking = thinking
+        self.topP = topP
         self.stream = stream
     }
 
@@ -539,6 +567,8 @@ private struct OpenAIChatCompletionRequest: Encodable {
         case toolChoice = "tool_choice"
         case reasoningEffort = "reasoning_effort"
         case maxTokens = "max_tokens"
+        case thinking
+        case topP = "top_p"
         case stream
     }
 
@@ -546,6 +576,11 @@ private struct OpenAIChatCompletionRequest: Encodable {
         let data = try JSONEncoder().encode(self)
         return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
     }
+}
+
+/// 方舟 Chat API 的 thinking 参数：`{"type": "enabled"}`，Agent 场景显式开启。
+private struct OpenAIThinkingConfig: Encodable {
+    var type: String = "enabled"
 }
 
 private struct OpenAIChatMessage: Codable {
