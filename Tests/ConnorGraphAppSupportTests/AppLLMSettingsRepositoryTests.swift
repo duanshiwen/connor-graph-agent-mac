@@ -698,3 +698,113 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(deepseekConfig.apiKey == "deepseek-key")
     #expect(deepseekConfig.baseURL.absoluteString == "https://api.deepseek.com/v1")
 }
+
+@Test func arkModelSupportClassifiesDoubaoThinkingModels() {
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-seed-2-1-pro-260628") == true)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-seed-2-1-turbo-260628") == true)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-seed-evolving") == true)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-seed-1-8-251228") == true)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-seed-2-0-pro-260215") == true)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-seed-2-0-lite-260428") == true)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-seed-1-6-thinking") == true)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("ark-code-latest") == true)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("deepseek-v4-flash") == true)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("glm-5.2") == true)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("Kimi-K2.7-Code") == true)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("MiniMax-M3") == true)
+}
+
+@Test func arkModelSupportExcludesNonThinkingDoubaoModels() {
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-seed-1-6") == false)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-seed-1-6-flash") == false)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-seed-1-6-vision") == false)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-seed-1-6-embedding") == false)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("doubao-1-5-pro-32k") == false)
+    #expect(AppLLMSettingsRepository.arkModelSupportsThinking("gpt-4o") == false)
+}
+
+@Test func settingsRepositoryInjectsArkParametersIntoOpenAICompatibleConfig() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    try repository.save(
+        settings: AppLLMSettings(
+            connections: [
+                AppLLMConnectionConfig(
+                    id: "ark",
+                    name: "火山方舟 · 豆包",
+                    providerMode: .openAICompatible,
+                    baseURLString: "https://ark.cn-beijing.volces.com/api/v3",
+                    model: "doubao-seed-2-1-pro-260628",
+                    selectedModel: "doubao-seed-2-1-pro-260628"
+                )
+            ],
+            defaultConnectionID: "ark",
+            defaultThinkingLevel: .medium
+        ),
+        apiKey: "ark-key"
+    )
+
+    let config = try #require(try repository.openAICompatibleConfig(connectionID: "ark"))
+
+    #expect(config.thinkingEnabled == true)
+    #expect(config.topP == 0.95)
+    #expect(config.temperatureOverride == 1.0)
+    // 思考强度 medium 在方舟 Agent 场景按下限 high 处理
+    #expect(config.reasoningEffort == "high")
+}
+
+@Test func settingsRepositoryKeepsArkNonThinkingModelWithoutThinkingParameters() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    try repository.save(
+        settings: AppLLMSettings(
+            connections: [
+                AppLLMConnectionConfig(
+                    id: "ark-flash",
+                    name: "火山方舟 · 豆包",
+                    providerMode: .openAICompatible,
+                    baseURLString: "https://ark.cn-beijing.volces.com/api/v3",
+                    model: "doubao-seed-1-6-flash",
+                    selectedModel: "doubao-seed-1-6-flash"
+                )
+            ],
+            defaultConnectionID: "ark-flash",
+            defaultThinkingLevel: .medium
+        ),
+        apiKey: "ark-key"
+    )
+
+    let config = try #require(try repository.openAICompatibleConfig(connectionID: "ark-flash"))
+
+    #expect(config.thinkingEnabled == nil)
+    #expect(config.reasoningEffort == nil)
+    // 采样参数对方舟所有模型注入
+    #expect(config.topP == 0.95)
+    #expect(config.temperatureOverride == 1.0)
+}
+
+@Test func settingsRepositoryHonorsThinkingOffForArkConnections() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    try repository.save(
+        settings: AppLLMSettings(
+            connections: [
+                AppLLMConnectionConfig(
+                    id: "ark",
+                    name: "火山方舟 · 豆包",
+                    providerMode: .openAICompatible,
+                    baseURLString: "https://ark.cn-beijing.volces.com/api/v3",
+                    model: "doubao-seed-2-1-pro-260628",
+                    selectedModel: "doubao-seed-2-1-pro-260628"
+                )
+            ],
+            defaultConnectionID: "ark",
+            defaultThinkingLevel: .off
+        ),
+        apiKey: "ark-key"
+    )
+
+    let config = try #require(try repository.openAICompatibleConfig(connectionID: "ark"))
+
+    #expect(config.thinkingEnabled == nil)
+    #expect(config.reasoningEffort == nil)
+    #expect(config.topP == 0.95)
+    #expect(config.temperatureOverride == 1.0)
+}
