@@ -42,6 +42,17 @@ struct AgentMarkdownImageSourcePolicyTests {
         #expect(AgentMarkdownImageSourcePolicy.resolvedSource(source: "http://example.com/a.png", allowedRoot: root) == .remote(URL(string: "http://example.com/a.png")!))
     }
 
+    @Test("Resolves local images under real session roots, including percent-encoded paths and colon session IDs")
+    func resolvesLocalImagesUnderRealSessionRoots() {
+        // 笔记会话首条消息（笔记正文）里嵌入的图片就是这种形态：
+        // 绝对 file:// URL，路径带百分号编码空格，会话 ID 含冒号（如 note-import-session:…）。
+        let sessionID = "note-import-session:764BFFC1-EB11-4F6D-885D-CE2AD876B7DE"
+        let root = URL(fileURLWithPath: "/tmp/Library/Application Support/Connor/sessions/\(sessionID)")
+        let imageSource = "file:///tmp/Library/Application%20Support/Connor/sessions/\(sessionID)/attachments/45BAE5E5-1DF0-4226-8CD6-B323E294195D/original/image.png"
+        let expected = URL(fileURLWithPath: "/tmp/Library/Application Support/Connor/sessions/\(sessionID)/attachments/45BAE5E5-1DF0-4226-8CD6-B323E294195D/original/image.png")
+        #expect(AgentMarkdownImageSourcePolicy.resolvedSource(source: imageSource, allowedRoot: root) == .local(expected))
+    }
+
     @Test("Validates decoded image data before display")
     func validatesImageData() {
         let tinyPNG = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")!
