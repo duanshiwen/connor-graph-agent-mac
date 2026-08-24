@@ -448,3 +448,132 @@ private struct CapturingHTTPClient: AgentHTTPClient {
 
     #expect(!response.text.isEmpty)
 }
+
+@Test func openAICompatibleProviderParsesEncryptedThinkingContentFromNonStreamingResponse() async throws {
+    let body = """
+    {
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "reasoning_content": "用户想查天气，先定位城市。",
+            "encrypted_content": "ARK-ENCRYPTED-BLOCK-001",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_abc123",
+                "type": "function",
+                "function": {"name": "get_weather", "arguments": "{\\"location\\":\\"北京\\"}"}
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://ark.cn-beijing.volces.com/api/v3")!, apiKey: "ark-key", model: "doubao-seed-2-1-pro-260628"),
+        httpClient: client
+    )
+
+    let response = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "北京天气")]))
+
+    let metadata = try #require(response.providerMetadata)
+    #expect(metadata.reasoningContent == "用户想查天气，先定位城市。")
+    #expect(metadata.encryptedContent == "ARK-ENCRYPTED-BLOCK-001")
+    #expect(response.toolCalls.first?.name == "get_weather")
+}
+
+@Test func openAICompatibleProviderReplaysEncryptedThinkingContentInNextRequest() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" }, "finish_reason": "stop" }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://ark.cn-beijing.volces.com/api/v3")!, apiKey: "ark-key", model: "doubao-seed-2-1-pro-260628"),
+        httpClient: client
+    )
+    let assistantTurn = AgentModelMessage(
+        role: .assistant,
+        content: "",
+        providerMetadata: AgentModelProviderMetadata(
+            providerID: "openai-compatible",
+            reasoningContent: "先定位城市。",
+            encryptedContent: "ARK-ENCRYPTED-BLOCK-001"
+        )
+    )
+
+    _ = try await provider.complete(AgentModelRequest(
+        messages: [
+            AgentModelMessage(role: .user, content: "北京天气"),
+            assistantTurn,
+            AgentModelMessage(role: .tool, content: "北京 晴", toolCallID: "call_abc123")
+        ]
+    ))
+
+    let requestBody = try #require(client.captured?.body)
+    let requestText = String(data: requestBody, encoding: .utf8) ?? ""
+    #expect(requestText.contains("ARK-ENCRYPTED-BLOCK-001"))
+    #expect(requestText.contains("先定位城市。"))
+    #expect(requestText.contains("\"encrypted_content\":\"ARK-ENCRYPTED-BLOCK-001\""))
+}
+
+@Test func openAICompatibleProviderSendsArkThinkingParametersWhenConfigured() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" }, "finish_reason": "stop" }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://ark.cn-beijing.volces.com/api/v3")!,
+            apiKey: "ark-key",
+            model: "doubao-seed-2-1-pro-260628",
+            thinkingEnabled: true,
+            topP: 0.95,
+            temperatureOverride: 1.0
+        ),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "ping")]))
+
+    let requestBody = try #require(client.captured?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+    let thinking = try #require(object["thinking"] as? [String: Any])
+    #expect(thinking["type"] as? String == "enabled")
+    #expect(object["top_p"] as? Double == 0.95)
+    #expect(object["temperature"] as? Double == 1.0)
+}
+
+@Test func openAICompatibleProviderOmitsArkParametersByDefault() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" }, "finish_reason": "stop" }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "ping")]))
+
+    let requestBody = try #require(client.captured?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+    #expect(object["thinking"] == nil)
+    #expect(object["top_p"] == nil)
+    #expect(object["temperature"] as? Double == 0.2)
+}

@@ -1333,9 +1333,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     ) async throws -> AgentModelResponse {
         var request = request
         if request.maxTokens == nil {
-            // 互动网页等长代码任务：放大单次输出上限；其余任务使用默认上限，
-            // 避免思考模型在工具循环里输出不可控的长文本/思考链。
-            if request.tools.contains(where: { AssistantToolRouter.interactiveWebDirectToolNames.contains($0.name) }) {
+            // 方舟思考模型：文档建议 Agent 场景 max_tokens ≥ 128000，
+            // 避免长任务/多工具循环中输出被 length 截断（工具参数 JSON 不完整等）。
+            if AgentModelArkSupport.arkModelSupportsThinking(modelProvider.modelID) {
+                request.maxTokens = 128_000
+            } else if request.tools.contains(where: { AssistantToolRouter.interactiveWebDirectToolNames.contains($0.name) }) {
+                // 互动网页等长代码任务：放大单次输出上限；其余任务使用默认上限，
+                // 避免思考模型在工具循环里输出不可控的长文本/思考链。
                 request.maxTokens = 32_768
             } else {
                 request.maxTokens = configuration.defaultMaxOutputTokens

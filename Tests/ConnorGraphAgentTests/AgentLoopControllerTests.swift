@@ -3828,3 +3828,49 @@ private struct StreamingSynthesisWithoutCompletionProvider: StreamingAgentModelP
     #expect(textDeltas == ["Synthe", "sized"])
     #expect(completeText == "Synthesized")
 }
+
+private actor ArkOutputBudgetCaptureProvider: AgentModelProvider {
+    let modelID: String
+    let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+    private(set) var requests: [AgentModelRequest] = []
+
+    init(modelID: String) {
+        self.modelID = modelID
+    }
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        requests.append(request)
+        if let automatic = automaticPhaseResponse(for: request, nextResponse: .init(text: "Final answer")) {
+            return automatic
+        }
+        return AgentModelResponse(text: "Final answer", usage: AgentModelUsage(promptTokens: 10, completionTokens: 3))
+    }
+}
+
+@Test func agentLoopScalesOutputBudgetForArkThinkingModels() async throws {
+    let provider = ArkOutputBudgetCaptureProvider(modelID: "doubao-seed-2-1-pro-260628")
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+
+    for try await _ in loop.run(AgentChatRequest(
+        sessionID: "session-ark-budget",
+        userMessage: "Complete a multi-step task"
+    )) {}
+
+    let requests = await provider.requests
+    #expect(!requests.isEmpty)
+    #expect(requests.allSatisfy { $0.maxTokens == 128_000 })
+}
+
+@Test func agentLoopKeepsDefaultOutputBudgetForNonArkModels() async throws {
+    let provider = ArkOutputBudgetCaptureProvider(modelID: "gpt-test")
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+
+    for try await _ in loop.run(AgentChatRequest(
+        sessionID: "session-default-budget",
+        userMessage: "Complete a multi-step task"
+    )) {}
+
+    let requests = await provider.requests
+    #expect(!requests.isEmpty)
+    #expect(requests.allSatisfy { $0.maxTokens == 16_384 })
+}

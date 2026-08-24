@@ -704,15 +704,48 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         if connection.connectionKind == .githubCopilot {
             extraHeaders = GitHubCopilotRequestHeaders.applying(to: extraHeaders)
         }
+        let model = modelOverride ?? connection.effectiveModel
+        let isArkEndpoint = Self.isArkEndpointURL(urlString)
+        var reasoningEffort: String?
+        var thinkingEnabled: Bool?
+        if isArkEndpoint {
+            let thinkingLevel = thinkingLevelOverride ?? settings.defaultThinkingLevel
+            // 方舟文档：Agent 场景 reasoning_effort 建议 high 及以上。
+            // 思考强度低于 high 时按 high 处理；off 保持不开启思考。
+            let effectiveLevel: AppLLMThinkingLevel = {
+                guard thinkingLevel != .off else { return .off }
+                let order = AppLLMThinkingLevel.allCases
+                guard let selected = order.firstIndex(of: thinkingLevel),
+                      let highIndex = order.firstIndex(of: .high) else { return .high }
+                return order[max(selected, highIndex)]
+            }()
+            let supportsThinking = Self.arkModelSupportsThinking(model)
+            thinkingEnabled = (effectiveLevel != .off && supportsThinking) ? true : nil
+            reasoningEffort = thinkingEnabled == true ? effectiveLevel.openAIReasoningEffort : nil
+        }
         return OpenAICompatibleConfig(
             baseURL: baseURL,
             apiKey: apiKey,
-            model: modelOverride ?? connection.effectiveModel,
+            model: model,
             extraHeaders: extraHeaders,
             apiKeyHeaderKind: apiKeyHeaderKind,
-            reasoningEffort: nil,
-            explicitVisionSupport: connection.explicitVisionSupport
+            reasoningEffort: reasoningEffort,
+            explicitVisionSupport: connection.explicitVisionSupport,
+            thinkingEnabled: thinkingEnabled,
+            topP: isArkEndpoint ? 0.95 : nil,
+            temperatureOverride: isArkEndpoint ? 1.0 : nil
         )
+    }
+
+    /// 方舟（火山方舟 · 豆包）OpenAI 兼容端点：标准 v3 与 Token Plan 均在 volces.com 域名下。
+    public static func isArkEndpointURL(_ urlString: String) -> Bool {
+        urlString.lowercased().contains("volces.com")
+    }
+
+    /// 判断方舟模型是否为思考模型（支持 thinking 参数与思考内容回传）。
+    /// 非思考模型（flash/vision/embedding/tts 等）不发送 thinking，避免参数不兼容报错。
+    public static func arkModelSupportsThinking(_ modelID: String) -> Bool {
+        AgentModelArkSupport.arkModelSupportsThinking(modelID)
     }
 
     public func anthropicCompatibleConfig(

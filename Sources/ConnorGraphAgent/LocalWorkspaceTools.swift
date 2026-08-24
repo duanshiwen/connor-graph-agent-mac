@@ -48,7 +48,7 @@ private func requireLargeWriteApprovalIfNeeded(
 
 public struct LocalReadFileTool: AgentTool {
     public let name = "Read"
-    public let description = "Read a text file from the configured local workspace. A small file is returned completely in a single call. A larger file is read from the start (or from the given 1-based offset) and automatically truncated to the output budget, returning nextOffset when more lines remain so you can continue with Read(filePath, offset: nextOffset). Optional offset/limit only create an explicit window on large files; do not pass a small limit for a small file. Paths must stay inside allowed workspace roots."
+    public let description = "Read a text file from the configured local workspace. Without an explicit window, a small file is returned completely in one call, and a larger file is read from the start, truncated to the output budget, returning nextOffset so you can continue with Read(filePath, offset: nextOffset). Pass optional 1-based offset and/or limit to read an explicit line window on any file: reading then always starts at the requested offset, never from the top. Paths must stay inside allowed workspace roots."
     public let permission: AgentPermissionCapability = .readWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "filePath": .string(description: "Path to a file inside the workspace."),
@@ -75,9 +75,14 @@ public struct LocalReadFileTool: AgentTool {
         let allFormatted = lines.enumerated().map { "\($0.offset + 1): \($0.element)" }
         let fullText = allFormatted.joined(separator: "\n")
 
-        // 小文件整读：整个文件（含行号前缀）能放进单次输出预算时直接返回全文，
-        // 即使调用方传了很小的 limit 也不截断——避免“读小文件被压缩/截断”。
-        if fullText.utf8.count <= maxBytes {
+        let rawOffset = arguments.int("offset")
+        let rawLimit = arguments.int("limit")
+        let hasExplicitWindow = rawOffset != nil || rawLimit != nil
+
+        // 无显式窗口时：整个文件（含行号前缀）能放进单次输出预算就直接返回全文，
+        // 避免“读小文件被压缩/截断”。但一旦调用方显式传了 offset/limit，
+        // 必须尊重窗口：从指定行开始读、按 limit 截取，而不是从头返回全文。
+        if !hasExplicitWindow, fullText.utf8.count <= maxBytes {
             let jsonObject: [String: Any] = [
                 "path": path.path,
                 "lineCount": lines.count,
@@ -88,22 +93,22 @@ public struct LocalReadFileTool: AgentTool {
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: fullText, contentJSON: LocalToolJSON.encode(jsonObject))
         }
 
-        // 大文件自动分页：默认按输出预算自动截断并返回 nextOffset；
-        // 显式 offset/limit 仍可覆盖窗口（offset 用于从 nextOffset 继续）。
-        let offset = max(arguments.int("offset") ?? 1, 1)
+        // 显式窗口或大文件自动分页：从 offset 开始，按 limit 与输出预算截取。
+        let offset = max(rawOffset ?? 1, 1)
         let start = min(offset - 1, lines.count)
-        let requestedLimit = arguments.int("limit")
         var end = start
         var usedBytes = 0
         while end < lines.count {
-            if let requestedLimit, end - start >= requestedLimit { break }
+            if let rawLimit, end - start >= rawLimit { break }
             let lineBytes = allFormatted[end].utf8.count + 1
             if end > start, usedBytes + lineBytes > maxBytes { break }
             usedBytes += lineBytes
             end += 1
         }
         let selected = allFormatted[start..<end].joined(separator: "\n")
-        let truncated = end < lines.count
+        // truncated 仅表示“窗口未送完却因预算提前停止”：显式窗口完整送达或读到 EOF 均不算截断。
+        let windowEnd = rawLimit.map { min(start + $0, lines.count) } ?? lines.count
+        let truncated = end < windowEnd
         var jsonObject: [String: Any] = [
             "path": path.path,
             "lineCount": lines.count,
