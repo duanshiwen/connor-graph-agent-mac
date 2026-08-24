@@ -32,7 +32,10 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
         extraHeaders: [String: String] = [:],
         apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
         reasoningEffort: String? = nil,
-        explicitVisionSupport: Bool? = nil
+        explicitVisionSupport: Bool? = nil,
+        thinkingEnabled: Bool? = nil,
+        topP: Double? = nil,
+        temperatureOverride: Double? = nil
     ) {
         self.init(
             baseURL: baseURL,
@@ -42,7 +45,10 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
             apiKeyHeaderKind: apiKeyHeaderKind,
             reasoningEffort: reasoningEffort,
             requestTimeout: 300,
-            explicitVisionSupport: explicitVisionSupport
+            explicitVisionSupport: explicitVisionSupport,
+            thinkingEnabled: thinkingEnabled,
+            topP: topP,
+            temperatureOverride: temperatureOverride
         )
     }
 
