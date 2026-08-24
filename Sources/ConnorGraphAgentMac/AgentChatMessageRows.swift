@@ -401,7 +401,8 @@ struct AgentChatMessageRow: View {
                     markdown: row.message.content,
                     font: messageBodyFont,
                     bodyPointSize: messageBodyPointSize,
-                    allowsDeferredPreview: !isMessageExpanded
+                    allowsDeferredPreview: !isMessageExpanded,
+                    persistentCacheContext: persistentCacheContext
                 )
             }
         } else {
