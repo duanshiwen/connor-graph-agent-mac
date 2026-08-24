@@ -17,7 +17,7 @@ struct ChineseProviderSubscriptionPlanPresetTests {
     @Test func usesOfficialDedicatedOpenAIEndpoints() {
         #expect(preset("xiaomi-mimo").subscriptionPlan?.endpoint == "https://token-plan-cn.xiaomimimo.com/v1")
         #expect(preset("qwen").subscriptionPlan?.endpoint == "https://coding.dashscope.aliyuncs.com/v1")
-        #expect(preset("doubao").subscriptionPlan?.endpoint == "https://ark.cn-beijing.volces.com/api/coding/v3")
+        #expect(preset("doubao").subscriptionPlan?.endpoint == "https://ark.cn-beijing.volces.com/api/plan/v3")
         #expect(preset("moonshot").subscriptionPlan?.endpoint == "https://api.kimi.com/coding/v1")
         #expect(preset("zhipu").subscriptionPlan?.endpoint == "https://open.bigmodel.cn/api/coding/paas/v4")
         #expect(preset("minimax").subscriptionPlan?.endpoint == "https://api.minimaxi.com/v1")
@@ -38,5 +38,12 @@ struct ChineseProviderSubscriptionPlanPresetTests {
         #expect(preset("xiaomi-mimo").subscriptionPlan?.keyPlaceholder == "tp-...")
         #expect(preset("qwen").subscriptionPlan?.keyPlaceholder == "sk-sp-...")
         #expect(preset("minimax").subscriptionPlan?.keyPlaceholder == "sk-cp-...")
+    }
+
+    @Test func doubaoPlanShipsOnlyDefaultModelAndReliesOnRemoteCatalog() {
+        let plan = preset("doubao").subscriptionPlan!
+        #expect(plan.defaultModel == "ark-code-latest")
+        #expect(plan.supportedModels == ["ark-code-latest"])
+        #expect(plan.availableModels == ["ark-code-latest"])
     }
 }
