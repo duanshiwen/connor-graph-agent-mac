@@ -737,7 +737,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         )
     }
 
-    /// 方舟（火山方舟 · 豆包）OpenAI 兼容端点：标准 v3 与 Coding Plan 均在 volces.com 域名下。
+    /// 方舟（火山方舟 · 豆包）OpenAI 兼容端点：标准 v3 与 Token Plan 均在 volces.com 域名下。
     public static func isArkEndpointURL(_ urlString: String) -> Bool {
         urlString.lowercased().contains("volces.com")
     }
