@@ -196,3 +196,36 @@ private struct OpenAIStreamingFallbackHTTPClient: AgentHTTPClient {
         AgentToolCall(id: "call_1", name: "agent_commit_strategy", argumentsJSON: "{\"taskMode\":\"mechanical\"}")
     ])
 }
+
+@Test func openAICompatibleProviderCapturesStreamedEncryptedThinkingBlock() async throws {
+    let sseClient = OpenAIStreamingCapturingSSEClient(frames: [
+        "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"用户想查\"}}]}\n",
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"天气。\"}}]}\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"\",\"reasoning_content\":\"\",\"encrypted_content\":\"ARK-ENCRYPTED-BLOCK-002\"}}]}\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"北京晴\"},\"finish_reason\":\"stop\"}]}\n",
+        "data: [DONE]\n"
+    ])
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://ark.cn-beijing.volces.com/api/v3")!,
+            apiKey: "ark-key",
+            model: "doubao-seed-evolving"
+        ),
+        httpClient: OpenAIStreamingFallbackHTTPClient(),
+        sseClient: sseClient
+    )
+
+    var events: [AgentModelStreamEvent] = []
+    for try await event in provider.streamComplete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "北京天气")])) {
+        events.append(event)
+    }
+
+    let completed = try #require(events.compactMap { event -> AgentModelResponse? in
+        if case .completed(let response) = event { return response }
+        return nil
+    }.last)
+    let metadata = try #require(completed.providerMetadata)
+    #expect(metadata.reasoningContent == "用户想查天气。")
+    #expect(metadata.encryptedContent == "ARK-ENCRYPTED-BLOCK-002")
+    #expect(completed.text == "北京晴")
+}

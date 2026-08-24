@@ -719,8 +719,9 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
                       let highIndex = order.firstIndex(of: .high) else { return .high }
                 return order[max(selected, highIndex)]
             }()
-            reasoningEffort = effectiveLevel.openAIReasoningEffort
-            thinkingEnabled = effectiveLevel != .off && Self.arkModelSupportsThinking(model)
+            let supportsThinking = Self.arkModelSupportsThinking(model)
+            thinkingEnabled = (effectiveLevel != .off && supportsThinking) ? true : nil
+            reasoningEffort = thinkingEnabled == true ? effectiveLevel.openAIReasoningEffort : nil
         }
         return OpenAICompatibleConfig(
             baseURL: baseURL,
