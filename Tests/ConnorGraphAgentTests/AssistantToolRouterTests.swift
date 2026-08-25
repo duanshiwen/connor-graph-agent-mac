@@ -332,3 +332,46 @@ import Testing
     #expect(Set(matches.map(\.name)) == ["note_search", "mail_search_messages"])
     #expect(!matches.contains { $0.name == "calendar_upcoming_events" })
 }
+
+@Test func toolSearchRecoversDirectWorkspaceToolsThroughRuntimeCatalogWiring() {
+    let definitions = [
+        AgentToolDefinition(name: "Read", description: "Read a workspace file", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "Glob", description: "List files matching a pattern", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "Shell", description: "Execute a shell command in the workspace", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "ApplyPatch", description: "Apply an ordered set of structured file changes inside the workspace", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: []))
+    ]
+    let router = AssistantToolRouter()
+    let route = router.route(definitions: definitions)
+    #expect(!route.discoverableDefinitions.contains { $0.name == "ApplyPatch" })
+
+    // 修复 A 之前的运行时行为：只把过滤后的 discoverableDefinitions 喂给 discovery，
+    // 直接工具永远进不了候选列表，写入类查询也搜不到 ApplyPatch。
+    let beforeFix = router.discovery(
+        query: "工作区 写入 保存 补丁 patch",
+        definitions: route.discoverableDefinitions
+    )
+    #expect(!beforeFix.tools.contains { $0.name == "ApplyPatch" })
+
+    // 修复 A 之后：运行时传入完整注册目录，discovery 内部重新加回直接工具。
+    let afterFix = router.discovery(
+        query: "工作区 写入 保存 补丁 patch",
+        definitions: definitions
+    )
+    #expect(afterFix.tools.first?.name == "ApplyPatch")
+    let neutral = router.discovery(query: "本地工作区文件工具", definitions: definitions)
+    #expect(Set(neutral.tools.map(\.name)).isSuperset(of: ["Shell", "ApplyPatch"]))
+}
+
+@Test func toolSearchFindsApplyPatchForWorkspaceWritePhrases() {
+    let definitions = [
+        AgentToolDefinition(name: "Read", description: "Read a workspace file", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "Glob", description: "List files matching a pattern", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "Shell", description: "Inspect and search workspace files", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "ApplyPatch", description: "Edit workspace files", inputSchema: .object(properties: [:], required: []))
+    ]
+    for query in ["写文件", "写入文件", "创建文件", "新建文件", "新增文件", "保存文件", "改文件", "修改文件", "编辑文件", "打补丁", "删除文件", "文件操作"] {
+        let matches = AssistantToolRouter().discover(query: query, definitions: definitions)
+        #expect(matches.first?.name == "ApplyPatch", "写入类查询应优先命中 ApplyPatch: \(query)")
+    }
+}
