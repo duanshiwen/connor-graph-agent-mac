@@ -375,3 +375,16 @@ import Testing
         #expect(matches.first?.name == "ApplyPatch", "写入类查询应优先命中 ApplyPatch: \(query)")
     }
 }
+
+@Test func toolSearchFindsShellForRunAndGitQueries() {
+    let definitions = [
+        AgentToolDefinition(name: "Read", description: "Read a workspace file", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "Glob", description: "List files matching a pattern", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "Shell", description: "Execute a shell command in the workspace: inspect files, query Git, run builds, tests, and scripts", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "ApplyPatch", description: "Edit workspace files", inputSchema: .object(properties: [:], required: []))
+    ]
+    for query in ["执行命令", "执行 git 命令", "运行终端命令", "用 shell 跑命令", "命令行工具", "构建项目", "跑测试", "运行项目测试", "查询 git 状态", "执行构建和测试"] {
+        let matches = AssistantToolRouter().discover(query: query, definitions: definitions)
+        #expect(matches.first?.name == "Shell", "操作类查询应优先命中 Shell: \(query)")
+    }
+}
