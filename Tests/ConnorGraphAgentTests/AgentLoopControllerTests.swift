@@ -2485,6 +2485,92 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect((payload["initiallyExposedToolCount"] as? Int ?? 0) > 0)
 }
 
+@Test func agentLoopDiscoveryFindsApplyPatchForWorkspaceWriteQuery() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [.init(
+                id: "discover-write",
+                name: AssistantDecisionToolContract.searchName,
+                argumentsJSON: #"{"query":"写文件 创建 修改 保存"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [.init(
+                id: "discover-workspace",
+                name: AssistantDecisionToolContract.searchName,
+                argumentsJSON: #"{"query":"本地工作区文件工具"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [.init(
+                id: "prepare-write-discovery-final",
+                name: AgentPhaseToolContract.prepareFinalOutputName,
+                argumentsJSON: #"{"reason":"discovery verified"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "已找到工作区写入工具。", finishReason: .stop)
+    ])
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("connor-discover-write-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    let policy = LocalWorkspacePolicy(workingDirectory: workspace)
+    var registry = AgentToolRegistry()
+    registry.register(LocalShellTool(policy: policy))
+    registry.register(LocalApplyPatchTool(policy: policy))
+    let audit = InMemoryAgentAuditLog()
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        auditLog: audit
+    )
+
+    for try await _ in loop.run(AgentChatRequest(
+        runID: "run-discover-write",
+        sessionID: "session-discover-write",
+        userMessage: "我要在工作区写一个文件"
+    )) {}
+
+    let requests = await provider.requests
+    // 写入类查询优先命中 ApplyPatch。
+    #expect(requests.dropFirst().contains { request in
+        request.messages.contains { message in
+            message.role == .tool
+                && message.toolCallID == "discover-write"
+                && message.content.contains("ApplyPatch")
+        }
+    })
+    // 中性工作区查询同时找回 ApplyPatch 与 Shell。
+    #expect(requests.dropFirst().contains { request in
+        request.messages.contains { message in
+            message.role == .tool
+                && message.toolCallID == "discover-workspace"
+                && message.content.contains("Shell")
+        }
+    })
+    let discoveryEvents = await audit.events.filter { $0.eventType == .toolDiscovery }
+    #expect(discoveryEvents.count == 2)
+    // 修复 A 后 catalog 是完整注册目录（Shell + ApplyPatch），不再是过滤后的空目录。
+    #expect(discoveryEvents.allSatisfy { event in
+        let payload = try? JSONSerialization.jsonObject(with: Data(event.payloadJSON.utf8)) as? [String: Any]
+        return payload?["catalogToolCount"] as? Int == 2
+    })
+    let firstPayload = try #require(JSONSerialization.jsonObject(with: Data(discoveryEvents[0].payloadJSON.utf8)) as? [String: Any])
+    #expect(firstPayload["matchStatus"] as? String == "matched")
+    #expect(firstPayload["returnedTools"] as? [String] == ["ApplyPatch"])
+    #expect(discoveryEvents.contains { event in
+        let payload = try? JSONSerialization.jsonObject(with: Data(event.payloadJSON.utf8)) as? [String: Any]
+        return (payload?["returnedTools"] as? [String] ?? []).contains("Shell")
+    })
+}
+
 @Test func agentLoopBlocksRepeatedDiscoveryOfUnavailableCapabilityNamespace() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
