@@ -2067,7 +2067,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         if sourceID == "connor_skill_activate", let promotion = result.instructionPromotion {
                             await promotionCollector.record(promotion)
                         }
-                        let payload = result.contentJSON ?? result.contentText
+                        let payload = Self.preferredBatchToolText(result)
                         let durationMilliseconds = max(0, Int(Date().timeIntervalSince(nestedStartedAt) * 1_000))
                         await auditLog.record(AgentAuditEvent(
                             runID: nestedRunID,
@@ -2127,7 +2127,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             if nestedCall.name == "connor_skill_activate", let promotion = result.instructionPromotion {
                                 await promotionCollector.record(promotion)
                             }
-                            let payload = result.contentJSON ?? result.contentText
+                            let payload = Self.preferredBatchToolText(result)
                             resolved.append([.init(
                                 id: result.toolCallID,
                                 sourceID: nestedCall.name,
@@ -2342,6 +2342,22 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         guard let data = item.argumentsJSON.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
         return object
+    }
+
+    // 工作区文件/内容工具把正文放在 contentText，contentJSON 只带路径/行号等元数据；
+    // 批量查询里继续用 contentJSON 会让 Read/Grep/Shell 的结果退化成纯元数据。
+    // 其余工具（网页/邮件/MCP 等）保持 contentJSON 优先的结构化结果约定。
+    private static var batchContentTextToolNames: Set<String> {
+        [
+        "Read", "ReadMany", "Grep", "Shell", "LS", "Glob", "ApplyPatch"
+        ]
+    }
+
+    private static func preferredBatchToolText(_ result: AgentToolResult) -> String {
+        if Self.batchContentTextToolNames.contains(result.toolName) {
+            return result.contentText
+        }
+        return result.contentJSON ?? result.contentText
     }
 
     private static func firstString(in arguments: [String: Any], keys: [String]) -> String? {
