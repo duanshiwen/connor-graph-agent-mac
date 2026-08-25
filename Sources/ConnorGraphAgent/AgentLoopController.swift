@@ -926,7 +926,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                            !query.isEmpty {
                             let discovery = assistantToolRouter.discovery(
                                 query: query,
-                                definitions: assistantToolRoute.discoverableDefinitions,
+                                definitions: availableRegisteredToolDefinitions,
                                 maximumResults: arguments.int("maxResults") ?? 8
                             )
                             let unavailable = Set(discovery.unavailableNamespaces)
@@ -1045,7 +1045,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             request: request,
                             run: &run,
                             policy: policy,
-                            discoverableToolDefinitions: assistantToolRoute.discoverableDefinitions,
+                            catalogToolDefinitions: availableRegisteredToolDefinitions,
                             initiallyExposedToolCount: modelFacingToolDefinitions.count,
                             continuation: continuation
                         )
@@ -1652,7 +1652,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         request: AgentChatRequest,
         run: inout AgentRun,
         policy: AgentPolicyEngine,
-        discoverableToolDefinitions: [AgentToolDefinition],
+        catalogToolDefinitions: [AgentToolDefinition],
         initiallyExposedToolCount: Int,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> [AgentToolBatchResult] {
@@ -1673,7 +1673,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 request: request,
                 run: &run,
                 policy: policy,
-                discoverableToolDefinitions: discoverableToolDefinitions,
+                catalogToolDefinitions: catalogToolDefinitions,
                 initiallyExposedToolCount: initiallyExposedToolCount,
                 continuation: continuation
             )
@@ -1808,7 +1808,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         request: AgentChatRequest,
         run: inout AgentRun,
         policy: AgentPolicyEngine,
-        discoverableToolDefinitions: [AgentToolDefinition],
+        catalogToolDefinitions: [AgentToolDefinition],
         initiallyExposedToolCount: Int,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentToolResult {
@@ -1849,7 +1849,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     call: call,
                     context: context,
                     run: &run,
-                    discoverableToolDefinitions: discoverableToolDefinitions,
+                    catalogToolDefinitions: catalogToolDefinitions,
                     initiallyExposedToolCount: initiallyExposedToolCount,
                     continuation: continuation
                 )
@@ -1909,7 +1909,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         call: AgentToolCall,
         context: AgentToolExecutionContext,
         run: inout AgentRun,
-        discoverableToolDefinitions: [AgentToolDefinition],
+        catalogToolDefinitions: [AgentToolDefinition],
         initiallyExposedToolCount: Int,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentToolResult {
@@ -1920,7 +1920,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             guard !query.isEmpty else { throw AgentToolError.invalidArguments("query is required") }
             let discovery = AssistantToolRouter().discovery(
                 query: query,
-                definitions: discoverableToolDefinitions,
+                definitions: catalogToolDefinitions,
                 maximumResults: arguments.int("maxResults") ?? 8
             )
             let tools: [[String: Any]] = discovery.tools.map { definition in
@@ -1944,7 +1944,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             let auditData = try JSONSerialization.data(withJSONObject: [
                 "query": query,
                 "matchStatus": matchStatus,
-                "catalogToolCount": discoverableToolDefinitions.count,
+                "catalogToolCount": catalogToolDefinitions.count,
                 "initiallyExposedToolCount": initiallyExposedToolCount,
                 "returnedItems": tools.count,
                 "requestedNamespaces": discovery.requestedNamespaces,
