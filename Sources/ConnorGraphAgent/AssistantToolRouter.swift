@@ -85,7 +85,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
         .init(name: "environment", summary: "current environment, location, and weather context / 当前环境、位置与天气", aliases: ["environment", "location", "weather", "环境", "位置", "地点", "天气", "温度", "时区"]),
         .init(name: "skill", summary: "installed skills and reusable workflows / 已安装技能与工作流", aliases: ["skill", "workflow", "技能", "工作流", "能力"]),
         .init(name: "graph", summary: "knowledge graph search and graph-backed records / 知识图谱搜索与图谱记录", aliases: ["graph", "knowledge graph", "图谱", "知识图谱", "关系图", "实体关系"]),
-        .init(name: "workspace", summary: "workspace files, search, and local editing / 工作区文件、搜索与编辑", aliases: ["workspace", "local files", "code", "file", "write", "save", "export", "patch", "工作区", "本地文件", "本地", "代码", "文件", "目录", "文件夹", "项目", "工程", "写", "写入", "导出", "保存", "落盘", "补丁", "修改", "编辑"]),
+        .init(name: "workspace", summary: "workspace files, search, and local editing / 工作区文件、搜索与编辑", aliases: ["workspace", "local files", "code", "file", "write", "save", "export", "patch", "工作区", "本地文件", "本地", "代码", "文件", "目录", "文件夹", "项目", "工程", "写", "写入", "导出", "保存", "落盘", "补丁", "修改", "编辑", "写文件", "写入文件", "创建文件", "新建文件", "新增文件", "生成文件", "建文件", "改文件", "编辑文件", "修改文件", "更新文件", "保存文件", "删除文件", "移除文件", "文件操作", "文件管理", "增删改", "读写", "存盘", "打补丁"]),
         .init(name: "knowledge", summary: "cloud knowledge-base search and retrieval / 云端知识库搜索与读取", aliases: ["knowledge", "knowledge base", "cloud knowledge", "知识", "知识库", "云知识库", "云端"])
     ]
 
@@ -309,7 +309,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
             case "rss": return toolName.contains("add_source") ? 8 : 0
             case "skill": return toolName.contains("create") ? 8 : 0
             case "image": return (toolName.contains("generate") || toolName.contains("create")) ? 8 : 0
-            case "workspace": return toolName == "write" ? 8 : (toolName == "edit" ? 6 : 0)
+            case "workspace": return (toolName == "write" || toolName == "applypatch") ? 8 : ((toolName == "edit" || toolName == "multiedit") ? 6 : 0)
             default: return 0
             }
         case "delete":
@@ -318,6 +318,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
             case "note": return toolName.contains("delete") ? 8 : 0
             case "rss": return toolName.contains("remove_source") ? 8 : 0
             case "skill": return toolName.contains("delete") ? 8 : 0
+            case "workspace": return toolName == "applypatch" ? 8 : 0
             default: return 0
             }
         case "edit":
@@ -361,17 +362,17 @@ public struct AssistantToolRouter: Sendable, Equatable {
     }
 
     private func operationPreferenceKey(for query: String) -> String? {
-        let create = ["create", "add", "new", "compose", "send", "schedule", "draft", "创建", "新建", "添加", "新增", "发送", "撰写", "写", "生成", "定时", "提醒", "计划"]
+        let create = ["create", "add", "new", "compose", "send", "schedule", "draft", "创建", "新建", "添加", "新增", "发送", "撰写", "写", "生成", "定时", "提醒", "计划", "写文件", "写入文件", "创建文件", "新建文件", "新增文件", "生成文件", "建文件", "保存", "保存文件"]
         if containsAny(in: query, create) { return "create" }
-        let delete = ["delete", "remove", "取消", "删除", "移除"]
+        let delete = ["delete", "remove", "取消", "删除", "移除", "删", "删除文件", "移除文件"]
         if containsAny(in: query, delete) { return "delete" }
-        let edit = ["edit", "update", "modify", "change", "编辑", "修改", "更新", "更改", "改动"]
+        let edit = ["edit", "update", "modify", "change", "patch", "编辑", "修改", "更新", "更改", "改动", "改", "变更", "补丁", "打补丁", "改文件", "编辑文件", "修改文件", "更新文件"]
         if containsAny(in: query, edit) { return "edit" }
         let list = ["list", "show", "display", "status", "列表", "列出", "查看", "显示", "状态", "有多少"]
         if containsAny(in: query, list) { return "list" }
         let search = ["search", "find", "query", "lookup", "检索", "搜索", "查找", "查询", "找"]
         if containsAny(in: query, search) { return "search" }
-        let read = ["read", "get", "fetch", "open", "view", "detail", "inspect", "读取", "获取", "详情", "打开", "预览", "看"]
+        let read = ["read", "get", "fetch", "open", "view", "detail", "inspect", "读取", "获取", "详情", "打开", "预览", "看", "读", "读文件"]
         if containsAny(in: query, read) { return "read" }
         return nil
     }
@@ -407,7 +408,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
         .init("environment", ["environment", "location", "weather", "temperature", "环境", "位置", "地点", "天气", "温度", "时区"]),
         .init("skill", ["skill", "workflow", "capability", "技能", "工作流", "能力"]),
         .init("graph", ["graph", "knowledge", "relation", "entity", "图谱", "知识图谱", "关系", "实体"]),
-        .init("workspace", ["workspace", "file", "folder", "directory", "code", "project", "local", "write", "save", "export", "patch", "工作区", "文件", "文件夹", "目录", "代码", "项目", "本地", "写", "写入", "导出", "保存", "落盘", "补丁", "修改", "编辑"]),
+        .init("workspace", ["workspace", "file", "folder", "directory", "code", "project", "local", "write", "save", "export", "patch", "工作区", "文件", "文件夹", "目录", "代码", "项目", "本地", "写", "写入", "导出", "保存", "落盘", "补丁", "修改", "编辑", "写文件", "写入文件", "创建文件", "新建文件", "新增文件", "生成文件", "建文件", "改文件", "编辑文件", "修改文件", "更新文件", "保存文件", "删除文件", "移除文件", "文件操作", "文件管理", "增删改", "读写", "存盘", "打补丁"]),
         .init("session", ["session", "conversation", "chat", "会话", "对话", "聊天", "交谈"]),
         .init("send", ["send", "compose", "draft", "reply", "forward", "发送", "撰写", "回复", "转发"]),
         .init("read", ["read", "view", "open", "get", "detail", "inspect", "读取", "查看", "打开", "获取", "详情", "预览", "看"]),
