@@ -1,7 +1,7 @@
 import Foundation
 import CoreFoundation
 import Testing
-import ConnorGraphAgent
+@testable import ConnorGraphAgent
 
 private struct ResponsesCapturingHTTPClient: AgentHTTPClient {
     final class Storage: @unchecked Sendable {
@@ -537,4 +537,99 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     }.last)
     #expect(completed.finishReason == .toolCalls)
     #expect(completed.toolCalls == [AgentToolCall(id: "call_1", name: "graph_search", argumentsJSON: "{\"query\":\"memory\"}")])
+}
+
+private final class SequencedImageHTTPClient: AgentHTTPClient, @unchecked Sendable {
+    private let queue: DispatchQueue
+    private var responses: [(statusCode: Int, body: Data)]
+    private(set) var requestCount = 0
+
+    init(responses: [(Int, Data)]) {
+        self.queue = DispatchQueue(label: "SequencedImageHTTPClient")
+        self.responses = responses
+    }
+
+    func send(_ request: AgentHTTPRequest) async throws -> AgentHTTPResponse {
+        let index = queue.sync {
+            requestCount += 1
+            return requestCount - 1
+        }
+        let pair = responses[min(index, responses.count - 1)]
+        return AgentHTTPResponse(statusCode: pair.statusCode, body: pair.body)
+    }
+}
+
+@Test func openAIResponsesProviderRetriesAndSurfacesUpstreamErrorForImageGeneration() async throws {
+    let upstreamError = ["error": ["message": "上游图片服务暂时不可用，请稍后重试"]]
+    let errorBody = try JSONSerialization.data(withJSONObject: upstreamError)
+    let client = SequencedImageHTTPClient(responses: [
+        (503, errorBody),
+        (502, errorBody),
+        (503, errorBody)
+    ])
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "gpt-5"),
+        httpClient: client
+    )
+
+    do {
+        for try await _ in provider.generateMedia(AgentGeneratedMediaRequest(kind: .image, prompt: "A lake")) {}
+        Issue.record("Expected 503 after retries")
+    } catch let error as OpenAIGeneratedMediaError {
+        if case .providerRejected(let statusCode, let upstreamMessage) = error {
+            #expect(statusCode == 503)
+            #expect(upstreamMessage?.contains("上游图片服务暂时不可用") == true)
+            #expect(error.errorDescription?.contains("HTTP 503") == true)
+            #expect(error.errorDescription?.contains("上游图片服务暂时不可用") == true)
+        } else {
+            Issue.record("Unexpected error \(error)")
+        }
+    }
+    #expect(client.requestCount == OpenAIImageGenerationRetry.maxAttempts)
+}
+
+@Test func openAIResponsesProviderRecoversAfterRetriableImageStatus() async throws {
+    let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+    let success = """
+    {"id":"resp_retry","output":[{"type":"image_generation_call","status":"completed","output_format":"png","result":"\(png.base64EncodedString())"}]}
+    """.data(using: .utf8)!
+    let errorBody = try JSONSerialization.data(withJSONObject: ["error": ["message": "busy"]])
+    let client = SequencedImageHTTPClient(responses: [(503, errorBody), (502, errorBody), (200, success)])
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "gpt-5"),
+        httpClient: client
+    )
+
+    var artifact: AgentGeneratedMediaArtifact?
+    for try await event in provider.generateMedia(AgentGeneratedMediaRequest(kind: .image, prompt: "A lake")) {
+        if case .completed(let value) = event { artifact = value }
+    }
+    #expect(artifact != nil)
+    #expect(client.requestCount == 3)
+    if let url = artifact?.temporaryFileURL {
+        #expect(try Data(contentsOf: url) == png)
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
+@Test func openAIResponsesProviderDoesNotRetryNonRetriableImageStatus() async throws {
+    let errorBody = try JSONSerialization.data(withJSONObject: ["error": ["message": "content policy blocked"]])
+    let client = SequencedImageHTTPClient(responses: [(400, errorBody)])
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "gpt-5"),
+        httpClient: client
+    )
+
+    do {
+        for try await _ in provider.generateMedia(AgentGeneratedMediaRequest(kind: .image, prompt: "A lake")) {}
+        Issue.record("Expected 400")
+    } catch let error as OpenAIGeneratedMediaError {
+        if case .providerRejected(let statusCode, let upstreamMessage) = error {
+            #expect(statusCode == 400)
+            #expect(upstreamMessage == "content policy blocked")
+        } else {
+            Issue.record("Unexpected error \(error)")
+        }
+    }
+    #expect(client.requestCount == 1)
 }
