@@ -163,7 +163,8 @@ private func anthropicNativeTemporaryDatabaseURL(_ name: String = UUID().uuidStr
     let controller = factory.makeAgentLoopController()
 
     #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" } == false)
-    #expect(controller.configuration.instructionAppendix.contains("generate_image") == false)
+    // 图片工具不可用时，附录明确告知模型“不可用”（仍会点名 generate_image 以防止凭空声称已生成）。
+    #expect(controller.configuration.instructionAppendix.contains("Image generation (`generate_image`) and image editing (`edit_image`) are NOT available"))
 }
 
 @Test func runtimeFactoryDoesNotAdvertiseGeneratedImageWithoutAttachmentStorage() throws {
@@ -190,7 +191,7 @@ private func anthropicNativeTemporaryDatabaseURL(_ name: String = UUID().uuidStr
     let controller = factory.makeAgentLoopController()
 
     #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" } == false)
-    #expect(controller.configuration.instructionAppendix.contains("generate_image") == false)
+    #expect(controller.configuration.instructionAppendix.contains("Image generation (`generate_image`) and image editing (`edit_image`) are NOT available"))
 }
 
 @Test func runtimeFactoryRoutesOpenAICompatibleConnectionThroughChatCompletionsCompatibilityProvider() throws {
