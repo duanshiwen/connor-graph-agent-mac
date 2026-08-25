@@ -2365,6 +2365,20 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(names == ["Shell", "ApplyPatch"])
 }
 
+@Test func contextualRunTokenPolicyExposesWorkspaceToolsForRunAndGitSignals() {
+    let definitions = ["Shell", "ApplyPatch", "mail_search_messages", "web_search"].map {
+        AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
+    }
+    for message in ["请帮我执行 git status 命令", "运行这个项目的测试", "在终端执行构建命令"] {
+        let names = Set(AgentRunTokenPolicy().initiallyExposedTools(
+            from: definitions,
+            request: AgentChatRequest(sessionID: "run-signals", userMessage: message),
+            mode: .contextual
+        ).map(\.name))
+        #expect(names == ["Shell", "ApplyPatch"], "运行/Git 类消息应暴露工作区直接工具: \(message)")
+    }
+}
+
 @Test func contextualRunTokenPolicyCarriesWorkspaceToolsIntoExplicitContinuation() {
     let definitions = ["Shell", "ApplyPatch", "mail_search_messages"].map {
         AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))

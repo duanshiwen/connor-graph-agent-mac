@@ -85,7 +85,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
         .init(name: "environment", summary: "current environment, location, and weather context / 当前环境、位置与天气", aliases: ["environment", "location", "weather", "环境", "位置", "地点", "天气", "温度", "时区"]),
         .init(name: "skill", summary: "installed skills and reusable workflows / 已安装技能与工作流", aliases: ["skill", "workflow", "技能", "工作流", "能力"]),
         .init(name: "graph", summary: "knowledge graph search and graph-backed records / 知识图谱搜索与图谱记录", aliases: ["graph", "knowledge graph", "图谱", "知识图谱", "关系图", "实体关系"]),
-        .init(name: "workspace", summary: "workspace files, search, and local editing / 工作区文件、搜索与编辑", aliases: ["workspace", "local files", "code", "file", "write", "save", "export", "patch", "工作区", "本地文件", "本地", "代码", "文件", "目录", "文件夹", "项目", "工程", "写", "写入", "导出", "保存", "落盘", "补丁", "修改", "编辑", "写文件", "写入文件", "创建文件", "新建文件", "新增文件", "生成文件", "建文件", "改文件", "编辑文件", "修改文件", "更新文件", "保存文件", "删除文件", "移除文件", "文件操作", "文件管理", "增删改", "读写", "存盘", "打补丁"]),
+        .init(name: "workspace", summary: "workspace files, search, local editing, and shell commands / 工作区文件、搜索、编辑与 Shell 命令", aliases: ["workspace", "local files", "code", "file", "write", "save", "export", "patch", "shell", "command", "terminal", "run", "execute", "git", "build", "compile", "工作区", "本地文件", "本地", "代码", "文件", "目录", "文件夹", "项目", "工程", "写", "写入", "导出", "保存", "落盘", "补丁", "修改", "编辑", "执行", "运行", "终端", "命令", "命令行", "构建", "编译", "跑命令", "执行命令", "终端命令", "写文件", "写入文件", "创建文件", "新建文件", "新增文件", "生成文件", "建文件", "改文件", "编辑文件", "修改文件", "更新文件", "保存文件", "删除文件", "移除文件", "文件操作", "文件管理", "增删改", "读写", "存盘", "打补丁"]),
         .init(name: "knowledge", summary: "cloud knowledge-base search and retrieval / 云端知识库搜索与读取", aliases: ["knowledge", "knowledge base", "cloud knowledge", "知识", "知识库", "云知识库", "云端"])
     ]
 
@@ -235,7 +235,7 @@ public struct AssistantToolRouter: Sendable, Equatable {
         return ([
             "## Tool Discovery",
             "Direct workspace tools, core interactive webpage tools, and control tools have stable schemas in this request. assistant_tool_search discovers schemas only; it does not read data. For any other capability, search once using one or more compact capability domains in the user's language, then invoke returned exact names and schemas through parallel_tool_query or parallel_tool_execute. Keep dates, record IDs, and operation arguments for the native tool call.",
-            "Discovery tips: put the operation and the domain together and try synonyms in both languages, e.g. \"写文件 / 写入 / 导出 / 保存 / 补丁 / patch\". If one phrasing returns nothing, re-search with synonyms rather than inventing a tool name. Workspace file changes are the direct ApplyPatch tool.",
+            "Discovery tips: put the operation and the domain together and try synonyms in both languages, e.g. \"写文件 / 执行命令 / 运行 / 终端 / shell / git / 构建 / 测试\". If one phrasing returns nothing, re-search with synonyms rather than inventing a tool name. Workspace file changes are the direct ApplyPatch tool; shell commands are the direct Shell tool.",
             "Available families:"
         ] + lines).joined(separator: "\n")
     }
@@ -321,6 +321,11 @@ public struct AssistantToolRouter: Sendable, Equatable {
             case "workspace": return toolName == "applypatch" ? 8 : 0
             default: return 0
             }
+        case "run":
+            switch namespace {
+            case "workspace": return toolName == "shell" ? 8 : 0
+            default: return 0
+            }
         case "edit":
             switch namespace {
             case "workspace": return (toolName == "edit" || toolName == "multiedit" || toolName == "applypatch") ? 8 : 0
@@ -368,6 +373,8 @@ public struct AssistantToolRouter: Sendable, Equatable {
         if containsAny(in: query, delete) { return "delete" }
         let edit = ["edit", "update", "modify", "change", "patch", "编辑", "修改", "更新", "更改", "改动", "改", "变更", "补丁", "打补丁", "改文件", "编辑文件", "修改文件", "更新文件"]
         if containsAny(in: query, edit) { return "edit" }
+        let run = ["run", "execute", "exec", "shell", "command", "terminal", "cli", "git", "build", "compile", "执行", "运行", "终端", "命令", "命令行", "构建", "编译", "跑", "跑命令", "跑测试", "执行命令", "终端命令"]
+        if containsAny(in: query, run) { return "run" }
         let list = ["list", "show", "display", "status", "列表", "列出", "查看", "显示", "状态", "有多少"]
         if containsAny(in: query, list) { return "list" }
         let search = ["search", "find", "query", "lookup", "检索", "搜索", "查找", "查询", "找"]
@@ -409,6 +416,9 @@ public struct AssistantToolRouter: Sendable, Equatable {
         .init("skill", ["skill", "workflow", "capability", "技能", "工作流", "能力"]),
         .init("graph", ["graph", "knowledge", "relation", "entity", "图谱", "知识图谱", "关系", "实体"]),
         .init("workspace", ["workspace", "file", "folder", "directory", "code", "project", "local", "write", "save", "export", "patch", "工作区", "文件", "文件夹", "目录", "代码", "项目", "本地", "写", "写入", "导出", "保存", "落盘", "补丁", "修改", "编辑", "写文件", "写入文件", "创建文件", "新建文件", "新增文件", "生成文件", "建文件", "改文件", "编辑文件", "修改文件", "更新文件", "保存文件", "删除文件", "移除文件", "文件操作", "文件管理", "增删改", "读写", "存盘", "打补丁"]),
+        .init("shell", ["shell", "terminal", "command", "cli", "console", "bash", "zsh", "终端", "命令", "命令行", "控制台"]),
+        .init("run", ["run", "execute", "exec", "执行", "运行", "跑", "跑命令", "跑测试", "执行命令"]),
+        .init("git", ["git", "version control", "version-control", "仓库", "版本控制"]),
         .init("session", ["session", "conversation", "chat", "会话", "对话", "聊天", "交谈"]),
         .init("send", ["send", "compose", "draft", "reply", "forward", "发送", "撰写", "回复", "转发"]),
         .init("read", ["read", "view", "open", "get", "detail", "inspect", "读取", "查看", "打开", "获取", "详情", "预览", "看"]),

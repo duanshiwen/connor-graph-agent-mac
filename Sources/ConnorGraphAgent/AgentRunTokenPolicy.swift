@@ -118,7 +118,7 @@ public struct AgentRunTokenPolicy: Sendable, Equatable {
         }
     }
 
-    private static let localFileSignals = ["文件", "目录", "文件夹", "代码", "仓库", "项目", "工作区", "编译", "测试", "重构", "修改", "实现", "file", "folder", "directory", "code", "repo", "project", "workspace", "build", "test", "refactor", "implement", "edit"]
+    private static let localFileSignals = ["文件", "目录", "文件夹", "代码", "仓库", "项目", "工作区", "编译", "测试", "重构", "修改", "实现", "执行", "运行", "终端", "命令", "命令行", "构建", "跑", "file", "folder", "directory", "code", "repo", "project", "workspace", "build", "test", "refactor", "implement", "edit", "shell", "command", "terminal", "run", "execute", "git"]
     private static let continuationSignals = [
         "已经选择", "已选择", "继续", "继续执行", "继续制作", "继续制作并发布", "接着做", "接着执行", "好了", "已完成",
         "continue", "continue working", "continue and publish", "resume", "resume work", "done", "selected"
