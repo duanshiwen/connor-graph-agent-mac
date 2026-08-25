@@ -388,3 +388,18 @@ import Testing
         #expect(matches.first?.name == "Shell", "操作类查询应优先命中 Shell: \(query)")
     }
 }
+
+@Test func toolSearchDiscoversMCPAndLoadContentTools() {
+    let definitions = [
+        AgentToolDefinition(name: "mcp__github__get_repo", description: "Fetch repository details from the GitHub connector", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "load_attachment_context", description: "Load selected historical session attachments into this run", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "Read", description: "Read a workspace file", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "mail_search_messages", description: "Search email inbox", inputSchema: .object(properties: [:], required: []))
+    ]
+    let mcpMatches = AssistantToolRouter().discover(query: "mcp 外部工具 数据源", definitions: definitions)
+    #expect(mcpMatches.first?.name.hasPrefix("mcp__") == true)
+    for query in ["加载附件", "读取内容", "load attachment context"] {
+        let matches = AssistantToolRouter().discover(query: query, definitions: definitions)
+        #expect(matches.first?.name == "load_attachment_context", "内容加载查询应命中 load_attachment_context: \(query)")
+    }
+}

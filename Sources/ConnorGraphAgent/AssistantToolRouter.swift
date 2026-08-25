@@ -86,7 +86,9 @@ public struct AssistantToolRouter: Sendable, Equatable {
         .init(name: "skill", summary: "installed skills and reusable workflows / 已安装技能与工作流", aliases: ["skill", "workflow", "技能", "工作流", "能力"]),
         .init(name: "graph", summary: "knowledge graph search and graph-backed records / 知识图谱搜索与图谱记录", aliases: ["graph", "knowledge graph", "图谱", "知识图谱", "关系图", "实体关系"]),
         .init(name: "workspace", summary: "workspace files, search, local editing, and shell commands / 工作区文件、搜索、编辑与 Shell 命令", aliases: ["workspace", "local files", "code", "file", "write", "save", "export", "patch", "shell", "command", "terminal", "run", "execute", "git", "build", "compile", "工作区", "本地文件", "本地", "代码", "文件", "目录", "文件夹", "项目", "工程", "写", "写入", "导出", "保存", "落盘", "补丁", "修改", "编辑", "执行", "运行", "终端", "命令", "命令行", "构建", "编译", "跑命令", "执行命令", "终端命令", "写文件", "写入文件", "创建文件", "新建文件", "新增文件", "生成文件", "建文件", "改文件", "编辑文件", "修改文件", "更新文件", "保存文件", "删除文件", "移除文件", "文件操作", "文件管理", "增删改", "读写", "存盘", "打补丁"]),
-        .init(name: "knowledge", summary: "cloud knowledge-base search and retrieval / 云端知识库搜索与读取", aliases: ["knowledge", "knowledge base", "cloud knowledge", "知识", "知识库", "云知识库", "云端"])
+        .init(name: "knowledge", summary: "cloud knowledge-base search and retrieval / 云端知识库搜索与读取", aliases: ["knowledge", "knowledge base", "cloud knowledge", "知识", "知识库", "云知识库", "云端"]),
+        .init(name: "mcp", summary: "MCP external tools and data sources registered for this run / MCP 外部工具与数据源", aliases: ["mcp", "connector", "external tool", "external tools", "data source", "mcp 工具", "mcp工具", "外部工具", "数据源", "连接器", "插件", "外部连接"]),
+        .init(name: "load", summary: "loading saved attachments, content, and context into the conversation / 加载附件、内容与上下文", aliases: ["load", "attachment", "attachments", "load content", "加载", "附件", "载入", "加载内容", "读取内容", "上下文内容"])
     ]
 
     public func route(definitions: [AgentToolDefinition]) -> AssistantToolRoute {
@@ -419,6 +421,8 @@ public struct AssistantToolRouter: Sendable, Equatable {
         .init("shell", ["shell", "terminal", "command", "cli", "console", "bash", "zsh", "终端", "命令", "命令行", "控制台"]),
         .init("run", ["run", "execute", "exec", "执行", "运行", "跑", "跑命令", "跑测试", "执行命令"]),
         .init("git", ["git", "version control", "version-control", "仓库", "版本控制"]),
+        .init("mcp", ["mcp", "connector", "data source", "external tool", "外部工具", "数据源", "连接器"]),
+        .init("load", ["load", "attachment", "attachments", "加载", "附件", "载入", "读取内容"]),
         .init("session", ["session", "conversation", "chat", "会话", "对话", "聊天", "交谈"]),
         .init("send", ["send", "compose", "draft", "reply", "forward", "发送", "撰写", "回复", "转发"]),
         .init("read", ["read", "view", "open", "get", "detail", "inspect", "读取", "查看", "打开", "获取", "详情", "预览", "看"]),
