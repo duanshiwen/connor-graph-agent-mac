@@ -124,10 +124,7 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
                     continuation.yield(.started)
                     var client = httpClient
                     let httpRequest = try makeImageGenerationRequest(request)
-                    let response = try await client.send(httpRequest)
-                    guard (200..<300).contains(response.statusCode) else {
-                        throw OpenAIGeneratedMediaError.providerRejected(statusCode: response.statusCode)
-                    }
+                    let response = try await sendImageGenerationRequestWithRetry(httpRequest, using: &client)
                     let result = try OpenAIImageGenerationParser.parse(response.body)
                     guard let data = Data(base64Encoded: result.base64, options: [.ignoreUnknownCharacters]), !data.isEmpty else {
                         throw OpenAIGeneratedMediaError.invalidBase64
@@ -218,6 +215,30 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
         }
         headers["Content-Type"] = "application/json"
         return headers
+    }
+
+    /// 图片生成请求的有限退避重试：502/503/504 等上游临时错误重试最多 3 次
+    /// （含首次请求），指数退避 0.5s → 1s → 2s；最终失败时把状态码与上游错误体一起透出。
+    private func sendImageGenerationRequestWithRetry(
+        _ request: AgentHTTPRequest,
+        using client: inout Client
+    ) async throws -> AgentHTTPResponse {
+        var attempt = 0
+        while true {
+            attempt += 1
+            let response = try await client.send(request)
+            if (200..<300).contains(response.statusCode) {
+                return response
+            }
+            let retriable = OpenAIImageGenerationRetry.retriableStatusCodes.contains(response.statusCode)
+            if retriable && attempt < OpenAIImageGenerationRetry.maxAttempts {
+                let delay = OpenAIImageGenerationRetry.baseDelay * pow(2.0, Double(attempt - 1))
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                continue
+            }
+            let upstreamMessage = OpenAICompatibleProvider<Client>.errorMessage(from: response.body)
+            throw OpenAIGeneratedMediaError.providerRejected(statusCode: response.statusCode, upstreamMessage: upstreamMessage)
+        }
     }
 
     private func makeImageGenerationRequest(_ request: AgentGeneratedMediaRequest) throws -> AgentHTTPRequest {
@@ -429,12 +450,37 @@ public extension OpenAIResponsesProvider where Client == URLSessionAgentHTTPClie
     }
 }
 
-public enum OpenAIGeneratedMediaError: Error, Sendable, Equatable {
+public enum OpenAIGeneratedMediaError: Error, Sendable, Equatable, LocalizedError {
     case unsupportedRequestKind
     case unsupportedByCurrentModel(String)
-    case providerRejected(statusCode: Int)
+    case providerRejected(statusCode: Int, upstreamMessage: String?)
     case missingImageResult
     case invalidBase64
+
+    public var errorDescription: String? {
+        switch self {
+        case .unsupportedRequestKind:
+            return "OpenAI Responses 图片生成仅支持图片 (image) 请求。"
+        case .unsupportedByCurrentModel(let reason):
+            return reason
+        case .providerRejected(let statusCode, let upstreamMessage):
+            if let upstreamMessage, !upstreamMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "图片生成服务返回 HTTP \(statusCode)：\(upstreamMessage)"
+            }
+            return "图片生成服务返回 HTTP \(statusCode)。"
+        case .missingImageResult:
+            return "图片生成响应中缺少图片结果。"
+        case .invalidBase64:
+            return "图片生成响应中的 base64 数据无法解码。"
+        }
+    }
+}
+
+/// 图片生成上游请求的有限退避重试策略：502/503/504 等临时故障重试。
+enum OpenAIImageGenerationRetry {
+    static let retriableStatusCodes: Set<Int> = [408, 425, 429, 500, 502, 503, 504]
+    static let maxAttempts = 3
+    static let baseDelay: TimeInterval = 0.5
 }
 
 private enum OpenAIImageGenerationParser {
