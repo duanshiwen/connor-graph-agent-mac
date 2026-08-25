@@ -8,7 +8,7 @@ import ConnorGraphStore
 private final class ConfiguredMediaStore: LLMSettingsStore, @unchecked Sendable { var values: [String: String] = [:]; func string(forKey key: String) -> String? { values[key] }; func set(_ value: String, forKey key: String) { values[key] = value } }
 private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Sendable { var values: [String: String] = [:]; func saveSecret(_ secret: String, service: String, account: String) throws { values["\(service):\(account)"] = secret }; func readSecret(service: String, account: String) throws -> String? { values["\(service):\(account)"] }; func deleteSecret(service: String, account: String) throws { values.removeValue(forKey: "\(service):\(account)") } }
 
-@Test func runtimeFactoryUsesExplicitConfiguredMediaConnectionForClaudeChat() throws {
+@Test func currentModelClaudeDoesNotExposeImageToolEvenWithStandaloneMediaConnection() throws {
     let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
     let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
     let llmStore = ConfiguredMediaStore(); let llmCredentials = ConfiguredMediaCredentials(); let llmRepository = AppLLMSettingsRepository(settingsStore: llmStore, credentialStore: llmCredentials)
@@ -22,33 +22,32 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
 
     let controller = factory.makeAgentLoopController()
 
+    // 新策略：即便配置了独立的图片连接，当前对话模型（Claude）不支持图片生成时也不暴露 generate_image。
     #expect(controller.modelProvider.modelID == "claude-sonnet-4-5")
     #expect(controller.toolRegistry.definitions.contains { $0.name == ShareProgressUpdateTool.toolName })
-    #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
+    #expect(!controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
+    #expect(!controller.toolRegistry.definitions.contains { $0.name == "edit_image" })
 }
 
-@Test func runtimeFactoryUsesExplicitOpenAIResponsesMediaConnectionForRelayChat() throws {
+@Test func currentModelOpenAIResponsesExposesImageToolWithoutStandaloneMediaConnection() throws {
     let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
     let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
     let llmStore = ConfiguredMediaStore(); let llmCredentials = ConfiguredMediaCredentials(); let llmRepository = AppLLMSettingsRepository(settingsStore: llmStore, credentialStore: llmCredentials)
-    let relay = AppLLMConnectionConfig(id: "relay", name: "Relay GPT", providerMode: .openAICompatible, connectionKind: .openAICompatible, baseURLString: "https://relay.example.com/v1", model: "gpt-5.6")
-    try llmRepository.save(settings: AppLLMSettings(connections: [relay], defaultConnectionID: relay.id), apiKey: "relay-key")
-    let mediaStore = ConfiguredMediaStore(); let mediaCredentials = ConfiguredMediaCredentials(); let mediaRepository = AppGeneratedMediaSettingsRepository(settingsStore: mediaStore, credentialStore: mediaCredentials)
-    let responses = AppGeneratedMediaConnectionConfig(id: "responses", name: "Relay Responses Image", providerKind: .openAIResponses, baseURLString: "https://relay.example.com/v1", model: "gpt-5.6")
-    try mediaRepository.save(settings: AppGeneratedMediaSettings(connections: [responses], defaultImageConnectionID: responses.id)); try mediaRepository.saveAPIKey("responses-key", connectionID: responses.id)
+    let gpt = AppLLMConnectionConfig(id: "gpt", name: "GPT Chat", providerMode: .openAIResponses, connectionKind: .openAIResponses, baseURLString: "https://relay.example.com/v1", model: "gpt-5.6")
+    try llmRepository.save(settings: AppLLMSettings(connections: [gpt], defaultConnectionID: gpt.id), apiKey: "gpt-key")
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true); defer { try? FileManager.default.removeItem(at: root) }; let paths = AppStoragePaths(applicationSupportDirectory: root); try paths.ensureDirectoryHierarchy()
-    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: llmRepository, generatedMediaSettingsRepository: mediaRepository, storagePaths: paths)
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: llmRepository, storagePaths: paths)
 
     let controller = factory.makeAgentLoopController()
 
     #expect(controller.modelProvider.modelID == "gpt-5.6")
     #expect(controller.toolRegistry.definitions.contains { $0.name == ShareProgressUpdateTool.toolName })
-    #expect(!controller.modelProvider.capabilities.generatedMediaCapabilities.contains(.imageGeneration))
+    #expect(controller.modelProvider.capabilities.generatedMediaCapabilities.contains(.imageGeneration))
     #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
     #expect(controller.toolRegistry.definitions.contains { $0.name == "edit_image" })
 }
 
-@Test func runtimeFactoryDerivesResponsesMediaProviderFromVerifiedConversationConnection() throws {
+@Test func currentModelOpenAICompatibleRelayDoesNotExposeImageToolEvenWithVerifiedEvidence() throws {
     let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
     let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
     let llmStore = ConfiguredMediaStore(); let credentials = ConfiguredMediaCredentials(); let llmRepository = AppLLMSettingsRepository(settingsStore: llmStore, credentialStore: credentials)
@@ -67,8 +66,9 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
 
     let controller = factory.makeAgentLoopController()
 
+    // OpenAI 兼容（非 Responses）协议即便有已验证证据，也不能在新策略下出图——工具隐藏。
     #expect(!controller.modelProvider.capabilities.generatedMediaCapabilities.contains(.imageGeneration))
-    #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
+    #expect(!controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
 }
 
 @Test func runtimeFactoryRejectsExpiredVerifiedMediaEvidence() throws {
@@ -93,7 +93,7 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
     #expect(!controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
 }
 
-@Test func discoveredImageCapabilityRegistersGenerateImageEndToEnd() async throws {
+@Test func discoveredImageCapabilityOnCompatibleRelayDoesNotRegisterGenerateImageUnderCurrentModelPolicy() async throws {
     let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
     let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
     let llmStore = ConfiguredMediaStore(); let credentials = ConfiguredMediaCredentials(); let llmRepository = AppLLMSettingsRepository(settingsStore: llmStore, credentialStore: credentials)
@@ -115,7 +115,8 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
 
     let controller = factory.makeAgentLoopController()
 
-    #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
+    // 新策略：OpenAI 兼容（非 Responses）协议即便探测到 hosted_image_generation 能力也不暴露图片工具。
+    #expect(!controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
 }
 
 @Test func legacyConversationConnectionWithoutCapabilitySnapshotKeepsChatButNotImageTool() throws {
