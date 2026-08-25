@@ -965,6 +965,51 @@ private struct InterruptedStreamProvider: StreamingAgentModelProvider {
     #expect(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("nested-shell-created.txt").path))
 }
 
+@Test func parallelToolQueryReturnsFileContentForReadAndGrep() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(
+                id: "query-read-grep",
+                name: AgentPhaseToolContract.externalSearchBatchName,
+                argumentsJSON: #"{"calls":[{"toolName":"Read","arguments":{"filePath":"note.txt"}},{"toolName":"Grep","arguments":{"pattern":"alpha","path":"."}}]}"#
+            )],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Read content and grep matches retrieved.", finishReason: .stop)
+    ])
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorParallelQueryContent-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    try "alpha line\nbeta line\n".write(to: workspace.appendingPathComponent("note.txt"), atomically: true, encoding: .utf8)
+    var registry = AgentToolRegistry()
+    let policy = LocalWorkspacePolicy(workingDirectory: workspace)
+    registry.register(LocalReadFileTool(policy: policy))
+    registry.register(LocalGrepTool(policy: policy))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(sessionID: "session-query-content", userMessage: "Read note and grep alpha")) {
+        events.append(event)
+    }
+
+    let batchResult = try #require(events.compactMap { event -> AgentToolResult? in
+        if case .toolFinished(let result) = event, result.toolName == AgentPhaseToolContract.externalSearchBatchName {
+            return result
+        }
+        return nil
+    }.first)
+    let combined = batchResult.contentText + (batchResult.contentJSON ?? "")
+    // Read 必须返回正文（行号前缀），Grep 必须返回匹配行，而不是只有 path/matches 元数据。
+    #expect(combined.contains("1: alpha line"))
+    #expect(combined.contains("2: beta line"))
+    #expect(combined.contains("note.txt:1: alpha line"))
+    #expect(events.last?.kind == .runCompleted)
+}
+
 @Test func agentLoopAbortDuringPendingApprovalCancelsRun() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
