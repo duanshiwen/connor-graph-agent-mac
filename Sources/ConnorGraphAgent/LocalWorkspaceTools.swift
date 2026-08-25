@@ -48,7 +48,7 @@ private func requireLargeWriteApprovalIfNeeded(
 
 public struct LocalReadFileTool: AgentTool {
     public let name = "Read"
-    public let description = "Read a text file from the configured local workspace. Without an explicit window, a small file is returned completely in one call, and a larger file is read from the start, truncated to the output budget, returning nextOffset so you can continue with Read(filePath, offset: nextOffset). Pass optional 1-based offset and/or limit to read an explicit line window on any file: reading then always starts at the requested offset, never from the top. Paths must stay inside allowed workspace roots."
+    public let description = "Read a text file from the configured local workspace. Without an explicit window, a small file is returned completely in one call, and a larger file is read from the start, truncated to the output budget, returning nextOffset so you can continue with Read(filePath, offset: nextOffset). Pass optional 1-based offset and/or limit to read an explicit line window on any file: reading then always starts at the requested offset, never from the top. Output lines carry a presentation-only 'N: ' line-number prefix; the exact file text excludes that prefix, so ApplyPatch oldText/newText must be built from the raw file text. Paths must stay inside allowed workspace roots."
     public let permission: AgentPermissionCapability = .readWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "filePath": .string(description: "Path to a file inside the workspace."),
@@ -124,7 +124,7 @@ public struct LocalReadFileTool: AgentTool {
 
 public struct LocalListDirectoryTool: AgentTool {
     public let name = "LS"
-    public let description = "List directory contents inside the configured local workspace. Directories end with '/'. Large directories are paginated with offset and limit; when the result is truncated it returns nextOffset so you can continue."
+    public let description = "List direct directory contents inside the configured local workspace. Directories end with '/'. Large directories are paginated with offset and limit; when the result is truncated it returns nextOffset so you can continue. Use Glob for recursive file discovery."
     public let permission: AgentPermissionCapability = .listWorkspaceFiles
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "path": .string(description: "Directory path inside the workspace. Defaults to '.'."),
@@ -169,7 +169,7 @@ public struct LocalListDirectoryTool: AgentTool {
 
 public struct LocalGlobTool: AgentTool {
     public let name = "Glob"
-    public let description = "Find files matching a glob pattern inside the configured local workspace. Large result sets are paginated with offset and limit; when the result is truncated it returns nextOffset so you can continue."
+    public let description = "Find files matching a glob pattern inside the configured local workspace. Results are sorted by name and exclude ignored directories (.git, node_modules, .build, DerivedData). Large result sets are paginated with offset and limit; when the result is truncated it returns nextOffset so you can continue."
     public let permission: AgentPermissionCapability = .listWorkspaceFiles
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "pattern": .string(description: "Glob pattern, for example '**/*.swift'."),
@@ -214,7 +214,7 @@ public struct LocalGlobTool: AgentTool {
 
 public struct LocalGrepTool: AgentTool {
     public let name = "Grep"
-    public let description = "Search text files inside the configured local workspace using literal or regular expression patterns. Matches are paginated with offset and limit; when the result is truncated it returns nextOffset so you can continue."
+    public let description = "Search text files inside the configured local workspace using literal or regular expression patterns. Results use 'path:line: content' rows and exclude ignored directories (.git, node_modules, .build, DerivedData). Matches are paginated with offset and limit; when the result is truncated it returns nextOffset so you can continue."
     public let permission: AgentPermissionCapability = .searchWorkspaceFiles
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "pattern": .string(description: "Text or regex pattern to search for."),
@@ -310,7 +310,7 @@ public struct LocalGrepTool: AgentTool {
 
 public struct LocalShellTool: AgentTool {
     public let name = "Shell"
-    public let description = "Execute a focused non-interactive shell command in the configured local workspace. Use it to inspect and search files, query Git, and run builds, tests, formatters, package managers, or scripts. Commands are conservatively classified, sandboxed to allowed workspace roots, timed out, truncated, and audited. Commands that may write, use the network, or have unknown effects require the corresponding approval. Use ApplyPatch for file mutations."
+    public let description = "Execute a focused non-interactive shell command in the configured local workspace. Prefer Read/Grep/Glob/LS for file content and listing; use Shell for Git inspection, builds, tests, formatters, package managers, scripts, and anything not covered by a dedicated tool. Commands are conservatively classified, sandboxed to allowed workspace roots, timed out, truncated, and audited. Read-only commands run without approval; commands that may write, use the network, or have unknown effects require the corresponding approval. Use ApplyPatch for file mutations."
     public let permission: AgentPermissionCapability = .runReadOnlyShellCommand
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "command": .string(description: "Shell command to execute."),
@@ -384,7 +384,7 @@ public struct LocalShellTool: AgentTool {
 
 public struct LocalReadManyTool: AgentTool {
     public let name = "ReadMany"
-    public let description = "Read multiple text files from the configured local workspace in a single call. Prefer this over separate Read calls when a task needs several files: every file is returned in one turn. Each request supports optional 1-based line offset and limit, and truncated windows return nextOffset so you can continue reading a large file in chunks; a per-file error does not fail the whole batch. Paths must stay inside allowed workspace roots."
+    public let description = "Read multiple text files from the configured local workspace in a single call. Prefer this over separate Read calls when a task needs several files: every file is returned in one turn. Each request supports optional 1-based line offset and limit, and truncated windows return nextOffset so you can continue reading a large file in chunks; a per-file error does not fail the whole batch. Output lines carry a presentation-only 'N: ' line-number prefix; ApplyPatch oldText/newText must use the raw file text. Paths must stay inside allowed workspace roots."
     public let permission: AgentPermissionCapability = .readWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "requests": .array(
@@ -509,7 +509,7 @@ public struct LocalReadManyTool: AgentTool {
 
 public struct LocalApplyPatchTool: AgentTool {
     public let name = "ApplyPatch"
-    public let description = "Apply an ordered set of structured file changes inside the workspace. Operations are create, edit, multiedit, or delete. The complete patch is validated against projected file contents before commit; a failed commit is rolled back. Use Shell to inspect files before constructing the patch. Example: {\"operations\":[{\"op\":\"create\",\"filePath\":\"notes/plan.md\",\"content\":\"# Plan\\n\"},{\"op\":\"edit\",\"filePath\":\"notes/plan.md\",\"oldText\":\"# Plan\",\"newText\":\"# Roadmap\"}]}. Use op create with content for new files, op edit with oldText/newText for a unique replacement, op multiedit with an edits array for several replacements in one file, and op delete to remove a file."
+    public let description = "Apply an ordered set of structured file changes inside the workspace. Operations are create, edit, multiedit, or delete. The complete patch is validated against projected file contents before commit; a failed commit is rolled back. Prefer edit/multiedit over create for existing files: search-and-replace is low-destructive and token-efficient. oldText/newText must match the file's raw text exactly (never include Read's 'N: ' line-number prefix). Read the file first so oldText reflects current content. Use replaceAll only for deliberate bulk replacements; without it an edit fails when oldText is not unique. Use op create with content for new files, op edit with oldText/newText for a unique replacement, op multiedit with an edits array for several replacements in one file, and op delete to remove a file. Example: {\"operations\":[{\"op\":\"create\",\"filePath\":\"notes/plan.md\",\"content\":\"# Plan\\n\"},{\"op\":\"edit\",\"filePath\":\"notes/plan.md\",\"oldText\":\"# Plan\",\"newText\":\"# Roadmap\"}]}."
     public let permission: AgentPermissionCapability = .editWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "operations": .array(
@@ -517,14 +517,17 @@ public struct LocalApplyPatchTool: AgentTool {
                 "op": .stringEnumeration(values: ["create", "edit", "multiedit", "delete"], description: "Patch operation."),
                 "filePath": .string(description: "Path to write inside the workspace."),
                 "content": .string(description: "Full file content for 'create'."),
-                "oldText": .string(description: "Exact text to replace for 'edit'. Must occur exactly once in the projected file."),
+                "instruction": .string(description: "Optional short semantic description of the change, shown in the approval summary."),
+                "oldText": .string(description: "Exact raw text to replace for 'edit'. Must occur exactly once in the projected file unless replaceAll is true."),
                 "newText": .string(description: "Replacement text for 'edit'."),
+                "replaceAll": .boolean(description: "Whether to replace every occurrence of oldText. Defaults to false; when false, oldText must occur exactly once."),
                 "edits": .array(items: .closedObject(properties: [
-                    "oldText": .string(description: "Exact text to replace. Must occur exactly once in the projected file."),
-                    "newText": .string(description: "Replacement text.")
+                    "oldText": .string(description: "Exact raw text to replace. Must occur exactly once in the projected file unless replaceAll is true."),
+                    "newText": .string(description: "Replacement text."),
+                    "replaceAll": .boolean(description: "Whether to replace every occurrence of oldText. Defaults to false.")
                 ], required: ["oldText", "newText"]), description: "Ordered replacements for 'multiedit'.")
             ], required: ["op", "filePath"]),
-            description: "Ordered patch operations. Applied top to bottom against projected copies, then committed with rollback on failure."
+            description: "Ordered patch operations. Applied top to bottom against projected copies, then committed with rollback on failure. oldText/newText match the file's raw text exactly (without Read's line-number prefix)."
         )
     ], required: ["operations"])
 
@@ -570,10 +573,13 @@ public struct LocalApplyPatchTool: AgentTool {
         guard case .object(var dict) = value else { return value }
         if dict["oldText"] == nil, let old = dict["old_string"] ?? dict["old_text"] { dict["oldText"] = old }
         if dict["newText"] == nil, let new = dict["new_string"] ?? dict["new_text"] { dict["newText"] = new }
+        if dict["replaceAll"] == nil, let flag = dict["replace_all"] ?? dict["allow_multiple"] { dict["replaceAll"] = flag }
         dict.removeValue(forKey: "old_string")
         dict.removeValue(forKey: "old_text")
         dict.removeValue(forKey: "new_string")
         dict.removeValue(forKey: "new_text")
+        dict.removeValue(forKey: "replace_all")
+        dict.removeValue(forKey: "allow_multiple")
         return .object(dict)
     }
 
@@ -589,8 +595,8 @@ public struct LocalApplyPatchTool: AgentTool {
 
     private enum Op {
         case create(content: String)
-        case edit(oldText: String, newText: String)
-        case multiedit(edits: [(oldText: String, newText: String)])
+        case edit(oldText: String, newText: String, replaceAll: Bool)
+        case multiedit(edits: [(oldText: String, newText: String, replaceAll: Bool)])
         case delete
 
         var label: String {
@@ -606,6 +612,7 @@ public struct LocalApplyPatchTool: AgentTool {
     private struct ParsedOperation {
         var index: Int
         var path: URL
+        var instruction: String?
         var op: Op
     }
 
@@ -627,7 +634,11 @@ public struct LocalApplyPatchTool: AgentTool {
                   let path = object["filePath"]?.stringValue ?? object["file_path"]?.stringValue ?? object["path"]?.stringValue else {
                 return nil
             }
-            return ["index": index, "op": op, "filePath": path]
+            var entry: [String: Any] = ["index": index, "op": op, "filePath": path]
+            if let instruction = object["instruction"]?.stringValue ?? object["note"]?.stringValue, !instruction.isEmpty {
+                entry["instruction"] = instruction
+            }
+            return entry
         }
         return LocalToolJSON.encode(["operations": summary]) ?? call.argumentsJSON
     }
@@ -651,29 +662,31 @@ public struct LocalApplyPatchTool: AgentTool {
                 guard let content = object["content"]?.stringValue else {
                     throw AgentToolError.invalidArguments("operation \(index) (create) requires content")
                 }
-                operations.append(ParsedOperation(index: index, path: path, op: .create(content: content)))
+                operations.append(ParsedOperation(index: index, path: path, instruction: object["instruction"]?.stringValue ?? object["note"]?.stringValue, op: .create(content: content)))
             case "edit":
                 guard let oldText = object["oldText"]?.stringValue ?? object["old_text"]?.stringValue ?? object["old_string"]?.stringValue,
                       let newText = object["newText"]?.stringValue ?? object["new_text"]?.stringValue ?? object["new_string"]?.stringValue else {
                     throw AgentToolError.invalidArguments("operation \(index) (edit) requires oldText and newText")
                 }
-                operations.append(ParsedOperation(index: index, path: path, op: .edit(oldText: oldText, newText: newText)))
+                let replaceAll = object["replaceAll"]?.boolValue ?? object["replace_all"]?.boolValue ?? object["allow_multiple"]?.boolValue ?? false
+                operations.append(ParsedOperation(index: index, path: path, instruction: object["instruction"]?.stringValue ?? object["note"]?.stringValue, op: .edit(oldText: oldText, newText: newText, replaceAll: replaceAll)))
             case "multiedit":
                 guard let rawEdits = object["edits"]?.arrayValue else {
                     throw AgentToolError.invalidArguments("operation \(index) (multiedit) requires edits")
                 }
-                let edits: [(oldText: String, newText: String)] = try rawEdits.map { editValue in
+                let edits: [(oldText: String, newText: String, replaceAll: Bool)] = try rawEdits.map { editValue in
                     guard let editObject = editValue.objectValue,
                           let oldText = editObject["oldText"]?.stringValue ?? editObject["old_text"]?.stringValue ?? editObject["old_string"]?.stringValue,
                           let newText = editObject["newText"]?.stringValue ?? editObject["new_text"]?.stringValue ?? editObject["new_string"]?.stringValue else {
                         throw AgentToolError.invalidArguments("operation \(index) (multiedit) each edit requires oldText and newText")
                     }
-                    return (oldText, newText)
+                    let replaceAll = editObject["replaceAll"]?.boolValue ?? editObject["replace_all"]?.boolValue ?? editObject["allow_multiple"]?.boolValue ?? false
+                    return (oldText, newText, replaceAll)
                 }
                 guard !edits.isEmpty else { throw AgentToolError.invalidArguments("operation \(index) (multiedit) edits must not be empty") }
-                operations.append(ParsedOperation(index: index, path: path, op: .multiedit(edits: edits)))
+                operations.append(ParsedOperation(index: index, path: path, instruction: object["instruction"]?.stringValue ?? object["note"]?.stringValue, op: .multiedit(edits: edits)))
             case "delete":
-                operations.append(ParsedOperation(index: index, path: path, op: .delete))
+                operations.append(ParsedOperation(index: index, path: path, instruction: object["instruction"]?.stringValue ?? object["note"]?.stringValue, op: .delete))
             default:
                 throw AgentToolError.invalidArguments("operation \(index) has unsupported op '\(opName)'; use create, edit, multiedit, or delete")
             }
@@ -723,10 +736,10 @@ public struct LocalApplyPatchTool: AgentTool {
                 try policy.validateWritablePath(operation.path, operation: (existsOnDisk || alreadyStaged) ? .overwriteFile : .createFile)
                 projected[key] = content
                 deletedPaths.remove(key)
-            case .edit(let oldText, let newText):
+            case .edit(let oldText, let newText, let replaceAll):
                 try policy.validateWritablePath(operation.path, operation: .editFile)
                 let current = try projectedContent(for: operation.path, key: key, projected: projected, deletedPaths: deletedPaths)
-                projected[key] = try LocalTextEditor.replacingUnique(original: current, oldText: oldText, newText: newText)
+                projected[key] = try LocalTextEditor.replacing(original: current, oldText: oldText, newText: newText, replaceAll: replaceAll)
             case .multiedit(let edits):
                 try policy.validateWritablePath(operation.path, operation: .editFile)
                 let current = try projectedContent(for: operation.path, key: key, projected: projected, deletedPaths: deletedPaths)
@@ -798,7 +811,11 @@ public struct LocalApplyPatchTool: AgentTool {
         }
 
         let operationsReport: [[String: Any]] = operations.map { operation in
-            ["index": operation.index, "filePath": operation.path.path, "op": operation.op.label]
+            var entry: [String: Any] = ["index": operation.index, "filePath": operation.path.path, "op": operation.op.label]
+            if let instruction = operation.instruction, !instruction.isEmpty {
+                entry["instruction"] = instruction
+            }
+            return entry
         }
         let json = LocalToolJSON.encode([
             "filesChanged": orderedPaths.count,
@@ -829,6 +846,11 @@ private extension SendableJSONValue {
         return nil
     }
 
+    var boolValue: Bool? {
+        if case .bool(let value) = self { return value }
+        return nil
+    }
+
     var intValue: Int? {
         switch self {
         case .int(let value): return value
@@ -839,25 +861,45 @@ private extension SendableJSONValue {
 }
 
 enum LocalTextEditor {
-    static func replacingUnique(original: String, oldText: String, newText: String) throws -> String {
+    static func replacing(original: String, oldText: String, newText: String, replaceAll: Bool) throws -> String {
         guard !oldText.isEmpty else { throw AgentToolError.invalidArguments("oldText must not be empty") }
         let ranges = ranges(of: oldText, in: original)
-        guard ranges.count == 1 else {
-            throw AgentToolError.invalidArguments("oldText must occur exactly once; found \(ranges.count)")
+        if !replaceAll {
+            guard ranges.count == 1 else {
+                throw AgentToolError.invalidArguments("oldText must occur exactly once; found \(ranges.count)")
+            }
+        } else {
+            guard !ranges.isEmpty else {
+                throw AgentToolError.invalidArguments("oldText not found in the projected file")
+            }
         }
-        return original.replacingCharacters(in: ranges[0], with: newText)
+        var updated = original
+        for range in ranges.reversed() {
+            updated.replaceSubrange(range, with: newText)
+        }
+        return updated
     }
 
-    static func applyingAtomicEdits(original: String, edits: [(oldText: String, newText: String)]) throws -> String {
+    static func replacingUnique(original: String, oldText: String, newText: String) throws -> String {
+        try replacing(original: original, oldText: oldText, newText: newText, replaceAll: false)
+    }
+
+    static func applyingAtomicEdits(original: String, edits: [(oldText: String, newText: String, replaceAll: Bool)]) throws -> String {
         for edit in edits {
             let ranges = ranges(of: edit.oldText, in: original)
-            guard ranges.count == 1 else {
-                throw AgentToolError.invalidArguments("oldText must occur exactly once; found \(ranges.count): \(edit.oldText)")
+            if !edit.replaceAll {
+                guard ranges.count == 1 else {
+                    throw AgentToolError.invalidArguments("oldText must occur exactly once; found \(ranges.count): \(edit.oldText)")
+                }
+            } else {
+                guard !ranges.isEmpty else {
+                    throw AgentToolError.invalidArguments("oldText not found in the projected file: \(edit.oldText)")
+                }
             }
         }
         var updated = original
         for edit in edits {
-            updated = try replacingUnique(original: updated, oldText: edit.oldText, newText: edit.newText)
+            updated = try replacing(original: updated, oldText: edit.oldText, newText: edit.newText, replaceAll: edit.replaceAll)
         }
         return updated
     }

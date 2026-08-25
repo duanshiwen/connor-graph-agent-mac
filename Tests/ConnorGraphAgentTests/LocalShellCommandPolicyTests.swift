@@ -12,6 +12,36 @@ import ConnorGraphAgent
     #expect(LocalShellCommandPolicy.classify("sudo rm -rf /").risk == .destructive)
 }
 
+@Test func shellCommandPolicyAllowsCommonGitInspectionCommands() {
+    let readOnlyCommands = [
+        "git branch",
+        "git branch -a",
+        "git tag --list",
+        "git remote -v",
+        "git blame App.swift",
+        "git grep TODO",
+        "git rev-parse --show-toplevel",
+        "git ls-files",
+        "git describe --tags",
+        "git shortlog -sn",
+        "git stash list",
+        "git config --get user.name",
+        "git log --oneline -5",
+        "git show HEAD --stat",
+        "git diff --stat",
+        "git status --short",
+        "git symbolic-ref HEAD",
+        "file README.md",
+        "stat README.md",
+        "du -sh Sources"
+    ]
+    for command in readOnlyCommands {
+        #expect(LocalShellCommandPolicy.classify(command).risk == .readOnly, "Git 检查类命令应免审批执行: \(command)")
+    }
+    #expect(LocalShellCommandPolicy.classify("git commit -m fix").risk == .workspaceWrite)
+    #expect(LocalShellCommandPolicy.classify("git push origin main").risk == .network)
+}
+
 @Test func shellCommandPolicyDoesNotTrustAReadOnlyLeadingCommand() {
     #expect(LocalShellCommandPolicy.classify("git status && touch changed.txt").risk == .workspaceWrite)
     #expect(LocalShellCommandPolicy.classify("git status; curl https://example.com").risk == .network)

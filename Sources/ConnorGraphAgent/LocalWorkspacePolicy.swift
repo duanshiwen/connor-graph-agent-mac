@@ -264,7 +264,14 @@ public enum LocalShellCommandPolicy {
         if compositionSignals.contains(where: { lower.contains($0) }) {
             return ShellCommandClassification(risk: .unknown, reason: "compound shell syntax requires conservative workspace-write review")
         }
-        let readOnlyPrefixes = ["pwd", "ls", "cat", "sed -n", "grep", "rg", "find", "head", "tail", "wc", "git status", "git diff", "git log", "git show"]
+        let readOnlyPrefixes = [
+            "pwd", "ls", "cat", "sed -n", "grep", "rg", "find", "head", "tail", "wc",
+            "file", "stat", "du",
+            "git status", "git diff", "git log", "git show", "git blame", "git grep",
+            "git branch", "git tag", "git remote", "git rev-parse", "git ls-files",
+            "git describe", "git shortlog", "git name-rev", "git symbolic-ref",
+            "git stash list", "git config --get", "git help", "git version"
+        ]
         if readOnlyPrefixes.contains(where: { hasSimplePrefix($0, in: lower) }) {
             return ShellCommandClassification(risk: .readOnly, reason: "recognized read-only command")
         }

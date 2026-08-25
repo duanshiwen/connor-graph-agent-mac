@@ -484,6 +484,49 @@ private func makeLargeReadableFile(_ name: String = "large.txt") throws -> (URL,
     #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 1\n")
 }
 
+@Test func applyPatchToolRequiresUniqueOldTextByDefault() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("App.swift")
+    try "let a = 1\nlet a = 2\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    await #expect(throws: AgentToolError.self) {
+        _ = try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"operations":[{"op":"edit","filePath":"App.swift","oldText":"let a =","newText":"let b ="}]}"#),
+            context: .localToolTestContext(toolCallID: "applypatch-ambiguous")
+        )
+    }
+    #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 1\nlet a = 2\n")
+}
+
+@Test func applyPatchToolReplaceAllReplacesEveryOccurrence() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("App.swift")
+    try "let a = 1\nlet a = 2\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    _ = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"operations":[{"op":"edit","filePath":"App.swift","oldText":"let a =","newText":"let b =","replaceAll":true}]}"#),
+        context: .localToolTestContext(toolCallID: "applypatch-replace-all")
+    )
+
+    #expect(try String(contentsOf: file, encoding: .utf8) == "let b = 1\nlet b = 2\n")
+}
+
+@Test func applyPatchToolMultieditSupportsReplaceAllAliases() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("App.swift")
+    try "oldName(1)\noldName(2)\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    _ = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"operations":[{"op":"multiedit","filePath":"App.swift","edits":[{"old_string":"oldName(","new_string":"newName(","allow_multiple":true}]}]}"#),
+        context: .localToolTestContext(toolCallID: "applypatch-multiedit-replace-all")
+    )
+
+    #expect(try String(contentsOf: file, encoding: .utf8) == "newName(1)\nnewName(2)\n")
+}
+
 @Test func applyPatchToolDeletesExistingFile() async throws {
     let workspace = try makeToolTempWorkspace()
     let file = workspace.appendingPathComponent("App.swift")
@@ -517,6 +560,25 @@ private func makeLargeReadableFile(_ name: String = "large.txt") throws -> (URL,
     #expect(payload.contains("B.swift"))
     #expect(payload.contains("create"))
     #expect(payload.contains("edit"))
+}
+
+@Test func applyPatchApprovalPayloadIncludesInstruction() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    var call = AgentToolCall(
+        id: "writebatch-instruction",
+        name: "ApplyPatch",
+        argumentsJSON: #"{"operations":[{"op":"edit","filePath":"B.swift","oldText":"x","newText":"y","instruction":"将占位符替换为正式值"}]}"#
+    )
+    call.runID = "run-local-tools"
+
+    let payload = await tool.approvalPayloadJSON(
+        for: call,
+        context: .localToolTestContext(toolCallID: "writebatch-instruction")
+    )
+
+    #expect(payload.contains("B.swift"))
+    #expect(payload.contains("将占位符替换为正式值"))
 }
 
 private extension AgentToolExecutionContext {
