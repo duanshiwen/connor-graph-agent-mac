@@ -50,6 +50,18 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     case exportRSSOPML
     case createInteractiveWebDraft
     case publishInteractiveWeb
+
+    /// 即使在“执行”（trustedWrite）/“全部允许”（allowAll）模式下，也必须由人工审批的能力
+    /// （硬性门禁）。这是 run 侧策略引擎（AgentPolicyEngine）与客户端审批协调器共享的
+    /// 单一事实来源：这类能力无论权限模式如何都不会被自动放行，必须展示审批卡片等待用户确认。
+    public var requiresHumanApprovalInExecutionMode: Bool {
+        switch self {
+        case .publishInteractiveWeb:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 public enum AgentPermissionMode: String, Codable, Sendable, Equatable, CaseIterable, Hashable {
