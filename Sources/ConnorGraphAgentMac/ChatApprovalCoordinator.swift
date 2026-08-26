@@ -30,8 +30,13 @@ final class ChatApprovalCoordinator {
         self.repository = repository
     }
 
+    /// 当前会话需要人工处理的待审批请求。
+    /// 不按权限模式过滤：run 侧策略（AgentPolicyEngine）决定哪些请求会进入待审批状态——
+    /// 在执行模式（trustedWrite/allowAll）下普通权限直接放行，只有策略仍然硬性要求人工确认的
+    /// 请求（如发布互动网页 publishInteractiveWeb）才会到达这里；这类请求必须展示审批卡片，
+    /// 否则 run 会一直阻塞且用户无处确认（会话列表只显示“请求审批”文字，详情页却看不到弹窗）。
     func activeApprovals(sessionID: String) -> [AgentPendingApproval] {
-        model.pendingApprovals.filter { $0.sessionID == sessionID && !shouldAutoApprove($0) }
+        model.pendingApprovals.filter { $0.sessionID == sessionID && $0.status == .pending }
     }
 
     func install(_ approvals: [AgentPendingApproval]) {
@@ -92,7 +97,6 @@ final class ChatApprovalCoordinator {
                 let existingIDs = Set(self.model.pendingApprovals.map(\.id))
                 self.model.pendingApprovals.append(contentsOf: page.approvals.filter { !existingIDs.contains($0.id) })
                 self.model.nextPageCursor = page.nextCursor
-                self.autoApproveCurrentPolicy()
             } catch is CancellationError {
                 return
             } catch {
@@ -151,11 +155,15 @@ final class ChatApprovalCoordinator {
         resolve(approval, status: .approved, reason: "Always allowed by reviewer for this trusted session", actor: "human-reviewer")
     }
 
+    /// 用户主动切换权限模式（例如从“询问”切到“执行”）时，把当前仍处于待审批状态的请求
+    /// 按新模式自动放行：这是用户明确的“接下来不用再问我”的意图。
     func permissionModeDidChange() {
         guard !isShutdown else { return }
         autoApproveCurrentPolicy()
     }
 
+    /// 仅在用户主动切换权限模式时调用；加载待审批列表本身不自动批准，
+    /// 因为能进入待审批状态的请求（含执行模式下的硬性门禁请求）必须交给用户确认。
     private func autoApproveCurrentPolicy() {
         for approval in model.pendingApprovals where shouldAutoApprove(approval) {
             resolve(
@@ -167,8 +175,10 @@ final class ChatApprovalCoordinator {
         }
     }
 
-    /// 统一入口：替换待审批列表、执行自动批准策略，并把「新到达且需要人工处理」
-    /// 的请求通过 onNewPendingApprovals 通知外层（用于弹窗/通知/自动切换到对应会话）。
+    /// 统一入口：替换待审批列表，并把「新到达」的待审批请求通过 onNewPendingApprovals
+    /// 通知外层（用于弹窗/通知/自动切换到对应会话）。
+    /// 加载本身不再执行自动批准：任何能进入待审批状态的请求都代表 run 正在等待人工决策，
+    /// 必须展示给用户；执行模式下的普通权限在 run 侧策略引擎就已放行，不会走到这里。
     private func applyLoadedApprovals(_ approvals: [AgentPendingApproval], nextCursor: String?) {
         let previouslySeen = lastReportedPendingRequestIDs
         let loadedPendingIDs = Set(approvals.filter { $0.status == .pending }.map(\.requestID))
@@ -176,10 +186,8 @@ final class ChatApprovalCoordinator {
         lastReportedPendingRequestIDs = loadedPendingIDs
         model.pendingApprovals = approvals
         model.nextPageCursor = nextCursor
-        autoApproveCurrentPolicy()
-        let toSurface = newlyArrived.filter { !shouldAutoApprove($0) }
-        if !toSurface.isEmpty {
-            onNewPendingApprovals(toSurface)
+        if !newlyArrived.isEmpty {
+            onNewPendingApprovals(newlyArrived)
         }
     }
 

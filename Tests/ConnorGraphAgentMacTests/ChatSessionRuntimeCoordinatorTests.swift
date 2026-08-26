@@ -200,7 +200,7 @@ struct ChatSessionRuntimeCoordinatorTests {
         #expect(model.attachmentToast?.title == "Before")
     }
 
-    @Test func approvalCoordinatorFiltersAutoApprovedCapabilitiesAndStopsAfterShutdown() {
+    @Test func approvalCoordinatorShowsPendingApprovalsInEveryModeAndStopsAfterShutdown() {
         let model = ChatApprovalModel()
         let coordinator = ChatApprovalCoordinator(model: model, repository: nil)
         coordinator.permissionMode = { .trustedWrite }
@@ -208,10 +208,12 @@ struct ChatSessionRuntimeCoordinatorTests {
         let destructive = AgentPendingApproval(requestID: "delete", runID: "run", sessionID: "session", capability: .deleteGraphObject)
         let personality = AgentPendingApproval(requestID: "personality", runID: "run", sessionID: "session", capability: .mutatePersonality)
 
+        // 能进入待审批状态就代表 run 正在等待人工决策：执行模式也必须展示审批卡，
+        // 否则硬性门禁请求（如发布互动网页）会阻塞 run 且用户无处确认。
         coordinator.install([readable, destructive, personality])
-        #expect(coordinator.activeApprovals(sessionID: "session").isEmpty)
+        #expect(coordinator.activeApprovals(sessionID: "session").count == 3)
         coordinator.permissionMode = { .allowAll }
-        #expect(coordinator.activeApprovals(sessionID: "session").isEmpty)
+        #expect(coordinator.activeApprovals(sessionID: "session").count == 3)
 
         coordinator.shutdown()
         coordinator.install([])
@@ -240,17 +242,60 @@ struct ChatSessionRuntimeCoordinatorTests {
         #expect(surfaced[1].map(\.requestID) == ["approval-2"])
     }
 
-    @Test func approvalCoordinatorDoesNotSurfaceAutoApprovedRequests() {
+    @Test func approvalCoordinatorSurfacesPendingApprovalsInExecutionModeWithoutSilentAutoApprove() {
         let model = ChatApprovalModel()
         let coordinator = ChatApprovalCoordinator(model: model, repository: nil)
         coordinator.permissionMode = { .trustedWrite }
-        var surfaced = false
-        coordinator.onNewPendingApprovals = { _ in surfaced = true }
-        coordinator.install([
-            AgentPendingApproval(requestID: "auto-approve", runID: "run", sessionID: "session", capability: .deleteGraphObject)
-        ])
-        #expect(!surfaced)
-        #expect(coordinator.activeApprovals(sessionID: "session").isEmpty)
+        var surfaced: [[AgentPendingApproval]] = []
+        coordinator.onNewPendingApprovals = { surfaced.append($0) }
+        let approval = AgentPendingApproval(
+            requestID: "publish",
+            runID: "run",
+            sessionID: "session",
+            capability: .publishInteractiveWeb,
+            toolName: "interactive_web_publish"
+        )
+
+        // 执行模式下硬性门禁请求仍然到达待审批状态：必须通知外层并展示卡片，
+        // 同时加载本身不得静默自动批准（run 侧策略没有放行它，App 侧不能替用户决定）。
+        coordinator.install([approval])
+        #expect(surfaced.count == 1)
+        #expect(surfaced[0].map(\.requestID) == ["publish"])
+        #expect(coordinator.activeApprovals(sessionID: "session").map(\.requestID) == ["publish"])
+        #expect(model.pendingApprovals.count == 1)
+    }
+
+    @Test func permissionModeSwitchToExecutionAutoApprovesPendingApprovals() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanup() }
+        let approval = AgentPendingApproval(
+            requestID: "switch-exec",
+            runID: "run",
+            sessionID: "session",
+            capability: .sendMail
+        )
+        try fixture.approvalRepository.store.upsert(pendingApproval: approval)
+        let model = ChatApprovalModel()
+        let coordinator = ChatApprovalCoordinator(model: model, repository: fixture.approvalRepository)
+        coordinator.permissionMode = { .askToWrite }
+        let resolvedStatuses = ResolvedApprovalStatusBox()
+        let backend = AnyAgentBackend(
+            chat: { _ in AsyncThrowingStream { _ in } },
+            resolveApproval: { _, status, _, _ in resolvedStatuses.append(status) }
+        )
+        coordinator.backendForApproval = { _ in backend }
+        coordinator.install([approval])
+        #expect(coordinator.activeApprovals(sessionID: "session").count == 1)
+
+        // 用户主动切到“执行”模式：已挂起的待审批请求按新模式自动放行。
+        coordinator.permissionMode = { .trustedWrite }
+        coordinator.permissionModeDidChange()
+        for _ in 0..<50 where resolvedStatuses.values.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(resolvedStatuses.values == [.approved])
+        let persisted = try #require(fixture.approvalRepository.load(runID: approval.runID).first)
+        #expect(persisted.status == .approved)
     }
 
     @Test func approvalCoordinatorCancelsPersistedApprovalsWhenRunStops() throws {
@@ -361,4 +406,22 @@ private struct RepositoryFixture {
     }
 
     func cleanup() { try? FileManager.default.removeItem(at: directory) }
+}
+
+/// @Sendable 闭包内记录审批结果的线程安全容器（测试用）。
+private final class ResolvedApprovalStatusBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [AgentPendingApprovalStatus] = []
+
+    var values: [AgentPendingApprovalStatus] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ status: AgentPendingApprovalStatus) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage.append(status)
+    }
 }
