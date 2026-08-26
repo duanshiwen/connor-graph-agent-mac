@@ -23,6 +23,9 @@ public struct AppMemoryOSPipelineTriggerCoordinator: @unchecked Sendable {
     }
 
     public func runDailySweep(now: Date = Date()) throws -> [MemoryOSQueueItem] {
+        // Orphan GC is local DB maintenance and runs even when L1 extraction is paused, so a
+        // dangling L0 reference can never accumulate or block a later daily enqueue.
+        _ = try facade.sweepOrphanL1CaptureEvents(now: now)
         guard facade.canRunL1Extraction(now) else { return [] }
         let enqueued = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1AgePolicy, now: now)
         // Daily probe: bring user-action-paused batches back so they resume as soon as the

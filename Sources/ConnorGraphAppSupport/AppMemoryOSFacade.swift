@@ -639,15 +639,13 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
 
     public func enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), now: Date = Date()) throws -> [MemoryOSQueueItem] {
         let events = try pendingCaptureEvents(limit: max(policy.minPendingCount * 2, policy.maxEventsPerBlock * 4))
-        let originalContentByProvenanceID = try Dictionary(uniqueKeysWithValues: events.map { event in
-            guard let object = try store.provenanceObject(id: event.provenanceObjectID) else {
-                throw SQLiteMemoryOSStoreError.missingRecord("Missing L0 provenance object: \(event.provenanceObjectID)")
-            }
-            return (event.provenanceObjectID, object.content)
-        })
+        // Skip-and-purge instead of throw: one dangling L0 reference must never block the whole
+        // L1 projection pipeline. Orphaned events cannot be projected without their original
+        // evidence, so they are deleted here and recorded in the audit log.
+        let partitioned = try partitionByLiveProvenance(events, subjectID: "l1-unified-projection-enqueue", now: now)
         let drafts = MemoryOSL1UnifiedProjectionJobPlanner(policy: policy).planJobs(
-            from: events,
-            originalContentByProvenanceID: originalContentByProvenanceID,
+            from: partitioned.live,
+            originalContentByProvenanceID: partitioned.originalContentByProvenanceID,
             now: now
         )
         var inserted: [MemoryOSQueueItem] = []
@@ -792,6 +790,38 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return transitioned
     }
 
+    /// Cancel a background job so it never runs again, dead-letter it, record the attempt, and
+    /// audit the outcome. Used for terminal conditions: single-event isolation and total L0 loss.
+    private func cancelBackgroundJobAndDeadLetter(
+        _ item: MemoryOSQueueItem,
+        errorCode: String,
+        errorMessage: String,
+        deadLetterReason: String,
+        originalErrorCode: String,
+        auditEventType: String,
+        auditPayload: [String: String],
+        issueMessage: String,
+        now: Date
+    ) throws -> MemoryOSProjectionRunSummary {
+        var cancelled = item
+        cancelled.status = .cancelled
+        cancelled.errorCode = errorCode
+        cancelled.errorMessage = errorMessage
+        cancelled.nextRunAt = now
+        cancelled.lockedAt = nil
+        cancelled.lockedBy = nil
+        cancelled.leaseExpiresAt = nil
+        cancelled.updatedAt = now
+        try store.enqueue(cancelled)
+        try store.saveDeadLetter(queueItem: cancelled, now: now, metadata: [
+            "reason": deadLetterReason,
+            "original_error_code": originalErrorCode
+        ])
+        try store.saveQueueAttempt(queueItemID: item.id, attemptNumber: item.attemptCount + 1, status: .cancelled, startedAt: item.lockedAt ?? now, finishedAt: now, errorCode: errorCode, errorMessage: errorMessage)
+        try saveBackgroundJobAudit(eventType: auditEventType, subjectID: item.id, payload: auditPayload, now: now)
+        return MemoryOSProjectionRunSummary(artifactID: item.id, accepted: false, issues: [MemoryOSValidationIssue(code: errorCode, message: issueMessage)])
+    }
+
     /// Deterministic batch-scope failure (token budget, iteration cap, duration cap, context
     /// length, repeated tool errors): split the batch into smaller jobs and retry instead of
     /// re-running the same oversized payload. A single remaining event is isolated so it can
@@ -804,45 +834,54 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     ) throws -> MemoryOSProjectionRunSummary {
         let draft = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, item.payloadJSON)
         let events = try store.captureEvents(ids: draft.captureEventIDs)
-        let originalContentByProvenanceID = try Dictionary(uniqueKeysWithValues: events.map { event in
-            guard let object = try store.provenanceObject(id: event.provenanceObjectID) else {
-                throw SQLiteMemoryOSStoreError.missingRecord("Missing L0 provenance object: \(event.provenanceObjectID)")
-            }
-            return (event.provenanceObjectID, object.content)
-        })
+        // Same skip-and-purge contract as enqueue: a missing L0 provenance is a poison event,
+        // not a pipeline-wide failure. Purged orphans are removed so they cannot block replanning.
+        let partitioned = try partitionByLiveProvenance(events, subjectID: item.id, now: now)
+        let liveEvents = partitioned.live
+        let originalContentByProvenanceID = partitioned.originalContentByProvenanceID
 
-        guard events.count > 1 else {
+        guard !liveEvents.isEmpty else {
+            // Every event in this job lost its L0 provenance (already purged above): the job can
+            // never make progress, so cancel it instead of re-running the same doomed batch.
+            return try cancelBackgroundJobAndDeadLetter(
+                item,
+                errorCode: "background_ai_l0_provenance_missing",
+                errorMessage: "All events in the batch reference missing L0 provenance objects and were purged.",
+                deadLetterReason: "l0_provenance_missing",
+                originalErrorCode: errorCode,
+                auditEventType: "memory_os.background_job.l0_provenance_missing",
+                auditPayload: ["event_count": String(draft.captureEventIDs.count)],
+                issueMessage: "Batch cancelled: all events referenced missing L0 provenance objects.",
+                now: now
+            )
+        }
+
+        guard liveEvents.count > 1 else {
             // Last downscale level: isolate the single poison event so it cannot block others.
-            var isolated = item
-            isolated.status = .cancelled
-            isolated.errorCode = "background_ai_single_event_isolated"
-            isolated.errorMessage = errorMessage
-            isolated.nextRunAt = now
-            isolated.lockedAt = nil
-            isolated.lockedBy = nil
-            isolated.leaseExpiresAt = nil
-            isolated.updatedAt = now
-            try store.enqueue(isolated)
-            try store.saveDeadLetter(queueItem: isolated, now: now, metadata: [
-                "reason": "downscale_isolation",
-                "original_error_code": errorCode
-            ])
-            try store.saveQueueAttempt(queueItemID: item.id, attemptNumber: item.attemptCount + 1, status: .cancelled, startedAt: item.lockedAt ?? now, finishedAt: now, errorCode: "background_ai_single_event_isolated", errorMessage: errorMessage)
-            for event in events {
+            for event in liveEvents {
                 var dead = event
                 dead.processingState = .deadLetter
                 try store.upsert(captureEvent: dead)
             }
-            try saveBackgroundJobAudit(eventType: "memory_os.background_job.single_event_isolated", subjectID: item.id, payload: [
-                "event_count": String(events.count),
-                "event_id": events.first?.id ?? "",
-                "error_code": errorCode
-            ], now: now)
-            return MemoryOSProjectionRunSummary(artifactID: item.id, accepted: false, issues: [MemoryOSValidationIssue(code: "background_ai_single_event_isolated", message: "Event isolated after repeated batch failures: \(errorCode)")])
+            return try cancelBackgroundJobAndDeadLetter(
+                item,
+                errorCode: "background_ai_single_event_isolated",
+                errorMessage: errorMessage,
+                deadLetterReason: "downscale_isolation",
+                originalErrorCode: errorCode,
+                auditEventType: "memory_os.background_job.single_event_isolated",
+                auditPayload: [
+                    "event_count": String(liveEvents.count),
+                    "event_id": liveEvents.first?.id ?? "",
+                    "error_code": errorCode
+                ],
+                issueMessage: "Event isolated after repeated batch failures: \(errorCode)",
+                now: now
+            )
         }
 
         let level = Int(draft.metadata["downscale_level"] ?? "") ?? 0
-        let targetSize = max(1, (events.count + 1) / 2)
+        let targetSize = max(1, (liveEvents.count + 1) / 2)
         let policy = MemoryOSL1ProcessingTriggerPolicy(
             minPendingCount: 1,
             maxEventsPerBlock: targetSize,
@@ -850,7 +889,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             maxPendingAge: nil
         )
         let subDrafts = MemoryOSL1UnifiedProjectionJobPlanner(policy: policy)
-            .planJobs(from: events, originalContentByProvenanceID: originalContentByProvenanceID, now: now)
+            .planJobs(from: liveEvents, originalContentByProvenanceID: originalContentByProvenanceID, now: now)
         let enriched = subDrafts.enumerated().map { index, subDraft in
             var sub = subDraft
             sub.kind = item.kind
@@ -936,6 +975,38 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return resumed
     }
 
+    /// Daily-maintenance GC: purge pending L1 capture events whose L0 provenance object no longer
+    /// exists. Runs regardless of whether L1 extraction is eligible, so dangling references can
+    /// never accumulate or block a later enqueue.
+    public func sweepOrphanL1CaptureEvents(now: Date = Date()) throws -> Int {
+        let referencedIDs = try captureEventIDsReferencedByActiveL1QueueItems()
+        let referencedList = referencedIDs.isEmpty ? "''" : referencedIDs.map { store.quote($0) }.joined(separator: ",")
+        let rows = try store.query(sql: """
+        SELECT id
+        FROM memory_l1_capture_events
+        WHERE processing_state = 'pending'
+          AND NOT EXISTS (
+              SELECT 1 FROM memory_l0_provenance_objects o WHERE o.id = memory_l1_capture_events.provenance_object_id
+          )
+          AND id NOT IN (\(referencedList))
+        """)
+        let ids = rows.compactMap(\.first)
+        guard !ids.isEmpty else { return 0 }
+        try deleteL1CaptureEvents(ids: ids)
+        try saveBackgroundJobAudit(
+            eventType: "memory_os.l1.orphan_provenance.purged",
+            subjectID: "l1-unified-projection-daily-sweep",
+            payload: [
+                "event_count": String(ids.count),
+                "purged_event_ids": ids.prefix(20).joined(separator: ","),
+                "purged_sample_truncated": ids.count > 20 ? "true" : "false"
+            ],
+            now: now
+        )
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.l1.orphan_provenance.purged", value: Double(ids.count), dimensions: ["subject": "daily-sweep"], createdAt: now))
+        return ids.count
+    }
+
     public func recoverExpiredBackgroundQueueLeases(now: Date = Date(), limit: Int = 100) throws -> Int {
         let expired = try store.expiredLeaseQueueItems(limit: limit, now: now)
         for item in expired {
@@ -985,6 +1056,46 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         let quoted = ids.map { store.quote($0) }.joined(separator: ",")
         try store.execute("DELETE FROM memory_l1_time_block_events WHERE capture_event_id IN (\(quoted));")
         try store.execute("DELETE FROM memory_l1_capture_events WHERE id IN (\(quoted));")
+    }
+
+    /// Partition events into those whose L0 provenance object still exists and orphans whose L0
+    /// is gone. Orphans are deleted (their original evidence no longer exists, so they can never
+    /// be projected) and recorded in the audit log, so a single dangling reference can never
+    /// block the L1 projection pipeline again.
+    private func partitionByLiveProvenance(
+        _ events: [MemoryOSCaptureEvent],
+        subjectID: String,
+        now: Date
+    ) throws -> (live: [MemoryOSCaptureEvent], originalContentByProvenanceID: [String: String], purgedOrphanCount: Int) {
+        var live: [MemoryOSCaptureEvent] = []
+        var originalContentByProvenanceID: [String: String] = [:]
+        var orphanIDs: [String] = []
+        var missingProvenanceObjectIDs: [String] = []
+        for event in events {
+            guard let object = try store.provenanceObject(id: event.provenanceObjectID) else {
+                orphanIDs.append(event.id)
+                missingProvenanceObjectIDs.append(event.provenanceObjectID)
+                continue
+            }
+            live.append(event)
+            originalContentByProvenanceID[event.provenanceObjectID] = object.content
+        }
+        if !orphanIDs.isEmpty {
+            try deleteL1CaptureEvents(ids: orphanIDs)
+            try saveBackgroundJobAudit(
+                eventType: "memory_os.l1.orphan_provenance.purged",
+                subjectID: subjectID,
+                payload: [
+                    "event_count": String(orphanIDs.count),
+                    "purged_event_ids": orphanIDs.prefix(20).joined(separator: ","),
+                    "missing_provenance_object_ids": missingProvenanceObjectIDs.prefix(20).joined(separator: ","),
+                    "purged_sample_truncated": orphanIDs.count > 20 ? "true" : "false"
+                ],
+                now: now
+            )
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.l1.orphan_provenance.purged", value: Double(orphanIDs.count), dimensions: ["subject": subjectID], createdAt: now))
+        }
+        return (live, originalContentByProvenanceID, orphanIDs.count)
     }
 
     func l2StatementIDs(sourceArtifactID: String) throws -> [String] {
