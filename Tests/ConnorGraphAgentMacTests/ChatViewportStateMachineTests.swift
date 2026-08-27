@@ -163,6 +163,43 @@ struct ChatViewportStateMachineTests {
         #expect(snapshot.mode == .programmaticScroll(.item(id: "message-7", anchor: .top, animated: false)))
     }
 
+    /// 复现 AgentChatView 的真实时序：仓库分页 prepend 后，`onChange(of: transcript.count)`
+    /// 先发出 .append（错误通知），随后 `onChange(of: visibleMessageLimit)` 才发出 .prepend。
+    /// 期望：最终仍生成锚点恢复命令（顺序 append→prepend 时纠正保留，但 pendingNewItemCount 被错误累加）。
+    @Test func appendDuringPrependCorrectionKeepsAnchorRestorationButLeaksPendingCount() {
+        let machine = ChatViewportStateMachine(configuration: .init())
+        let browsing = ChatViewportSnapshot(mode: .freeBrowsing, isPinnedToBottom: false, shouldShowJumpToLatest: true, pendingNewItemCount: 0)
+        let prepared = machine.reduce(snapshot: browsing, event: .prepareForPrepend(anchorItemID: "message-42"))
+
+        // onChange(of: transcript.count) 先触发：prepend 被误报为 .append
+        let afterAppend = machine.reduce(snapshot: prepared, event: .dataChanged(.append(count: 20)))
+        #expect(afterAppend.mode == .freeBrowsing)
+
+        // onChange(of: visibleMessageLimit) 后触发：真正的 prepend 通知
+        let final = machine.reduce(snapshot: afterAppend, event: .dataChanged(.prepend(count: 20, anchorItemID: "message-42")))
+        #expect(final.mode == .programmaticScroll(.item(id: "message-42", anchor: .top, animated: false)))
+        // 缺陷：pendingNewItemCount 被错误累加 → “跳到最新”按钮错误出现
+        #expect(final.pendingNewItemCount == 20)
+    }
+
+    /// 复现最坏时序：prepend 纠正命令已生成（prepend 通知先于 append 通知），
+    /// 随后 onChange(of: transcript.count) 的 .append 误通知把纠正状态覆盖为 freeBrowsing，
+    /// 导致锚点恢复滚动命令丢失——新消息插入顶部后视口不滚动，用户仍停留在旧内容位置。
+    @Test func appendAfterAnchorRestorationCancelsCorrectionCommand() {
+        let machine = ChatViewportStateMachine(configuration: .init())
+        let browsing = ChatViewportSnapshot(mode: .freeBrowsing, isPinnedToBottom: false, shouldShowJumpToLatest: true, pendingNewItemCount: 0)
+        let prepared = machine.reduce(snapshot: browsing, event: .prepareForPrepend(anchorItemID: "message-42"))
+
+        // prepend 通知先到：锚点恢复命令已生成
+        let corrected = machine.reduce(snapshot: prepared, event: .dataChanged(.prepend(count: 20)))
+        #expect(corrected.mode == .programmaticScroll(.item(id: "message-42", anchor: .top, animated: false)))
+
+        // .append 误通知随后覆盖：纠正命令丢失
+        let final = machine.reduce(snapshot: corrected, event: .dataChanged(.append(count: 20)))
+        #expect(final.mode == .freeBrowsing)
+        #expect(final.pendingNewItemCount == 20)
+    }
+
     @Test func completedPrependCorrectionReturnsToFreeBrowsing() {
         let machine = ChatViewportStateMachine(configuration: .init())
         let correcting = ChatViewportSnapshot(

@@ -575,6 +575,12 @@ private struct AgentChatConversationView: View {
     @State private var lastObservedTranscriptCount: Int = 0
     @State private var visibleMessageLimit: Int = Self.initialVisibleMessageLimit
     @State private var pendingPrependCorrection: PendingPrependCorrection?
+    // 记录最近一次 transcript 增长是否来自顶部 prepend（加载更早消息）。
+    // onChange(of: transcript.count) 用它区分 prepend 与 append：
+    // prepend 的窗口扩展与 .prepend 通知由 loadOlderMessagesIfNeeded 的 Task 统一处理，
+    // 若这里再误发 .append 会把状态机的 prepend 锚点纠正覆盖掉（纠正命令丢失、
+    // “跳到最新”按钮的 pending 计数被错误累加）。
+    @State private var pendingPrependCount = 0
     @State private var isLoadingOlderMessages = false
     @State private var selectedForwardMessageIDs: Set<String> = []
     @State private var isForwardSelectionMode = false
@@ -805,6 +811,10 @@ private struct AgentChatConversationView: View {
                 previousFirstItemID: anchorItemID,
                 addedMessageCount: addedCount
             )
+            // 显式标记本次增长来自顶部 prepend（不依赖 isLoadingOlderMessages 的时序推断，
+            // 避免 onChange(of: transcript.count) 在 onChange(of: visibleMessageLimit) 之后
+            // 触发时误判为 append）。
+            pendingPrependCount = addedCount
             visibleMessageLimit += addedCount
         }
     }
@@ -1140,6 +1150,16 @@ private struct AgentChatConversationView: View {
                 guard (currentSessionID == lastObservedSessionID || lastObservedSessionID == nil),
                       newCount > oldCount
                 else { return }
+                // 顶部 prepend（加载更早消息）：窗口扩展与 .prepend 锚点纠正由
+                // loadOlderMessagesIfNeeded 的 Task / onChange(of: visibleMessageLimit) 处理，
+                // 这里只补扩窗（覆盖 prepend 期间并发 append 超出窗口的边界），不再发 .append。
+                if pendingPrependCount > 0 {
+                    pendingPrependCount = 0
+                    if visibleMessageLimit < newCount {
+                        visibleMessageLimit = newCount
+                    }
+                    return
+                }
                 visibleMessageLimit = max(visibleMessageLimit, newCount)
                 chatViewportController.notifyDataChange(.append(count: newCount - oldCount))
             }
