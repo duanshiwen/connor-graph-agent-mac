@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import os
 import ConnorGraphAppSupport
 
 struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where Item.ID: Hashable {
@@ -70,13 +71,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                         Color.clear.preference(key: ChatViewportViewportHeightKey.self, value: geometry.size.height)
                     }
                 )
-                .background(
-                    ChatViewportNativeScrollObserver { nativeMetrics in
-                        publishMetrics(nativeMetrics: nativeMetrics)
-                        requestOlderItemsIfNeeded(distanceToTop: nativeMetrics.distanceToTop)
-                    }
-                    .id(dataSetID)
-                )
+
                 .onPreferenceChange(ChatViewportViewportHeightKey.self) { height in
                     viewportHeight = height
                     publishMetrics()
@@ -186,6 +181,19 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     )
                 }
             )
+
+        // 原生滚动观察者必须放在滚动内容内部：只有这样才能通过 enclosingScrollView
+        // 可靠找到聊天自己的 NSScrollView。此前放在 ScrollView 的 .background() 中，
+        // 观察者 NSView 与滚动视图是兄弟节点，enclosingScrollView 要么为 nil、
+        // 要么错绑外层容器，导致触顶回调永不触发（即“滚到顶不加载更早消息”）。
+        ChatViewportNativeScrollObserver { nativeMetrics in
+            publishMetrics(nativeMetrics: nativeMetrics)
+            requestOlderItemsIfNeeded(distanceToTop: nativeMetrics.distanceToTop)
+        }
+        .id(dataSetID)
+        .frame(width: 0, height: 0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
 
         ForEach(items) { item in
             rowContent(item)
@@ -326,7 +334,7 @@ struct ChatViewportNativeScrollMetrics: Equatable {
     }
 }
 
-private struct ChatViewportNativeScrollObserver: NSViewRepresentable {
+struct ChatViewportNativeScrollObserver: NSViewRepresentable {
     var onMetricsChanged: (ChatViewportNativeScrollMetrics) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -348,6 +356,26 @@ private struct ChatViewportNativeScrollObserver: NSViewRepresentable {
         coordinator.detach()
     }
 
+    /// 沿视图祖先链向上查找“真正包含该视图”的滚动视图。
+    ///
+    /// 关键校验：候选 NSScrollView 的 documentView 必须是该视图的祖先，
+    /// 即视图位于滚动内容的文档视图内。SwiftUI 把 `.background()` /
+    /// `.overlay()` 视图放在 ScrollView 之外（与滚动视图互为兄弟节点），
+    /// 此时 view.enclosingScrollView 要么为 nil、要么错绑外层容器；
+    /// 本方法会跳过这类无效候选，保证只绑定聊天自己的滚动视图。
+    static func locateScrollView(containing view: NSView) -> NSScrollView? {
+        var current: NSView? = view
+        while let candidate = current {
+            if let scrollView = candidate as? NSScrollView,
+               let documentView = scrollView.documentView,
+               view.isDescendant(of: documentView) {
+                return scrollView
+            }
+            current = candidate.superview
+        }
+        return nil
+    }
+
     @MainActor
     final class Coordinator {
         var onMetricsChanged: (ChatViewportNativeScrollMetrics) -> Void
@@ -355,20 +383,42 @@ private struct ChatViewportNativeScrollObserver: NSViewRepresentable {
         private var boundsObserver: NSObjectProtocol?
         private var isAttachmentScheduled = false
         private var isDismantled = false
+        private var retryAttemptsRemaining = 5
         private var lastPublishedMetrics: ChatViewportNativeScrollMetrics?
+
+        private static let logger = Logger(subsystem: "ConnorGraphAgentMac", category: "ChatViewport")
+        private static let retryDelay: TimeInterval = 0.05
 
         init(onMetricsChanged: @escaping (ChatViewportNativeScrollMetrics) -> Void) {
             self.onMetricsChanged = onMetricsChanged
         }
 
         func attachWhenAvailable(from view: NSView) {
-            guard scrollView == nil, !isAttachmentScheduled, !isDismantled else { return }
+            guard !isDismantled, scrollView == nil, !isAttachmentScheduled else { return }
+            scheduleAttachmentAttempt(from: view, delay: 0)
+        }
+
+        private func scheduleAttachmentAttempt(from view: NSView, delay: TimeInterval) {
+            guard !isDismantled, scrollView == nil else { return }
             isAttachmentScheduled = true
-            DispatchQueue.main.async { [weak self, weak view] in
+            let attempt: () -> Void = { [weak self, weak view] in
                 guard let self else { return }
-                isAttachmentScheduled = false
-                guard !isDismantled, let scrollView = view?.enclosingScrollView else { return }
-                attach(to: scrollView)
+                self.isAttachmentScheduled = false
+                guard !self.isDismantled, let view else { return }
+                if let scrollView = ChatViewportNativeScrollObserver.locateScrollView(containing: view) {
+                    Self.logger.info("ChatViewport 原生滚动观察者已绑定聊天滚动视图")
+                    self.attach(to: scrollView)
+                } else if self.retryAttemptsRemaining > 0 {
+                    self.retryAttemptsRemaining -= 1
+                    self.scheduleAttachmentAttempt(from: view, delay: Self.retryDelay)
+                } else {
+                    Self.logger.error("ChatViewport 原生滚动观察者挂载失败：多次尝试后仍未找到聊天滚动视图")
+                }
+            }
+            if delay > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: attempt)
+            } else {
+                DispatchQueue.main.async(execute: attempt)
             }
         }
 
@@ -405,9 +455,13 @@ private struct ChatViewportNativeScrollObserver: NSViewRepresentable {
 
         private func publishMetrics() {
             guard let scrollView, let documentView = scrollView.documentView else { return }
+            let visibleBounds = scrollView.contentView.bounds
+            let documentBounds = documentView.bounds
+            // 布局未完成（可见区域或文档高度为 0）时不发布指标，避免误触发触顶加载。
+            guard visibleBounds.width > 0, visibleBounds.height > 0, documentBounds.height > 0 else { return }
             let metrics = ChatViewportNativeScrollMetrics.calculate(
-                documentBounds: documentView.bounds,
-                visibleBounds: scrollView.contentView.bounds,
+                documentBounds: documentBounds,
+                visibleBounds: visibleBounds,
                 isFlipped: documentView.isFlipped
             )
             guard metrics != lastPublishedMetrics else { return }
