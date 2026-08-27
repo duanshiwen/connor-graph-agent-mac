@@ -114,6 +114,7 @@
 		F71000010000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift */; };
 		F71000010000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift */; };
 		F71000010000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift */; };
+		CA51A0000000000000000002 /* Sources/ConnorGraphAgentMac/AssistantSpeechController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA51A0000000000000000001 /* Sources/ConnorGraphAgentMac/AssistantSpeechController.swift */; };
 		F71000010000000000000006 /* Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000006 /* Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift */; };
 		F71000010000000000000007 /* Sources/ConnorGraphAgentMac/ChatMediaPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000007 /* Sources/ConnorGraphAgentMac/ChatMediaPreview.swift */; };
 		A00000000000000000000072 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000073 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift */; };
@@ -221,6 +222,7 @@
 		F71000000000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift; sourceTree = "<group>"; };
 		F71000000000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift; sourceTree = "<group>"; };
 		F71000000000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift; sourceTree = "<group>"; };
+		CA51A0000000000000000001 /* Sources/ConnorGraphAgentMac/AssistantSpeechController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AssistantSpeechController.swift; sourceTree = "<group>"; };
 		F71000000000000000000006 /* Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift; sourceTree = "<group>"; };
 		F71000000000000000000007 /* Sources/ConnorGraphAgentMac/ChatMediaPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ChatMediaPreview.swift; sourceTree = "<group>"; };
 		E71500000000000000000004 /* Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift; sourceTree = "<group>"; };
@@ -437,6 +439,7 @@
 				F71000000000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift */,
 				F71000000000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift */,
 				F71000000000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift */,
+				CA51A0000000000000000001 /* Sources/ConnorGraphAgentMac/AssistantSpeechController.swift */,
 				F71000000000000000000006 /* Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift */,
 				F71000000000000000000007 /* Sources/ConnorGraphAgentMac/ChatMediaPreview.swift */,
 				A00000000000000000000073 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift */,
@@ -758,6 +761,7 @@
 				F71000010000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift in Sources */,
 				F71000010000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift in Sources */,
 				F71000010000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift in Sources */,
+				CA51A0000000000000000002 /* Sources/ConnorGraphAgentMac/AssistantSpeechController.swift in Sources */,
 				F71000010000000000000006 /* Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift in Sources */,
 				F71000010000000000000007 /* Sources/ConnorGraphAgentMac/ChatMediaPreview.swift in Sources */,
 				A00000000000000000000072 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift in Sources */,
