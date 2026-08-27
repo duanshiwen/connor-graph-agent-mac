@@ -773,6 +773,7 @@ private struct AgentChatConversationView: View {
     private func resetVisibleMessageWindow() {
         visibleMessageLimit = Self.initialVisibleMessageLimit
         pendingPrependCorrection = nil
+        pendingPrependCount = 0
         isLoadingOlderMessages = false
     }
 
