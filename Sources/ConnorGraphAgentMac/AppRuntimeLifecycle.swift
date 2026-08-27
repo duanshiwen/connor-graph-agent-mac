@@ -256,6 +256,10 @@ final class AppRuntimeLifecycle {
             Task { await backend.updatePermissionMode(mode) }
         }
         chatApprovalCoordinator.permissionModeDidChange()
+        // 权限模式切换后立即按新模式重载待审批列表：切到“询问”时被过滤的请求要立刻
+        // 出现审批卡片；切到“执行”时普通请求继续自动放行，硬性门禁请求照常展示。
+        // 不重载的话审批面板会沿用旧模式的判定，直到下一次无关刷新才更新。
+        chatApprovalCoordinator.reload()
     }
 
     /// 将会话权限写入当前会话的状态快照并持久化，切换会话后仍能恢复。
@@ -1903,9 +1907,17 @@ final class AppRuntimeLifecycle {
             onEventPresentation: { [weak self] presentation in
                 guard let self else { return }
                 self.chatRunCoordinator.appendEvent(presentation, sessionID: sessionID)
+                if presentation.kind == AgentEventKind.permissionRequested.rawValue {
+                    // 后台技能 run 固定执行模式，普通权限由 run 侧策略直接放行；
+                    // 但硬性门禁请求（如发布互动网页）仍会进入待审批队列阻塞 run，
+                    // 必须重载审批协调器，让审批卡片/会话锁标记/系统通知照常出现，
+                    // 否则 run 一直等待且用户无处确认（与主会话路径的行为保持一致）。
+                    self.chatApprovalCoordinator.reload()
+                }
                 self.skillRuntimeModel.reloadIfNeeded(after: presentation)
             }
         )
+        chatApprovalCoordinator.reload()
     }
 
     private func buildAddSkillAgentPrompt(userRequest: String) -> String {
@@ -2251,7 +2263,18 @@ final class AppRuntimeLifecycle {
             rebuildNativeSessionManagerForActiveSession()
         } else {
             pendingNativeSessionRuntimeRebuild = true
-            chatRunCoordinator.mutateManager { $0.permissionMode = settings.loop.permissionMode }
+            let loopMode = settings.loop.permissionMode == .allowAll ? .askToWrite : settings.loop.permissionMode
+            chatRunCoordinator.mutateManager { $0.permissionMode = loopMode }
+            // 运行中的 manager 被设置改写后，必须同步客户端审批协调器读取的模式快照，
+            // 否则会出现 run 侧策略与面板判定漂移：run 阻塞等待审批的请求可能被面板
+            // 当作“可自动放行”过滤掉（执行模式下硬性门禁请求看不到审批卡片），
+            // 或反之把普通请求误判为需要人工审批。同步后再重载，面板立即按新模式刷新。
+            if agentPermissionMode != loopMode {
+                agentPermissionMode = loopMode
+                persistPermissionMode(loopMode)
+                chatApprovalCoordinator.permissionModeDidChange()
+                chatApprovalCoordinator.reload()
+            }
         }
         shellFeatureModel.clearAllSettingsMessages()
         errorMessage = nil
