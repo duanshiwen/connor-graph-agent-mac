@@ -109,6 +109,11 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
                 .onChange(of: items.count) { _, newCount in
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: newCount, initialAnchor: .bottom)
+                    // 内容数量变化（加载更早消息、扩窗、正常追加）后，允许再次触发触顶加载。
+                    // 兜底：isLoadingOlderItems 若在同一事务内 true→false 被 SwiftUI 合并，
+                    // onChange(of: isLoadingOlderItems) 不会触发，didRequest 会永久卡在 true，
+                    // 表现为“只能看到最后一页、向上滚动不再加载”。
+                    didRequestOlderItemsForCurrentTopReach = false
                 }
                 .onChange(of: isLoadingOlderItems) { wasLoading, isLoading in
                     guard wasLoading, !isLoading else { return }
