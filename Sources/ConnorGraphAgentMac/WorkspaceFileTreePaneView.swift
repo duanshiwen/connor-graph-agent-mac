@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import ConnorGraphAppSupport
 
 private struct WorkspaceFileTreeVisibleRow: Identifiable {
@@ -106,6 +108,7 @@ struct WorkspaceFileTreePaneView: View {
             .workspaceTreeRowSurface(isSelected: false, depth: 0)
         }
         .buttonStyle(.plain)
+        .contextMenu { rootContextMenu(root) }
         .help(root.url.path)
     }
 
@@ -179,6 +182,7 @@ struct WorkspaceFileTreePaneView: View {
             .workspaceTreeRowSurface(isSelected: model.selectedNodeID == node.id, depth: depth)
         }
         .buttonStyle(.plain)
+        .contextMenu { nodeContextMenu(node) }
         .help(node.relativePath)
         .accessibilityLabel(node.name)
     }
@@ -223,6 +227,224 @@ struct WorkspaceFileTreePaneView: View {
         case "zip", "tar", "gz", "rar", "7z": "archivebox"
         default: "doc"
         }
+    }
+
+    // MARK: - 右键菜单
+
+    @ViewBuilder
+    private func rootContextMenu(_ root: WorkspaceExplorerRoot) -> some View {
+        Button {
+            model.toggleRoot(root)
+        } label: {
+            Label(model.expandedNodeIDs.contains(root.nodeID) ? "折叠" : "展开", systemImage: "folder")
+        }
+        Button {
+            revealInFinder(root.url)
+        } label: {
+            Label("在访达中显示", systemImage: "finder")
+        }
+        Divider()
+        Button {
+            copyPath(root.url)
+        } label: {
+            Label("复制路径", systemImage: "doc.on.doc")
+        }
+        Button {
+            copyName(root.displayName)
+        } label: {
+            Label("复制文件名", systemImage: "doc.on.clipboard")
+        }
+        Divider()
+        Button {
+            model.refresh()
+        } label: {
+            Label("刷新", systemImage: "arrow.clockwise")
+        }
+        Button {
+            openDirectoryInTerminal(root.url)
+        } label: {
+            Label("在终端中打开", systemImage: "terminal")
+        }
+    }
+
+    @ViewBuilder
+    private func nodeContextMenu(_ node: WorkspaceFileNode) -> some View {
+        Button {
+            openNodeInApp(node)
+        } label: {
+            Label(
+                node.isExpandable
+                    ? (model.expandedNodeIDs.contains(node.id) ? "折叠" : "展开")
+                    : "打开",
+                systemImage: node.isExpandable ? "folder" : "doc.text"
+            )
+        }
+        if !node.isExpandable {
+            openWithMenu(node.url)
+        }
+        Divider()
+        Button {
+            revealInFinder(node.url)
+        } label: {
+            Label("在访达中显示", systemImage: "finder")
+        }
+        Divider()
+        Button {
+            copyPath(node.url)
+        } label: {
+            Label("复制路径", systemImage: "doc.on.doc")
+        }
+        Button {
+            copyName(node.name)
+        } label: {
+            Label("复制文件名", systemImage: "doc.on.clipboard")
+        }
+        if node.isExpandable {
+            Divider()
+            Button {
+                model.refreshNode(node)
+            } label: {
+                Label("刷新", systemImage: "arrow.clockwise")
+            }
+            Button {
+                openDirectoryInTerminal(node.url)
+            } label: {
+                Label("在终端中打开", systemImage: "terminal")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func openWithMenu(_ url: URL) -> some View {
+        let apps = applicationsForOpening(url)
+        Menu {
+            Button {
+                openWithDefaultApp(url)
+            } label: {
+                Label("默认应用打开", systemImage: "arrow.up.right.square")
+            }
+            if !apps.isEmpty {
+                Divider()
+                ForEach(apps, id: \.path) { appURL in
+                    Button {
+                        openWithApplication(url, applicationURL: appURL)
+                    } label: {
+                        Label(applicationDisplayName(at: appURL), systemImage: "app")
+                    }
+                }
+            }
+            Divider()
+            Button {
+                chooseAndOpenWithApplication(url)
+            } label: {
+                Label("其他应用…", systemImage: "ellipsis.circle")
+            }
+        } label: {
+            Label("打开方式", systemImage: "arrow.up.forward.app")
+        }
+    }
+
+    private func openNodeInApp(_ node: WorkspaceFileNode) {
+        model.activateNode(node, openHTMLPreview: onOpenHTMLPreview)
+    }
+
+    private func revealInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func openWithDefaultApp(_ url: URL) {
+        if !NSWorkspace.shared.open(url) {
+            presentOpenError(for: url)
+        }
+    }
+
+    private func openWithApplication(_ url: URL, applicationURL: URL) {
+        NSWorkspace.shared.open(
+            [url],
+            withApplicationAt: applicationURL,
+            configuration: NSWorkspace.OpenConfiguration()
+        ) { _, error in
+            if let error {
+                DispatchQueue.main.async {
+                    self.presentOpenError(for: url, underlying: error)
+                }
+            }
+        }
+    }
+
+    private func chooseAndOpenWithApplication(_ url: URL) {
+        let panel = NSOpenPanel()
+        panel.title = "选择用于打开“\(url.lastPathComponent)”的应用"
+        panel.prompt = "打开"
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.resolvesAliases = true
+        guard panel.runModal() == .OK, let appURL = panel.url else { return }
+        openWithApplication(url, applicationURL: appURL)
+    }
+
+    private func applicationsForOpening(_ url: URL) -> [URL] {
+        NSWorkspace.shared.urlsForApplications(toOpen: url)
+    }
+
+    private func applicationDisplayName(at appURL: URL) -> String {
+        if let bundle = Bundle(url: appURL) {
+            if let name = bundle.localizedInfoDictionary?["CFBundleDisplayName"] as? String, !name.isEmpty { return name }
+            if let name = bundle.infoDictionary?["CFBundleDisplayName"] as? String, !name.isEmpty { return name }
+            if let name = bundle.localizedInfoDictionary?["CFBundleName"] as? String, !name.isEmpty { return name }
+            if let name = bundle.infoDictionary?["CFBundleName"] as? String, !name.isEmpty { return name }
+        }
+        return appURL.deletingPathExtension().lastPathComponent
+    }
+
+    private func openDirectoryInTerminal(_ url: URL) {
+        let terminalURL = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+        if FileManager.default.fileExists(atPath: terminalURL.path) {
+            NSWorkspace.shared.open(
+                [url],
+                withApplicationAt: terminalURL,
+                configuration: NSWorkspace.OpenConfiguration()
+            ) { _, error in
+                if let error {
+                    DispatchQueue.main.async {
+                        self.presentOpenError(for: url, underlying: error)
+                    }
+                }
+            }
+            return
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "Terminal", url.path]
+        do {
+            try process.run()
+        } catch {
+            presentOpenError(for: url, underlying: error)
+        }
+    }
+
+    private func copyPath(_ url: URL) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.path, forType: .string)
+    }
+
+    private func copyName(_ name: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(name, forType: .string)
+    }
+
+    private func presentOpenError(for url: URL, underlying error: Error? = nil) {
+        var message = "无法打开“\(url.lastPathComponent)”。"
+        if let error {
+            message += "\n\(error.localizedDescription)"
+        }
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "好")
+        alert.runModal()
     }
 }
 

@@ -213,6 +213,14 @@ final class WorkspaceExplorerFeatureModel {
         }
     }
 
+    /// 强制重新读取某个目录节点的子项（绕过加载器缓存），用于右键菜单“刷新”。
+    func refreshNode(_ node: WorkspaceFileNode) {
+        guard node.isExpandable, let root = roots.first(where: { $0.id == node.rootID }) else { return }
+        childrenByNodeID[node.id] = nil
+        errorsByNodeID[node.id] = nil
+        loadChildren(nodeID: node.id, root: root, directoryURL: node.url, forceRefresh: true)
+    }
+
     func shutdown() {
         generation &+= 1
         cancelAllTasks()
@@ -261,14 +269,24 @@ final class WorkspaceExplorerFeatureModel {
         loadChildren(nodeID: nodeID, root: root, directoryURL: directoryURL)
     }
 
-    private func loadChildren(nodeID: String, root: WorkspaceExplorerRoot, directoryURL: URL) {
+    private func loadChildren(
+        nodeID: String,
+        root: WorkspaceExplorerRoot,
+        directoryURL: URL,
+        forceRefresh: Bool = false
+    ) {
         tasksByNodeID[nodeID]?.cancel()
         loadingNodeIDs.insert(nodeID)
         errorsByNodeID[nodeID] = nil
         let requestGeneration = generation
         tasksByNodeID[nodeID] = Task { [weak self, loader] in
             do {
-                let children = try await loader.children(rootID: root.id, rootURL: root.url, directoryURL: directoryURL)
+                let children = try await loader.children(
+                    rootID: root.id,
+                    rootURL: root.url,
+                    directoryURL: directoryURL,
+                    forceRefresh: forceRefresh
+                )
                 guard !Task.isCancelled else { return }
                 self?.finishLoading(children, nodeID: nodeID, generation: requestGeneration)
             } catch {
