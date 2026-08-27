@@ -102,7 +102,11 @@ final class AssistantSpeechController {
 }
 
 /// AVSpeechSynthesizer 的代理桥接（回调线程不保证是主线程，统一切回主线程处理状态）。
-private final class SpeechSynthesizerDelegateBridge: NSObject, AVSpeechSynthesizerDelegate {
+///
+/// macOS 26 SDK 起 `AVSpeechSynthesizerDelegate` 被标注为 `Sendable`，遵循它会隐式要求本类符合
+/// `Sendable`。这里的两个闭包只在主线程的初始化阶段写入一次、之后只读，回调侧仅读取，因此用
+/// `@unchecked Sendable` 显式声明并发安全由该使用契约保证。
+private final class SpeechSynthesizerDelegateBridge: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
     var onFinished: (AVSpeechUtterance) -> Void = { _ in }
     var onCancelled: (AVSpeechUtterance) -> Void = { _ in }
 
