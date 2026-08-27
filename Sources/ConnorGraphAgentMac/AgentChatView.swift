@@ -777,7 +777,10 @@ private struct AgentChatConversationView: View {
         else { return }
 
         let previousLimit = visibleMessageLimit
-        let nextLimit = min(model.run.transcript.count, previousLimit + Self.messagePageSize)
+        // 一次把窗口扩到整个已加载 transcript（而不是每次 +8）：
+        // 若窗口小于已加载消息数，每次触顶只放大一小段，用户要反复滚很久
+        // 才能看到更早消息，且仓库分页（nextMessageBeforePosition）始终不可达。
+        let nextLimit = model.run.transcript.count
         let anchorItemID = dataSetID.namespacedElementID(firstVisibleItemID)
         chatViewportController.prepareForPrepend(anchorItemID: anchorItemID)
         if nextLimit > previousLimit {
@@ -1112,6 +1115,11 @@ private struct AgentChatConversationView: View {
                     cancelNoteBodyEditing()
                 }
                 resetVisibleMessageWindow()
+                // 切换会话后立即让可见窗口覆盖当前已加载的 transcript：
+                // reload/筛选/直接选择等路径不会先清空 transcript，若窗口仍停在 8 行，
+                // 后续 transcript 数量不增长时窗口永远不会自动扩大，
+                // 表现为“只显示最新几条、往上滚不加载更早消息”。
+                visibleMessageLimit = max(Self.initialVisibleMessageLimit, model.run.transcript.count)
                 lastObservedSessionID = newSessionID
                 lastObservedTranscriptCount = model.run.transcript.count
             }
@@ -1121,11 +1129,13 @@ private struct AgentChatConversationView: View {
                     lastObservedSessionID = currentSessionID
                     lastObservedTranscriptCount = newCount
                 }
-                guard currentSessionID == lastObservedSessionID,
-                      newCount > oldCount,
-                      newCount > lastObservedTranscriptCount
+                // lastObservedSessionID 为 nil 说明视图挂载后 transcript 才首次到达，
+                // 此时同样必须允许扩窗，否则窗口会永久卡在 8 行；
+                // 数量不增的替换（如 reload 重放同一页）保持现有窗口即可。
+                guard (currentSessionID == lastObservedSessionID || lastObservedSessionID == nil),
+                      newCount > oldCount
                 else { return }
-                visibleMessageLimit += newCount - oldCount
+                visibleMessageLimit = max(visibleMessageLimit, newCount)
                 chatViewportController.notifyDataChange(.append(count: newCount - oldCount))
             }
             .onChange(of: visibleMessageLimit) { _, _ in
