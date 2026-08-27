@@ -66,6 +66,7 @@ extension ChatComposerCommanding {
     func markdownPersistentCacheContext(messageID: String) -> AgentMarkdownPersistentCacheContext?
     func copyAssistantMessageToPasteboard(_ message: AgentChatMessagePresentation)
     func exportAssistantMessageToFile(_ message: AgentChatMessagePresentation, now: Date)
+    func speakAssistantMessage(_ message: AgentChatMessagePresentation)
     func downloadPreviewImage(_ model: AttachmentPreviewModel)
     func clearSessionLLMOverride()
     func selectLLMModel(_ model: String, providerMode: AppLLMProviderMode, connectionID: String?)
@@ -116,6 +117,7 @@ struct ChatFeatureDependencies {
     let aiConnections: AIConnectionsFeatureModel
     let knowledgeMarketplace: CloudKnowledgeMarketplaceStore
     let sources: SourceRuntimeFeatureModel
+    let speech: AssistantSpeechController
     let permissionMode: () -> AgentPermissionMode
     let sessionHasLLMOverride: () -> Bool
 }
@@ -199,6 +201,7 @@ final class ClosureChatRunPort: ChatRunCommanding {
     let markdownAction: (String) -> AgentMarkdownPersistentCacheContext?
     let copyAction: (AgentChatMessagePresentation) -> Void
     let exportAction: (AgentChatMessagePresentation, Date) -> Void
+    let speakAction: (AgentChatMessagePresentation) -> Void
     let downloadAction: (AttachmentPreviewModel) -> Void
     let clearOverrideAction: () -> Void
     let selectModelAction: (String, AppLLMProviderMode, String?) -> Void
@@ -220,6 +223,7 @@ final class ClosureChatRunPort: ChatRunCommanding {
     func markdownPersistentCacheContext(messageID: String) -> AgentMarkdownPersistentCacheContext? { markdownAction(messageID) }
     func copyAssistantMessageToPasteboard(_ message: AgentChatMessagePresentation) { copyAction(message) }
     func exportAssistantMessageToFile(_ message: AgentChatMessagePresentation, now: Date) { exportAction(message, now) }
+    func speakAssistantMessage(_ message: AgentChatMessagePresentation) { speakAction(message) }
     func downloadPreviewImage(_ model: AttachmentPreviewModel) { downloadAction(model) }
     func clearSessionLLMOverride() { clearOverrideAction() }
     func selectLLMModel(_ model: String, providerMode: AppLLMProviderMode, connectionID: String?) { selectModelAction(model, providerMode, connectionID) }
@@ -228,8 +232,8 @@ final class ClosureChatRunPort: ChatRunCommanding {
     func reloadLLMModelConnections() async { await reloadModelsAction() }
     func setSessionRemoteKnowledgeBaseIDs(_ ids: [String]?) { remoteKnowledgeAction(ids) }
     func setSessionAllowedMCPToolNames(_ names: [String]?) { mcpToolsAction(names) }
-    init(backgroundTasks: @escaping () -> [AppSessionBackgroundTask], hasBackgroundTask: @escaping () -> Bool, summaryFreshness: @escaping () -> AgentSessionSummaryFreshness?, summaryContext: @escaping () -> String, submitNewChat: @escaping (String, String?) async -> String?, submit: @escaping (String, Bool, String?, [AgentMessageAttachmentRef]?, [PersonReference]) async -> String?, reviseNoteBody: @escaping (String, String, String) async -> Bool, cancel: @escaping () -> Void, permission: @escaping (AgentPermissionMode) -> Void, timeline: @escaping (AgentChatTurnProcessPresentation) async -> [AgentEventPresentation], markdown: @escaping (String) -> AgentMarkdownPersistentCacheContext?, copy: @escaping (AgentChatMessagePresentation) -> Void, export: @escaping (AgentChatMessagePresentation, Date) -> Void, download: @escaping (AttachmentPreviewModel) -> Void, clearOverride: @escaping () -> Void, selectModel: @escaping (String, AppLLMProviderMode, String?) -> Void, thinking: @escaping (AppLLMThinkingLevel) -> Void, defaultThinking: @escaping (AppLLMThinkingLevel) -> Void, reloadModels: @escaping () async -> Void, remoteKnowledge: @escaping ([String]?) -> Void, mcpTools: @escaping ([String]?) -> Void) {
-        self.backgroundTasks = backgroundTasks; self.hasBackgroundTask = hasBackgroundTask; self.summaryFreshness = summaryFreshness; self.summaryContext = summaryContext; submitNewChatAction = submitNewChat; submitAction = submit; reviseNoteBodyAction = reviseNoteBody; cancelAction = cancel; permissionAction = permission; timelineAction = timeline; markdownAction = markdown; copyAction = copy; exportAction = export; downloadAction = download; clearOverrideAction = clearOverride; selectModelAction = selectModel; thinkingAction = thinking; defaultThinkingAction = defaultThinking; reloadModelsAction = reloadModels; remoteKnowledgeAction = remoteKnowledge; mcpToolsAction = mcpTools
+    init(backgroundTasks: @escaping () -> [AppSessionBackgroundTask], hasBackgroundTask: @escaping () -> Bool, summaryFreshness: @escaping () -> AgentSessionSummaryFreshness?, summaryContext: @escaping () -> String, submitNewChat: @escaping (String, String?) async -> String?, submit: @escaping (String, Bool, String?, [AgentMessageAttachmentRef]?, [PersonReference]) async -> String?, reviseNoteBody: @escaping (String, String, String) async -> Bool, cancel: @escaping () -> Void, permission: @escaping (AgentPermissionMode) -> Void, timeline: @escaping (AgentChatTurnProcessPresentation) async -> [AgentEventPresentation], markdown: @escaping (String) -> AgentMarkdownPersistentCacheContext?, copy: @escaping (AgentChatMessagePresentation) -> Void, export: @escaping (AgentChatMessagePresentation, Date) -> Void, speak: @escaping (AgentChatMessagePresentation) -> Void, download: @escaping (AttachmentPreviewModel) -> Void, clearOverride: @escaping () -> Void, selectModel: @escaping (String, AppLLMProviderMode, String?) -> Void, thinking: @escaping (AppLLMThinkingLevel) -> Void, defaultThinking: @escaping (AppLLMThinkingLevel) -> Void, reloadModels: @escaping () async -> Void, remoteKnowledge: @escaping ([String]?) -> Void, mcpTools: @escaping ([String]?) -> Void) {
+        self.backgroundTasks = backgroundTasks; self.hasBackgroundTask = hasBackgroundTask; self.summaryFreshness = summaryFreshness; self.summaryContext = summaryContext; submitNewChatAction = submitNewChat; submitAction = submit; reviseNoteBodyAction = reviseNoteBody; cancelAction = cancel; permissionAction = permission; timelineAction = timeline; markdownAction = markdown; copyAction = copy; exportAction = export; speakAction = speak; downloadAction = download; clearOverrideAction = clearOverride; selectModelAction = selectModel; thinkingAction = thinking; defaultThinkingAction = defaultThinking; reloadModelsAction = reloadModels; remoteKnowledgeAction = remoteKnowledge; mcpToolsAction = mcpTools
     }
 }
 

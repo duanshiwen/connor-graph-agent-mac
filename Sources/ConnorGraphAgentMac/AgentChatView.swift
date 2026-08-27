@@ -887,6 +887,11 @@ private struct AgentChatConversationView: View {
                     onExportAssistantMessage: { message in
                         chatActions.run.exportAssistantMessageToFile(message)
                     },
+                    onSpeakAssistantMessage: { message in
+                        chatActions.run.speakAssistantMessage(message)
+                    },
+                    isSpeakingMessage: chatActions.dependencies.speech.isSpeaking
+                        && chatActions.dependencies.speech.speakingMessageID == message.message.id,
                     onBeginEditingNoteBody: noteBodyEditBeginAction(for: message),
                     isForwardSelectionMode: isForwardSelectionMode,
                     isForwardSelected: selectedForwardMessageIDs.contains(message.id),
@@ -1466,6 +1471,19 @@ private struct AgentChatConversationHeader: View {
                     .foregroundStyle(isSessionInfoPresented ? Color.accentColor : Color.secondary)
                     .help("会话信息")
                     .accessibilityLabel("打开会话信息")
+
+                    // 自动朗读开关：位于会话页右上角，与安卓端统一位置。
+                    Button {
+                        chatActions.dependencies.speech.autoReadEnabled.toggle()
+                    } label: {
+                        Image(systemName: chatActions.dependencies.speech.autoReadEnabled ? "speaker.wave.2.fill" : "speaker.slash")
+                            .font(.system(size: windowWidthClass.usesStackedPanes ? 14 : 13, weight: .semibold))
+                            .frame(width: headerButtonSize, height: headerButtonSize)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(chatActions.dependencies.speech.autoReadEnabled ? Color.accentColor : Color.secondary)
+                    .help(chatActions.dependencies.speech.autoReadEnabled ? "自动朗读 AI 回复（已开启），点击关闭" : "自动朗读 AI 回复（当前关闭），点击开启")
+                    .accessibilityLabel(chatActions.dependencies.speech.autoReadEnabled ? "关闭自动朗读" : "开启自动朗读")
                 }
             }
 

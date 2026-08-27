@@ -30,6 +30,8 @@ struct AgentAssistantMessageActionsPresentation: Equatable {
     var exportAccessibilityLabel: String
     var copyHelp: String
     var exportHelp: String
+    var speakAccessibilityLabel: String
+    var speakHelp: String
 
     init(message: AgentMessage, isEnabled: Bool = true) {
         let hasContent = message.content.unicodeScalars.contains {
@@ -42,6 +44,8 @@ struct AgentAssistantMessageActionsPresentation: Equatable {
         self.exportAccessibilityLabel = "导出这条助理回复为 Markdown 文件"
         self.copyHelp = "复制原始 Markdown 文本"
         self.exportHelp = "选择保存位置和文件名，导出为 Markdown 文件"
+        self.speakAccessibilityLabel = "朗读这条助理回复"
+        self.speakHelp = "用本地语音朗读这条回复，再次点击可停止"
     }
 }
 
@@ -177,6 +181,9 @@ struct AgentChatMessageRow: View {
     var onShareAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
+    var onSpeakAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
+    /// 当前是否正在朗读这条消息（用于展示停止态图标）。
+    var isSpeakingMessage = false
     var onBeginEditingNoteBody: (() -> Void)? = nil
     var isForwardSelectionMode = false
     var isForwardSelected = false
@@ -323,9 +330,11 @@ struct AgentChatMessageRow: View {
         AgentAssistantMessageActionsView(
             presentation: assistantActionsPresentation,
             expansionPresentation: assistantExpansionPresentation,
+            isSpeakingMessage: isSpeakingMessage,
             onToggleExpansion: toggleMessageExpansion,
             onCopy: { onCopyAssistantMessage(row) },
-            onExport: { onExportAssistantMessage(row) }
+            onExport: { onExportAssistantMessage(row) },
+            onSpeak: { onSpeakAssistantMessage(row) }
         )
     }
 
@@ -446,9 +455,11 @@ struct AgentChatMessageRow: View {
 private struct AgentAssistantMessageActionsView: View {
     var presentation: AgentAssistantMessageActionsPresentation
     var expansionPresentation: AgentAssistantMessageExpansionPresentation
+    var isSpeakingMessage: Bool
     var onToggleExpansion: () -> Void
     var onCopy: () -> Void
     var onExport: () -> Void
+    var onSpeak: () -> Void
 
     var body: some View {
         HStack(spacing: AgentChatLayout.spaceM) {
@@ -456,6 +467,7 @@ private struct AgentAssistantMessageActionsView: View {
                 expansionButton
             }
             if presentation.showsActions {
+                speakButton
                 actionButton(
                     title: presentation.copyTitle,
                     systemImage: "doc.on.doc",
@@ -474,6 +486,23 @@ private struct AgentAssistantMessageActionsView: View {
         }
         .padding(.top, 2)
         .accessibilityElement(children: .contain)
+    }
+
+    /// 朗读 / 停止按钮：小喇叭图标，朗读中显示停止态并高亮。
+    private var speakButton: some View {
+        Button(action: onSpeak) {
+            Image(systemName: isSpeakingMessage ? "stop.fill" : "speaker.wave.2")
+                .font(.system(size: 10, weight: .medium))
+                .imageScale(.small)
+                .frame(width: 12, height: 12)
+                .padding(.horizontal, 3)
+                .padding(.vertical, 2)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSpeakingMessage ? Color.accentColor : Color.secondary.opacity(0.55))
+        .accessibilityLabel(presentation.speakAccessibilityLabel)
+        .help(presentation.speakHelp)
     }
 
     private var expansionButton: some View {

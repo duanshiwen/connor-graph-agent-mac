@@ -73,6 +73,8 @@ final class AppRuntimeLifecycle {
     let maintenanceCoordinator = AppMaintenanceCoordinator()
     private let searchIndexDrainer = AppMemoryOSSearchIndexDrainer()
     private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
+    /// 本地 TTS 朗读控制器：会话页顶栏开关、消息气泡朗读按钮与回复完成后的自动朗读共用。
+    let assistantSpeechController = AssistantSpeechController()
     /// 审批请求系统通知的会话级冷却，避免同一会话反复打扰。
     private var lastApprovalNotificationAt: [String: Date] = [:]
     private lazy var chatSessionCoordinator = ChatSessionCoordinator(
@@ -317,6 +319,12 @@ final class AppRuntimeLifecycle {
             message: "已复制原始 Markdown 文本。",
             systemImage: "doc.on.doc"
         )
+    }
+
+    func speakAssistantMessage(_ message: AgentChatMessagePresentation) {
+        let content = AssistantMessageFullContentProvider.markdown(for: message)
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        assistantSpeechController.toggleSpeak(content, messageID: message.message.id)
     }
 
     func exportAssistantMessageToFile(_ message: AgentChatMessagePresentation, now: Date = Date()) {
@@ -1074,6 +1082,7 @@ final class AppRuntimeLifecycle {
                 markdown: { [weak self] in self?.markdownPersistentCacheContext(messageID: $0) },
                 copy: { [weak self] in self?.copyAssistantMessageToPasteboard($0) },
                 export: { [weak self] in self?.exportAssistantMessageToFile($0, now: $1) },
+                speak: { [weak self] in self?.speakAssistantMessage($0) },
                 download: { [weak self] in self?.downloadPreviewImage($0) },
                 clearOverride: { [weak self] in self?.aiConnectionsRuntimeCoordinator.clearOverride() },
                 selectModel: { [weak self] in self?.aiConnectionsRuntimeCoordinator.selectModel($0, providerMode: $1, connectionID: $2) },
@@ -3620,6 +3629,12 @@ final class AppRuntimeLifecycle {
             )
             maintenanceCoordinator.scheduleBackgroundJobs()
             maintenanceCoordinator.scheduleDailySweep()
+            // 自动朗读：开关开启时，回复完成后朗读本次最新的一条助理回复。
+            if assistantSpeechController.autoReadEnabled,
+               let latestAssistantMessage,
+               !latestAssistantMessage.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                assistantSpeechController.speak(latestAssistantMessage.content, messageID: latestAssistantMessage.id)
+            }
             return latestAssistantMessage?.content
         } catch {
             let recoveredSession = (try? chatSessionRepository?.loadSession(id: submittingSessionID)) ?? manager.session
@@ -3947,6 +3962,7 @@ extension AppRuntimeLifecycle {
             markdown: { [weak model] in model?.markdownPersistentCacheContext(messageID: $0) },
             copy: { [weak model] in model?.copyAssistantMessageToPasteboard($0) },
             export: { [weak model] in model?.exportAssistantMessageToFile($0, now: $1) },
+            speak: { [weak model] in model?.speakAssistantMessage($0) },
             download: { [weak model] in model?.downloadPreviewImage($0) },
             clearOverride: { [weak aiRuntime] in aiRuntime?.clearOverride() },
             selectModel: { [weak aiRuntime] in aiRuntime?.selectModel($0, providerMode: $1, connectionID: $2) },
@@ -3982,6 +3998,7 @@ extension AppRuntimeLifecycle {
                 aiConnections: aiConnections,
                 knowledgeMarketplace: model.knowledgeMarketplaceStore,
                 sources: model.sourceRuntimeModel,
+                speech: model.assistantSpeechController,
                 permissionMode: { [weak model] in model?.agentPermissionMode ?? .askToWrite },
                 sessionHasLLMOverride: { [weak aiRuntime] in aiRuntime?.sessionHasOverride ?? false }
             )
