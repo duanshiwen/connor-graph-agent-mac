@@ -13,12 +13,12 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
     var onTopReached: (() -> Void)?
     var rowContent: (Item) -> RowContent
 
+    /// 仅用于“内容不足一屏时贴底”的 minHeight 布局；只在窗口尺寸变化等
+    /// 真正改变可见高度的时机写入，避免滚动过程中每帧触发视图重算。
     @State private var viewportHeight: CGFloat = 0
-    @State private var contentHeight: CGFloat = 0
-    @State private var topSentinelMinY: CGFloat = 0
-    @State private var bottomSentinelMaxY: CGFloat = 0
     @State private var didRequestOlderItemsForCurrentTopReach = false
-    private let coordinateSpaceName = "commercial-chat-viewport-scroll-space"
+    /// 原生滚动指标存进引用类型容器：滚动时每帧更新但不会使 SwiftUI 失效重排。
+    @State private var nativeMetricsBox = NativeMetricsBox()
 
     private var topSentinelID: String {
         dataSetID.namespacedElementID("commercial-chat-viewport-top-sentinel")
@@ -58,43 +58,9 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                         minHeight: configuration.preservesBottomAnchorForUnderfilledContent ? viewportHeight : nil,
                         alignment: configuration.preservesBottomAnchorForUnderfilledContent ? .bottomLeading : .topLeading
                     )
-                    .background(
-                        GeometryReader { geometry in
-                            Color.clear.preference(key: ChatViewportContentHeightKey.self, value: geometry.size.height)
-                        }
-                    )
                 }
                 .defaultScrollAnchor(.bottom)
-                .coordinateSpace(name: coordinateSpaceName)
-                .background(
-                    GeometryReader { geometry in
-                        Color.clear.preference(key: ChatViewportViewportHeightKey.self, value: geometry.size.height)
-                    }
-                )
 
-                .onPreferenceChange(ChatViewportViewportHeightKey.self) { height in
-                    viewportHeight = height
-                    publishMetrics()
-                }
-                .onPreferenceChange(ChatViewportContentHeightKey.self) { height in
-                    let previousHeight = contentHeight
-                    contentHeight = height
-                    if previousHeight > 0,
-                       abs(height - previousHeight) > 1,
-                       controller.isPinnedToBottom {
-                        controller.notifyDataChange(.itemHeightChanged(id: "viewport-content"))
-                    }
-                    publishMetrics()
-                }
-                .onPreferenceChange(ChatViewportTopSentinelMinYKey.self) { minY in
-                    topSentinelMinY = minY
-                    publishMetrics()
-                    requestOlderItemsIfNeeded()
-                }
-                .onPreferenceChange(ChatViewportBottomSentinelMaxYKey.self) { maxY in
-                    bottomSentinelMaxY = maxY
-                    publishMetrics()
-                }
                 .onAppear {
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: items.count, initialAnchor: .bottom)
                 }
@@ -104,10 +70,6 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
                 .onChange(of: items.count) { _, newCount in
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: newCount, initialAnchor: .bottom)
-                    // 内容数量变化（加载更早消息、扩窗、正常追加）后，允许再次触发触顶加载。
-                    // 兜底：isLoadingOlderItems 若在同一事务内 true→false 被 SwiftUI 合并，
-                    // onChange(of: isLoadingOlderItems) 不会触发，didRequest 会永久卡在 true，
-                    // 表现为“只能看到最后一页、向上滚动不再加载”。
                     didRequestOlderItemsForCurrentTopReach = false
                     // 用户停在顶部时自动重估：加载完一页后无需再滚动即可继续加载下一页，
                     // 直到 hasOlderItems 为 false（全部历史加载完成）。
@@ -126,8 +88,8 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     guard wasResolving,
                     !isResolving,
                     ChatViewportTopLoadPolicy.shouldReevaluateAfterInitialAnchor(
-                        viewportHeight: viewportHeight,
-                        contentHeight: contentHeight
+                        viewportHeight: Double(nativeMetricsBox.latest?.visibleHeight ?? 0),
+                        contentHeight: Double(nativeMetricsBox.latest?.documentHeight ?? 0)
                     ) else { return }
                     DispatchQueue.main.async {
                         requestOlderItemsIfNeeded()
@@ -173,14 +135,6 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         Color.clear
             .frame(height: 1)
             .id(topSentinelID)
-            .background(
-                GeometryReader { geometry in
-                    Color.clear.preference(
-                        key: ChatViewportTopSentinelMinYKey.self,
-                        value: geometry.frame(in: .named(coordinateSpaceName)).minY
-                    )
-                }
-            )
 
         // 原生滚动观察者必须放在滚动内容内部：只有这样才能通过 enclosingScrollView
         // 可靠找到聊天自己的 NSScrollView。此前放在 ScrollView 的 .background() 中，
@@ -188,7 +142,10 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         // 要么错绑外层容器，导致触顶回调永不触发（即“滚到顶不加载更早消息”）。
         ChatViewportNativeScrollObserver { nativeMetrics in
             publishMetrics(nativeMetrics: nativeMetrics)
-            requestOlderItemsIfNeeded(distanceToTop: nativeMetrics.distanceToTop)
+            requestOlderItemsIfNeeded(
+                distanceToTop: nativeMetrics.distanceToTop,
+                viewportHeight: nativeMetrics.visibleHeight
+            )
         }
         .id(dataSetID)
         .frame(width: 0, height: 0)
@@ -203,49 +160,57 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         Color.clear
             .frame(height: 1)
             .id(bottomSentinelID)
-            .background(
-                GeometryReader { geometry in
-                    Color.clear.preference(
-                        key: ChatViewportBottomSentinelMaxYKey.self,
-                        value: geometry.frame(in: .named(coordinateSpaceName)).maxY
-                    )
-                }
-            )
     }
 
     private func rowID(for item: Item) -> String {
         dataSetID.namespacedElementID(String(describing: item.id))
     }
 
-    private func publishMetrics(nativeMetrics: ChatViewportNativeScrollMetrics? = nil) {
-        guard viewportHeight > 0 else { return }
-        let distanceToBottom = nativeMetrics?.distanceToBottom
-            ?? max(0, bottomSentinelMaxY - viewportHeight)
-        let distanceToTop = nativeMetrics?.distanceToTop
-            ?? max(0, -topSentinelMinY)
+    /// 以原生 NSScrollView 指标作为唯一权威源。
+    ///
+    /// 性能说明：滚动时这里每帧都会被调用，但只更新引用容器（不触发 SwiftUI 重排），
+    /// 仅当可见高度真的变化（例如窗口 resize）时才写入 @State。控制器仍逐帧收到
+    /// 最新指标，用于贴底判定与“跳到最新”按钮，快照不变时不会重新发布。
+    private func publishMetrics(nativeMetrics: ChatViewportNativeScrollMetrics) {
+        let previousContentHeight = nativeMetricsBox.latest?.documentHeight
+        nativeMetricsBox.latest = nativeMetrics
+
+        if abs(viewportHeight - nativeMetrics.visibleHeight) > 0.5 {
+            viewportHeight = nativeMetrics.visibleHeight
+        }
+
+        if let previousContentHeight,
+           previousContentHeight > 0,
+           abs(nativeMetrics.documentHeight - previousContentHeight) > 1,
+           controller.isPinnedToBottom {
+            controller.notifyDataChange(.itemHeightChanged(id: "viewport-content"))
+        }
+
         controller.updateMetrics(
             ChatViewportMetrics(
-                viewportHeight: viewportHeight,
-                contentHeight: contentHeight,
-                distanceToBottom: distanceToBottom,
-                distanceToTop: distanceToTop
+                viewportHeight: nativeMetrics.visibleHeight,
+                contentHeight: nativeMetrics.documentHeight,
+                distanceToBottom: nativeMetrics.distanceToBottom,
+                distanceToTop: nativeMetrics.distanceToTop
             )
         )
     }
 
-    private func requestOlderItemsIfNeeded(distanceToTop: CGFloat? = nil) {
-        let distanceToTop = distanceToTop ?? max(0, -topSentinelMinY)
+    private func requestOlderItemsIfNeeded(distanceToTop: CGFloat? = nil, viewportHeight: CGFloat? = nil) {
+        let metrics = nativeMetricsBox.latest
+        let resolvedDistanceToTop = distanceToTop ?? metrics?.distanceToTop ?? 0
+        let resolvedViewportHeight = viewportHeight ?? metrics?.visibleHeight ?? self.viewportHeight
         guard ChatViewportTopLoadPolicy.shouldRequestOlderItems(
             hasOlderItems: hasOlderItems,
             isLoadingOlderItems: isLoadingOlderItems,
             didRequestOlderItemsForCurrentTopReach: didRequestOlderItemsForCurrentTopReach,
-            viewportHeight: viewportHeight,
-            distanceToTop: distanceToTop,
+            viewportHeight: resolvedViewportHeight,
+            distanceToTop: resolvedDistanceToTop,
             topLoadTriggerOffset: configuration.topLoadTriggerOffset,
             isResolvingInitialAnchor: controller.isResolvingInitialAnchor
         ) else {
             if ChatViewportTopLoadPolicy.shouldResetTopReachRequest(
-                distanceToTop: distanceToTop,
+                distanceToTop: resolvedDistanceToTop,
                 topLoadTriggerOffset: configuration.topLoadTriggerOffset
             ) {
                 didRequestOlderItemsForCurrentTopReach = false
@@ -266,9 +231,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
 
     private func resetMeasurementsForDataSetReplacement() {
         viewportHeight = 0
-        contentHeight = 0
-        topSentinelMinY = 0
-        bottomSentinelMaxY = 0
+        nativeMetricsBox.latest = nil
         didRequestOlderItemsForCurrentTopReach = false
     }
 
@@ -312,9 +275,17 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
     }
 }
 
+/// 滚动指标引用容器：把每帧更新的数值放在引用类型里，
+/// 避免 @State 写入导致滚动过程中视图反复重算。
+private final class NativeMetricsBox {
+    var latest: ChatViewportNativeScrollMetrics?
+}
+
 struct ChatViewportNativeScrollMetrics: Equatable {
     var distanceToTop: CGFloat
     var distanceToBottom: CGFloat
+    var visibleHeight: CGFloat
+    var documentHeight: CGFloat
 
     static func calculate(
         documentBounds: CGRect,
@@ -324,12 +295,16 @@ struct ChatViewportNativeScrollMetrics: Equatable {
         if isFlipped {
             return Self(
                 distanceToTop: max(0, visibleBounds.minY - documentBounds.minY),
-                distanceToBottom: max(0, documentBounds.maxY - visibleBounds.maxY)
+                distanceToBottom: max(0, documentBounds.maxY - visibleBounds.maxY),
+                visibleHeight: visibleBounds.height,
+                documentHeight: documentBounds.height
             )
         }
         return Self(
             distanceToTop: max(0, documentBounds.maxY - visibleBounds.maxY),
-            distanceToBottom: max(0, visibleBounds.minY - documentBounds.minY)
+            distanceToBottom: max(0, visibleBounds.minY - documentBounds.minY),
+            visibleHeight: visibleBounds.height,
+            documentHeight: documentBounds.height
         )
     }
 }
@@ -383,7 +358,7 @@ struct ChatViewportNativeScrollObserver: NSViewRepresentable {
         private var boundsObserver: NSObjectProtocol?
         private var isAttachmentScheduled = false
         private var isDismantled = false
-        private var retryAttemptsRemaining = 5
+        private var retryAttemptsRemaining = 20
         private var lastPublishedMetrics: ChatViewportNativeScrollMetrics?
 
         private static let logger = Logger(subsystem: "ConnorGraphAgentMac", category: "ChatViewport")
@@ -416,9 +391,13 @@ struct ChatViewportNativeScrollObserver: NSViewRepresentable {
                 }
             }
             if delay > 0 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: attempt)
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { @MainActor @Sendable in
+                    attempt()
+                }
             } else {
-                DispatchQueue.main.async(execute: attempt)
+                DispatchQueue.main.async { @MainActor @Sendable in
+                    attempt()
+                }
             }
         }
 
@@ -488,24 +467,4 @@ private extension ChatViewportAnchor {
         case .bottom: return .bottom
         }
     }
-}
-
-private struct ChatViewportTopSentinelMinYKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-private struct ChatViewportViewportHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-private struct ChatViewportContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-private struct ChatViewportBottomSentinelMaxYKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

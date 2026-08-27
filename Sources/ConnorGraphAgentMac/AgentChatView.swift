@@ -100,6 +100,9 @@ struct AgentChatView: View {
                             preferredSessionID: model.sessions.selectedSessionID
                         )
                     },
+                    onSendToChat: { urls in
+                        chatActions.composer.enqueueAttachmentImport(urls: urls)
+                    },
                     onClose: model.workspaceExplorer.dismissTree
                 )
                 .transition(.move(edge: .trailing).combined(with: .opacity))
