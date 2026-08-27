@@ -428,6 +428,32 @@ struct ChatSessionRuntimeIntegrationTests {
             .appendingPathComponent(filename)
     }
 
+    @Test func longSessionLoadsOlderPageThroughRuntimeWiring() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        var session = try fixture.repository.createSession(title: "Long history", now: Date(timeIntervalSince1970: 2_000))
+        session.messages = (0..<77).map { index in
+            AgentMessage(id: "message-\(index)", role: .user, content: "Message \(index)")
+        }
+        _ = try fixture.repository.saveSession(session)
+
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.selectChatSession(session.id)
+        try await waitForLoadingToFinish(fixture.runtime)
+
+        let run = fixture.runtime.chatFeatureModel.run
+        #expect(run.transcript.count == 50)
+        #expect(run.nextMessageBeforePosition == 27)
+
+        let added = await run.loadOlderMessages()
+        #expect(added == 27)
+        #expect(run.transcript.count == 77)
+        #expect(run.transcript.first?.id == "message-0")
+        #expect(run.transcript.last?.id == "message-76")
+        #expect(run.nextMessageBeforePosition == nil)
+    }
+
     private func makeFixture() throws -> Fixture {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory
