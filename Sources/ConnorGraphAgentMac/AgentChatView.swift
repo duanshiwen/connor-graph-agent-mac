@@ -1392,13 +1392,19 @@ private struct AgentChatConversationHeader: View {
     @FocusState private var isTitleFocused: Bool
 
     /// 标题左右留白：为右侧操作按钮预留空间，同时避免窄窗口下把标题挤成一个字。
-    private var titleHorizontalInset: CGFloat {
-        switch windowWidthClass {
-        case .regular: 220
-        case .compact: 180
-        case .narrow: 88
-        case .phone: 72
-        }
+    /// 标题左侧留白：堆叠布局下避开返回按钮，分栏布局只留基础边距。
+    private var titleLeadingInset: CGFloat {
+        let base: CGFloat = 12
+        guard windowWidthClass.usesStackedPanes else { return base }
+        return headerButtonSize + AgentChatLayout.spaceS + base
+    }
+
+    /// 标题右侧留白：按右侧图标按钮区实际宽度动态计算，长标题在此边界内截断，不再覆盖按钮。
+    private var titleTrailingInset: CGFloat {
+        var buttonCount: CGFloat = 2  // 会话信息 + 自动朗读
+        if !isForwardSelectionMode { buttonCount += 2 }  // 转发会话 + 选择消息
+        let spacing = (buttonCount - 1) * AgentChatLayout.spaceS
+        return buttonCount * headerButtonSize + spacing + 12
     }
 
     /// 堆叠布局下头部图标按钮统一放大一档，便于点击与识别。
@@ -1420,7 +1426,8 @@ private struct AgentChatConversationHeader: View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             ZStack {
                 titleView
-                    .padding(.horizontal, titleHorizontalInset)
+                    .padding(.leading, titleLeadingInset)
+                    .padding(.trailing, titleTrailingInset)
 
                 HStack(spacing: AgentChatLayout.spaceS) {
                     if windowWidthClass.usesStackedPanes {
@@ -1438,46 +1445,30 @@ private struct AgentChatConversationHeader: View {
                     }
                     Spacer()
                     if !isForwardSelectionMode {
-                        if windowWidthClass.usesStackedPanes {
-                            Button {
-                                onForwardSession()
-                            } label: {
-                                Image(systemName: "arrowshape.turn.up.right.2")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .frame(width: headerButtonSize, height: headerButtonSize)
-                            }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.secondary)
-                            .help("把整个会话转发到单聊、群聊或其他会话")
-                            .accessibilityLabel("转发会话")
-
-                            Button {
-                                onBeginForwardSelection()
-                            } label: {
-                                Image(systemName: "checkmark.circle")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .frame(width: headerButtonSize, height: headerButtonSize)
-                            }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.secondary)
-                            .disabled(!canBeginForwardSelection)
-                            .help("选择多条消息并合并转发")
-                            .accessibilityLabel("选择消息")
-                        } else {
-                            Button("转发会话", systemImage: "arrowshape.turn.up.right.2") {
-                                onForwardSession()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .help("把整个会话转发到单聊、群聊或其他会话")
-                            Button("选择消息", systemImage: "checkmark.circle") {
-                                onBeginForwardSelection()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled(!canBeginForwardSelection)
-                            .help("选择多条消息并合并转发")
+                        Button {
+                            onForwardSession()
+                        } label: {
+                            Image(systemName: "arrowshape.turn.up.right.2")
+                                .font(.system(size: 13, weight: .semibold))
+                                .frame(width: headerButtonSize, height: headerButtonSize)
                         }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .help("把整个会话转发到单聊、群聊或其他会话")
+                        .accessibilityLabel("转发会话")
+
+                        Button {
+                            onBeginForwardSelection()
+                        } label: {
+                            Image(systemName: "checkmark.circle")
+                                .font(.system(size: 13, weight: .semibold))
+                                .frame(width: headerButtonSize, height: headerButtonSize)
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .disabled(!canBeginForwardSelection)
+                        .help("选择多条消息并合并转发")
+                        .accessibilityLabel("选择消息")
                     }
                     Button {
                         withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
