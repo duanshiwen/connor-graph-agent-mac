@@ -114,6 +114,11 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     // onChange(of: isLoadingOlderItems) 不会触发，didRequest 会永久卡在 true，
                     // 表现为“只能看到最后一页、向上滚动不再加载”。
                     didRequestOlderItemsForCurrentTopReach = false
+                    // 用户停在顶部时自动重估：加载完一页后无需再滚动即可继续加载下一页，
+                    // 直到 hasOlderItems 为 false（全部历史加载完成）。
+                    DispatchQueue.main.async {
+                        requestOlderItemsIfNeeded()
+                    }
                 }
                 .onChange(of: isLoadingOlderItems) { wasLoading, isLoading in
                     guard wasLoading, !isLoading else { return }
