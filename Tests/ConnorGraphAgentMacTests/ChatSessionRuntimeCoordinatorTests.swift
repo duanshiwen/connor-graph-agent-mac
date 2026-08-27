@@ -450,6 +450,64 @@ struct ChatSessionRuntimeCoordinatorTests {
         #expect(selectionChangeCount == 0)
         #expect(detailReloadCount == 0)
     }
+
+    @Test func approvalCoordinatorRevealsHiddenPendingApprovalWhenSwitchingToAskMode() {
+        let model = ChatApprovalModel()
+        let coordinator = ChatApprovalCoordinator(model: model, repository: nil)
+        coordinator.permissionMode = { .trustedWrite }
+        let approval = AgentPendingApproval(
+            requestID: "ordinary-request",
+            runID: "run",
+            sessionID: "session",
+            capability: .writeWorkspaceFile
+        )
+
+        // 执行模式下普通权限请求由自动放行策略覆盖：不展示审批卡片（连续自动审批语义），
+        // run 侧策略引擎会直接放行，不会让这类请求滞留待审批。
+        coordinator.install([approval])
+        #expect(coordinator.activeApprovals(sessionID: "session").isEmpty)
+
+        // 用户切到“询问”模式：同一请求必须立即出现在审批面板，
+        // 否则 run 真正阻塞时（例如先切换模式、后执行任务）用户无处确认。
+        coordinator.permissionMode = { .askToWrite }
+        #expect(coordinator.activeApprovals(sessionID: "session").map(\.requestID) == ["ordinary-request"])
+    }
+
+    @Test func approvalCoordinatorReloadSurfacesHardGatedApprovalInExecutionMode() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanup() }
+        let approval = AgentPendingApproval(
+            requestID: "publish-reload",
+            runID: "run",
+            sessionID: "session",
+            capability: .publishInteractiveWeb,
+            toolName: "interactive_web_publish"
+        )
+        try fixture.approvalRepository.store.upsert(pendingApproval: approval)
+        let model = ChatApprovalModel()
+        let coordinator = ChatApprovalCoordinator(model: model, repository: fixture.approvalRepository)
+        coordinator.permissionMode = { .trustedWrite }
+        let resolvedStatuses = ResolvedApprovalStatusBox()
+        let backend = AnyAgentBackend(
+            chat: { _ in AsyncThrowingStream { _ in } },
+            resolveApproval: { _, status, _, _ in resolvedStatuses.append(status) }
+        )
+        coordinator.backendForApproval = { _ in backend }
+        var surfaced: [[AgentPendingApproval]] = []
+        coordinator.onNewPendingApprovals = { surfaced.append($0) }
+
+        // 模拟真实运行流：run 侧把硬性门禁请求写入待审批存储，客户端 reload 拉取。
+        // 执行模式下该请求必须出现在审批面板、触发外层通知，且绝不被自动放行。
+        coordinator.reload()
+        for _ in 0..<50 where model.pendingApprovals.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(coordinator.activeApprovals(sessionID: "session").map(\.requestID) == ["publish-reload"])
+        #expect(surfaced.flatMap { $0.map(\.requestID) }.contains("publish-reload"))
+        #expect(resolvedStatuses.values.isEmpty)
+        let persisted = try #require(fixture.approvalRepository.load(runID: approval.runID).first)
+        #expect(persisted.status == .pending)
+    }
 }
 
 private struct CoordinatorTestBackend: AgentBackend {
