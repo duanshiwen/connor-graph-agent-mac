@@ -21,6 +21,7 @@ struct WorkspaceFileTreePaneView: View {
     var sessionID: String?
     var workingDirectoryPath: String
     var onOpenHTMLPreview: (WorkspaceFileNode, WorkspaceExplorerRoot) -> Void
+    var onSendToChat: (([URL]) -> Void)? = nil
     var onClose: (() -> Void)? = nil
 
     private var configurationID: String {
@@ -269,6 +270,14 @@ struct WorkspaceFileTreePaneView: View {
 
     @ViewBuilder
     private func nodeContextMenu(_ node: WorkspaceFileNode) -> some View {
+        if node.kind == .file {
+            Button {
+                onSendToChat?([node.url])
+            } label: {
+                Label("发送到当前会话", systemImage: "paperplane")
+            }
+            Divider()
+        }
         Button {
             openNodeInApp(node)
         } label: {
@@ -453,6 +462,7 @@ struct WorkspaceFileTreeOverlay: View {
     var sessionID: String?
     var workingDirectoryPath: String
     var onOpenHTMLPreview: (WorkspaceFileNode, WorkspaceExplorerRoot) -> Void
+    var onSendToChat: (([URL]) -> Void)? = nil
     var onClose: () -> Void
 
     var body: some View {
@@ -464,6 +474,7 @@ struct WorkspaceFileTreeOverlay: View {
                     sessionID: sessionID,
                     workingDirectoryPath: workingDirectoryPath,
                     onOpenHTMLPreview: onOpenHTMLPreview,
+                    onSendToChat: onSendToChat,
                     onClose: onClose
                 )
                 .frame(
