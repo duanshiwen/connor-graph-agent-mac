@@ -555,6 +555,11 @@ public struct LocalApplyPatchTool: AgentTool {
         return AgentToolArguments(values: values)
     }
 
+    public func invalidArgumentsHint(_ issues: [String]) -> String? {
+        guard issues.contains(where: { $0.contains("operations") || $0.contains("op") }) else { return nil }
+        return "Expected {\"operations\":[...]} at the top level; op must be inside each operations item, never at the top level. Correct example: {\"operations\":[{\"op\":\"create\",\"filePath\":\"notes/plan.md\",\"content\":\"# Plan\\n\"}]}"
+    }
+
     private static func canInferOperation(from values: [String: SendableJSONValue]) -> Bool {
         if values["op"] != nil { return true }
         if values["edits"] != nil { return true }

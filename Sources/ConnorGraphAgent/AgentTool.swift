@@ -691,6 +691,7 @@ public protocol AgentTool: Sendable {
     var inputExamples: [[String: SendableJSONValue]] { get }
 
     func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments
+    func invalidArgumentsHint(_ issues: [String]) -> String?
     func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws
     func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult
@@ -699,6 +700,7 @@ public protocol AgentTool: Sendable {
 public extension AgentTool {
     var inputExamples: [[String: SendableJSONValue]] { [] }
     func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments { arguments }
+    func invalidArgumentsHint(_ issues: [String]) -> String? { nil }
 
     func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws {}
 
@@ -801,7 +803,11 @@ public struct AgentToolRegistry: Sendable {
         let argumentObject = tool.inputSchema.normalizingLegacyPropertyAliases(.object(legacyNormalizedArguments.values))
         let argumentIssues = tool.inputSchema.argumentValidationIssues(argumentObject)
         guard argumentIssues.isEmpty else {
-            throw AgentToolError.invalidArguments(argumentIssues.joined(separator: "; "))
+            var message = argumentIssues.joined(separator: "; ")
+            if let hint = tool.invalidArgumentsHint(argumentIssues), !hint.isEmpty {
+                message += "; " + hint
+            }
+            throw AgentToolError.invalidArguments(message)
         }
         guard case .object(let normalizedValues) = argumentObject else {
             throw AgentToolError.invalidArguments("$ must be an object")
