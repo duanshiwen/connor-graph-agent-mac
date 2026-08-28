@@ -342,6 +342,62 @@ private func makeLargeReadableFile(_ name: String = "large.txt") throws -> (URL,
     #expect(try String(contentsOf: workspace.appendingPathComponent("readme.md"), encoding: .utf8) == "# Hi\n")
 }
 
+@Test func applyPatchToolAcceptsTopLevelOpAsSingleOperation() async throws {
+    // 模型把单个 operation 展开到顶层（op + path + value）时，应自动包成 operations 数组并完成创建。
+    let workspace = try makeToolTempWorkspace()
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    var registry = AgentToolRegistry()
+    registry.register(tool)
+
+    _ = try await registry.execute(
+        AgentToolCall(
+            name: "ApplyPatch",
+            argumentsJSON: ##"{"op":"create","path":"notes.md","value":"hello\n"}"##
+        ),
+        context: .localToolTestContext(toolCallID: "patch-top-level-create")
+    )
+
+    #expect(try String(contentsOf: workspace.appendingPathComponent("notes.md"), encoding: .utf8) == "hello\n")
+}
+
+@Test func applyPatchToolAcceptsTopLevelReplaceAsEdit() async throws {
+    // 顶层 op=replace + old_string/new_string 展开写法应归一到 edit 并完成唯一替换。
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("App.swift")
+    try "let a = 1\n".write(to: file, atomically: true, encoding: .utf8)
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    var registry = AgentToolRegistry()
+    registry.register(tool)
+
+    _ = try await registry.execute(
+        AgentToolCall(
+            name: "ApplyPatch",
+            argumentsJSON: #"{"op":"replace","path":"App.swift","old_string":"let a = 1","new_string":"let a = 10"}"#
+        ),
+        context: .localToolTestContext(toolCallID: "patch-top-level-replace")
+    )
+
+    #expect(try String(contentsOf: file, encoding: .utf8) == "let a = 10\n")
+}
+
+@Test func applyPatchToolAcceptsOperationsAsSingleObject() async throws {
+    // operations 写成对象而不是数组时，也应自动包成数组并完成创建。
+    let workspace = try makeToolTempWorkspace()
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    var registry = AgentToolRegistry()
+    registry.register(tool)
+
+    _ = try await registry.execute(
+        AgentToolCall(
+            name: "ApplyPatch",
+            argumentsJSON: ##"{"operations":{"op":"create","filePath":"readme.md","content":"# Hi\n"}}"##
+        ),
+        context: .localToolTestContext(toolCallID: "patch-operations-object")
+    )
+
+    #expect(try String(contentsOf: workspace.appendingPathComponent("readme.md"), encoding: .utf8) == "# Hi\n")
+}
+
 @Test func applyPatchToolNormalizesReplaceToEdit() async throws {
     // 模型把替换写成 op=replace + path + value 时，应归一到 edit 并完成唯一替换。
     let workspace = try makeToolTempWorkspace()
