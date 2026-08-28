@@ -509,7 +509,7 @@ public struct LocalReadManyTool: AgentTool {
 
 public struct LocalApplyPatchTool: AgentTool {
     public let name = "ApplyPatch"
-    public let description = "Apply an ordered set of structured file changes inside the workspace. Operations are create, edit, multiedit, or delete. The complete patch is validated against projected file contents before commit; a failed commit is rolled back. Prefer edit/multiedit over create for existing files: search-and-replace is low-destructive and token-efficient. oldText/newText must match the file's raw text exactly (never include Read's 'N: ' line-number prefix). Read the file first so oldText reflects current content. Use replaceAll only for deliberate bulk replacements; without it an edit fails when oldText is not unique. Use op create with content for new files, op edit with oldText/newText for a unique replacement, op multiedit with an edits array for several replacements in one file, and op delete to remove a file. Example: {\"operations\":[{\"op\":\"create\",\"filePath\":\"notes/plan.md\",\"content\":\"# Plan\\n\"},{\"op\":\"edit\",\"filePath\":\"notes/plan.md\",\"oldText\":\"# Plan\",\"newText\":\"# Roadmap\"}]}."
+    public let description = "Apply structured file changes: the arguments object must be {\"operations\":[...]}; op is a field inside each operations item, never a top-level argument. Example: {\"operations\":[{\"op\":\"create\",\"filePath\":\"notes/plan.md\",\"content\":\"# Plan\\n\"},{\"op\":\"edit\",\"filePath\":\"notes/plan.md\",\"oldText\":\"# Plan\",\"newText\":\"# Roadmap\"}]}. Operations are create, edit, multiedit, or delete. The complete patch is validated against projected file contents before commit; a failed commit is rolled back. Prefer edit/multiedit over create for existing files: search-and-replace is low-destructive and token-efficient. oldText/newText must match the file's raw text exactly (never include Read's 'N: ' line-number prefix). Read the file first so oldText reflects current content. Use replaceAll only for deliberate bulk replacements; without it an edit fails when oldText is not unique. Use op create with content for new files, op edit with oldText/newText for a unique replacement, op multiedit with an edits array for several replacements in one file, and op delete to remove a file."
     public let permission: AgentPermissionCapability = .editWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "operations": .array(
@@ -530,6 +530,15 @@ public struct LocalApplyPatchTool: AgentTool {
             description: "Ordered patch operations. Applied top to bottom against projected copies, then committed with rollback on failure. oldText/newText match the file's raw text exactly (without Read's line-number prefix)."
         )
     ], required: ["operations"])
+    public let inputExamples: [[String: SendableJSONValue]] = [
+        ["operations": .array([
+            .object([
+                "op": .string("create"),
+                "filePath": .string("notes/plan.md"),
+                "content": .string("# Plan\n")
+            ])
+        ])]
+    ]
 
     private let policy: LocalWorkspacePolicy
 
