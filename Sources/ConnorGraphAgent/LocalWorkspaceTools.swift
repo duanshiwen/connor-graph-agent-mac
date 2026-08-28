@@ -539,10 +539,29 @@ public struct LocalApplyPatchTool: AgentTool {
     /// filePath 写成 path、把 create 的整文件内容写成 value、把操作写成 add/replace/remove，
     /// 或漏写 op），让这些意图明确的调用变成合法 operations，避免 ApplyPatch 反复报参数错误。
     public func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments {
-        guard let operations = arguments.array("operations") else { return arguments }
         var values = arguments.values
-        values["operations"] = .array(operations.map(Self.normalizeOperation))
+        if let operations = arguments.array("operations") {
+            values["operations"] = .array(operations.map(Self.normalizeOperation))
+        } else if case .object(let single)? = values["operations"] {
+            // 模型把单个 operation 直接写成 operations 对象而不是数组时，包成数组再归一化。
+            values["operations"] = .array([Self.normalizeOperation(.object(single))])
+        } else if Self.canInferOperation(from: values) {
+            // 模型把单个 operation 展开到顶层（op/filePath/content/value 等）时，
+            // 自动包成 operations 数组，再走统一的 operation 归一化。
+            values["operations"] = .array([Self.normalizeOperation(.object(values))])
+            let topLevelKeys = values.keys.filter { $0 != "operations" }
+            for key in topLevelKeys { values.removeValue(forKey: key) }
+        }
         return AgentToolArguments(values: values)
+    }
+
+    private static func canInferOperation(from values: [String: SendableJSONValue]) -> Bool {
+        if values["op"] != nil { return true }
+        if values["edits"] != nil { return true }
+        if values["content"] != nil || values["value"] != nil { return true }
+        if values["oldText"] != nil || values["old_text"] != nil || values["old_string"] != nil { return true }
+        if values["newText"] != nil || values["new_text"] != nil || values["new_string"] != nil { return true }
+        return false
     }
 
     private static func normalizeOperation(_ value: SendableJSONValue) -> SendableJSONValue {
