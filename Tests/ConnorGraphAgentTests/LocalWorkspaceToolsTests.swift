@@ -398,6 +398,31 @@ private func makeLargeReadableFile(_ name: String = "large.txt") throws -> (URL,
     #expect(try String(contentsOf: workspace.appendingPathComponent("readme.md"), encoding: .utf8) == "# Hi\n")
 }
 
+@Test func applyPatchToolAddsCorrectiveHintWhenOperationsMissing() async throws {
+    // 完全无法推断 op 的调用仍然失败，但错误信息要给出可执行的修正示例，
+    // 避免模型在“schema 说 op 必填、报错却说 op 不支持”的矛盾里反复重试。
+    let workspace = try makeToolTempWorkspace()
+    let tool = LocalApplyPatchTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    var registry = AgentToolRegistry()
+    registry.register(tool)
+
+    do {
+        _ = try await registry.execute(
+            AgentToolCall(
+                name: "ApplyPatch",
+                argumentsJSON: #"{"note":"please write a file"}"#
+            ),
+            context: .localToolTestContext(toolCallID: "patch-hint")
+        )
+        Issue.record("Expected ApplyPatch to reject arguments without operations")
+    } catch {
+        let text = String(describing: error)
+        #expect(text.contains("operations"))
+        #expect(text.contains("Correct example"))
+        #expect(text.contains("\"op\":\"create\""))
+    }
+}
+
 @Test func applyPatchToolNormalizesReplaceToEdit() async throws {
     // 模型把替换写成 op=replace + path + value 时，应归一到 edit 并完成唯一替换。
     let workspace = try makeToolTempWorkspace()
