@@ -62,6 +62,20 @@ struct PersonMentionPickerPresentationTests {
         #expect(row.accessibilityLabel.contains("shiwen@example.com"))
     }
 
+    @Test func searchAllReturnsEveryMatchBeyondLegacyLimit() {
+        let profiles = (0..<25).map { Self.profile(id: "person-\($0)", name: "小\($0)") }
+        let all = PersonMentionSearch().searchAll(query: "小", profiles: profiles)
+        #expect(all.count == 25)
+    }
+
+    @Test func presentationSubtitleShowsTotalMatchCountNotPageCount() {
+        let profiles = (0..<25).map { Self.profile(id: "person-\($0)", name: "小\($0)") }
+        let presentation = PersonMentionPickerPresentation(query: "小", profiles: profiles, selectionIndex: 24)
+        #expect(presentation.rows.count == 25)
+        #expect(presentation.subtitle == "25 个匹配人物")
+        #expect(presentation.clampedSelectionIndex == 24)
+    }
+
     private static func profile(id: String, name: String, email: String? = nil) -> PersonProfile {
         PersonProfile(
             id: ContactID(rawValue: id),
