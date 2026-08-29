@@ -48,6 +48,7 @@ public final class FileBackedMailSourceStore: MailStoreProtocol, @unchecked Send
     public func listAccounts() async throws -> [MailAccount] { try await store.listAccounts() }
     public func saveAccount(_ account: MailAccount) async throws { try await store.saveAccount(account) }
     public func account(id: MailAccountID) async throws -> MailAccount? { try await store.account(id: id) }
+    public func deleteAccount(id: MailAccountID) async throws { try await store.deleteAccount(id: id) }
     public func listMailboxes(accountID: MailAccountID) async throws -> [MailMailbox] { try await store.listMailboxes(accountID: accountID) }
     public func saveMailbox(_ mailbox: MailMailbox) async throws { try await store.saveMailbox(mailbox) }
     public func saveMessage(_ message: MailMessageDetail) async throws { try await store.saveMessage(message) }
