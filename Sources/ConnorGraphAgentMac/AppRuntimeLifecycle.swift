@@ -4063,6 +4063,7 @@ extension AppRuntimeLifecycle {
             memory: memoryOSStore,
             skillStore: SkillSyncStore(storagePaths: storagePaths),
             rss: rssFeatureModel.agentRuntime.repository,
+            mail: mailFeatureModel.sourceRepository,
             identity: identityStore
         )
         // 消费本机「好友并入/解绑」动作：写入或清除 L4 实体的 connor_friend_* 元数据，
@@ -4079,6 +4080,9 @@ extension AppRuntimeLifecycle {
         }
         if result.rssChanged {
             await rssFeatureModel.reload()
+        }
+        if result.mailAccountsChanged {
+            await mailFeatureModel.reload()
         }
         if result.sessionsChanged {
             scheduleChatSessionListRefresh(reason: "account-sync")

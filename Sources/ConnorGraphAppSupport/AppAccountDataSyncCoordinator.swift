@@ -151,19 +151,105 @@ public struct SyncRSSSubscription: Codable, Sendable, Equatable {
     }
 }
 
+/// 邮件账户跨端共享线格式：只含服务器配置/显示名/邮箱/登录名与时间戳。
+/// 密码等凭证不入库也不进同步（各端凭证库独立），邮件消息体更不参与账号同步。
+public struct SyncMailAccount: Codable, Sendable, Equatable {
+    public var id: String
+    public var displayName: String
+    public var address: String
+    public var username: String
+    public var imapHost: String
+    public var imapPort: Int
+    public var imapSecurity: String
+    public var smtpHost: String
+    public var smtpPort: Int
+    public var smtpSecurity: String
+    public var createdAt: Int64
+    public var updatedAt: Int64
+
+    public init(_ account: MailAccount) {
+        id = account.id.rawValue
+        displayName = account.displayName
+        address = account.identities.first?.address.email ?? ""
+        username = account.credentialBinding?.accountName ?? account.identities.first?.address.email ?? ""
+        imapHost = account.incoming?.host ?? ""
+        imapPort = account.incoming?.port ?? 0
+        imapSecurity = Self.securityWire(account.incoming?.security)
+        smtpHost = account.outgoing?.host ?? ""
+        smtpPort = account.outgoing?.port ?? 0
+        smtpSecurity = Self.securityWire(account.outgoing?.security)
+        createdAt = Int64(account.createdAt.timeIntervalSince1970 * 1_000)
+        updatedAt = Int64(account.updatedAt.timeIntervalSince1970 * 1_000)
+    }
+
+    /// 合并回 MailAccount：优先保留本机 provider/凭证绑定/健康度等字段，只覆盖共享字段。
+    static func makeAccount(_ wire: SyncMailAccount, local: MailAccount?) -> MailAccount {
+        let displayName = wire.displayName.isEmpty ? wire.address : wire.displayName
+        let identity = MailIdentity(
+            id: MailIdentityID(rawValue: "identity-\(wire.id)"),
+            displayName: displayName,
+            address: MailAddress(email: wire.address)
+        )
+        var incoming: MailServerEndpoint?
+        if !wire.imapHost.isEmpty {
+            incoming = MailServerEndpoint(host: wire.imapHost, port: wire.imapPort, security: security(from: wire.imapSecurity), protocolKind: .imap)
+        }
+        var outgoing: MailServerEndpoint?
+        if !wire.smtpHost.isEmpty {
+            outgoing = MailServerEndpoint(host: wire.smtpHost, port: wire.smtpPort, security: security(from: wire.smtpSecurity), protocolKind: .smtp)
+        }
+        let binding = local?.credentialBinding ?? MailCredentialBinding(
+            credentialNamespace: AppMailCredentialStore.credentialNamespace,
+            accountName: wire.username.isEmpty ? wire.address.lowercased() : wire.username,
+            authMode: .password
+        )
+        return MailAccount(
+            id: MailAccountID(rawValue: wire.id),
+            provider: local?.provider ?? .genericIMAPSMTP,
+            displayName: displayName,
+            identities: [identity],
+            incoming: incoming,
+            outgoing: outgoing,
+            credentialBinding: binding,
+            health: local?.health ?? MailAccountHealth(status: .unknown, summary: "Synced from account settings"),
+            createdAt: Date(timeIntervalSince1970: Double(wire.createdAt) / 1_000),
+            updatedAt: Date(timeIntervalSince1970: Double(wire.updatedAt) / 1_000)
+        )
+    }
+
+    private static func securityWire(_ security: MailConnectionSecurity?) -> String {
+        switch security {
+        case .tls: return "ssl"
+        case .startTLS: return "starttls"
+        case .some(.none): return "none"
+        case nil: return "none"
+        }
+    }
+
+    private static func security(from wire: String) -> MailConnectionSecurity {
+        switch wire.lowercased() {
+        case "ssl": return .tls
+        case "starttls": return .startTLS
+        default: return .none
+        }
+    }
+}
+
 public struct AppAccountDataSyncResult: Sendable, Equatable {
     public var appliedSessionChangeCount: Int
     public var appliedSettingsChangeCount: Int
     public var appliedGovernanceLabelChangeCount: Int
     public var appliedRSSChangeCount: Int
+    public var appliedMailAccountChangeCount: Int
     public var pushedChangeCount: Int
     public var appliedSessionIDs: Set<String>
 
-    public init(appliedSessionChangeCount: Int = 0, appliedSettingsChangeCount: Int = 0, appliedGovernanceLabelChangeCount: Int = 0, appliedRSSChangeCount: Int = 0, pushedChangeCount: Int = 0, appliedSessionIDs: Set<String> = []) {
+    public init(appliedSessionChangeCount: Int = 0, appliedSettingsChangeCount: Int = 0, appliedGovernanceLabelChangeCount: Int = 0, appliedRSSChangeCount: Int = 0, appliedMailAccountChangeCount: Int = 0, pushedChangeCount: Int = 0, appliedSessionIDs: Set<String> = []) {
         self.appliedSessionChangeCount = appliedSessionChangeCount
         self.appliedSettingsChangeCount = appliedSettingsChangeCount
         self.appliedGovernanceLabelChangeCount = appliedGovernanceLabelChangeCount
         self.appliedRSSChangeCount = appliedRSSChangeCount
+        self.appliedMailAccountChangeCount = appliedMailAccountChangeCount
         self.pushedChangeCount = pushedChangeCount
         self.appliedSessionIDs = appliedSessionIDs
     }
@@ -172,6 +258,7 @@ public struct AppAccountDataSyncResult: Sendable, Equatable {
     public var settingsChanged: Bool { appliedSettingsChangeCount > 0 }
     public var governanceLabelsChanged: Bool { appliedGovernanceLabelChangeCount > 0 }
     public var rssChanged: Bool { appliedRSSChangeCount > 0 }
+    public var mailAccountsChanged: Bool { appliedMailAccountChangeCount > 0 }
 }
 
 public actor AppAccountDataSyncCoordinator {
@@ -191,6 +278,7 @@ public actor AppAccountDataSyncCoordinator {
         static let skills = "skills"
         static let governanceLabels = "governance_labels"
         static let rssSubscriptions = "rss_subscriptions"
+        static let mailAccounts = "mail_accounts"
     }
 
     /// 记录级同步边界：sessions 全量同步；settings 同步运行时设置、人格与用户偏好；
@@ -204,6 +292,7 @@ public actor AppAccountDataSyncCoordinator {
         case SyncCollection.settings: return recordId == "macos_runtime" || recordId == "personality" || recordId == "user_preferences"
         case SyncCollection.governanceLabels: return true
         case SyncCollection.rssSubscriptions: return true
+        case SyncCollection.mailAccounts: return true
         case SyncCollection.memoryL0, SyncCollection.memoryL0Spans, SyncCollection.memoryL1: return true
         case "memory_l2", "memory_l2_nodes", "memory_l3", "memory_l4_entities", "memory_l4_relations": return true
         case SyncCollection.skills: return true
@@ -211,7 +300,7 @@ public actor AppAccountDataSyncCoordinator {
         }
     }
 
-    private enum AppliedChangeKind { case session(String), settings, governanceLabels, rssSubscriptions }
+    private enum AppliedChangeKind { case session(String), settings, governanceLabels, rssSubscriptions, mailAccounts }
     private struct RecordState: Codable { var version: Int64; var hash: String; var deleted: Bool; var encrypted: Bool = false }
     private struct PersistedState: Codable { var cursor: Int64 = 0; var records: [String: RecordState] = [:] }
 
@@ -221,13 +310,14 @@ public actor AppAccountDataSyncCoordinator {
     private let memory: SQLiteMemoryOSStore?
     private let skillStore: SkillSyncStore?
     private let rss: (any RSSSourceRepository)?
+    private let mail: (any MailSourceRepository)?
     private let identity: AppUserIdentityStore
     private let defaults: UserDefaults
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, governance: AppSessionGovernanceConfigRepository? = nil, memory: SQLiteMemoryOSStore?, skillStore: SkillSyncStore? = nil, rss: (any RSSSourceRepository)? = nil, identity: AppUserIdentityStore, defaults: UserDefaults = .standard) {
-        self.sessions = sessions; self.settings = settings; self.governance = governance; self.memory = memory; self.skillStore = skillStore; self.rss = rss; self.identity = identity; self.defaults = defaults
+    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, governance: AppSessionGovernanceConfigRepository? = nil, memory: SQLiteMemoryOSStore?, skillStore: SkillSyncStore? = nil, rss: (any RSSSourceRepository)? = nil, mail: (any MailSourceRepository)? = nil, identity: AppUserIdentityStore, defaults: UserDefaults = .standard) {
+        self.sessions = sessions; self.settings = settings; self.governance = governance; self.memory = memory; self.skillStore = skillStore; self.rss = rss; self.mail = mail; self.identity = identity; self.defaults = defaults
         encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
         decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
     }
@@ -252,6 +342,7 @@ public actor AppAccountDataSyncCoordinator {
                     || change.collection == SyncCollection.memoryL1
                     || change.collection == SyncCollection.governanceLabels
                     || change.collection == SyncCollection.rssSubscriptions
+                    || change.collection == SyncCollection.mailAccounts
                     || change.collection == SyncCollection.sessions
                 guard !change.deleted || isTombstoneCollection else { continue }
                 do {
@@ -306,7 +397,7 @@ public actor AppAccountDataSyncCoordinator {
         // 丢失/列表被清空，而不是“删光了全部”，避免一台空设备把其它端的数据也清掉。
         // RSS 订阅源不走这里：它使用显式删除标记（pendingDeletes），见下方单独逻辑。
         let nowMillis = Int64(Date().timeIntervalSince1970 * 1_000)
-        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|", "sessions|"]
+        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|", "sessions|", "mail_accounts|"]
         let projectedCollections = Set(projected.keys.map { String($0.split(separator: "|", maxSplits: 1)[0]) })
         for key in state.records.keys where tombstonePrefixes.contains(where: { key.hasPrefix($0) }) {
             guard state.records[key]?.deleted != true, projected[key] == nil else { continue }
@@ -431,6 +522,13 @@ public actor AppAccountDataSyncCoordinator {
         if let rss {
             for source in try await rss.listSources() {
                 values[recordKey(SyncCollection.rssSubscriptions, source.id.rawValue)] = try jsonValue(SyncRSSSubscription(source))
+            }
+        }
+        // 邮件账户：只同步跨端共享的服务器配置/显示名/邮箱/登录名与时间戳，
+        // 密码等凭证不入库不参与同步（各端凭证库独立），邮件消息体更不进账号同步。
+        if let mail {
+            for account in try await mail.listAccounts() {
+                values[recordKey(SyncCollection.mailAccounts, account.id.rawValue)] = try jsonValue(SyncMailAccount(account))
             }
         }
         return values
@@ -613,6 +711,36 @@ public actor AppAccountDataSyncCoordinator {
                 }
             }
             return nil
+        case ("mail_accounts", let id):
+            guard let mail else { return nil }
+            let accountID = MailAccountID(rawValue: id)
+            if change.deleted {
+                // 删除按“最新操作优先”：远端删除时间比本地账户时间新才删除。
+                let tombstone: SyncTombstone = try decode(change.payload)
+                let local = try await mail.account(id: accountID)
+                if tombstone.updatedAt > Int64((local?.updatedAt ?? .distantPast).timeIntervalSince1970 * 1_000) {
+                    try await mail.deleteAccount(id: accountID)
+                    return .mailAccounts
+                }
+            } else {
+                let wire: SyncMailAccount = try decode(change.payload)
+                // 邮箱地址去重：同地址已存在不同 id（历史 UUID/旧版本）时按“后更新者胜”采用胜者 id，
+                // 避免跨端重复账户；这是远端驱动的合并，不是用户删除，不产生本机删除标记。
+                let accounts = try await mail.listAccounts()
+                if let byAddress = accounts.first(where: { ($0.identities.first?.address.email ?? "").lowercased() == wire.address.lowercased() && $0.id.rawValue != id }) {
+                    if wire.updatedAt > Int64(byAddress.updatedAt.timeIntervalSince1970 * 1_000) {
+                        try await mail.deleteAccount(id: byAddress.id)
+                        try await mail.saveAccount(SyncMailAccount.makeAccount(wire, local: nil))
+                    }
+                    return .mailAccounts
+                }
+                let local = try await mail.account(id: accountID)
+                if wire.updatedAt > Int64((local?.updatedAt ?? .distantPast).timeIntervalSince1970 * 1_000) {
+                    try await mail.saveAccount(SyncMailAccount.makeAccount(wire, local: local))
+                    return .mailAccounts
+                }
+            }
+            return nil
         default: return nil
         }
     }
@@ -625,6 +753,7 @@ public actor AppAccountDataSyncCoordinator {
         case .settings: result.appliedSettingsChangeCount += 1
         case .governanceLabels: result.appliedGovernanceLabelChangeCount += 1
         case .rssSubscriptions: result.appliedRSSChangeCount += 1
+        case .mailAccounts: result.appliedMailAccountChangeCount += 1
         }
     }
 

@@ -177,6 +177,12 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         return try decoder.decode(MailAccount.self, from: Data(row[0].utf8))
     }
 
+    public func deleteAccount(id: MailAccountID) async throws {
+        // 邮箱/邮件缓存随 mail_mailboxes 的 ON DELETE CASCADE 一并清理；
+        // 凭证由 credential store 单独清理，不经此路径。
+        try execute("DELETE FROM mail_accounts WHERE id = '\(esc(id.rawValue))'")
+    }
+
     // MARK: - MailSourceCache
 
     public func listMailboxes(accountID: MailAccountID) async throws -> [MailMailbox] {

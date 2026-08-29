@@ -24,6 +24,10 @@ public actor InMemoryMailSourceRepository: MailSourceRepository {
     public func account(id: MailAccountID) async throws -> MailAccount? {
         accounts[id]
     }
+
+    public func deleteAccount(id: MailAccountID) async throws {
+        accounts.removeValue(forKey: id)
+    }
 }
 
 public actor InMemoryMailSourceCache: MailSourceCache, RecentMailSourceCache {
