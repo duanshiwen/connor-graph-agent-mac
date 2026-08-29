@@ -534,7 +534,7 @@ struct AgentChatComposerView: View {
 
     private var personMentionPickerResults: [PersonProfile] {
         guard let trigger = personMentionTrigger else { return [] }
-        return PersonMentionSearch().search(query: trigger.query, profiles: contactsFeatureModel.profiles, limit: 8)
+        return PersonMentionSearch().searchAll(query: trigger.query, profiles: contactsFeatureModel.profiles)
     }
 
     private func updatePersonMentionTrigger(for text: String) {

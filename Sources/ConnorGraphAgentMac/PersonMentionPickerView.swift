@@ -1,6 +1,10 @@
 import SwiftUI
 import ConnorGraphCore
 
+private enum PersonMentionPickerPaging {
+    static let pageSize = 10
+}
+
 struct PersonMentionPickerRowPresentation: Equatable, Identifiable {
     var id: ContactID { profile.id }
     var profile: PersonProfile
@@ -18,7 +22,7 @@ struct PersonMentionPickerPresentation: Equatable {
     var rows: [PersonMentionPickerRowPresentation]
 
     init(query: String, profiles: [PersonProfile], selectionIndex: Int) {
-        let results = PersonMentionSearch().search(query: query, profiles: profiles, limit: 8)
+        let results = PersonMentionSearch().searchAll(query: query, profiles: profiles)
         self.query = query
         self.selectionIndex = selectionIndex
         self.rows = results.map { profile in
@@ -65,8 +69,18 @@ struct PersonMentionPickerView: View {
     var selectionIndex: Int
     var onSelect: (PersonProfile) -> Void
 
+    @State private var loadedCount: Int = PersonMentionPickerPaging.pageSize
+
     private var presentation: PersonMentionPickerPresentation {
         PersonMentionPickerPresentation(query: query, profiles: profiles, selectionIndex: selectionIndex)
+    }
+
+    private var visibleRows: [PersonMentionPickerRowPresentation] {
+        Array(presentation.rows.prefix(max(0, loadedCount)))
+    }
+
+    private var canLoadMore: Bool {
+        loadedCount < presentation.rows.count
     }
 
     var body: some View {
@@ -83,18 +97,31 @@ struct PersonMentionPickerView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 1) {
-                            ForEach(Array(presentation.rows.enumerated()), id: \.element.id) { index, row in
+                            ForEach(Array(visibleRows.enumerated()), id: \.element.id) { index, row in
                                 rowButton(row, isSelected: index == presentation.clampedSelectionIndex)
                                     .id(row.id)
+                            }
+
+                            if canLoadMore {
+                                loadMoreFooter
                             }
                         }
                         .padding(.vertical, AgentChatLayout.spaceXS)
                     }
                     .onChange(of: presentation.clampedSelectionIndex) { _, index in
                         guard presentation.rows.indices.contains(index) else { return }
-                        withAnimation(.easeOut(duration: 0.12)) {
-                            proxy.scrollTo(presentation.rows[index].id, anchor: .center)
+                        if index >= loadedCount {
+                            expandLoadedCount(toInclude: index)
                         }
+                        let targetID = presentation.rows[index].id
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.12)) {
+                                proxy.scrollTo(targetID, anchor: .center)
+                            }
+                        }
+                    }
+                    .onChange(of: presentation.query) { _, _ in
+                        loadedCount = PersonMentionPickerPaging.pageSize
                     }
                 }
             }
@@ -107,6 +134,27 @@ struct PersonMentionPickerView: View {
         .frame(width: ComposerPopoverLayout.width, height: ComposerPopoverLayout.height, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("人物选择器")
+    }
+
+    private var loadMoreFooter: some View {
+        Text("已显示 \(visibleRows.count) / \(presentation.rows.count) 个匹配人物，向下滚动加载更多")
+            .font(AgentChatTypography.micro)
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, AgentChatLayout.spaceS)
+            .onAppear {
+                loadNextPageIfNeeded()
+            }
+    }
+
+    private func loadNextPageIfNeeded() {
+        guard canLoadMore else { return }
+        loadedCount = min(presentation.rows.count, loadedCount + PersonMentionPickerPaging.pageSize)
+    }
+
+    private func expandLoadedCount(toInclude index: Int) {
+        let nextPageCount = ((index / PersonMentionPickerPaging.pageSize) + 1) * PersonMentionPickerPaging.pageSize
+        loadedCount = min(presentation.rows.count, max(loadedCount, nextPageCount))
     }
 
     private var header: some View {

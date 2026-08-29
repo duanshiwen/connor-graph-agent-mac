@@ -157,6 +157,15 @@ public struct PersonMentionSearch: Sendable {
     public init() {}
 
     public func search(query: String, profiles: [PersonProfile], limit: Int = 8) -> [PersonProfile] {
+        Array(matchingProfiles(query: query, profiles: profiles).prefix(max(0, limit)))
+    }
+
+    /// 返回全部匹配人物（不截断），供需要完整列表的场景（如人物选择弹窗的分页加载）使用。
+    public func searchAll(query: String, profiles: [PersonProfile]) -> [PersonProfile] {
+        matchingProfiles(query: query, profiles: profiles)
+    }
+
+    private func matchingProfiles(query: String, profiles: [PersonProfile]) -> [PersonProfile] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
         let active = profiles.filter(\.isActiveForDefaultContext)
         let activeByID = Dictionary(uniqueKeysWithValues: active.map { ($0.id, $0) })
@@ -176,7 +185,7 @@ public struct PersonMentionSearch: Sendable {
             }
             matches = Array(matchedByID.values)
         }
-        return Array(matches.sorted(by: sortProfiles).prefix(max(0, limit)))
+        return matches.sorted(by: sortProfiles)
     }
 
     private func profileMatches(_ profile: PersonProfile, normalizedQuery: String) -> Bool {
