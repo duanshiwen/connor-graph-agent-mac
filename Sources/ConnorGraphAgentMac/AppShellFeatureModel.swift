@@ -108,6 +108,7 @@ enum AppCommand: Sendable, Equatable {
     case openSessionNotification(String)
     case openCalendarSettings
     case followRSSItem(RSSFollowRequest)
+    case openInteractiveWeb(InteractiveWebOpenRequest)
 }
 
 @MainActor

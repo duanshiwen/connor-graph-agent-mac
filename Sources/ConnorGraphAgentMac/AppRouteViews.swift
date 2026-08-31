@@ -73,3 +73,21 @@ struct RSSDetailRouteView: View {
         RSSSourceSettingsView(model: model)
     }
 }
+
+struct InteractiveWebListRouteView: View {
+    @Bindable var model: InteractiveWebFeatureModel
+    var forwarding: ListItemForwardingContext
+
+    var body: some View {
+        CraftInteractiveWebListPane(model: model, forwarding: forwarding)
+    }
+}
+
+struct InteractiveWebDetailRouteView: View {
+    @Bindable var model: InteractiveWebFeatureModel
+    var forwarding: ListItemForwardingContext
+
+    var body: some View {
+        InteractiveWebDetailPane(model: model, forwarding: forwarding)
+    }
+}

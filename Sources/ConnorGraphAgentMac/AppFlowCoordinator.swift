@@ -5,6 +5,7 @@ enum AppFlowIntent: Sendable, Equatable {
     case openSessionNotification(String)
     case openCalendarSettings
     case followRSSItem(RSSFollowRequest)
+    case openInteractiveWeb(InteractiveWebOpenRequest)
 }
 
 struct RSSFollowRequest: Sendable, Equatable {
@@ -17,6 +18,12 @@ struct RSSFollowRequest: Sendable, Equatable {
         self.title = title
         self.url = url
     }
+}
+
+/// 「打开互动网页」请求：新建会话并用会话浏览器打开站点（审核模式）。
+struct InteractiveWebOpenRequest: Sendable, Equatable {
+    var url: URL
+    var title: String
 }
 
 @MainActor

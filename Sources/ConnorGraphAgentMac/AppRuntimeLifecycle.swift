@@ -157,6 +157,7 @@ final class AppRuntimeLifecycle {
     let cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient
     let interactiveWebAPIClient: InteractiveWebAPIClient
     let rssFeatureModel: RSSFeatureModel
+    let interactiveWebFeatureModel: InteractiveWebFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let chatWorkspaceCoordinator = ChatWorkspaceCoordinator()
     let appSettingsModel: AppSettingsFeatureModel
@@ -752,11 +753,13 @@ final class AppRuntimeLifecycle {
             serverIsReachable: { AppBackendConnectivity.shared.isReachable }
         )
         self.cloudKnowledgeConsumptionClient = CloudKnowledgeConsumptionClient(api: cloudKnowledgeMarketplaceAPI, cache: cloudKnowledgeAuthorizationCache)
-        self.interactiveWebAPIClient = InteractiveWebAPIClient(
+        let resolvedInteractiveWebAPIClient = InteractiveWebAPIClient(
             baseURL: backendBaseURL,
             transport: backendTransport,
             credentials: cloudCredentials
         )
+        self.interactiveWebAPIClient = resolvedInteractiveWebAPIClient
+        self.interactiveWebFeatureModel = InteractiveWebFeatureModel(client: resolvedInteractiveWebAPIClient)
         self.knowledgeCreatorStore = CloudKnowledgeCreatorStore(
             creatorAPI: CloudKnowledgeCreatorAPIClient(
                 baseURL: backendBaseURL,
@@ -1852,6 +1855,34 @@ final class AppRuntimeLifecycle {
     private func rssFollowSessionTitle(_ rawTitle: String) -> String {
         let trimmedTitle = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         return "关注 \(trimmedTitle.isEmpty ? "RSS 文章" : trimmedTitle)"
+    }
+
+    /// 「打开互动网页」：新建会话并在会话浏览器中打开站点（审核模式）。
+    func handleInteractiveWebOpenRequest(_ request: InteractiveWebOpenRequest) {
+        let currentSessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
+        if browserFeatureModel.focusExistingTab(urlString: request.url.absoluteString, preferredSessionID: currentSessionID) {
+            errorMessage = nil
+            return
+        }
+        guard let chatSessionRepository else { return }
+        rememberCurrentWorkspaceMode()
+        do {
+            let session = try chatSessionRepository.createSession(title: request.title)
+            chatSessionCoordinator.adoptDirectSelection(session.id)
+            chatRunCoordinator.clearProcessTimelines()
+            browserFeatureModel.resetWorkspaceBinding()
+            chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            try loadSessionCapsule(sessionID: session.id)
+            try chatBackgroundTaskCoordinator.load(sessionID: session.id)
+            chatRunCoordinator.prepareNewSession(session, manager: makeNativeSessionManager(for: session))
+            restoreChatInputDraft(for: session.id)
+            reloadChatSessions(restoreWorkspaceMode: false)
+            chatSessionCoordinator.adoptDirectSelection(session.id)
+            openURLInCurrentChatBrowser(request.url)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     private func performAddSkillRequest(_ request: String) async throws -> String {
@@ -3906,6 +3937,7 @@ extension AppRuntimeLifecycle {
         case let .openSessionNotification(sessionID): openSessionFromNotification(sessionID)
         case .openCalendarSettings: shellFeatureModel.selectSettingsSection(.calendar)
         case let .followRSSItem(request): handleRSSFollowRequest(request)
+        case let .openInteractiveWeb(request): handleInteractiveWebOpenRequest(request)
         }
     }
 
@@ -4031,6 +4063,7 @@ extension AppRuntimeLifecycle {
             knowledgeMarketplace: model.knowledgeMarketplaceStore,
             knowledgeCreator: model.knowledgeCreatorStore,
             rss: model.rssFeatureModel,
+            interactiveWeb: model.interactiveWebFeatureModel,
             skills: model.skillRuntimeModel,
             appSettings: model.appSettingsModel,
             inputSettings: model.inputSettingsModel,

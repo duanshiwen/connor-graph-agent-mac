@@ -395,6 +395,8 @@ struct AppShellView: View {
             return graph.mail.selectedMessageID != nil
         case .rss:
             return graph.rss.selectedItemID != nil
+        case .interactiveWeb:
+            return graph.interactiveWeb.selectedProjectID != nil
         case .contacts:
             return graph.contacts.selectedContactID != nil
         default:
@@ -413,6 +415,8 @@ struct AppShellView: View {
             return { graph.mail.clearMessageSelection() }
         case .rss:
             return { graph.rss.clearItemSelection() }
+        case .interactiveWeb:
+            return { graph.interactiveWeb.clearSelection() }
         case .contacts:
             return { graph.contacts.clearContactSelection() }
         default:

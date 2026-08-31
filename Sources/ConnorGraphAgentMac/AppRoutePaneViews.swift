@@ -42,6 +42,8 @@ struct CraftListPaneView: View {
                 )
             case .rss:
                 RSSListRouteView(model: graph.rss, forwarding: makeListItemForwarding(graph: graph))
+            case .interactiveWeb:
+                InteractiveWebListRouteView(model: graph.interactiveWeb, forwarding: makeListItemForwarding(graph: graph))
             case .mail:
                 MailListRouteView(model: graph.mail, forwarding: makeListItemForwarding(graph: graph))
             case .sources:
@@ -137,6 +139,8 @@ struct CraftDetailPaneView: View {
                 MailDetailRouteView(model: graph.mail)
             case .rss:
                 RSSDetailRouteView(model: graph.rss)
+            case .interactiveWeb:
+                InteractiveWebDetailRouteView(model: graph.interactiveWeb, forwarding: makeListItemForwarding(graph: graph))
             case .sources:
                 SourceRuntimePanelView(model: graph.sources)
             case .skills:

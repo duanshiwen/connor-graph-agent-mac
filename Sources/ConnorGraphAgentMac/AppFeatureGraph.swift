@@ -96,6 +96,7 @@ final class AppFeatureGraph {
     let knowledgeMarketplace: CloudKnowledgeMarketplaceStore
     let knowledgeCreator: CloudKnowledgeCreatorStore
     let rss: RSSFeatureModel
+    let interactiveWeb: InteractiveWebFeatureModel
     let skills: SkillRuntimeFeatureModel
     let appSettings: AppSettingsFeatureModel
     let inputSettings: InputSettingsFeatureModel
@@ -130,6 +131,7 @@ final class AppFeatureGraph {
         knowledgeMarketplace: CloudKnowledgeMarketplaceStore,
         knowledgeCreator: CloudKnowledgeCreatorStore,
         rss: RSSFeatureModel,
+        interactiveWeb: InteractiveWebFeatureModel,
         skills: SkillRuntimeFeatureModel,
         appSettings: AppSettingsFeatureModel,
         inputSettings: InputSettingsFeatureModel,
@@ -159,6 +161,7 @@ final class AppFeatureGraph {
         self.knowledgeMarketplace = knowledgeMarketplace
         self.knowledgeCreator = knowledgeCreator
         self.rss = rss
+        self.interactiveWeb = interactiveWeb
         self.skills = skills
         self.appSettings = appSettings
         self.inputSettings = inputSettings
