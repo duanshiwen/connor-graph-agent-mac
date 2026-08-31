@@ -29,7 +29,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var providerRetryDelaySeconds: Double
 
     public init(
-        maxToolIterations: Int = 100,
+        maxToolIterations: Int = 256,
         maxToolCallsPerIteration: Int = 8,
         maxToolIterationsPerPhase: Int = 60,
         maxRunDurationSeconds: Int = 1800,
@@ -115,7 +115,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.maxToolIterations = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 100)
+        self.maxToolIterations = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 256)
         self.maxToolCallsPerIteration = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 8)
         self.maxToolIterationsPerPhase = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterationsPerPhase) ?? 60)
         self.maxRunDurationSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800)
