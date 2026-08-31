@@ -487,7 +487,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
     public var updatedAt: Date
 
     public init(
-        schemaVersion: Int = 8,
+        schemaVersion: Int = 9,
         loop: AgentLoopConfiguration = AgentLoopConfiguration(),
         ui: AgentRuntimeUISettings = AgentRuntimeUISettings(),
         app: AgentRuntimeAppSettings = AgentRuntimeAppSettings(),
@@ -579,7 +579,7 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
     }
 
     private static func migrateLegacyDefaults(_ settings: AgentRuntimeSettings) -> AgentRuntimeSettings {
-        guard settings.schemaVersion < 8 else { return settings }
+        guard settings.schemaVersion < 9 else { return settings }
         var migrated = settings
         if migrated.schemaVersion < 7 {
             if [160_000, 200_000, 1_000_000].contains(migrated.loop.promptMaxEstimatedTokens) {
@@ -595,12 +595,19 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
             migrated.loop.preflightMode = .contextual
             migrated.loop.toolExposureMode = .contextual
         }
-        // v7 → v8：旧默认的 12 轮硬上限上调为 100（仅作极端安全网）；
-        // 用户自定义过的值原样保留。
-        if migrated.loop.maxToolIterations == 12 {
-            migrated.loop.maxToolIterations = 100
+        if migrated.schemaVersion < 8 {
+            // v7 → v8：旧默认的 12 轮硬上限上调为 100（仅作极端安全网）；
+            // 用户自定义过的值原样保留。
+            if migrated.loop.maxToolIterations == 12 {
+                migrated.loop.maxToolIterations = 100
+            }
         }
-        migrated.schemaVersion = 8
+        // v8 → v9：旧默认的 100 轮硬上限上调为 256（仅作极端安全网）；
+        // 用户自定义过的值原样保留。
+        if migrated.schemaVersion < 9 && migrated.loop.maxToolIterations == 100 {
+            migrated.loop.maxToolIterations = 256
+        }
+        migrated.schemaVersion = 9
         return migrated
     }
 

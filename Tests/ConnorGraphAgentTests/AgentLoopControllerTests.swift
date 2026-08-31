@@ -363,7 +363,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 @Test func agentLoopConfigurationDefaultsBoundTokenUsage() {
     let configuration = AgentLoopConfiguration()
 
-    #expect(configuration.maxToolIterations == 100)
+    #expect(configuration.maxToolIterations == 256)
     #expect(configuration.maxToolCallsPerIteration == 8)
     #expect(configuration.maxConsecutiveToolResultErrors == 3)
     #expect(!configuration.stopAfterTurnWhenBudgetExceeded)
@@ -382,7 +382,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
         from: Data(#"{}"#.utf8)
     )
 
-    #expect(configuration.maxToolIterations == 100)
+    #expect(configuration.maxToolIterations == 256)
 }
 
 @Test func agentLoopConfigurationDecodesLegacyJSONWithPromptDefaults() throws {
