@@ -18,7 +18,8 @@ let package = Package(
         .executable(name: "connor", targets: ["ConnorCLI"])
     ],
     dependencies: [
-        .package(path: "Vendor/MailCoreSPM")
+        .package(path: "Vendor/MailCoreSPM"),
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.7.5")
     ],
     targets: [
         .target(name: "ConnorGraphCore"),
@@ -29,7 +30,7 @@ let package = Package(
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .target(name: "ConnorGraphSearch", dependencies: ["ConnorGraphCore", "ConnorGraphMemory"]),
-        .target(name: "ConnorGraphAgent", dependencies: ["ConnorGraphCore", "ConnorGraphMemory", "ConnorGraphSearch"]),
+        .target(name: "ConnorGraphAgent", dependencies: ["ConnorGraphCore", "ConnorGraphMemory", "ConnorGraphSearch", .product(name: "SwiftSoup", package: "SwiftSoup")]),
         .target(
             name: "ConnorGraphAppSupport",
             dependencies: [
