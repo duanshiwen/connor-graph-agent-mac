@@ -961,7 +961,8 @@ enum NativeWebTextExtractor {
     }
 
     static func markdown(from html: String, baseURL: URL) -> String {
-        var text = html
+        // 先定位正文容器（SwiftSoup），让正则转换器只处理正文，避免导航/广告噪声抢占预算
+        var text = NativeWebReadabilityExtractor.articleHTML(from: html)
         text = removeElement("script", from: text)
         text = removeElement("style", from: text)
         text = removeElement("nav", from: text)
