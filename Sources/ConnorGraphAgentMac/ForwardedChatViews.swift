@@ -159,6 +159,11 @@ struct ForwardDestinationSheet: View {
         kind: .agent
     )
 
+    /// 左侧目的地列表列宽（维持现状不变）。
+    private static let destinationColumnWidth: CGFloat = 320
+    /// 右侧内容块宽度 = 列表宽度 × 1.66（黄金比例 1:1.66）。
+    private static let sendColumnWidth: CGFloat = 320 * 1.66
+
     private var visibleDestinations: [ForwardDestination] {
         var result = [Self.newSessionDestination] + (searchMatches ?? loadedDestinations)
         if let kindFilter {
@@ -219,7 +224,7 @@ struct ForwardDestinationSheet: View {
             destinationList
         }
         .padding(20)
-        .frame(width: windowWidthClass.usesStackedPanes ? nil : 320)
+        .frame(width: windowWidthClass.usesStackedPanes ? nil : Self.destinationColumnWidth)
     }
 
     private var sendColumn: some View {
@@ -243,7 +248,12 @@ struct ForwardDestinationSheet: View {
             }
         }
         .padding(28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(width: windowWidthClass.usesStackedPanes ? nil : Self.sendColumnWidth)
+        .frame(
+            maxWidth: windowWidthClass.usesStackedPanes ? .infinity : nil,
+            maxHeight: .infinity,
+            alignment: .topLeading
+        )
     }
 
     @ViewBuilder
