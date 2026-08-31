@@ -723,7 +723,7 @@ final class BrowserFeatureModel {
     func completeAssistedWebFetch(_ taskID: UUID, title: String, finalURLString: String, text: String) {
         guard let task = assistedTasksByID[taskID], let request = assistedFetchRequestsByTaskID[taskID] else { return }
         let originalCount = text.count
-        let maxCharacters = 100_000
+        let maxCharacters = 300_000
         let truncated = originalCount > maxCharacters
         let returnedText = truncated ? String(text.prefix(maxCharacters)) : text
         let suffix = truncated ? "\n\n[Content truncated by Connor web_fetch(js-wkwebview): original characters = \(originalCount), returned characters = \(maxCharacters)]" : ""
