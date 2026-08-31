@@ -130,6 +130,8 @@ struct CraftPrimarySidebarView: View {
 
                     SidebarRow(title: "知识市场", systemImage: "books.vertical.fill", count: marketplaceCount, isSelected: selection == .knowledgeMarketplace) { select(.knowledgeMarketplace) }
 
+                    SidebarRow(title: "互动网页", systemImage: "globe", isSelected: selection == .interactiveWeb) { select(.interactiveWeb) }
+
                     SidebarDisclosure(title: "自动化", systemImage: "wand.and.stars", isExpanded: $automationExpanded) {
                         SidebarRow(title: "定时任务", systemImage: "clock", count: graph.tasks.presentation.summary.scheduledTaskCount, isSelected: selection == .scheduledTasks) { select(.scheduledTasks) }
                         SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: graph.tasks.presentation.summary.eventTriggeredTaskCount, isSelected: selection == .eventTriggeredTasks) { select(.eventTriggeredTasks) }

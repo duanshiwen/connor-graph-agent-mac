@@ -334,11 +334,15 @@ final class AppCompositionRoot: ObservableObject {
             case let .openSessionNotification(sessionID): command = .openSessionNotification(sessionID)
             case .openCalendarSettings: command = .openCalendarSettings
             case let .followRSSItem(request): command = .followRSSItem(request)
+            case let .openInteractiveWeb(request): command = .openInteractiveWeb(request)
             }
             self.sendWhenInteractive(command)
         }
         runtime.graph.rss.onFollowRequest = { [weak flowCoordinator] request in
             flowCoordinator?.send(.followRSSItem(request))
+        }
+        runtime.graph.interactiveWeb.onOpenInNewSession = { [weak flowCoordinator] url, title in
+            flowCoordinator?.send(.openInteractiveWeb(InteractiveWebOpenRequest(url: url, title: title)))
         }
         runtime.graph.calendar.onOpenSettingsRequest = { [weak flowCoordinator] in
             flowCoordinator?.send(.openCalendarSettings)
