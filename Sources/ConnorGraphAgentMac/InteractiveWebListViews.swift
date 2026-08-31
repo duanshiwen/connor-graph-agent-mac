@@ -6,10 +6,6 @@ import ConnorGraphAppSupport
 
 struct CraftInteractiveWebListPane: View {
     @Bindable var model: InteractiveWebFeatureModel
-    var forwarding: ListItemForwardingContext
-
-    @State private var pendingForwardBundle: ForwardedChatBundle?
-    @State private var isForwardSending = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,12 +59,7 @@ struct CraftInteractiveWebListPane: View {
                         InteractiveWebListRow(
                             project: project,
                             isSelected: project.id == model.selectedProjectID,
-                            onSelect: { model.select(project) },
-                            onForward: { pendingForwardBundle = model.forwardBundle(for: project) },
-                            onCopyLink: {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(model.siteURL(for: project).absoluteString, forType: .string)
-                            }
+                            onSelect: { model.select(project) }
                         )
                         .nativeListRowStyle()
                     }
@@ -79,24 +70,6 @@ struct CraftInteractiveWebListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .sheet(item: $pendingForwardBundle) { bundle in
-            ForwardDestinationSheet(
-                bundle: bundle,
-                pager: forwarding.makePager(),
-                isSending: isForwardSending,
-                onCancel: { pendingForwardBundle = nil },
-                onSend: { caption, keys in
-                    var copy = bundle
-                    copy.caption = caption
-                    isForwardSending = true
-                    defer {
-                        isForwardSending = false
-                        pendingForwardBundle = nil
-                    }
-                    try? await forwarding.send(copy, keys)
-                }
-            )
-        }
     }
 
     private var isListLoading: Bool {
@@ -109,8 +82,6 @@ private struct InteractiveWebListRow: View {
     let project: InteractiveWebRemoteProject
     let isSelected: Bool
     let onSelect: () -> Void
-    let onForward: () -> Void
-    let onCopyLink: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
@@ -141,19 +112,6 @@ private struct InteractiveWebListRow: View {
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                HStack(spacing: 4) {
-                    Button(action: onCopyLink) {
-                        Image(systemName: "link")
-                    }
-                    .buttonStyle(.appIcon)
-                    .help("复制链接")
-                    Button(action: onForward) {
-                        Image(systemName: "paperplane")
-                    }
-                    .buttonStyle(.appIcon)
-                    .help("转发到会话…")
                 }
             }
             .padding(.vertical, 2)
@@ -273,7 +231,7 @@ private struct InteractiveWebDetailContent: View {
             }
             .padding(20)
             .frame(maxWidth: 600, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 

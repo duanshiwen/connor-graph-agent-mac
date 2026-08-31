@@ -76,10 +76,9 @@ struct RSSDetailRouteView: View {
 
 struct InteractiveWebListRouteView: View {
     @Bindable var model: InteractiveWebFeatureModel
-    var forwarding: ListItemForwardingContext
 
     var body: some View {
-        CraftInteractiveWebListPane(model: model, forwarding: forwarding)
+        CraftInteractiveWebListPane(model: model)
     }
 }
 
