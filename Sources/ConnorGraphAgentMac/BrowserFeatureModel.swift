@@ -147,6 +147,28 @@ final class BrowserFeatureModel {
     @ObservationIgnored private(set) var automationRuntime: BrowserAutomationRuntime!
     private static let historyPageSize = 50
 
+    /// 注入到 WKWebView 的 Mozilla Readability.js（随 App 打包为资源，Apache-2.0）。
+    /// 懒加载避免每次 fetch 都读盘；不同构建方式（SwiftPM/Xcode）资源落点不同，
+    /// 依次探测；为空时降级为整页 innerText（不会崩溃）。
+    private static let readabilityScript: String = {
+        let name = "Readability"
+        let ext = "js"
+        let candidates: [URL?] = [
+            Bundle.main.url(forResource: name, withExtension: ext),
+            Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Resources"),
+            Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "ConnorGraphAgentMac_ConnorGraphAgentMac.bundle"),
+            Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Resources/ConnorGraphAgentMac_ConnorGraphAgentMac.bundle"),
+        ]
+        for candidate in candidates {
+            if let url = candidate,
+               let source = try? String(contentsOf: url, encoding: .utf8),
+               !source.isEmpty {
+                return source
+            }
+        }
+        return ""
+    }()
+
     @ObservationIgnored var sessionContextProvider: () -> SessionContext = {
         SessionContext(selectedSessionID: nil, activeSessionID: "__fallback__", sessionTitlesByID: [:])
     }
@@ -594,10 +616,17 @@ final class BrowserFeatureModel {
             return
         }
         let script = """
+        \(Self.readabilityScript)
         (() => JSON.stringify({
           title: document.title || '',
           url: location.href || '',
-          text: document.body ? document.body.innerText.slice(0, 100001) : '',
+          text: (() => {
+            try {
+              const article = new Readability(document).parse();
+              if (article && article.textContent) return article.textContent;
+            } catch (e) {}
+            return document.body ? document.body.innerText : '';
+          })(),
           lang: document.documentElement ? (document.documentElement.lang || '') : ''
         }))()
         """
