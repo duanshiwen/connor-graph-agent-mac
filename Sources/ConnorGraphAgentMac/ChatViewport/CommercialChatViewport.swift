@@ -426,7 +426,14 @@ struct ChatViewportNativeScrollObserver: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.publishMetrics()
+                    // NSView.boundsDidChange 会在滚动与布局（视图更新事务）期间同步投递，
+                    // 直接在这里写入 @State / @Published 会触发
+                    // “Modifying state during view update”与
+                    // “Publishing changes from within view updates”运行时告警。
+                    // 把指标发布调度到下一轮 RunLoop，等当前视图更新事务结束后再执行。
+                    DispatchQueue.main.async {
+                        self?.publishMetrics()
+                    }
                 }
             }
             publishMetrics()
