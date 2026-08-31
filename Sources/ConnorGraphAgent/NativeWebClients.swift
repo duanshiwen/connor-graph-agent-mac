@@ -132,7 +132,7 @@ public struct NativeWebFetchClient: Sendable {
 
     public init(
         httpClient: any NativeWebHTTPClient = URLSessionNativeWebHTTPClient(),
-        maxCharacters: Int = 50_000,
+        maxCharacters: Int = 200_000,
         retryPolicy: NativeWebRetryPolicy = .standard
     ) {
         self.httpClient = httpClient
