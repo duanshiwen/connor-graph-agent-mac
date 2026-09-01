@@ -18,6 +18,16 @@ private final class FactoryRSSCredentialStore: CredentialStore, @unchecked Senda
     func deleteSecret(service: String, account: String) throws { values["\(service):\(account)"] = nil }
 }
 
+// addSource 现在会先真实抓取并解析（无效源不入库），这里注入一个返回有效 RSS 的 stub fetcher。
+private struct FactoryRSSStubFetcher: RSSFetchAdapter {
+    func fetch(url: URL, timeoutSeconds: Int) async throws -> Data {
+        Data(#"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel><title>Shared Fixture Feed</title><link>https://example.com</link><description>Example</description><item><title>Item One</title><link>https://example.com/1</link><guid>1</guid></item></channel></rss>
+        """#.utf8)
+    }
+}
+
 @Test func agentRuntimeFactoryUsesInjectedRSSRuntimeAsSingleStoreOwner() async throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("connor-factory-rss-runtime-\(UUID().uuidString)", isDirectory: true)
@@ -33,7 +43,7 @@ private final class FactoryRSSCredentialStore: CredentialStore, @unchecked Senda
     )
     let repository = InMemoryRSSSourceRepository()
     let cache = InMemoryRSSSourceCache()
-    let runtime = RSSRuntime(repository: repository, cache: cache)
+    let runtime = RSSRuntime(repository: repository, cache: cache, fetcher: FactoryRSSStubFetcher())
     let factory = AppGraphAgentRuntimeFactory(
         store: store,
         settingsRepository: settings,
