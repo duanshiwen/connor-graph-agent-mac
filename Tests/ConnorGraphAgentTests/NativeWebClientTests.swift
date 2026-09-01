@@ -39,6 +39,37 @@ struct NativeWebClientTests {
         #expect(result.engine == "native-urlsession")
     }
 
+    @Test func webFetchPaginatesWithOffsetCharacters() async throws {
+        // 单段 210_000 字符长文，默认预算 200_000，第一页截断并返回续读偏移，
+        // 第二页从 offsetCharacters=200_000 续读到结尾，不再返回 nextOffsetCharacters。
+        let longText = String(repeating: "A", count: 210_000)
+        let html = "<html><head><title>Long</title></head><body><p>\(longText)</p></body></html>"
+        let client = NativeWebFetchClient(httpClient: FakeNativeWebHTTPClient(response: .html(html, url: "https://example.com/long")))
+
+        let first = try await client.fetch(
+            urlString: "https://example.com/long",
+            extractMode: "markdown",
+            timeoutMilliseconds: 30_000
+        )
+        #expect(first.truncated)
+        #expect(first.originalCharacterCount == 210_000)
+        #expect(first.offsetCharacters == 0)
+        #expect(first.nextOffsetCharacters == 200_000)
+        #expect(first.contentText.hasPrefix(String(repeating: "A", count: 200_000)))
+        #expect(first.contentText.contains("offsetCharacters=200000"))
+
+        let second = try await client.fetch(
+            urlString: "https://example.com/long",
+            extractMode: "markdown",
+            timeoutMilliseconds: 30_000,
+            offsetCharacters: 200_000
+        )
+        #expect(!second.truncated)
+        #expect(second.offsetCharacters == 200_000)
+        #expect(second.nextOffsetCharacters == nil)
+        #expect(second.contentText == String(repeating: "A", count: 10_000))
+    }
+
     @Test func webFetchCanReturnPlainText() async throws {
         let html = """
         <html><head><title>Plain</title></head><body><h1>Plain</h1><p>One&nbsp;two</p></body></html>

@@ -469,13 +469,15 @@ public struct BrowserAssistedWebFetchRequest: Equatable, Sendable {
     public var extractMode: String
     public var waitUntil: String
     public var timeoutMilliseconds: Int
+    public var offsetCharacters: Int
     public var revealImmediately: Bool
 
-    public init(urlString: String, extractMode: String, waitUntil: String, timeoutMilliseconds: Int, revealImmediately: Bool = false) {
+    public init(urlString: String, extractMode: String, waitUntil: String, timeoutMilliseconds: Int, offsetCharacters: Int = 0, revealImmediately: Bool = false) {
         self.urlString = urlString
         self.extractMode = extractMode
         self.waitUntil = waitUntil
         self.timeoutMilliseconds = timeoutMilliseconds
+        self.offsetCharacters = offsetCharacters
         self.revealImmediately = revealImmediately
     }
 }
@@ -500,6 +502,8 @@ public struct BrowserAssistedWebFetchResult: Equatable, Sendable {
     public var interventionReason: String?
     public var truncated: Bool
     public var originalCharacterCount: Int
+    public var offsetCharacters: Int
+    public var nextOffsetCharacters: Int?
 
     public init(
         status: BrowserAssistedWebFetchStatus,
@@ -513,7 +517,9 @@ public struct BrowserAssistedWebFetchResult: Equatable, Sendable {
         errorMessage: String?,
         interventionReason: String?,
         truncated: Bool,
-        originalCharacterCount: Int
+        originalCharacterCount: Int,
+        offsetCharacters: Int = 0,
+        nextOffsetCharacters: Int? = nil
     ) {
         self.status = status
         self.urlString = urlString
@@ -527,6 +533,8 @@ public struct BrowserAssistedWebFetchResult: Equatable, Sendable {
         self.interventionReason = interventionReason
         self.truncated = truncated
         self.originalCharacterCount = originalCharacterCount
+        self.offsetCharacters = offsetCharacters
+        self.nextOffsetCharacters = nextOffsetCharacters
     }
 }
 
@@ -542,7 +550,8 @@ public struct NativeWebFetchTool: AgentTool {
         "extractMode": .stringEnumeration(values: ["markdown", "text"], description: "Extraction format. Defaults to markdown."),
         "renderMode": .stringEnumeration(values: ["auto", "http", "js"], description: "Rendering strategy. Defaults to auto."),
         "waitUntil": .stringEnumeration(values: ["load", "domcontentloaded", "networkidle", "commit"], description: "Page readiness condition. Defaults to networkidle."),
-        "timeoutMs": .integer(description: "Per-page timeout in milliseconds. Defaults to 30000, capped at 60000.")
+        "timeoutMs": .integer(description: "Per-page timeout in milliseconds. Defaults to 30000, capped at 60000."),
+        "offsetCharacters": .integer(description: "Optional continuation offset in characters when the previous web_fetch return was truncated (its nextOffsetCharacters). Reads the same page's later portion starting at this offset. Only valid with a single url, not a urls batch.")
     ], required: [])
 
     private static let maximumBatchSize = 10
@@ -581,6 +590,10 @@ public struct NativeWebFetchTool: AgentTool {
         let extractMode = (arguments.string("extractMode") ?? arguments.string("extract_mode") ?? "markdown").lowercased()
         let waitUntil = (arguments.string("waitUntil") ?? arguments.string("wait_until") ?? "networkidle").lowercased()
         let timeoutMilliseconds = WebFetchTimeoutPolicy.normalized(arguments.int("timeoutMs") ?? arguments.int("timeout_ms"))
+        let offsetCharacters = max(0, arguments.int("offsetCharacters") ?? arguments.int("offset_characters") ?? 0)
+        if batchURLs != nil && offsetCharacters > 0 {
+            throw AgentToolError.invalidArguments("web_fetch offsetCharacters is only supported for a single url, not a urls batch")
+        }
         if batchURLs != nil {
             return await executeBatch(
                 urls: urls,
@@ -597,6 +610,7 @@ public struct NativeWebFetchTool: AgentTool {
             extractMode: extractMode,
             waitUntil: waitUntil,
             timeoutMilliseconds: timeoutMilliseconds,
+            offsetCharacters: offsetCharacters,
             context: context
         )
     }
@@ -607,6 +621,7 @@ public struct NativeWebFetchTool: AgentTool {
         extractMode: String,
         waitUntil: String,
         timeoutMilliseconds: Int,
+        offsetCharacters: Int,
         context: AgentToolExecutionContext
     ) async throws -> AgentToolResult {
         return try await WebFetchDeadline.run(toolName: name, timeoutMilliseconds: timeoutMilliseconds) {
@@ -616,6 +631,7 @@ public struct NativeWebFetchTool: AgentTool {
                 extractMode: extractMode,
                 waitUntil: waitUntil,
                 timeoutMilliseconds: timeoutMilliseconds,
+                offsetCharacters: offsetCharacters,
                 context: context
             )
         }
@@ -639,6 +655,7 @@ public struct NativeWebFetchTool: AgentTool {
                         extractMode: extractMode,
                         waitUntil: waitUntil,
                         timeoutMilliseconds: timeoutMilliseconds,
+                        offsetCharacters: 0,
                         context: context
                     ),
                     error: nil
@@ -690,6 +707,7 @@ public struct NativeWebFetchTool: AgentTool {
         extractMode: String,
         waitUntil: String,
         timeoutMilliseconds: Int,
+        offsetCharacters: Int,
         context: AgentToolExecutionContext
     ) async throws -> AgentToolResult {
         if renderMode == "js", let result = try await executeBrowserAssistedFetch(
@@ -697,6 +715,7 @@ public struct NativeWebFetchTool: AgentTool {
             extractMode: extractMode,
             waitUntil: waitUntil,
             timeoutMilliseconds: timeoutMilliseconds,
+            offsetCharacters: offsetCharacters,
             renderMode: renderMode,
             context: context
         ) {
@@ -708,6 +727,7 @@ public struct NativeWebFetchTool: AgentTool {
                 urlString: url,
                 extractMode: extractMode,
                 timeoutMilliseconds: timeoutMilliseconds,
+                offsetCharacters: offsetCharacters,
                 onRetryProgress: { [context] message in
                     context.publishToolProgress(toolName: name, message: message)
                 }
@@ -718,6 +738,7 @@ public struct NativeWebFetchTool: AgentTool {
                 extractMode: extractMode,
                 waitUntil: waitUntil,
                 timeoutMilliseconds: timeoutMilliseconds,
+                offsetCharacters: offsetCharacters,
                 renderMode: renderMode,
                 context: context
             ) {
@@ -732,6 +753,7 @@ public struct NativeWebFetchTool: AgentTool {
                extractMode: extractMode,
                waitUntil: waitUntil,
                timeoutMilliseconds: timeoutMilliseconds,
+               offsetCharacters: offsetCharacters,
                renderMode: renderMode,
                context: context
            ) {
@@ -752,6 +774,8 @@ public struct NativeWebFetchTool: AgentTool {
                 "mimeType": nativeResult.mimeType,
                 "truncated": nativeResult.truncated,
                 "originalCharacterCount": nativeResult.originalCharacterCount,
+                "offsetCharacters": nativeResult.offsetCharacters,
+                "nextOffsetCharacters": nativeResult.nextOffsetCharacters as Any,
                 "text": nativeResult.contentText
             ]),
             citations: [nativeResult.finalURLString.isEmpty ? nativeResult.urlString : nativeResult.finalURLString]
@@ -763,6 +787,7 @@ public struct NativeWebFetchTool: AgentTool {
         extractMode: String,
         waitUntil: String,
         timeoutMilliseconds: Int,
+        offsetCharacters: Int,
         renderMode: String,
         context: AgentToolExecutionContext
     ) async throws -> AgentToolResult? {
@@ -772,6 +797,7 @@ public struct NativeWebFetchTool: AgentTool {
             extractMode: extractMode,
             waitUntil: waitUntil,
             timeoutMilliseconds: timeoutMilliseconds,
+            offsetCharacters: offsetCharacters,
             revealImmediately: false
         )
         guard let browserResult = await browserAssistedWebFetchHandler(request) else { return nil }
@@ -789,7 +815,9 @@ public struct NativeWebFetchTool: AgentTool {
             "errorMessage": browserResult.errorMessage as Any,
             "interventionReason": browserResult.interventionReason as Any,
             "truncated": browserResult.truncated,
-            "originalCharacterCount": browserResult.originalCharacterCount
+            "originalCharacterCount": browserResult.originalCharacterCount,
+            "offsetCharacters": browserResult.offsetCharacters,
+            "nextOffsetCharacters": browserResult.nextOffsetCharacters as Any
         ]
         switch browserResult.status {
         case .fetched:

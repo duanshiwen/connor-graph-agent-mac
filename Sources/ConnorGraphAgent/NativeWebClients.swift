@@ -48,6 +48,47 @@ public struct NativeWebFetchResult: Sendable, Equatable {
     public var engine: String
     public var truncated: Bool
     public var originalCharacterCount: Int
+    /// 本次返回内容在全文中起始的字符偏移（连续分页用）。
+    public var offsetCharacters: Int
+    /// 还有更多内容时，下一次续读应传入的偏移；nil 表示已到结尾。
+    public var nextOffsetCharacters: Int?
+}
+
+/// 智能截断：优先段落（\n\n）边界，其次句子（中英文句末）边界，
+/// 避免在长文中间硬切；极端情况（无任何边界）才回退到硬限。
+public enum NativeWebTruncation {
+    public static func truncateAtBoundary(_ text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let window = String(text.prefix(limit))
+        let chars = Array(window)
+        let threshold = limit * 3 / 5
+        var paragraphStart = -1
+        var i = chars.count - 1
+        while i >= 1 {
+            if chars[i] == "\n" && chars[i - 1] == "\n" {
+                paragraphStart = i - 1
+                break
+            }
+            i -= 1
+        }
+        if paragraphStart > threshold {
+            return String(chars[0..<paragraphStart])
+        }
+        let sentenceCharacters: Set<Character> = ["。", "！", "？", ".", "!", "?"]
+        var sentenceEnd = -1
+        i = chars.count - 1
+        while i >= 0 {
+            if sentenceCharacters.contains(chars[i]) {
+                sentenceEnd = i
+                break
+            }
+            i -= 1
+        }
+        if sentenceEnd > threshold {
+            return String(chars[0...sentenceEnd])
+        }
+        return window
+    }
 }
 
 /// Retry policy for transient web_fetch failures.
@@ -144,6 +185,7 @@ public struct NativeWebFetchClient: Sendable {
         urlString: String,
         extractMode: String,
         timeoutMilliseconds: Int,
+        offsetCharacters: Int = 0,
         onRetryProgress: (@Sendable (String) -> Void)? = nil
     ) async throws -> NativeWebFetchResult {
         guard let url = URL(string: urlString), ["http", "https"].contains(url.scheme?.lowercased()) else {
@@ -175,18 +217,36 @@ public struct NativeWebFetchClient: Sendable {
                     let markdown = NativeWebTextExtractor.markdown(from: decoded.text, baseURL: response.finalURL ?? url)
                     let plainText = NativeWebTextExtractor.plainText(fromMarkdown: markdown)
                     let selected = extractMode.lowercased() == "text" ? plainText : markdown
-                    let truncatedText = String(selected.prefix(maxCharacters))
+                    let start = max(0, offsetCharacters)
+                    let available = selected.count
+                    let hasMore = start + maxCharacters < available
+                    let window: String
+                    if start >= available {
+                        window = ""
+                    } else {
+                        let dropStart = selected.index(selected.startIndex, offsetBy: start)
+                        let dropEnd = selected.index(dropStart, offsetBy: min(maxCharacters, available - start))
+                        window = String(selected[dropStart..<dropEnd])
+                    }
+                    let windowText = hasMore ? NativeWebTruncation.truncateAtBoundary(window, limit: maxCharacters) : window
+                    let nextOffset = start + windowText.count
+                    let percent = available > 0 ? (nextOffset * 100) / available : 100
+                    let contentText = hasMore
+                        ? "\(windowText)\n\n[内容较长已分页：本次返回约占全文 \(percent)%，后续还有。如需继续阅读，请用 offsetCharacters=\(nextOffset) 调用 web_fetch 续读同页。]"
+                        : windowText
 
                     return NativeWebFetchResult(
                         urlString: url.absoluteString,
                         finalURLString: (response.finalURL ?? url).absoluteString,
                         title: title,
-                        contentText: truncatedText,
+                        contentText: contentText,
                         statusCode: response.statusCode,
                         mimeType: response.mimeType ?? "unknown",
                         engine: "native-urlsession",
-                        truncated: selected.count > maxCharacters,
-                        originalCharacterCount: selected.count
+                        truncated: hasMore,
+                        originalCharacterCount: available,
+                        offsetCharacters: start,
+                        nextOffsetCharacters: hasMore ? nextOffset : nil
                     )
                 }
             } catch {
