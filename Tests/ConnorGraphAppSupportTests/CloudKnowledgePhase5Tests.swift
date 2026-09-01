@@ -222,9 +222,13 @@ struct CloudKnowledgePhase5Tests {
     }
 
     @Test @MainActor func emptyPublicationFinishesWithoutCommit() async {
+        // 使用隔离的临时仓库，避免默认 Application Support 持久化文件在多次运行间串状态
+        // （上次运行落库的选中对话会污染下一次运行，导致 toggle 反选、随机失败）。
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-empty-pub-\\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
         let api = CreatorPublicationFakeAPI()
         await api.setEmptyValidation(true)
-        let store = CloudKnowledgeCreatorStore(publicationAPI: api)
+        let store = CloudKnowledgeCreatorStore(repository: .init(fileURL: root.appendingPathComponent("snapshot.json")), publicationAPI: api)
         store.attachRun(id: "run")
         // startGeneration 现在要求至少选中一个对话；空发布指“生成后服务端判定无新增知识”，
         // 而非零对话。选中一个占位对话以走完整生成→校验→空结果结束流程。
