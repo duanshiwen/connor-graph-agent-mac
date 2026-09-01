@@ -104,7 +104,7 @@ struct AppRouteViewDependencyTests {
         let detailStart = try #require(source.range(of: "struct CloudKnowledgeMarketplaceDetailPane: View"))
         let listSource = source[listStart.lowerBound..<detailStart.lowerBound]
 
-        #expect(listSource.contains("AppListPaneHeader(title: \"知识市场\")"))
+        #expect(listSource.contains("Text(\"知识市场\")"))
         #expect(listSource.contains("Image(systemName: \"plus\")"))
         #expect(listSource.contains("Image(systemName: \"clock.arrow.circlepath\")"))
         #expect(listSource.contains("LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing)"))
@@ -160,7 +160,7 @@ struct AppRouteViewDependencyTests {
         #expect(listPanes.contains("AppListPaneHeader(title: kind.title)"))
         #expect(listPanes.contains("AppListPaneHeader(title: \"邮件\")"))
         #expect(listPanes.contains("AppListPaneHeader(title: \"RSS 阅读\")"))
-        #expect(marketplace.contains("AppListPaneHeader(title: \"知识市场\")"))
+        #expect(marketplace.contains("Text(\"知识市场\")"))
         #expect(sources.contains("AppListPaneHeader(title: \"外部工具连接\""))
         #expect(skills.contains("AppListPaneHeader(title: \"技能\")"))
     }
@@ -175,7 +175,7 @@ struct AppRouteViewDependencyTests {
         #expect(!sidebar.contains("SidebarRow(title: \"通讯录\""))
         #expect(panes.contains("Button(\"添加康纳好友\""))
         #expect(panes.contains("Button(\"添加一条人际关系\""))
-        #expect(panes.contains("Menu(\"合并到已有人物\")"))
+        #expect(panes.contains("Button(\"合并到已有人物\""))
         #expect(routes.contains("CraftContactsListPane("))
         #expect(routes.contains("im: graph.im"))
     }
@@ -219,9 +219,12 @@ struct AppRouteViewDependencyTests {
         let badgeStart = try #require(source.range(of: "struct MarketplaceStatusBadge: View"))
         let detailSource = source[detailStart.lowerBound..<badgeStart.lowerBound]
 
-        #expect(!detailSource.contains("CloudKnowledgeCreatorView"))
+        // 详情页主体是“首页或知识库详情”，创作者流程只作为编辑弹窗（sheet），不再是详情本体。
+        #expect(detailSource.contains(".sheet(isPresented: $isPresentingEditor)"))
+        #expect(detailSource.contains("marketplaceDetail(selected)"))
         #expect(!detailSource.contains("store.showsPublisher"))
-        #expect(!detailSource.contains("if !base.owned"))
+        // 已发布知识库允许所有者订阅自己（后端仅校验 published/active，不限制所有者）。
+        #expect(detailSource.contains("!base.owned || base.publicationStatus == \"published\""))
         #expect(detailSource.contains("if base.subscribed"))
         #expect(detailSource.contains("store.subscribe(id: base.id)"))
     }
