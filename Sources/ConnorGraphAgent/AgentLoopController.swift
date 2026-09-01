@@ -2557,13 +2557,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     private static func invalidToolArgumentsMessage(for call: AgentToolCall) -> String? {
         let trimmed = call.argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        guard let object = try? JSONSerialization.jsonObject(with: Data(trimmed.utf8)) as? [String: Any] else {
-            return "Tool call arguments were not a valid JSON object. Re-issue this tool call with arguments that satisfy the tool's input schema."
-        }
-        if object.count == 1, object["INVALID_JSON"] != nil {
-            return "The streamed tool call arguments could not be reassembled into valid JSON. Re-issue this tool call with arguments that satisfy the tool's input schema."
-        }
-        return nil
+        // 优先解包流式 INVALID_JSON 标记（带 __length/__truncated/__json_error 等元数据）；
+        // 否则直接分析原文。合法 JSON 对象返回 nil（放行执行）。
+        let payload = ToolArgumentJSONDiagnostics.unwrapInvalidJSONMarker(trimmed)
+            ?? ToolArgumentJSONDiagnostics.analyze(trimmed)
+        guard let payload else { return nil }
+        // 统一错误模板：具体原因 + 长度/位置 + 截断判定 + 写工具行动指引（勿用批量通道调 ApplyPatch）。
+        return ToolArgumentJSONDiagnostics.errorDescription(forToolName: call.name, payload: payload)
     }
 
     private func canExecuteInParallel(_ calls: [AgentToolCall]) -> Bool {
