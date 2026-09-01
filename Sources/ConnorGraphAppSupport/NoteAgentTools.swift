@@ -267,19 +267,19 @@ public struct NoteEditTool: AgentTool {
         guard let note = try noteRepository.note(id: noteID) else {
             throw AgentToolError.invalidArguments("note not found for noteID=\(noteID); read notes with note_search/note_get first")
         }
-        guard var session = try repository.loadSession(id: note.sessionID) else {
+        guard let session = try repository.loadSession(id: note.sessionID) else {
             throw AgentToolError.invalidArguments("note session not found")
         }
         let newTitle = (arguments.string("title") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !newTitle.isEmpty { session.title = newTitle }
         // 与 UI 编辑路径一致：原位更新笔记正文首条消息（保留会话其它消息、带冲突校验），
-        // 并刷新笔记投影与索引。
+        // 并刷新笔记投影与索引；可选 title 一并落库（否则改标题永远不会生效）。
         let updated = try repository.updateNoteBody(
             sessionID: session.id,
             messageID: note.sourceMessageID,
             expectedContent: note.body,
             content: content,
-            updatedAt: Date()
+            updatedAt: Date(),
+            title: newTitle.isEmpty ? nil : newTitle
         )
         let refreshed = try noteRepository.note(sessionID: session.id)
         let payload = NoteEditResult(noteID: noteID, sessionID: session.id, title: updated.title, updatedAt: refreshed?.updatedAt)
@@ -292,7 +292,7 @@ public struct NoteEditTool: AgentTool {
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "已更新笔记「\(session.title)」（noteID=\(noteID)），正文与索引已刷新。",
+            contentText: "已更新笔记「\(updated.title)」（noteID=\(noteID)），正文与索引已刷新。",
             contentJSON: json,
             citations: []
         )

@@ -89,6 +89,42 @@ private struct FailingNoteProjection: NoteProjectionSynchronizing {
     #expect(try AppNoteRepository(store: store).note(sessionID: "editable-note")?.body == "revised")
 }
 
+@Test func appChatRepositoryUpdateNoteBodyAppliesOptionalTitle() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    var governance = AgentSessionGovernanceMetadata.default
+    governance.kind = .note
+    try repository.saveSession(AgentSession(
+        id: "retitle-note",
+        title: "Old Title",
+        messages: [AgentMessage(id: "body", role: .user, content: "current")],
+        governance: governance
+    ))
+
+    let updated = try repository.updateNoteBody(
+        sessionID: "retitle-note",
+        messageID: "body",
+        expectedContent: "current",
+        content: "replacement",
+        title: "New Title"
+    )
+    #expect(updated.title == "New Title")
+    #expect(updated.messages.first?.content == "replacement")
+    #expect(try AppNoteRepository(store: store).note(sessionID: "retitle-note")?.title == "New Title")
+
+    // 只改标题、正文不变时也要落库（原来会提前 return，导致改标题永不生效）。
+    let retitledOnly = try repository.updateNoteBody(
+        sessionID: "retitle-note",
+        messageID: "body",
+        expectedContent: "replacement",
+        content: "replacement",
+        title: "Titled Again"
+    )
+    #expect(retitledOnly.title == "Titled Again")
+    #expect(retitledOnly.messages.first?.content == "replacement")
+}
+
 @Test func appChatRepositoryRejectsStaleOrNonNoteBodyEdits() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
     try store.migrate()
