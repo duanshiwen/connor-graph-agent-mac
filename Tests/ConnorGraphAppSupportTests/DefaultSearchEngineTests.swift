@@ -9,7 +9,7 @@ struct DefaultSearchEngineTests {
     }
 
     @Test func supportedEnginesExposeUserFacingNames() {
-        #expect(DefaultSearchEngine.allCases.map(\.displayName) == ["Bing", "Google", "DuckDuckGo", "百度", "Yahoo"])
+        #expect(DefaultSearchEngine.allCases.map(\.displayName) == ["Bing", "Google", "DuckDuckGo", "Yahoo"])
     }
 
     @Test func buildsBingSearchURL() throws {
@@ -25,7 +25,6 @@ struct DefaultSearchEngineTests {
         let cases: [(DefaultSearchEngine, String, String, String)] = [
             (.google, "www.google.com", "/search", "q"),
             (.duckDuckGo, "duckduckgo.com", "/", "q"),
-            (.baidu, "www.baidu.com", "/s", "wd"),
             (.yahoo, "search.yahoo.com", "/search", "p")
         ]
 
@@ -42,6 +41,14 @@ struct DefaultSearchEngineTests {
 
     @Test func blankQueriesDoNotBuildSearchURLs() {
         #expect(DefaultSearchEngine.bing.searchURL(for: "   ") == nil)
+    }
+
+    @Test func decodesRemovedEngineRawValuesByFallingBackToDefault() throws {
+        let data = try #require("\"baidu\"".data(using: .utf8))
+        let engine = try JSONDecoder().decode(DefaultSearchEngine.self, from: data)
+
+        #expect(engine == .default)
+        #expect(engine == .bing)
     }
 }
 

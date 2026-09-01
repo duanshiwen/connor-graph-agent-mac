@@ -4,19 +4,29 @@ public enum DefaultSearchEngine: String, Codable, Sendable, Equatable, CaseItera
     case bing
     case google
     case duckDuckGo
-    case baidu
     case yahoo
 
     public static let `default`: DefaultSearchEngine = .bing
 
     public var id: String { rawValue }
 
+    /// 旧版本持久化里可能存过已移除的引擎（如 baidu）；解码到未知 rawValue 时安全回退到默认值，避免整个设置解码失败。
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        self = DefaultSearchEngine(rawValue: rawValue) ?? .default
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
     public var displayName: String {
         switch self {
         case .bing: "Bing"
         case .google: "Google"
         case .duckDuckGo: "DuckDuckGo"
-        case .baidu: "百度"
         case .yahoo: "Yahoo"
         }
     }
@@ -42,7 +52,6 @@ public enum DefaultSearchEngine: String, Codable, Sendable, Equatable, CaseItera
         case .bing: "cn.bing.com"
         case .google: "www.google.com"
         case .duckDuckGo: "duckduckgo.com"
-        case .baidu: "www.baidu.com"
         case .yahoo: "search.yahoo.com"
         }
     }
@@ -51,14 +60,12 @@ public enum DefaultSearchEngine: String, Codable, Sendable, Equatable, CaseItera
         switch self {
         case .bing, .google, .yahoo: "/search"
         case .duckDuckGo: "/"
-        case .baidu: "/s"
         }
     }
 
     private var queryParameterName: String {
         switch self {
         case .bing, .google, .duckDuckGo: "q"
-        case .baidu: "wd"
         case .yahoo: "p"
         }
     }
