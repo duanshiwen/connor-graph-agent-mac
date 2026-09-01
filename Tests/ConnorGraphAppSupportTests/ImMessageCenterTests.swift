@@ -310,7 +310,8 @@ struct ImMessageCenterTests {
         let friend = try #require(try await fixture.store.friend(userId: 9))
         #expect(friend.nickname == "艾丽")
         #expect(friend.personProfileID == "person-1")
-        #expect(try await fixture.store.friend(userId: 99)?.username == "stale")
+        // 服务端已不存在的好友会被收敛（幽灵好友清理），本地不再保留。
+        #expect(try await fixture.store.friend(userId: 99) == nil)
         #expect(try await fixture.store.loadFriendRequests().map(\.id) == [5])
 
         let peer = try #require(try await fixture.store.conversation(id: "peer:9"))
@@ -456,8 +457,9 @@ struct ImMessageCenterTests {
         #expect(try await fixture.store.message(id: "srv-1") == nil)
     }
 
-    @Test func accountRefreshDoesNotPrunePreviousAccountFriendsOrGroups() async throws {
+    @Test func accountRefreshPrunesServerMissingFriendsButKeepsConversations() async throws {
         let fixture = try makeFixture()
+        // 本地残留的好友与会话：服务端已不存在的好友应被收敛，会话不被清理。
         try await fixture.store.upsertFriends([ImFriend(userId: 99, username: "old-friend")])
         try await fixture.store.upsertConversation(ImConversation(
             id: "group:old-group", kind: .group, groupId: "old-group", title: "旧账号群聊"
@@ -467,7 +469,8 @@ struct ImMessageCenterTests {
 
         await fixture.center.refreshAll()
 
-        #expect(try await fixture.store.friend(userId: 99)?.username == "old-friend")
+        // 好友按账号收敛：服务端已不存在的好友被清理；会话不被清理。
+        #expect(try await fixture.store.friend(userId: 99) == nil)
         #expect(try await fixture.store.conversation(id: "group:old-group")?.title == "旧账号群聊")
     }
 
