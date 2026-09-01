@@ -348,7 +348,7 @@ private struct PhasedArtifactTool: AgentTool {
 }
 
 @Test func promptModuleCatalogHasCompleteStableAcyclicClassification() {
-    #expect(AgentPromptModuleCatalog.specifications.count == 45)
+    #expect(AgentPromptModuleCatalog.specifications.count == 46)
     #expect(AgentPromptModuleCatalog.duplicateIDs.isEmpty)
     #expect(AgentPromptModuleCatalog.dependencyCycles.isEmpty)
     #expect(AgentPromptModuleCatalog.specifications.allSatisfy { !$0.summary.isEmpty })
