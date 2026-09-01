@@ -277,7 +277,8 @@ public struct AppChatSessionRepository: Sendable {
         messageID: String,
         expectedContent: String,
         content: String,
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        title: String? = nil
     ) throws -> AgentSession {
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AppChatSessionRepositoryError.emptyNoteBody
@@ -293,8 +294,12 @@ public struct AppChatSessionRepository: Sendable {
         guard session.messages[0].content == expectedContent else {
             throw AppChatSessionRepositoryError.noteBodyConflict("\(sessionID):\(messageID)")
         }
-        guard session.messages[0].content != content else { return session }
-        session.messages[0].content = content
+        let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let bodyChanged = session.messages[0].content != content
+        let titleChanged = !trimmedTitle.isEmpty && trimmedTitle != session.title
+        guard bodyChanged || titleChanged else { return session }
+        if titleChanged { session.title = trimmedTitle }
+        if bodyChanged { session.messages[0].content = content }
         session.updatedAt = updatedAt
         return try saveSession(session, previousMessageCount: session.messages.count)
     }
