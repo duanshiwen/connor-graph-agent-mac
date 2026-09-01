@@ -2295,7 +2295,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         }
         return """
         ## Native Tool Catalog
-        These task-relevant native tools are loaded for this run and are not called directly. Pass their exact names and native arguments through parallel_tool_query or parallel_tool_execute. Shell and ApplyPatch are direct tools and are intentionally absent from this catalog. Do not invent arguments outside a selected native schema.
+        These task-relevant native tools are loaded for this run and are not called directly. Pass their exact names and native arguments through parallel_tool_query or parallel_tool_execute. Shell and ApplyPatch are direct tools and are intentionally absent from this catalog. Write tools such as ApplyPatch must be invoked directly, never wrapped in a batch channel. Do not invent arguments outside a selected native schema.
         \(json)
         """
     }
