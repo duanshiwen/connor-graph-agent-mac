@@ -226,6 +226,9 @@ struct CloudKnowledgePhase5Tests {
         await api.setEmptyValidation(true)
         let store = CloudKnowledgeCreatorStore(publicationAPI: api)
         store.attachRun(id: "run")
+        // startGeneration 现在要求至少选中一个对话；空发布指“生成后服务端判定无新增知识”，
+        // 而非零对话。选中一个占位对话以走完整生成→校验→空结果结束流程。
+        store.toggleConversation("c1")
         store.startGeneration { id in .init(summary: id) }
         await store.waitForGenerationCompletion()
 
