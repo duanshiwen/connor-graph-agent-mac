@@ -982,7 +982,7 @@ public enum AgentPhaseToolContract {
         ),
         AgentToolDefinition(
             name: externalSearchBatchName,
-            description: "Run model-selected independent native reads concurrently and return one aggregated result. This wrapper does not classify call semantics; native tool permissions remain authoritative. Put every read that can be anticipated from current evidence into this one batch. Each calls item uses the exact native toolName and native arguments object. Do not repeat a completed call unless an intervening state change or explicit retry instruction makes the same call necessary.",
+            description: "Run model-selected independent native reads concurrently and return one aggregated result. This wrapper does not classify call semantics; native tool permissions remain authoritative. Put every read that can be anticipated from current evidence into this one batch. Each calls item uses the exact native toolName and native arguments object. Do not repeat a completed call unless an intervening state change or explicit retry instruction makes the same call necessary. Write tools such as ApplyPatch must be called directly, never through this batch channel; oversized write arguments are blocked before execution.",
             inputSchema: .object(properties: [
                 "calls": .array(items: .object(properties: [
                     "toolName": .string(description: "Exact native tool name selected by the model."),
@@ -993,7 +993,7 @@ public enum AgentPhaseToolContract {
         ),
         AgentToolDefinition(
             name: externalReadBatchName,
-            description: "Run model-selected native action calls as one ordered batch and return one aggregated result. Put every currently determined compatible action into this one batch. Each calls item uses the exact native toolName and native arguments object. Calls execute in listed order through normal permission and approval handling; never repeat a successful mutation merely to confirm it.",
+            description: "Run model-selected native action calls as one ordered batch and return one aggregated result. Put every currently determined compatible action into this one batch. Each calls item uses the exact native toolName and native arguments object. Calls execute in listed order through normal permission and approval handling; never repeat a successful mutation merely to confirm it. Write tools such as ApplyPatch must be called directly, never through this batch channel; oversized write arguments are blocked before execution.",
             inputSchema: .object(properties: [
                 "calls": .array(items: .object(properties: [
                     "toolName": .string(description: "Exact native tool name selected by the model."),

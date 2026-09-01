@@ -277,7 +277,15 @@ public struct AnthropicStreamAccumulator: Sendable, Equatable {
             if let data = block.inputJSON.data(using: .utf8), (try? JSONSerialization.jsonObject(with: data)) != nil {
                 argumentsJSON = block.inputJSON
             } else {
-                argumentsJSON = jsonString(["INVALID_JSON": block.inputJSON])
+                // 流式解析失败：升级为带诊断元数据的 INVALID_JSON 标记，原文完整保留（绝不裁剪）。
+                let payload = ToolArgumentJSONDiagnostics.analyze(block.inputJSON)
+                    ?? ToolArgumentJSONDiagnostics.JSONErrorPayload(
+                        raw: block.inputJSON,
+                        length: block.inputJSON.count,
+                        truncated: false,
+                        summary: "invalid JSON"
+                    )
+                argumentsJSON = ToolArgumentJSONDiagnostics.invalidJSONMarker(payload: payload)
             }
             toolCalls.append(AgentToolCall(id: id, name: name, argumentsJSON: argumentsJSON))
             rawContentJSON.append(jsonString(["type": "tool_use", "id": id, "name": name, "input": (try? JSONSerialization.jsonObject(with: Data(argumentsJSON.utf8))) ?? [:]]))
