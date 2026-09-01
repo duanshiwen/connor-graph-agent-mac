@@ -33,7 +33,6 @@ struct PhaseGCraftGradeNativeUITests {
             .openCalendarSources,
             .openContactsSources,
             .openRSSSources,
-            .checkCommercialReadiness,
             .openSettings
         ])
         #expect(shell.commands.first?.keyboardShortcut == "⌘N")

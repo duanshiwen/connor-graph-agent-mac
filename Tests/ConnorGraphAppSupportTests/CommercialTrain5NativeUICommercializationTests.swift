@@ -25,10 +25,12 @@ struct CommercialTrain5NativeUICommercializationTests {
     @Test func nativeShellCommandsSupportGroupsRiskAndPrimaryActions() {
         let shell = ConnorNativeShellPresentation.default
 
-        let readiness = shell.command(for: .checkCommercialReadiness)
-        #expect(readiness?.groupID == "governance")
-        #expect(readiness?.riskLevel == .medium)
-        #expect(readiness?.isPrimaryAction == true)
+        // 商业就绪检查命令已随 Product OS 导航链移除，改用现行治理命令校验
+        // 命令的 group/risk/primary 元数据支持。
+        let governanceCommand = shell.command(for: .openLocalAutomationSurface)
+        #expect(governanceCommand?.groupID == "governance")
+        #expect(governanceCommand?.riskLevel == .medium)
+        #expect(governanceCommand?.isPrimaryAction == true)
         #expect(shell.command(for: .newSession)?.target == .agentChat)
         #expect(shell.command(for: .openApprovals)?.riskLevel == .high)
     }
