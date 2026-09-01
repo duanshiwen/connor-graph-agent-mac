@@ -133,6 +133,7 @@ struct ConnorGraphAgentMacApp: App {
                     Button("日历") { root.sendWhenInteractive(.selectSidebar(.calendar)) }
                     Button("邮件") { root.sendWhenInteractive(.selectSidebar(.mail)) }
                     Button("RSS") { root.sendWhenInteractive(.selectSidebar(.rss)) }
+                    Button("互动网页") { root.sendWhenInteractive(.selectSidebar(.interactiveWeb)) }
                     Button("数据源 / MCP") { root.sendWhenInteractive(.selectSidebar(.sources)) }
                     Button("技能") { root.sendWhenInteractive(.selectSidebar(.skills)) }
                     Button("知识市场") { root.sendWhenInteractive(.selectSidebar(.knowledgeMarketplace)) }
