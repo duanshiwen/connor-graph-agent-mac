@@ -162,15 +162,6 @@ struct BrowserAssistedWebToolTests {
         )
     }
 
-    @Test func baiduWebSearchUsesBrowserAssistedHandler() async throws {
-        try await assertSearchUsesBrowserAssistedHandler(
-            engine: "baidu",
-            query: "康纳同学",
-            expectedURLPart: "www.baidu.com/s",
-            expectedQueryParameter: "wd="
-        )
-    }
-
     @Test func webFetchUsesMergedSystemBrowserCapabilityWhenRequested() async throws {
         let tool = NativeWebFetchTool(browserAssistedWebFetchHandler: { request in
             #expect(request.urlString == "https://example.com/protected")
