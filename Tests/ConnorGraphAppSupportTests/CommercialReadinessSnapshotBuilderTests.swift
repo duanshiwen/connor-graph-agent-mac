@@ -42,6 +42,21 @@ struct CommercialReadinessSnapshotBuilderTests {
             cards: []
         )
 
+        // `.default` shell 已不再包含商业就绪检查命令（Product OS 导航链已移除），
+        // 这里构造一个完整链接就绪面板的商用 shell，验证“全就绪输入 → 整体 .ready”。
+        var shell = ConnorNativeShellPresentation.default
+        shell.commands.append(ConnorNativeShellCommand(
+            id: .checkCommercialReadiness,
+            title: "商业就绪检查",
+            systemImage: "checkmark.seal",
+            keyboardShortcut: "⌘R",
+            target: .settings,
+            groupID: "governance",
+            isPrimaryAction: true,
+            riskLevel: .medium,
+            keywords: ["readiness", "commercial", "release", "就绪"]
+        ))
+
         let input = CommercialReadinessSnapshotBuilder().build(
             sessions: [session],
             governanceConfig: .default,
@@ -56,7 +71,7 @@ struct CommercialReadinessSnapshotBuilderTests {
             skills: [skill],
             automationConfig: automation,
             graphMemoryDashboard: graphDashboard,
-            shell: .default,
+            shell: shell,
             settingsPanelsReady: true
         )
         let dashboard = CommercialReadinessGate().evaluate(input)
