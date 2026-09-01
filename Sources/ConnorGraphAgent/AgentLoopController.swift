@@ -2011,6 +2011,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     "calls include explicitly excluded tools: \(conflictingToolNames.sorted().joined(separator: ", "))"
                 )
             }
+            // P6-c：批量写入预检——写入工具 + 参数超长，在执行前拦截并引导改用直接调用/拆分。
+            if let issue = ToolArgumentJSONDiagnostics.batchWritePreflightIssue(
+                calls: arguments.calls.map { (toolName: $0.toolName, argumentsJSON: $0.argumentsJSON) }
+            ) {
+                throw AgentToolError.invalidArguments(issue)
+            }
             let sourceByID = Dictionary(uniqueKeysWithValues: externalKnowledgeSources.map { ($0.id, $0) })
             let isSearch = call.name == AgentPhaseToolContract.externalSearchBatchName
             let nestedRunID = run.id
@@ -2923,15 +2929,27 @@ private struct AgentExternalBatchArguments: Sendable, Equatable {
     var excludedToolNames: [String]
 
     static func decode(_ json: String) throws -> Self {
-        guard let data = json.data(using: .utf8),
-              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let rawCalls = root["calls"] as? [[String: Any]] else {
-            throw AgentToolError.invalidArguments("calls must be an array")
+        let root: [String: Any]
+        do {
+            guard let data = json.data(using: .utf8),
+                  let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw AgentToolError.invalidArguments("批量调用顶层必须是 {\"calls\":[...]} 对象")
+            }
+            root = parsed
+        } catch let error as AgentToolError {
+            throw error
+        } catch {
+            throw AgentToolError.invalidArguments("批量调用顶层 JSON 非法：\(String(describing: error))")
         }
-        let calls = try rawCalls.map { raw -> AgentExternalBatchItem in
-            guard let toolName = raw["toolName"] as? String,
-                  let arguments = raw["arguments"] as? [String: Any] else {
-                throw AgentToolError.invalidArguments("each call requires toolName and an arguments object")
+        guard let rawCalls = root["calls"] as? [[String: Any]] else {
+            throw AgentToolError.invalidArguments("批量调用缺少 calls 数组，或 calls 不是数组")
+        }
+        let calls = try rawCalls.enumerated().map { index, raw -> AgentExternalBatchItem in
+            guard let toolName = raw["toolName"] as? String else {
+                throw AgentToolError.invalidArguments("calls[\(index)] 缺少 toolName（应为字符串）")
+            }
+            guard let arguments = raw["arguments"] as? [String: Any] else {
+                throw AgentToolError.invalidArguments("calls[\(index)]（\(toolName)）缺少 arguments 对象，或 arguments 不是 JSON 对象")
             }
             let argumentsData = try JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
             return AgentExternalBatchItem(toolName: toolName, argumentsJSON: String(decoding: argumentsData, as: UTF8.self))
