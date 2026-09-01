@@ -216,7 +216,11 @@ struct MailFeatureModelTests {
             model: MailFeatureModel(
                 store: store,
                 preferencesStore: preferences,
-                credentialStore: AppMailCredentialStore(credentialStore: credentials)
+                credentialStore: AppMailCredentialStore(credentialStore: credentials),
+                // 使用独立 NotificationCenter，隔离其它并行测试通过共享 NotificationCenter.default
+                // 发出的 .connorMailCacheDidChange（MailRuntime/正文回填会发）：否则并发 reload 会把
+                // 正在分页的列表重置回第一页，导致 listProjection 用例随机失败。
+                notificationCenter: NotificationCenter()
             )
         )
     }
