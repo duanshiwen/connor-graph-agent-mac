@@ -237,7 +237,7 @@ public struct NativeWebSearchTool: AgentTool {
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "query": .string(description: "Search query keywords."),
-        "engine": .stringEnumeration(values: ["duckduckgo", "bing", "google", "yahoo", "baidu"], description: "Search engine. Defaults to duckduckgo."),
+        "engine": .stringEnumeration(values: ["duckduckgo", "bing", "google", "yahoo"], description: "Search engine. Defaults to duckduckgo."),
         "maxResults": .integer(description: "Maximum number of results, 1-10. Defaults to 5.")
     ], required: ["query"])
 
@@ -319,7 +319,7 @@ public struct NativeWebSearchTool: AgentTool {
 
     private static func requiresBrowser(engine: String) -> Bool {
         switch engine.lowercased() {
-        case "google", "bing", "baidu":
+        case "google", "bing":
             return true
         default:
             return false
@@ -339,11 +339,6 @@ public struct NativeWebSearchTool: AgentTool {
             components.host = "www.bing.com"
             components.path = "/search"
             components.queryItems = [URLQueryItem(name: "q", value: query)]
-        case "baidu":
-            components.scheme = "https"
-            components.host = "www.baidu.com"
-            components.path = "/s"
-            components.queryItems = [URLQueryItem(name: "wd", value: query)]
         default:
             components.scheme = "https"
             components.host = "duckduckgo.com"
