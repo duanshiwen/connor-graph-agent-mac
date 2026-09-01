@@ -261,10 +261,26 @@ private struct CalendarSourceSettingsRow: View {
     }
 }
 
+private struct OpenSourceProject {
+    let name: String
+    let license: String
+    let url: String
+    let summary: String
+}
+
 struct SettingsAppSection: View {
     @Bindable var model: AppSettingsFeatureModel
     @Bindable var inputModel: InputSettingsFeatureModel
     var openProjectHelp: () -> Void
+
+    private var openSourceProjects: [OpenSourceProject] {
+        [
+            OpenSourceProject(name: "SwiftSoup", license: "MIT License", url: "https://github.com/scinfu/SwiftSoup", summary: "HTML 解析库：web_fetch 正文提取"),
+            OpenSourceProject(name: "Readability.js", license: "Apache License 2.0", url: "https://github.com/mozilla/readability", summary: "Mozilla 正文抽取算法（web_fetch 长文识别）"),
+            OpenSourceProject(name: "MailCore 2", license: "BSD-3-Clause", url: "https://github.com/MailCore/mailcore2", summary: "邮件协议客户端"),
+            OpenSourceProject(name: "SQLite", license: "Public Domain", url: "https://www.sqlite.org/", summary: "嵌入式关系数据库"),
+        ]
+    }
 
     @ObservedObject private var updateCenter = AppUpdateCenter.shared
 
@@ -369,6 +385,40 @@ struct SettingsAppSection: View {
                     Spacer()
                     Button("打开官网") { openProjectHelp() }
                         .buttonStyle(.bordered)
+                }
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("开源项目").font(SettingsListTypography.rowTitleSelected)
+                    Text("康纳同学基于以下开源项目构建，向所有作者致谢。")
+                        .font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
+                    ForEach(openSourceProjects, id: \.name) { project in
+                        HStack(alignment: .center, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(project.name).font(SettingsListTypography.rowTitleSelected)
+                                    Text(project.license)
+                                        .font(.caption2)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.accentColor.opacity(0.12), in: Capsule())
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(project.summary)
+                                    .font(SettingsListTypography.rowCaption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer(minLength: 8)
+                            Button("打开") {
+                                if let url = URL(string: project.url) {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                        .padding(.vertical, 3)
+                    }
                 }
             }
             SettingsGroup(title: "软件更新") {
