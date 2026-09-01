@@ -558,7 +558,14 @@ data: {"type":"message_stop"}
     }
     let response = try #require(completed)
     #expect(response.finishReason == .length)
-    #expect(response.toolCalls.first?.argumentsJSON.contains("INVALID_JSON") == true)
+    let argumentsJSON = try #require(response.toolCalls.first?.argumentsJSON)
+    #expect(argumentsJSON.contains("INVALID_JSON") == true)
+    // 标记升级后带诊断元数据（原文在标记内被 JSON 转义，无损解包由下方 payload.raw 断言保证）。
+    #expect(argumentsJSON.contains("\"__length\":") == true)
+    #expect(argumentsJSON.contains("\"__json_error\":") == true)
+    #expect(ToolArgumentJSONDiagnostics.analyze(argumentsJSON) == nil)
+    let payload = ToolArgumentJSONDiagnostics.unwrapInvalidJSONMarker(argumentsJSON)
+    #expect(payload?.raw == #"{"path":"#)
 }
 
 @Test func anthropicThinkingDeltasArePreservedInProviderMetadata() throws {
