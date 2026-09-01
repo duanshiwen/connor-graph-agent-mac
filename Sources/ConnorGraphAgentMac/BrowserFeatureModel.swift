@@ -724,9 +724,20 @@ final class BrowserFeatureModel {
         guard let task = assistedTasksByID[taskID], let request = assistedFetchRequestsByTaskID[taskID] else { return }
         let originalCount = text.count
         let maxCharacters = 300_000
-        let truncated = originalCount > maxCharacters
-        let returnedText = truncated ? String(text.prefix(maxCharacters)) : text
-        let suffix = truncated ? "\n\n[Content truncated by Connor web_fetch(js-wkwebview): original characters = \(originalCount), returned characters = \(maxCharacters)]" : ""
+        let start = max(0, request.offsetCharacters)
+        let hasMore = start + maxCharacters < originalCount
+        let returnedText: String
+        if start >= originalCount {
+            returnedText = ""
+        } else {
+            let dropStart = text.index(text.startIndex, offsetBy: start)
+            let dropEnd = text.index(dropStart, offsetBy: min(maxCharacters, originalCount - start))
+            let window = String(text[dropStart..<dropEnd])
+            returnedText = hasMore ? NativeWebTruncation.truncateAtBoundary(window, limit: maxCharacters) : window
+        }
+        let nextOffset = start + returnedText.count
+        let percent = originalCount > 0 ? (nextOffset * 100) / originalCount : 100
+        let suffix = hasMore ? "\n\n[内容较长已分页：本次返回约占全文 \(percent)%，后续还有。如需继续阅读，请用 offsetCharacters=\(nextOffset) 调用 web_fetch 续读同页。]" : ""
         let content: String
         if request.extractMode == "text" {
             content = returnedText + suffix
@@ -753,8 +764,10 @@ final class BrowserFeatureModel {
             tabID: task.tabID.uuidString,
             errorMessage: nil,
             interventionReason: nil,
-            truncated: truncated,
-            originalCharacterCount: originalCount
+            truncated: hasMore,
+            originalCharacterCount: originalCount,
+            offsetCharacters: start,
+            nextOffsetCharacters: hasMore ? nextOffset : nil
         ), completionMessage: "Fetched rendered page content")
     }
 
