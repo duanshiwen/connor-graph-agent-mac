@@ -68,4 +68,24 @@ struct NativeSessionManagerMergeTests {
         )
         #expect(merged.map(\.id) == ["old", "note-1"])
     }
+
+    @Test func noteEditBodySurvivesFailurePathPersistWhenActiveRunCleared() {
+        // 回归：run 失败/取消后 activeRunID 被清空（nil），兜底持久化仍必须保留 note_edit 已落库的
+        // 新正文，不能拿 run 开始时加载的旧内存副本把正文回滚掉（否则笔记永远“更新不到”）。
+        let persisted = [
+            userMessage(id: "note-1", content: "新正文"),
+        ]
+        let inMemory = [
+            userMessage(id: "note-1", content: "旧正文"),
+            assistantMessage(id: "a-stream", content: "回复（未完成）", runID: "run-1"),
+        ]
+        let merged = NativeSessionManager.mergedMessages(
+            inMemory: inMemory,
+            persisted: persisted,
+            activeRunID: nil
+        )
+        #expect(merged.map(\.id) == ["note-1", "a-stream"])
+        #expect(merged[0].content == "新正文")
+        #expect(merged[1].content == "回复（未完成）")
+    }
 }
