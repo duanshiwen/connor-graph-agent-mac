@@ -252,7 +252,7 @@ struct MailRuntimeSendPipelineTests {
         #expect(payload.bodyPreview == body)
     }
 
-    @Test func approvedSendRequiresApprovedEnvelopeHashAndDoesNotCallSMTPWhenMissing() async throws {
+    @Test func approvedSendWithoutApprovalCardAutoApprovesAndSends() async throws {
         let accountID = MailAccountID(rawValue: "account-missing-approved-hash")
         let identityID = MailIdentityID(rawValue: "identity-missing-approved-hash")
         let binding = AppMailCredentialStore.binding(accountID: accountID, email: "connor@example.com", authMode: .appPassword)
@@ -268,19 +268,24 @@ struct MailRuntimeSendPipelineTests {
         let rawCredentialStore = TestMailCredentialStore()
         try rawCredentialStore.saveSecret("app-password", service: binding.credentialNamespace, account: binding.accountName)
         let smtpClient = FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-missing-hash"))
+        let draftRepository = InMemoryMailDraftRepository()
         let runtime = MailRuntime(
             repository: InMemoryMailSourceRepository(accounts: [account]),
             cache: InMemoryMailSourceCache(),
-            draftStore: InMemoryMailDraftRepository(),
+            draftStore: draftRepository,
             credentialStore: AppMailCredentialStore(credentialStore: rawCredentialStore),
             smtpClient: smtpClient
         )
         let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Hash", body: "Body")
 
-        await #expect(throws: MailRuntimeError.self) {
-            _ = try await runtime.sendDraft(draftID: draft.id, approved: true)
-        }
-        #expect(await smtpClient.requests.isEmpty)
+        // 执行模式：approved=true 且从未产生审批卡片时，自动批准当前信封并直接发送，
+        // 批准哈希同步落库，供后续一致性校验使用（不再要求预先存在批准哈希）。
+        let receipt = try await runtime.sendDraft(draftID: draft.id, approved: true)
+        #expect(receipt.providerMessageID == "provider-missing-hash")
+        #expect(await smtpClient.requests.count == 1)
+        let stored = try #require(try await draftRepository.draft(id: draft.id))
+        #expect(stored.status == .sent)
+        #expect(stored.approvedEnvelopeHash != nil)
     }
 
     @Test func approvedSendBlocksWhenDraftEnvelopeHashChangedAfterApproval() async throws {
@@ -307,10 +312,13 @@ struct MailRuntimeSendPipelineTests {
             credentialStore: AppMailCredentialStore(credentialStore: rawCredentialStore),
             smtpClient: smtpClient
         )
-        var draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Original", body: "Body")
+        let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Original", body: "Body")
         _ = try await draftRepository.updateApprovedEnvelopeHash(id: draft.id, envelopeHash: draft.envelopeHash())
-        draft.subject = "Changed after approval"
-        try await draftRepository.save(draft)
+        // 重新读取草稿（携带已落库的批准哈希）再修改保存；直接改过期副本保存会把
+        // approvedEnvelopeHash 覆盖回 nil，被误判为“执行模式自动批准”。
+        var changedDraft = try #require(try await draftRepository.draft(id: draft.id))
+        changedDraft.subject = "Changed after approval"
+        try await draftRepository.save(changedDraft)
 
         await #expect(throws: MailRuntimeError.self) {
             _ = try await runtime.sendDraft(draftID: draft.id, approved: true)

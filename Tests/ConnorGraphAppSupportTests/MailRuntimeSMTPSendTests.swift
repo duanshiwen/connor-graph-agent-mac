@@ -51,7 +51,8 @@ struct MailRuntimeSMTPSendTests {
         #expect(try await draftRepository.draft(id: draft.id)?.status == .sent)
         let attempts = try await draftRepository.sendAttempts(draftID: draft.id)
         #expect(attempts.contains { $0.status == .sent && $0.providerMessageID == "smtp-server-id" })
-        let notification = try #require(notifications.notifications.first)
+        // 过滤出本用例账号的通知，避免并行执行时捕获到其他用例（如 execute 模式）的通知。
+        let notification = try #require(notifications.notifications.first { ($0.userInfo?[MailCacheChangeNotificationUserInfoKey.accountID] as? String) == accountID.rawValue })
         #expect(notification.userInfo?[MailCacheChangeNotificationUserInfoKey.accountID] as? String == accountID.rawValue)
         #expect(notification.userInfo?[MailCacheChangeNotificationUserInfoKey.messageID] as? String == "smtp-server-id")
         #expect(notification.userInfo?[MailCacheChangeNotificationUserInfoKey.reason] as? String == MailCacheChangeReason.sentMessageSaved.rawValue)
