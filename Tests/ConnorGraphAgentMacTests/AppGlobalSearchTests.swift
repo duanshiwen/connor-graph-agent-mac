@@ -162,7 +162,7 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         let previousSessionID = fixture.runtime.chatFeatureModel.sessions.selectedSessionID
-        fixture.runtime.appSettingsModel.defaultSearchEngine = .baidu
+        fixture.runtime.appSettingsModel.defaultSearchEngine = .yahoo
         fixture.runtime.globalSearchFeatureModel.updateQuery("康纳 搜索")
         fixture.runtime.globalSearchFeatureModel.performWebSearch()
 
@@ -178,9 +178,9 @@ struct AppGlobalSearchTests {
         let url = try #require(URL(string: tab.currentURLString.isEmpty ? tab.initialURLString : tab.currentURLString))
         let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
 
-        #expect(url.host == "www.baidu.com")
-        #expect(url.path == "/s")
-        #expect(components.queryItems?.first(where: { $0.name == "wd" })?.value == "康纳 搜索")
+        #expect(url.host == "search.yahoo.com")
+        #expect(url.path == "/search")
+        #expect(components.queryItems?.first(where: { $0.name == "p" })?.value == "康纳 搜索")
         #expect(fixture.runtime.browserFeatureModel.workspaceSessionID == searchSessionID)
         #expect(!fixture.runtime.globalSearchFeatureModel.isOverlayPresented)
     }
