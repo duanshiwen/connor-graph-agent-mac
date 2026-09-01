@@ -3869,6 +3869,45 @@ private actor TransientFailureThenSuccessProvider: AgentModelProvider {
     #expect(events.last?.kind == .runCompleted)
 }
 
+@Test func agentLoopBlocksOversizedWriteToolThroughBatchChannel() async throws {
+    // P6-c：批量通道（parallel_tool_execute）内写工具 + 参数超长 → 在执行前拦截并给出行动指引。
+    let bigContent = String(repeating: "字", count: 8_500)
+    let argumentsJSON = #"{"calls":[{"toolName":"ApplyPatch","arguments":{"operations":[{"op":"create","filePath":"a.md","content":""# + bigContent + "\"}]}}]}"
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(
+                id: "call-batch-write",
+                name: AgentPhaseToolContract.externalReadBatchName,
+                argumentsJSON: argumentsJSON
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Understood, I will call ApplyPatch directly.", finishReason: .stop)
+    ])
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(toolExecutionTimeoutSeconds: 30)
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(sessionID: "session-batch-write-block", userMessage: "Write a file through the batch channel")) {
+        events.append(event)
+    }
+
+    let failureText = events.compactMap { event -> String? in
+        if case .toolFailed(let payload) = event, payload.toolName == AgentPhaseToolContract.externalReadBatchName {
+            return payload.message
+        }
+        return nil
+    }.joined(separator: "\n")
+    #expect(failureText.contains("calls[0]"))
+    #expect(failureText.contains("请勿使用批量通道"))
+    #expect(failureText.contains("直接调用 ApplyPatch"))
+    #expect(events.last?.kind == .runCompleted)
+}
+
 @Test(.disabled("Environment-sensitive: under full-suite load this machine delays Task.sleep timers 10s+, so the wall-clock assertion flakes; the hard-timeout path itself passes in isolation."))
 func agentLoopTimeoutDoesNotWaitForCancellationIgnoringTool() async throws {
     let provider = ScriptedModelProvider(responses: [
