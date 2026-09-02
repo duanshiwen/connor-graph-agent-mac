@@ -560,7 +560,7 @@ public struct MailCreateDraftTool: AgentTool {
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Created draft \(draftID) using account=\"\(resolved.account.id.rawValue)\" from=\"\(resolved.identity.address.email)\"; not sent. To send it through the current session permission policy, call mail_send_draft with draftID=\"\(draftID)\". Ask mode presents the native Compose approval card; Execute mode sends immediately. Do not ask the user to provide the draft ID.",
+            contentText: "Created draft \(draftID) using account=\"\(resolved.account.id.rawValue)\" from=\"\(resolved.identity.address.email)\"; not sent. To send it, call mail_send_draft with draftID=\"\(draftID)\"; sending always presents the native Compose approval card (hard human-gate, applies in every permission mode). Do not ask the user to provide the draft ID.",
             contentJSON: try MailJSON.encodeDraft(draft)
         )
     }
@@ -775,7 +775,7 @@ public struct MailCreateDraftToPeopleTool: AgentTool {
 public struct MailSendDraftTool: AgentTool {
     public let runtime: any AgentMailRuntime
     public var name: String { "mail_send_draft" }
-    public var description: String { "Send an existing mail draft through the current session permission policy. Ask mode presents native Compose approval; Execute mode sends immediately. Use the exact draftID returned by mail_create_draft and do not replace this tool with a natural-language confirmation." }
+    public var description: String { "Send an existing mail draft through the current session permission policy. Sending mail always requires the native Compose approval card before the email is sent, in every permission mode (it is a hard human-gate capability; even Execute mode shows the approval instead of sending immediately). Use the exact draftID returned by mail_create_draft and do not replace this tool with a natural-language confirmation." }
     public var permission: AgentPermissionCapability { .sendMail }
     public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["draftID": .string(description: "Exact draftID returned by mail_create_draft. Copy the field without renaming it. Do not ask the user to provide this ID. Sending remains governed by the current session permission policy.")], required: ["draftID"]) }
     public init(runtime: any AgentMailRuntime) { self.runtime = runtime }

@@ -56,7 +56,7 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     /// 单一事实来源：这类能力无论权限模式如何都不会被自动放行，必须展示审批卡片等待用户确认。
     public var requiresHumanApprovalInExecutionMode: Bool {
         switch self {
-        case .publishInteractiveWeb:
+        case .publishInteractiveWeb, .sendMail:
             return true
         default:
             return false

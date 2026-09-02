@@ -2884,7 +2884,7 @@ struct SettingsPermissionsSection: View {
             }
 
             SettingsGroup(title: "安全边界") {
-                PermissionBoundaryRow(systemImage: "exclamationmark.triangle", title: "执行模式不请求审批", message: "执行模式会自动允许所有 Connor 工具权限请求，包括删除、发送和外部提交。工作目录约束、操作系统授权、只读数据源、命令硬性安全策略和版本冲突保护仍然有效。")
+                PermissionBoundaryRow(systemImage: "exclamationmark.triangle", title: "执行模式不请求审批", message: "执行模式会自动允许大多数 Connor 工具权限请求，包括删除、发送和外部提交；但发送邮件和发布互动网页属于硬性门禁，始终要求人工确认。工作目录约束、操作系统授权、只读数据源、命令硬性安全策略和版本冲突保护仍然有效。")
                 Divider()
                 PermissionBoundaryRow(systemImage: "folder", title: "工作目录按会话设置", message: "主目录和其他工作目录在会话顶部设置，不在全局权限页管理。")
                 Divider()
@@ -2895,7 +2895,7 @@ struct SettingsPermissionsSection: View {
                 VStack(alignment: .leading, spacing: 10) {
                     PermissionPolicyDetailRow(title: "只读", message: "允许读取会话和文件、搜索本地内容、进行模型调用和本地计算；拒绝写入、删除、外部网络和高风险命令。")
                     PermissionPolicyDetailRow(title: "询问", message: "读取、普通模型调用和外部网络默认允许；文件写入、编辑、删除、记忆写入、高成本模型调用和高风险命令需要确认。")
-                    PermissionPolicyDetailRow(title: "执行", message: "所有 Connor 工具权限请求都自动批准，不显示人工审批；删除、发送、外部提交和网络权限也会直接放行，非权限类硬性约束仍然有效。")
+                    PermissionPolicyDetailRow(title: "执行", message: "大多数 Connor 工具权限请求自动批准，不显示人工审批；但发送邮件和发布互动网页属于硬性门禁，即使执行模式也始终显示审批卡片要求确认。")
                 }
                 .padding(.top, SettingsListLayout.spaceS)
             } label: {
