@@ -10,12 +10,14 @@ struct CommercialTrain7NativeMailSystemTests {
         let readOnly = AgentPolicyEngine(permissionMode: .readOnly)
         let readMail = await readOnly.evaluate(capability: .readMail, runID: "run", sessionID: "session", toolName: "mail_list_accounts")
         let readBody = await readOnly.evaluate(capability: .readMailBody, runID: "run", sessionID: "session", toolName: "mail_get_message")
+        // Sending mail is a hard human-gate capability: it is never auto-approved,
+        // not even under allowAll.
         let send = await AgentPolicyEngine(permissionMode: .allowAll).evaluate(capability: .sendMail, runID: "run", sessionID: "session", toolName: "mail_send_draft")
         let contactWrite = await AgentPolicyEngine(permissionMode: .allowAll).evaluate(capability: .mutateContacts, runID: "run", sessionID: "session", toolName: "contact_commit_draft")
 
         #expect(readMail.outcome == .approved)
         #expect(readBody.outcome == .approved)
-        #expect(send.outcome == .approved)
+        #expect(send.outcome == .needsApproval)
         #expect(contactWrite.outcome == .approved)
     }
 
@@ -362,10 +364,21 @@ struct CommercialTrain7NativeMailSystemTests {
             subject: "Execute mode",
             body: "Send immediately"
         )
+        // Sending mail is a hard human-gate capability: even in execute (trustedWrite) mode
+        // it must surface the approval card instead of being auto-approved.
         let executeContext = AgentToolExecutionContext(runID: "run-execute", sessionID: "session-execute", groupID: "group", userPrompt: "send", toolCallID: "call-execute", policyEngine: AgentPolicyEngine(permissionMode: .trustedWrite))
         let executeCall = AgentToolCall(id: "call-execute", runID: "run-execute", sessionID: "session-execute", name: "mail_send_draft", argumentsJSON: "{\"draftID\":\"\(draft.id.rawValue)\"}")
 
-        let result = try await registry.execute(executeCall, context: executeContext)
+        do {
+            _ = try await registry.execute(executeCall, context: executeContext)
+            Issue.record("Execute mode should still require approval before sending mail")
+        } catch AgentToolError.permissionNeedsApproval(let request) {
+            #expect(request.capability == .sendMail)
+        }
+
+        // After the approval resolves with the capability granted, the send executes.
+        let approvedContext = executeContext.approving(.sendMail)
+        let result = try await registry.execute(executeCall, context: approvedContext)
         #expect(result.error == nil)
         #expect(result.contentText.contains("Sent authorized draft"))
     }

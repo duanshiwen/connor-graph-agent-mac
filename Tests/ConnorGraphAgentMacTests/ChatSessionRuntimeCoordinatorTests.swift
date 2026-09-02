@@ -277,7 +277,7 @@ struct ChatSessionRuntimeCoordinatorTests {
             requestID: "switch-exec",
             runID: "run",
             sessionID: "session",
-            capability: .sendMail
+            capability: .mutateCalendar
         )
         try fixture.approvalRepository.store.upsert(pendingApproval: approval)
         let model = ChatApprovalModel()
@@ -310,7 +310,7 @@ struct ChatSessionRuntimeCoordinatorTests {
             requestID: "auto-exec-load",
             runID: "run",
             sessionID: "session",
-            capability: .sendMail
+            capability: .mutateCalendar
         )
         try fixture.approvalRepository.store.upsert(pendingApproval: approval)
         let model = ChatApprovalModel()
@@ -357,6 +357,36 @@ struct ChatSessionRuntimeCoordinatorTests {
         coordinator.backendForApproval = { _ in backend }
 
         // 执行模式下硬性门禁请求即使有在线 backend 也绝不自动放行：保持待审批并展示卡片。
+        coordinator.install([approval])
+        #expect(coordinator.activeApprovals(sessionID: "session").map(\.requestID) == [approval.requestID])
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(resolvedStatuses.values.isEmpty)
+        let persisted = try #require(fixture.approvalRepository.load(runID: approval.runID).first)
+        #expect(persisted.status == .pending)
+    }
+
+    @Test func approvalCoordinatorDoesNotAutoApproveMailSendApprovalOnLoadInExecutionMode() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanup() }
+        let approval = AgentPendingApproval(
+            requestID: "mail-hard-gate-load",
+            runID: "run",
+            sessionID: "session",
+            capability: .sendMail,
+            toolName: "mail_send_draft"
+        )
+        try fixture.approvalRepository.store.upsert(pendingApproval: approval)
+        let model = ChatApprovalModel()
+        let coordinator = ChatApprovalCoordinator(model: model, repository: fixture.approvalRepository)
+        coordinator.permissionMode = { .trustedWrite }
+        let resolvedStatuses = ResolvedApprovalStatusBox()
+        let backend = AnyAgentBackend(
+            chat: { _ in AsyncThrowingStream { _ in } },
+            resolveApproval: { _, status, _, _ in resolvedStatuses.append(status) }
+        )
+        coordinator.backendForApproval = { _ in backend }
+
+        // 发送邮件是硬性门禁：即使执行模式加载待审批列表，也必须保留审批卡片等待用户确认。
         coordinator.install([approval])
         #expect(coordinator.activeApprovals(sessionID: "session").map(\.requestID) == [approval.requestID])
         try await Task.sleep(for: .milliseconds(100))

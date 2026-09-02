@@ -26,7 +26,9 @@ private struct EchoTool: AgentTool {
 private struct ApprovalAwareTool: AgentTool {
     let name = "approval_aware"
     let description = "Verifies that a policy-approved capability reaches tool execution."
-    let permission: AgentPermissionCapability = .sendMail
+    // Uses an ordinary write capability (not a hard human-gate like .sendMail) so it is
+    // auto-approved under trustedWrite yet discoverable under readOnly/askToWrite.
+    let permission: AgentPermissionCapability = .mutateCalendar
     let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
 
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -76,7 +78,7 @@ private struct DirectShellStub: AgentTool {
 
 @Test func executeAndAllowAllModesApproveEverySensitiveCapability() async {
     let capabilities: [AgentPermissionCapability] = [
-        .mutatePersonality, .mutateContacts, .mutateCalendar, .sendMail,
+        .mutatePersonality, .mutateContacts, .mutateCalendar,
         .commitBrowserAction, .transferBrowserFile, .deleteWorkspaceFile,
         .runNetworkShellCommand, .runDestructiveShellCommand
     ]
@@ -89,6 +91,19 @@ private struct DirectShellStub: AgentTool {
             )
             #expect(decision.outcome == .approved)
         }
+    }
+
+    // Sending mail is a hard human-gate capability: it requires approval even in
+    // execute/allowAll modes (covered by interactiveWebPublishingAlwaysRequiresHumanApproval
+    // for publishInteractiveWeb).
+    for mode in [AgentPermissionMode.trustedWrite, .allowAll] {
+        let send = await AgentPolicyEngine(permissionMode: mode).evaluate(
+            capability: .sendMail,
+            runID: "run-execute",
+            sessionID: "session-execute",
+            toolName: "mail_send_draft"
+        )
+        #expect(send.outcome == .needsApproval)
     }
 
     let askDecision = await AgentPolicyEngine(permissionMode: .askToWrite).evaluate(
