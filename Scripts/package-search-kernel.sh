@@ -124,7 +124,19 @@ copy_and_sign() {
   cp -f "$CRATE_DYLIB" "$destination"
   chmod 755 "$destination"
   if [[ -n "$CODESIGN_IDENTITY" ]]; then
-    codesign --force --timestamp --options runtime --sign "$CODESIGN_IDENTITY" "$destination"
+    # 优先尝试带时间戳签名；Apple 时间戳服务间歇不可达时 codesign 会直接失败，
+    # 导致 Xcode 的 PhaseScriptExecution 报“nonzero exit code”。
+    # 本项目发布走 ad-hoc（不公证），内嵌 dylib 不依赖时间戳，故失败时回退为无时间戳签名。
+    local ts_err
+    ts_err="$(mktemp)"
+    if codesign --force --timestamp --options runtime --sign "$CODESIGN_IDENTITY" "$destination" 2>"$ts_err"; then
+      rm -f "$ts_err"
+    else
+      echo "warning: codesign with --timestamp failed (Apple timestamp service unreachable?); retrying without timestamp" >&2
+      cat "$ts_err" >&2
+      rm -f "$ts_err"
+      codesign --force --timestamp=none --options runtime --sign "$CODESIGN_IDENTITY" "$destination"
+    fi
   fi
   /usr/bin/file "$destination"
   echo "$destination"
