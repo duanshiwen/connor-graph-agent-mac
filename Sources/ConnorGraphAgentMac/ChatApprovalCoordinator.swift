@@ -30,11 +30,10 @@ final class ChatApprovalCoordinator {
         self.repository = repository
     }
 
-    /// 当前会话需要人工处理的待审批请求：能自动放行的请求（如执行模式下的普通权限）
-    /// 不在此展示，加载时会被自动批准；只有真正需要人工决策的请求才会展示审批卡片——
-    /// 非执行模式下的全部待审批请求，以及执行模式下 run 侧策略仍然硬性要求人工确认的
-    /// 能力（如发布互动网页 publishInteractiveWeb）。否则 run 会一直阻塞且用户无处确认
-    /// （会话列表只显示“请求审批”文字，详情页却看不到弹窗）。
+    /// 当前会话需要人工处理的待审批请求：能自动放行的请求（例如执行模式 trustedWrite/
+    /// allowAll 下的全部能力，包括发送邮件与发布互动网页）不在此展示，加载时会被自动
+    /// 批准；只有非执行模式下真正需要人工决策的请求才会展示审批卡片。否则 run 会一直
+    /// 阻塞且用户无处确认（会话列表只显示“请求审批”文字，详情页却看不到弹窗）。
     func activeApprovals(sessionID: String) -> [AgentPendingApproval] {
         model.pendingApprovals.filter { $0.sessionID == sessionID && $0.status == .pending && !shouldAutoApprove($0) }
     }
@@ -165,8 +164,8 @@ final class ChatApprovalCoordinator {
 
     /// 把当前权限模式下能自动放行的待审批请求批量批准。
     /// 调用时机：加载待审批列表（install/reload/loadMore）以及用户主动切换权限模式时。
-    /// 执行模式（trustedWrite/allowAll）下的普通权限自动放行；run 侧策略仍然硬性要求
-    /// 人工确认的能力（publishInteractiveWeb）不会被自动批准，必须展示给用户确认。
+    /// 执行模式（trustedWrite/allowAll）下所有能力（含发送邮件与发布互动网页）自动放行，
+    /// 与 run 侧策略引擎一致，不再存在需要人工确认的硬性门禁。
     private func autoApproveCurrentPolicy() {
         for approval in model.pendingApprovals where shouldAutoApprove(approval) {
             resolve(
@@ -180,8 +179,8 @@ final class ChatApprovalCoordinator {
 
     /// 统一入口：替换待审批列表、执行自动批准策略，并把「新到达且需要人工处理」
     /// 的请求通过 onNewPendingApprovals 通知外层（用于弹窗/通知/自动切换到对应会话）。
-    /// 执行模式下能自动放行的请求在此直接批准（恢复执行模式自动审批语义）；
-    /// 无法自动放行的请求（非执行模式，或执行模式下的硬性门禁）保留为待审批并通知外层。
+    /// 执行模式下能自动放行的请求在此直接批准（执行模式对所有能力都自动审批）；
+    /// 无法自动放行的请求（非执行模式）保留为待审批并通知外层。
     private func applyLoadedApprovals(_ approvals: [AgentPendingApproval], nextCursor: String?) {
         let previouslySeen = lastReportedPendingRequestIDs
         let loadedPendingIDs = Set(approvals.filter { $0.status == .pending }.map(\.requestID))
@@ -200,9 +199,9 @@ final class ChatApprovalCoordinator {
         guard approval.status == .pending else { return false }
         switch permissionMode() {
         case .trustedWrite, .allowAll:
-            // 执行模式自动放行普通权限；但 run 侧策略仍然硬性要求人工确认的能力
-            // （publishInteractiveWeb）除外——这类请求必须由用户确认。
-            return !approval.capability.requiresHumanApprovalInExecutionMode
+            // 执行模式自动放行所有能力（包括发送邮件与发布互动网页）：
+            // 与 run 侧策略引擎一致，没有需要人工确认的硬性门禁。
+            return true
         case .readOnly, .askToWrite:
             return false
         }

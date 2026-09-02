@@ -69,11 +69,8 @@ public actor AgentPolicyEngine: Sendable {
     }
 
     private func outcome(for capability: AgentPermissionCapability) -> AgentPermissionOutcome {
-        // 硬性门禁：即使在执行模式（trustedWrite/allowAll）下也要求人工审批，
-        // 规则与 requiresHumanApprovalInExecutionMode 保持一致（唯一事实来源）。
-        if capability.requiresHumanApprovalInExecutionMode {
-            return permissionMode == .readOnly ? .denied : .needsApproval
-        }
+        // 执行模式（trustedWrite/allowAll）下所有能力（含发送邮件与发布互动网页）自动批准，
+        // 不显示人工审批；询问/只读模式按下方细分规则逐项判定。
         if permissionMode == .trustedWrite || permissionMode == .allowAll {
             return .approved
         }
