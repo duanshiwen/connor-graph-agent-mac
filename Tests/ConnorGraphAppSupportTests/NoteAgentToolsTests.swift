@@ -73,23 +73,113 @@ private func noteToolFixture(count: Int = 1) throws -> (AppNoteRepository, NoteS
     #expect(response.records[0].sourceMessageID == "message-0")
 }
 
-@Test func noteGetToolReturnsCompleteLongBody() async throws {
+@Test func noteGetToolPaginatesLongBodyAcrossPagesAndReassembles() async throws {
     let (repository, _, tool) = try noteToolFixture()
     var note = try #require(try repository.note(sessionID: "session-0"))
-    note.body = String(repeating: "完整正文段落。", count: 10_000)
+    let fullBody = String(repeating: "完整正文段落。", count: 1_000)
+    note.body = fullBody
     note.contentHash = AppNoteProjectionService.contentHash(note.body)
     try repository.upsert(note)
 
-    let result = try await tool.execute(arguments: AgentToolArguments(values: [
+    let firstResult = try await tool.execute(arguments: AgentToolArguments(values: [
         "noteIDs": .array([.string(note.id)])
-    ]), context: noteToolContext("complete"))
+    ]), context: noteToolContext("page1"))
+    let firstData = try #require(firstResult.contentJSON?.data(using: .utf8))
+    let first = try JSONDecoder.noteTool.decode(NoteGetToolResponse.self, from: firstData)
+
+    let item = try #require(first.records.first)
+    #expect(item.status == "found")
+    #expect(item.page == 1)
+    #expect(item.pageSize == NoteGetTool.defaultPageSize)
+    #expect(item.characterOffset == 0)
+    #expect(item.totalCharacters == fullBody.count)
+    #expect(item.returnedCharacters == NoteGetTool.defaultPageSize)
+    #expect(item.isTruncated)
+    #expect(item.hasMore)
+    #expect(item.nextPage == 2)
+    #expect(item.body == String(fullBody.prefix(NoteGetTool.defaultPageSize)))
+    #expect(first.page == 1)
+    #expect(first.pageSize == NoteGetTool.defaultPageSize)
+
+    // 按 nextPage 翻到最后一页，整篇正文应能完整重装。
+    var assembled = item.body ?? ""
+    var page = 2
+    var guardCount = 0
+    while true {
+        guardCount += 1
+        #expect(guardCount < 100)
+        let result = try await tool.execute(arguments: AgentToolArguments(values: [
+            "noteIDs": .array([.string(note.id)]), "page": .int(page)
+        ]), context: noteToolContext("page\(page)"))
+        let data = try #require(result.contentJSON?.data(using: .utf8))
+        let response = try JSONDecoder.noteTool.decode(NoteGetToolResponse.self, from: data)
+        let current = try #require(response.records.first)
+        assembled += current.body ?? ""
+        if !current.hasMore { break }
+        page += 1
+    }
+    #expect(assembled == fullBody)
+}
+
+@Test func noteGetToolRespectsExplicitPageAndPageSize() async throws {
+    let (repository, _, tool) = try noteToolFixture()
+    var note = try #require(try repository.note(sessionID: "session-0"))
+    let fullBody = String(repeating: "正文", count: 900)
+    note.body = fullBody
+    note.contentHash = AppNoteProjectionService.contentHash(note.body)
+    try repository.upsert(note)
+
+    // page=2, pageSize=300 → 返回 offset 300..<600 这一段。
+    let result = try await tool.execute(arguments: AgentToolArguments(values: [
+        "noteIDs": .array([.string(note.id)]), "page": .int(2), "pageSize": .int(300)
+    ]), context: noteToolContext("explicit"))
     let data = try #require(result.contentJSON?.data(using: .utf8))
     let response = try JSONDecoder.noteTool.decode(NoteGetToolResponse.self, from: data)
+    let item = try #require(response.records.first)
 
-    #expect(response.records[0].body == note.body)
-    #expect(!response.records[0].isTruncated)
-    #expect(response.records[0].returnedCharacters == note.body.count)
-    #expect(response.records[0].totalCharacters == note.body.count)
+    #expect(item.page == 2)
+    #expect(item.pageSize == 300)
+    #expect(item.characterOffset == 300)
+    #expect(item.returnedCharacters == 300)
+    #expect(item.totalCharacters == 1800)
+    #expect(item.body == String(fullBody.dropFirst(300).prefix(300)))
+    #expect(item.hasMore)
+    #expect(item.nextPage == 3)
+    #expect(item.isTruncated)
+
+    // 模型常把整数发成字符串，应同样接受；第 6 页是最后一页。
+    let stringResult = try await tool.execute(arguments: AgentToolArguments(values: [
+        "noteIDs": .array([.string(note.id)]), "page": .string("6"), "pageSize": .string("300")
+    ]), context: noteToolContext("string"))
+    let stringData = try #require(stringResult.contentJSON?.data(using: .utf8))
+    let stringResponse = try JSONDecoder.noteTool.decode(NoteGetToolResponse.self, from: stringData)
+    let lastItem = try #require(stringResponse.records.first)
+    #expect(lastItem.page == 6)
+    #expect(lastItem.body == String(fullBody.dropFirst(1500).prefix(300)))
+    #expect(!lastItem.hasMore)
+    #expect(lastItem.nextPage == nil)
+    #expect(!lastItem.isTruncated)
+}
+
+@Test func noteGetToolRejectsInvalidPageAndPageSize() async throws {
+    let (repository, _, tool) = try noteToolFixture()
+    let note = try #require(try repository.note(sessionID: "session-0"))
+
+    await #expect(throws: AgentToolError.self) {
+        try await tool.execute(arguments: AgentToolArguments(values: [
+            "noteIDs": .array([.string(note.id)]), "page": .int(0)
+        ]), context: noteToolContext("zeroPage"))
+    }
+    await #expect(throws: AgentToolError.self) {
+        try await tool.execute(arguments: AgentToolArguments(values: [
+            "noteIDs": .array([.string(note.id)]), "pageSize": .int(100)
+        ]), context: noteToolContext("smallPageSize"))
+    }
+    await #expect(throws: AgentToolError.self) {
+        try await tool.execute(arguments: AgentToolArguments(values: [
+            "noteIDs": .array([.string(note.id)]), "pageSize": .int(100_000)
+        ]), context: noteToolContext("bigPageSize"))
+    }
 }
 
 private extension JSONDecoder {
