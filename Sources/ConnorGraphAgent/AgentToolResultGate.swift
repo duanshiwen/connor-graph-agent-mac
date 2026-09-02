@@ -66,6 +66,9 @@ public struct AgentToolResultGate: Sendable, Equatable {
         estimator: AgentPromptBudgetEstimator = AgentPromptBudgetEstimator()
     ) -> String {
         let content = gatedContent(for: result)
+        // completeResultToolNames 工具（如 note_get）已自带分页、由模型自行控制
+        // 单页大小：token 预算门与字符门一致地放行完整结果，绝不静默截断加标记。
+        guard !Self.completeResultToolNames.contains(result.toolName) else { return content }
         let tokenLimit = max(0, maximumEstimatedTokens)
         let originalTokens = estimator.estimate(content).estimatedTokenCount
         guard originalTokens > tokenLimit else { return content }
