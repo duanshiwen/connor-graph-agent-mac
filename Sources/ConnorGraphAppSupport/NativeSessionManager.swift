@@ -615,6 +615,8 @@ public struct NativeSessionManager: Sendable {
     /// 本 run 只会新增/修改带 `activeRunID` 的 assistant 消息；其它消息（例如笔记正文的首条 user 消息）
     /// 若持久化版本已变化（note_edit 工具改了正文、或跨端同步），必须保留持久化版本，
     /// 否则会用 run 开始时加载的旧内存副本把外部修改回滚掉。
+    /// 注意：run 失败/取消后的兜底持久化会把 `activeRunID` 清空（传 nil），此时没有任何消息属于
+    /// 当前 run，所有已有持久化副本的消息都必须以持久化版本为准——否则会把 note_edit 的正文写入回滚。
     public static func mergedMessages(
         inMemory: [AgentMessage],
         persisted: [AgentMessage],
@@ -622,7 +624,11 @@ public struct NativeSessionManager: Sendable {
     ) -> [AgentMessage] {
         let persistedByID = Dictionary(uniqueKeysWithValues: persisted.map { ($0.id, $0) })
         let merged = inMemory.map { message -> AgentMessage in
-            guard message.runID != activeRunID, let external = persistedByID[message.id] else { return message }
+            // 只有当前 run 自己创建/修改的消息（runID 非空且等于 activeRunID）才保留内存副本；
+            // 其余消息（runID 为空，如笔记正文首条 user 消息）只要存在持久化版本，就保留持久化版本。
+            // activeRunID 为 nil 时没有任何消息属于本 run，一律以持久化版本为准。
+            let runOwned = message.runID != nil && message.runID == activeRunID
+            guard !runOwned, let external = persistedByID[message.id] else { return message }
             return external
         }
         if let firstLoadedID = inMemory.first?.id,
