@@ -93,9 +93,8 @@ private struct DirectShellStub: AgentTool {
         }
     }
 
-    // Sending mail is a hard human-gate capability: it requires approval even in
-    // execute/allowAll modes (covered by interactiveWebPublishingAlwaysRequiresHumanApproval
-    // for publishInteractiveWeb).
+    // 发送邮件与发布互动网页不再是硬性门禁：执行模式（trustedWrite/allowAll）下直接放行，
+    // 自动发送/发布；询问模式仍需逐次审批。
     for mode in [AgentPermissionMode.trustedWrite, .allowAll] {
         let send = await AgentPolicyEngine(permissionMode: mode).evaluate(
             capability: .sendMail,
@@ -103,7 +102,7 @@ private struct DirectShellStub: AgentTool {
             sessionID: "session-execute",
             toolName: "mail_send_draft"
         )
-        #expect(send.outcome == .needsApproval)
+        #expect(send.outcome == .approved)
     }
 
     let askDecision = await AgentPolicyEngine(permissionMode: .askToWrite).evaluate(
@@ -122,15 +121,23 @@ private struct DirectShellStub: AgentTool {
     #expect(readOnlyDecision.outcome == .denied)
 }
 
-@Test func interactiveWebPublishingAlwaysRequiresHumanApproval() async {
-    for mode in [AgentPermissionMode.askToWrite, .trustedWrite, .allowAll] {
+@Test func interactiveWebPublishingAutoApprovesInExecuteModeAndNeedsApprovalInAskMode() async {
+    let ask = await AgentPolicyEngine(permissionMode: .askToWrite).evaluate(
+        capability: .publishInteractiveWeb,
+        runID: "run-publish",
+        sessionID: "session-publish",
+        toolName: "interactive_web_publish"
+    )
+    #expect(ask.outcome == .needsApproval)
+
+    for mode in [AgentPermissionMode.trustedWrite, .allowAll] {
         let decision = await AgentPolicyEngine(permissionMode: mode).evaluate(
             capability: .publishInteractiveWeb,
             runID: "run-publish",
             sessionID: "session-publish",
             toolName: "interactive_web_publish"
         )
-        #expect(decision.outcome == .needsApproval)
+        #expect(decision.outcome == .approved)
     }
 
     let denied = await AgentPolicyEngine(permissionMode: .readOnly).evaluate(

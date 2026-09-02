@@ -6,13 +6,12 @@ import ConnorGraphAppSupport
 import ConnorGraphStore
 
 // Regression coverage for the mail-send approval flow at the live session-manager level.
-// Sending mail is a hard human-gate capability: `mail_send_draft` must surface a
-// .permissionRequested pending approval (capability .sendMail) in BOTH ask and execute
-// modes, and only proceed after the user approves.
+// Sending mail follows the session permission policy: in ask mode `mail_send_draft`
+// surfaces a .permissionRequested pending approval (capability .sendMail) and only sends
+// after the user approves; in execute mode it is auto-approved and sends immediately.
 @Suite("Mail Send Approval Flow")
 struct MailSendApprovalFlowTests {
-    @Test(arguments: [AgentPermissionMode.askToWrite, .trustedWrite])
-    func mailSendDraftYieldsPermissionRequestedAndSendsAfterApproval(permissionMode: AgentPermissionMode) async throws {
+    @Test func mailSendDraftYieldsPermissionRequestedAndSendsAfterApprovalInAskMode() async throws {
         let store = try makeMailApprovalStore()
         let repository = AppChatSessionRepository(store: store)
         let session = AgentSession(id: "mail-approval-session", title: "Mail Approval", createdAt: Date(timeIntervalSince1970: 1_000))
@@ -46,7 +45,7 @@ struct MailSendApprovalFlowTests {
                 )
             ]),
             toolRegistry: registry,
-            configuration: AgentLoopConfiguration(permissionMode: permissionMode)
+            configuration: AgentLoopConfiguration(permissionMode: .askToWrite)
         )
         var manager = NativeSessionManager(loopController: loop, sessionRepository: repository, session: session)
 
@@ -59,7 +58,7 @@ struct MailSendApprovalFlowTests {
                 }
                 try await Task.sleep(nanoseconds: 10_000_000)
             }
-            let pending = try #require(approval, "No pending approval appeared for mail_send_draft in mode \(permissionMode)")
+            let pending = try #require(approval, "No pending approval appeared for mail_send_draft in ask mode")
             #expect(pending.capability == .sendMail)
             #expect(pending.toolName == "mail_send_draft")
             #expect(pending.sessionID == session.id)
@@ -73,6 +72,54 @@ struct MailSendApprovalFlowTests {
         #expect(response.events.map(\.kind).contains(.permissionRequested))
         #expect(response.events.map(\.kind).contains(.permissionResolved))
         #expect(response.assistantMessage?.content == "Mail sent after approval.")
+    }
+
+    @Test func mailSendDraftAutoApprovesAndSendsInExecuteMode() async throws {
+        let store = try makeMailApprovalStore()
+        let repository = AppChatSessionRepository(store: store)
+        let session = AgentSession(id: "mail-execute-session", title: "Mail Execute", createdAt: Date(timeIntervalSince1970: 1_000))
+        try repository.saveSession(session)
+
+        let runtime = MailRuntime.fixture()
+        let draft = try await runtime.createDraft(
+            accountID: MailAccountID(rawValue: "fixture-account"),
+            identityID: MailIdentityID(rawValue: "fixture-identity"),
+            to: [MailAddress(email: "bob@example.com")],
+            subject: "Execute send",
+            body: "Should send immediately"
+        )
+
+        var registry = AgentToolRegistry()
+        registry.registerNativeMailTools(runtime: runtime)
+
+        let loop = AgentLoopController(
+            modelProvider: MailApprovalScriptedProvider(responses: [
+                AgentModelResponse(
+                    text: nil,
+                    toolCalls: [AgentToolCall(id: "mail-send-call-execute", name: "mail_send_draft", argumentsJSON: "{\"draftID\":\"\(draft.id.rawValue)\"}")],
+                    usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+                    finishReason: .toolCalls
+                ),
+                AgentModelResponse(
+                    text: "Mail sent immediately.",
+                    toolCalls: [],
+                    usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+                    finishReason: .stop
+                )
+            ]),
+            toolRegistry: registry,
+            configuration: AgentLoopConfiguration(permissionMode: .trustedWrite)
+        )
+        var manager = NativeSessionManager(loopController: loop, sessionRepository: repository, session: session)
+
+        // 执行模式（trustedWrite）下 mail_send_draft 自动放行并直接发送：
+        // 不产出 .permissionRequested/.permissionResolved，不留待审批记录。
+        let response = try await manager.submit("Send the email")
+
+        #expect(!response.events.map(\.kind).contains(.permissionRequested))
+        #expect(!response.events.map(\.kind).contains(.permissionResolved))
+        #expect(response.assistantMessage?.content == "Mail sent immediately.")
+        #expect(try store.pendingApprovals(status: .pending, limit: 10).isEmpty)
     }
 }
 

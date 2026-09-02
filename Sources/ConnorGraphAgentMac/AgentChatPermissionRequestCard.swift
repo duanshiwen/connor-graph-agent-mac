@@ -188,14 +188,14 @@ struct AgentChatPermissionRequestCard: View {
                 if !windowWidthClass.usesStackedPanes {
                     Spacer(minLength: AgentChatLayout.spaceS)
 
-                    Text(approvalPresentation.allowsAlwaysAllow ? "始终允许会将当前会话切换为执行，后续权限请求直接放行" : (mailApproval.isMailSendRequest ? "可放大审阅；发送邮件始终需要逐次确认" : "可放大审阅；询问模式下此操作需要逐次审批"))
+                    Text(approvalPresentation.allowsAlwaysAllow ? "始终允许会将当前会话切换为执行，后续权限请求直接放行" : (mailApproval.isMailSendRequest ? "可放大审阅；询问模式下发送邮件需要逐次确认" : "可放大审阅；询问模式下此操作需要逐次审批"))
                         .font(AgentChatTypography.meta)
                         .foregroundStyle(.secondary)
                 }
             }
 
             if windowWidthClass.usesStackedPanes {
-                Text(approvalPresentation.allowsAlwaysAllow ? "始终允许会将当前会话切换为执行，后续权限请求直接放行" : (mailApproval.isMailSendRequest ? "可放大审阅；发送邮件始终需要逐次确认" : "可放大审阅；询问模式下此操作需要逐次审批"))
+                Text(approvalPresentation.allowsAlwaysAllow ? "始终允许会将当前会话切换为执行，后续权限请求直接放行" : (mailApproval.isMailSendRequest ? "可放大审阅；询问模式下发送邮件需要逐次确认" : "可放大审阅；询问模式下此操作需要逐次审批"))
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
