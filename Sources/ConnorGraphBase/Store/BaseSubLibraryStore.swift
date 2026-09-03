@@ -82,6 +82,14 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
                 PRIMARY KEY (table_name, column_name)
             );
             """)
+        // 幂等表（M1-K5）：本地去重，不同步。
+        try executeVoid("""
+            CREATE TABLE IF NOT EXISTS base_idempotency (
+                idempotency_key TEXT PRIMARY KEY,
+                response_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """)
     }
 
     private func loadTypeCache() throws {
@@ -125,6 +133,28 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
     public func recordMigration(_ version: Int) throws {
         try executeVoid("INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
                         parameters: [version, BaseTime.isoNow()])
+    }
+
+    // MARK: 幂等（M1-K5）
+
+    public func idempotencyResponse(for key: String) throws -> [String: Any]? {
+        let rows = try execute("SELECT response_json FROM base_idempotency WHERE idempotency_key = ?1",
+                               parameters: [key])
+        guard let raw = rows.first?["response_json"] as? String,
+              let data = raw.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return obj
+    }
+
+    public func saveIdempotency(key: String, response: [String: Any]) throws {
+        let raw = (try? JSONSerialization.data(withJSONObject: response))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        try executeVoid("""
+            INSERT OR REPLACE INTO base_idempotency (idempotency_key, response_json, created_at)
+            VALUES (?1, ?2, ?3)
+            """, parameters: [key, raw, BaseTime.isoNow()])
     }
 
     // MARK: DDL（表名/列名经白名单校验后拼接，值永不拼接）
