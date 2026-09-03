@@ -214,6 +214,9 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
             headers["api-key"] = config.apiKey
         }
         headers["Content-Type"] = "application/json"
+        if isTokenDanceEndpointHost(config.baseURL) {
+            headers["X-App-URL"] = connorTokenDanceAppURL
+        }
         return headers
     }
 

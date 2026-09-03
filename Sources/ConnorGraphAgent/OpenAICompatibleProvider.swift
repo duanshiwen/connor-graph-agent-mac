@@ -4,6 +4,16 @@ import ConnorGraphSearch
 import FoundationNetworking
 #endif
 
+/// TokenDance（词元跳动）应用归因：官方通过 `X-App-URL` 请求头识别调用来自哪个应用，
+/// 请求维度优先于 API Key 维度（https://tokendance.space/docs/app-attribution）。
+/// 康纳同学 Mac/Android 双端统一使用该 App URL，保证 TokenDance 侧调用可稳定归集到康纳同学。
+public let connorTokenDanceAppURL = "https://duanshiwen.github.io/connor-graph-agent-mac/"
+
+/// TokenDance（词元跳动）网关主机判定：命中时附加 `X-App-URL` 应用归因请求头。
+func isTokenDanceEndpointHost(_ url: URL) -> Bool {
+    url.host?.lowercased() == "tokendance.space"
+}
+
 public enum OpenAICompatibleAPIKeyHeaderKind: String, Sendable, Equatable, Codable, CaseIterable {
     case bearer
     case apiKey = "api-key"
@@ -380,6 +390,9 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             headers["api-key"] = config.apiKey
         }
         headers["Content-Type"] = "application/json"
+        if isTokenDanceEndpointHost(config.baseURL) {
+            headers["X-App-URL"] = connorTokenDanceAppURL
+        }
         return headers
     }
 

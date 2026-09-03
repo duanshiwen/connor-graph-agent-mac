@@ -881,7 +881,7 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
     }
 
     static let chinaProviderPresetIDs: Set<String> = [
-        "deepseek", "xiaomi-mimo", "qwen", "doubao", "moonshot", "zhipu", "minimax", "stepfun", "zai"
+        "tokendance", "deepseek", "xiaomi-mimo", "qwen", "doubao", "moonshot", "zhipu", "minimax", "stepfun", "zai"
     ]
 
     static var chinaProviderPresets: [AIConnectionProviderPreset] {
@@ -889,6 +889,7 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
     }
 
     static let otherProviderPresets: [AIConnectionProviderPreset] = [
+        AIConnectionProviderPreset(id: "tokendance", title: "TokenDance · 词元跳动", endpoint: "https://tokendance.space/gateway/v1", defaultModel: "seed-2.1-pro", supportedModels: ["seed-2.1-pro", "seed-2.1-turbo", "seed-2.0-pro", "seed-2.0-code", "seed-2.0-lite", "seed-2.0-mini", "seed-evolving"], keyPlaceholder: "Paste your TokenDance API Key...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "openai", title: "OpenAI", endpoint: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", keyPlaceholder: "sk-...", protocolKind: .openAICompatible, hidesEndpoint: true),
         AIConnectionProviderPreset(id: "openai-eu", title: "OpenAI EU", endpoint: "https://eu.api.openai.com/v1", defaultModel: "gpt-4o-mini", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "openai-us", title: "OpenAI US", endpoint: "https://us.api.openai.com/v1", defaultModel: "gpt-4o-mini", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
@@ -944,6 +945,25 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
     }
 
     static let all: [AIConnectionOnboardingOption] = [
+        AIConnectionOnboardingOption(
+            id: "tokendance",
+            title: "TokenDance · 词元跳动",
+            subtitle: "使用字节跳动 TokenDance 多模型网关，一个 Key 即可接入豆包 Seed、DeepSeek、Qwen、Kimi 等模型。",
+            systemImage: "sparkles.rectangle.stack.fill",
+            tint: .cyan,
+            providerMode: .openAICompatible,
+            connectionName: "TokenDance · 词元跳动",
+            baseURLString: "https://tokendance.space/gateway/v1",
+            model: "seed-2.1-pro",
+            selectedModel: "seed-2.1-pro",
+            supportedModels: ["seed-2.1-pro", "seed-2.1-turbo", "seed-2.0-pro", "seed-2.0-code", "seed-2.0-lite", "seed-2.0-mini", "seed-evolving"],
+            setupTitle: "连接 TokenDance",
+            setupSubtitle: "使用字节跳动 TokenDance OpenAI 兼容 API 驱动康纳同学。",
+            setupInstruction: "选择模型并填写 TokenDance API Key。接口地址已按官方文档预设。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
+        ),
         AIConnectionOnboardingOption(
             id: "deepseek",
             title: "DeepSeek",
