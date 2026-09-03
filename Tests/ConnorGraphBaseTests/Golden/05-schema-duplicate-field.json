@@ -1,0 +1,16 @@
+{
+  "name": "05-schema-duplicate-field",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [ { "name": "amount", "type": "number" } ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.table.create",
+      "args": { "appID": "acct", "table": { "name": "dups", "fields": [ { "name": "a", "type": "number" }, { "name": "a", "type": "text" } ] } }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": false, "data": null, "error": { "code": "VALIDATION_FAILED", "message": "字段名重复", "hint": "同一表内字段名须唯一", "retryable": false }, "site": "local" },
+    "errorCode": "VALIDATION_FAILED"
+  }
+}

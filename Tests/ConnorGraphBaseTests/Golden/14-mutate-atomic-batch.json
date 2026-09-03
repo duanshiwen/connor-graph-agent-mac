@@ -1,0 +1,25 @@
+{
+  "name": "14-mutate-atomic-batch",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [
+      { "name": "amount", "type": "number", "required": true, "range": { "min": 0 } },
+      { "name": "category", "type": "enum", "enum": ["food", "transport", "home", "other"] },
+      { "name": "date", "type": "date", "required": true },
+      { "name": "note", "type": "text" }
+    ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.record.mutate",
+      "args": { "appID": "acct", "table": "expenses", "ops": [
+        { "op": "insert", "record": { "amount": 25, "category": "transport", "date": "2026-09-03", "note": "地铁" } },
+        { "op": "insert", "record": { "amount": 68, "category": "food", "date": "2026-09-03", "note": "午饭" } },
+        { "op": "insert", "record": { "amount": 199, "category": "home", "date": "2026-09-04", "note": "日用品" } }
+      ] }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": true, "data": { "affected": 3, "ids": ["rec_1", "rec_2", "rec_3"] }, "error": null, "site": "local" },
+    "errorCode": null
+  }
+}

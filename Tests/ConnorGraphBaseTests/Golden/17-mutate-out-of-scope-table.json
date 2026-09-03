@@ -1,0 +1,16 @@
+{
+  "name": "17-mutate-out-of-scope-table",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [ { "name": "amount", "type": "number" } ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.record.mutate",
+      "args": { "appID": "acct", "table": "secret_table", "ops": [ { "op": "insert", "record": { "amount": 1 } } ] }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": false, "data": null, "error": { "code": "NOT_FOUND", "message": "TABLE_NOT_IN_SCOPE：表 secret_table 不在 App acct 作用域内", "hint": "核对表名与 App schema", "retryable": false }, "site": "local" },
+    "errorCode": "NOT_FOUND"
+  }
+}

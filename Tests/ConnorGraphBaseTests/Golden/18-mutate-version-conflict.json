@@ -1,0 +1,19 @@
+{
+  "name": "18-mutate-version-conflict",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [
+      { "name": "amount", "type": "number", "required": true },
+      { "name": "note", "type": "text" }
+    ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.record.mutate",
+      "args": { "appID": "acct", "table": "expenses", "ops": [ { "op": "update", "id": "rec_9", "expectedVersion": 3, "record": { "amount": 500 } } ] }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": false, "data": null, "error": { "code": "CONFLICT", "message": "记录版本冲突，字段级 LWW 无法自动消解", "hint": "读取最新版本后重试", "retryable": true }, "site": "local" },
+    "errorCode": "CONFLICT"
+  }
+}

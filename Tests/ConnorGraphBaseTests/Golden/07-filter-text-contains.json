@@ -1,0 +1,22 @@
+{
+  "name": "07-filter-text-contains",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [
+      { "name": "amount", "type": "number" },
+      { "name": "category", "type": "enum", "enum": ["food", "transport", "home", "other"] },
+      { "name": "date", "type": "date" },
+      { "name": "note", "type": "text" },
+      { "name": "owner", "type": "relation", "relation": { "table": "members", "on": "id" } }
+    ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.query.select",
+      "args": { "appID": "acct", "table": "expenses", "filter": { "field": "note", "op": "contains", "value": "咖啡" } }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": true, "data": { "rows": [] }, "error": null, "site": "local" },
+    "errorCode": null
+  }
+}
