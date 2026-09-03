@@ -27,9 +27,13 @@ public enum BaseNameResolver {
     }
 
     /// 解析字段引用：字段名必须合法（供 SQL 拼接白名单）。
+    /// 系统主键 `id`（每表隐式 TEXT 主键）始终放行。
     public static func resolveField(_ name: String, in table: String, fields: [String: String]) throws -> String {
         guard BaseSchemaValidator.isValidName(name) else {
             throw BaseError.validation(.invalidFieldName(name))
+        }
+        if name == "id" {
+            return "text"
         }
         guard let type = fields[name] else {
             throw BaseError(code: .notFound, message: "字段不存在", hint: "表 \(table) 不含字段 \(name)")
