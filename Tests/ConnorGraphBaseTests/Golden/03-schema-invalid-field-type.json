@@ -1,0 +1,16 @@
+{
+  "name": "03-schema-invalid-field-type",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [ { "name": "amount", "type": "number" } ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.table.create",
+      "args": { "appID": "acct", "table": { "name": "weird", "fields": [ { "name": "data", "type": "blob" } ] } }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": false, "data": null, "error": { "code": "VALIDATION_FAILED", "message": "字段类型不合法", "hint": "字段类型只允许 text/number/boolean/date/enum/relation/asset", "retryable": false }, "site": "local" },
+    "errorCode": "VALIDATION_FAILED"
+  }
+}

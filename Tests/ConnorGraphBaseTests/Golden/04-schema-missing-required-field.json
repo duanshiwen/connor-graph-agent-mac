@@ -1,0 +1,16 @@
+{
+  "name": "04-schema-missing-required-field",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [ { "name": "amount", "type": "number" } ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.table.create",
+      "args": { "appID": "acct", "table": { "name": "broken", "fields": [ { "name": "amount" } ] } }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": false, "data": null, "error": { "code": "VALIDATION_FAILED", "message": "字段缺少类型", "hint": "字段定义必须包含 type", "retryable": false }, "site": "local" },
+    "errorCode": "VALIDATION_FAILED"
+  }
+}
