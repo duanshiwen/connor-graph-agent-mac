@@ -41,10 +41,20 @@ final class BaseRecordMutatorTests: XCTestCase {
             "id": "e1",
             "record": ["amount": 360, "category": "food", "paid": true]
         ]])
-        XCTAssertEqual(r["applied"] as? Int, 1)
+        XCTAssertEqual(r["affected"] as? Int, 1)
         let row = try store.fetch(id: "e1", table: "expenses")
         XCTAssertEqual(row?["amount"], .number(360))
         XCTAssertEqual(row?["paid"], .bool(true))
+    }
+
+    func testSequentialIDsGenerated() throws {
+        let r = try mutator.mutate(appID: "acct", table: "expenses", ops: [
+            ["op": "insert", "record": ["amount": 1, "category": "food"]],
+            ["op": "insert", "record": ["amount": 2, "category": "food"]],
+            ["op": "insert", "record": ["amount": 3, "category": "food"]]
+        ])
+        XCTAssertEqual(r["affected"] as? Int, 3)
+        XCTAssertEqual(r["ids"] as? [String], ["rec_1", "rec_2", "rec_3"])
     }
 
     func testRequiredFieldEnforced() {
@@ -110,7 +120,7 @@ final class BaseRecordMutatorTests: XCTestCase {
         let r = try mutator.mutate(appID: "acct", table: "expenses", ops: [[
             "op": "insert", "id": "e1", "record": ["amount": 1, "category": "food"]
         ]], dryRun: true)
-        XCTAssertEqual(r["applied"] as? Int, 0)
+        XCTAssertEqual(r["wouldAffect"] as? Int, 1)
         XCTAssertEqual(r["dryRun"] as? Bool, true)
         XCTAssertNil(try store.fetch(id: "e1", table: "expenses"))
     }
@@ -150,7 +160,7 @@ final class BaseRecordMutatorTests: XCTestCase {
             "op": "insert", "id": "e1", "record": ["amount": 1, "category": "food"]
         ]])
         let r = try mutator.mutate(appID: "acct", table: "expenses", ops: [["op": "delete", "id": "e1"]])
-        XCTAssertEqual(r["applied"] as? Int, 1)
+        XCTAssertEqual(r["affected"] as? Int, 1)
         XCTAssertNil(try store.fetch(id: "e1", table: "expenses"))
     }
 }

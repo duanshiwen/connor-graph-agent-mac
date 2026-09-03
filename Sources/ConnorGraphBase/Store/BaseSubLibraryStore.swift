@@ -90,6 +90,14 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
                 created_at TEXT NOT NULL
             );
             """)
+        // 记录顺序表（M1-K5 修正）：子库级确定性顺序 ID（rec_N，与 golden 契约一致），单行自增。
+        try executeVoid("""
+            CREATE TABLE IF NOT EXISTS base_record_seq (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                seq INTEGER NOT NULL
+            );
+            """)
+        try executeVoid("INSERT OR IGNORE INTO base_record_seq (id, seq) VALUES (1, 0);")
     }
 
     private func loadTypeCache() throws {
@@ -155,6 +163,19 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
             INSERT OR REPLACE INTO base_idempotency (idempotency_key, response_json, created_at)
             VALUES (?1, ?2, ?3)
             """, parameters: [key, raw, BaseTime.isoNow()])
+    }
+
+    // MARK: 记录顺序 ID（确定性 rec_N，非 UUID——golden 契约要求）
+
+    /// 返回子库级顺序记录 ID（rec_1、rec_2、…），单调递增、事务内串行。
+    public func nextRecordID() throws -> String {
+        let rows = try execute("SELECT seq FROM base_record_seq WHERE id = 1")
+        let next: Int64 = (rows.first?["seq"] as? Int64).map { $0 + 1 } ?? 1
+        try executeVoid("""
+            INSERT INTO base_record_seq (id, seq) VALUES (1, ?1)
+            ON CONFLICT(id) DO UPDATE SET seq = excluded.seq
+            """, parameters: [next])
+        return "rec_\(next)"
     }
 
     // MARK: DDL（表名/列名经白名单校验后拼接，值永不拼接）
