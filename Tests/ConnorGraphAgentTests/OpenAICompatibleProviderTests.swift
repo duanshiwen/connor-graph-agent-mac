@@ -159,6 +159,54 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     #expect(!requestText.contains("Graph memory context"))
 }
 
+@Test func openAICompatibleProviderAttachesTokenDanceAppURLHeader() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" } }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://tokendance.space/gateway/v1")!,
+            apiKey: "td-key",
+            model: "seed-2.1-pro"
+        ),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(prompt: "ping", context: AgentContext(query: "ping", items: []))
+
+    #expect(client.captured?.url.absoluteString == "https://tokendance.space/gateway/v1/chat/completions")
+    #expect(client.captured?.headers["Authorization"] == "Bearer td-key")
+    #expect(client.captured?.headers["X-App-URL"] == connorTokenDanceAppURL)
+}
+
+@Test func openAICompatibleProviderDoesNotAttachTokenDanceAppURLHeaderToOtherHosts() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" } }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://llm.example.com/v1")!,
+            apiKey: "test-key",
+            model: "gpt-test"
+        ),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(prompt: "ping", context: AgentContext(query: "ping", items: []))
+
+    #expect(client.captured?.headers["X-App-URL"] == nil)
+}
+
 @Test func openAICompatibleProviderUsesFirstModelFromCommaSeparatedModelList() async throws {
     let body = """
     {
