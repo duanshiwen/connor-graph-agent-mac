@@ -85,6 +85,9 @@ let package = Package(
             name: "ConnorGraphBase",
             resources: [
                 .copy("Resources/Contracts")
+            ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
             ]
         ),
         .testTarget(name: "ConnorGraphCoreTests", dependencies: ["ConnorGraphCore"]),
