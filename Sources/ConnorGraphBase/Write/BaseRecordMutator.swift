@@ -13,9 +13,12 @@ public struct BaseRecordMutator {
     public let store: BaseSubLibraryStore
     public let schema: BaseAppSchema
 
-    public struct DiffItem: Encodable, Equatable {
+    /// 单 op 执行结果：id +（dryRun 时）变更前后字段 JSON 快照。
+    public struct DiffItem {
         public let op: String
         public let id: String
+        public var before: [String: JSONValue]?
+        public var after: [String: JSONValue]?
     }
 
     public init(store: BaseSubLibraryStore, schema: BaseAppSchema) {
@@ -31,7 +34,9 @@ public struct BaseRecordMutator {
         idempotencyKey: String? = nil
     ) throws -> [String: Any] {
         guard try store.tableExists(table) else {
-            throw BaseError(code: .notFound, message: "表不存在", hint: "子库无表 \(table)")
+            throw BaseError(code: .notFound,
+                            message: "TABLE_NOT_IN_SCOPE：表 \(table) 不在 App \(appID) 作用域内",
+                            hint: "核对表名与 App schema")
         }
         guard let tableDef = schema.table(named: table) else {
             throw BaseError(code: .notFound, message: "表不存在于 schema", hint: "schema 无表 \(table)")
@@ -41,10 +46,12 @@ public struct BaseRecordMutator {
             throw BaseError(code: .validationFailed, message: "ops 为空", hint: "ops 至少一项")
         }
 
-        // 幂等：命中直接返回首次响应。
+        // 幂等：命中直接返回首次响应（标记已去重）。
         if let key = idempotencyKey, !key.isEmpty {
             if let cached = try store.idempotencyResponse(for: key) {
-                return cached
+                var hit = cached
+                hit["deduplicated"] = true
+                return hit
             }
         }
 
@@ -56,57 +63,69 @@ public struct BaseRecordMutator {
                 }
                 switch op {
                 case "insert":
-                    let id = try insertOp(rawOp, tableDef: tableDef, dryRun: dryRun)
-                    diff.append(DiffItem(op: "insert", id: id))
+                    diff.append(try insertOp(rawOp, tableDef: tableDef, dryRun: dryRun))
                 case "update":
-                    let id = try updateOp(rawOp, tableDef: tableDef, dryRun: dryRun)
-                    diff.append(DiffItem(op: "update", id: id))
+                    diff.append(try updateOp(rawOp, tableDef: tableDef, dryRun: dryRun))
                 case "delete":
-                    let id = try deleteOp(rawOp, tableDef: tableDef, dryRun: dryRun)
-                    diff.append(DiffItem(op: "delete", id: id))
+                    diff.append(try deleteOp(rawOp, tableDef: tableDef, dryRun: dryRun))
                 default:
                     throw BaseError(code: .validationFailed, message: "op 不合法", hint: "op 须为 insert/update/delete")
                 }
             }
-            var result: [String: Any] = [
-                "applied": dryRun ? 0 : diff.count,
-                "dryRun": dryRun,
-                "diff": diff.map { ["op": $0.op, "id": $0.id] },
-                "ids": diff.map { $0.id }
-            ]
+            var result: [String: Any]
             if dryRun {
-                result["dryRunPreview"] = true
+                result = [
+                    "dryRun": true,
+                    "wouldAffect": diff.count,
+                    "diff": diff.map {
+                        ["op": $0.op,
+                         "id": $0.id,
+                         "before": $0.before.map { JSONValue.object($0).jsonObject } ?? NSNull(),
+                         "after": $0.after.map { JSONValue.object($0).jsonObject } ?? NSNull()]
+                    }
+                ]
+            } else {
+                result = ["affected": diff.count, "ids": diff.map { $0.id }]
             }
             return result
         }
 
         if let key = idempotencyKey, !key.isEmpty, !dryRun {
-            try store.saveIdempotency(key: key, response: response)
+            var stored = response
+            stored["deduplicated"] = false
+            try store.saveIdempotency(key: key, response: stored)
+            return stored
         }
         return response
     }
 
     // MARK: op 执行
 
-    private func insertOp(_ raw: [String: Any], tableDef: BaseTableDef, dryRun: Bool) throws -> String {
+    private func insertOp(_ raw: [String: Any], tableDef: BaseTableDef, dryRun: Bool) throws -> DiffItem {
         guard let record = raw["record"] as? [String: Any] else {
             throw BaseError(code: .validationFailed, message: "insert 缺 record", hint: "insert op 必须携带 record 对象")
         }
-        let id = (raw["id"] as? String) ?? UUID().uuidString.lowercased()
+        let id = try (raw["id"] as? String) ?? store.nextRecordID()
         let values = try validatedValues(record, tableDef: tableDef, forUpdate: false, existingId: nil)
         if !dryRun {
             let meta = baseMeta(version: 1)
             try store.insert(id: id, table: tableDef.name, values: values, meta: meta)
         }
-        return id
+        return DiffItem(op: "insert", id: id, before: nil, after: dryRun ? values : nil)
     }
 
-    private func updateOp(_ raw: [String: Any], tableDef: BaseTableDef, dryRun: Bool) throws -> String {
+    private func updateOp(_ raw: [String: Any], tableDef: BaseTableDef, dryRun: Bool) throws -> DiffItem {
         guard let id = raw["id"] as? String else {
             throw BaseError(code: .validationFailed, message: "update 缺 id", hint: "update op 必须携带 id")
         }
         let existing = try store.fetch(id: id, table: tableDef.name)
-        guard existing != nil else {
+        guard let existing else {
+            // 带 expectedVersion 更新不存在的记录 → 版本冲突（字段级 LWW 无法自动消解）。
+            if raw["expectedVersion"] != nil {
+                throw BaseError(code: .conflict,
+                                message: "记录版本冲突，字段级 LWW 无法自动消解",
+                                hint: "读取最新版本后重试")
+            }
             throw BaseError(code: .notFound, message: "记录不存在", hint: "无法更新不存在的记录 \(id)")
         }
         try checkExpectedVersion(raw, table: tableDef.name, id: id)
@@ -117,22 +136,31 @@ public struct BaseRecordMutator {
             let meta = baseMeta(version: newVersion)
             try store.update(id: id, table: tableDef.name, values: values, meta: meta)
         }
-        return id
+        return DiffItem(op: "update", id: id,
+                        before: dryRun ? existing : nil,
+                        after: dryRun ? mergedValues(existing: existing, updates: values) : nil)
     }
 
-    private func deleteOp(_ raw: [String: Any], tableDef: BaseTableDef, dryRun: Bool) throws -> String {
+    private func deleteOp(_ raw: [String: Any], tableDef: BaseTableDef, dryRun: Bool) throws -> DiffItem {
         guard let id = raw["id"] as? String else {
             throw BaseError(code: .validationFailed, message: "delete 缺 id", hint: "delete op 必须携带 id")
         }
         let existing = try store.fetch(id: id, table: tableDef.name)
-        guard existing != nil else {
+        guard let existing else {
             throw BaseError(code: .notFound, message: "记录不存在", hint: "无法删除不存在的记录 \(id)")
         }
         try checkExpectedVersion(raw, table: tableDef.name, id: id)
         if !dryRun {
             try store.delete(id: id, table: tableDef.name)
         }
-        return id
+        return DiffItem(op: "delete", id: id, before: dryRun ? existing : nil, after: nil)
+    }
+
+    /// dryRun 时预览 update 后的完整记录（existing + 新值覆盖）。
+    private func mergedValues(existing: [String: JSONValue], updates: [String: JSONValue]) -> [String: JSONValue] {
+        var merged = existing
+        for (k, v) in updates { merged[k] = v }
+        return merged
     }
 
     // MARK: 校验
@@ -143,8 +171,8 @@ public struct BaseRecordMutator {
         let current = try version(of: id, table: table)
         guard let current, current == expected else {
             throw BaseError(code: .conflict,
-                            message: "记录版本冲突",
-                            hint: "期望版本 \(expected)，当前 \(current.map(String.init) ?? "无")")
+                            message: "记录版本冲突，字段级 LWW 无法自动消解",
+                            hint: "读取最新版本后重试")
         }
     }
 
