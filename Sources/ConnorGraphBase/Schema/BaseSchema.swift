@@ -295,7 +295,7 @@ public enum BaseSchemaValidator {
 
     /// 解析并校验一个完整 App schema（多表）。
     /// 两遍：先解析全部表，再统一校验 relation 引用（目标表必须在同一子库）。
-    public static func parseSchema(_ object: [String: Any]) throws -> BaseAppSchema {
+    public static func parseSchema(_ object: [String: Any], validateRelations: Bool = true) throws -> BaseAppSchema {
         guard let rawTables = object["tables"] as? [[String: Any]] else {
             throw ValidationError.invalid(.invalidTableName(""))
         }
@@ -310,15 +310,18 @@ public enum BaseSchemaValidator {
             tables.append(table)
         }
         let schema = BaseAppSchema(tables: tables)
-        // 第二遍：relation 目标表与目标字段必须在同一 schema 内。
-        for table in tables {
-            for field in table.fields where field.type == "relation" {
-                guard let rel = field.relation else { continue }
-                guard let target = schema.table(named: rel.table) else {
-                    throw ValidationError.invalid(.relationTableNotFound(table.name, rel.table))
-                }
-                guard target.fields.contains(where: { $0.name == rel.on }) || rel.on == "id" else {
-                    throw ValidationError.invalid(.relationFieldNotFound(table.name, rel.table, rel.on))
+        // 第二遍：relation 目标表与目标字段必须在同一 schema 内（结构期不变量；
+        // 读/写执行期传 validateRelations:false 不复校验，允许查询所需的局部 schema 快照）。
+        if validateRelations {
+            for table in tables {
+                for field in table.fields where field.type == "relation" {
+                    guard let rel = field.relation else { continue }
+                    guard let target = schema.table(named: rel.table) else {
+                        throw ValidationError.invalid(.relationTableNotFound(table.name, rel.table))
+                    }
+                    guard target.fields.contains(where: { $0.name == rel.on }) || rel.on == "id" else {
+                        throw ValidationError.invalid(.relationFieldNotFound(table.name, rel.table, rel.on))
+                    }
                 }
             }
         }
