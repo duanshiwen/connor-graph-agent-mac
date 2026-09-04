@@ -948,7 +948,7 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
         AIConnectionOnboardingOption(
             id: "tokendance",
             title: "TokenDance · 词元跳动",
-            subtitle: "使用字节跳动 TokenDance 多模型网关，一个 Key 即可接入豆包 Seed、DeepSeek、Qwen、Kimi 等模型。",
+            subtitle: "使用 TokenDance（词元跳动）多模型网关，一个 Key 即可接入 Seed、DeepSeek、Qwen、Kimi 等模型。",
             systemImage: "sparkles.rectangle.stack.fill",
             tint: .cyan,
             providerMode: .openAICompatible,
@@ -958,7 +958,7 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             selectedModel: "seed-2.1-pro",
             supportedModels: ["seed-2.1-pro", "seed-2.1-turbo", "seed-2.0-pro", "seed-2.0-code", "seed-2.0-lite", "seed-2.0-mini", "seed-evolving"],
             setupTitle: "连接 TokenDance",
-            setupSubtitle: "使用字节跳动 TokenDance OpenAI 兼容 API 驱动康纳同学。",
+            setupSubtitle: "使用 TokenDance（词元跳动）OpenAI 兼容 API 驱动康纳同学。",
             setupInstruction: "选择模型并填写 TokenDance API Key。接口地址已按官方文档预设。",
             loginButtonTitle: "继续",
             authURLString: "",
