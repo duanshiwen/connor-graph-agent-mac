@@ -316,6 +316,99 @@ final class BaseMethodInterpreterTests: XCTestCase {
         XCTAssertEqual(literal, "$money")
     }
 
+    // MARK: M2-K4 reply 模板 / JSONPath 边界
+
+    func testReplyMissingPathResolvesToNull() throws {
+        let json: [String: Any] = [
+            "name": "missing",
+            "steps": [["type": "reply", "template": ["nope": "$not.there"]]]
+        ]
+        let def = try BaseMethodDef(json: json)
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
+        guard case let .object(reply) = result.data else {
+            return XCTFail("reply 应为对象")
+        }
+        guard case .null = reply["nope"] else {
+            return XCTFail("缺失路径应解析为 null")
+        }
+    }
+
+    func testReplyArrayIndexOutOfBoundsIsNull() throws {
+        let json: [String: Any] = [
+            "name": "bounds",
+            "steps": [
+                ["type": "aggregate", "table": "expenses", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
+                ["type": "reply", "template": ["x": "$agg.9.total"]]
+            ]
+        ]
+        let def = try BaseMethodDef(json: json)
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
+        guard case let .object(reply) = result.data, case .null = reply["x"] else {
+            return XCTFail("越界下标应解析为 null")
+        }
+    }
+
+    func testReplyNestedObjectPath() throws {
+        let json: [String: Any] = [
+            "name": "nested",
+            "steps": [
+                ["type": "query", "table": "expenses", "as": "rows"],
+                ["type": "reply", "template": [
+                    "firstCategory": "$rows.0.category",
+                    "firstAmount": "$rows.0.amount"
+                ]]
+            ]
+        ]
+        let def = try BaseMethodDef(json: json)
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
+        guard case let .object(reply) = result.data,
+              case let .string(category)? = reply["firstCategory"],
+              case let .number(amount)? = reply["firstAmount"] else {
+            return XCTFail("嵌套投影应解析")
+        }
+        XCTAssertEqual(category, "food")
+        XCTAssertEqual(amount, 93)
+    }
+
+    func testReplyLiteralPassthroughTypes() throws {
+        let json: [String: Any] = [
+            "name": "passthrough",
+            "steps": [["type": "reply", "template": [
+                "text": "plain",
+                "num": 3.14,
+                "flag": true,
+                "arr": [1, "two"],
+                "obj": ["inner": 42]
+            ]]]
+        ]
+        let def = try BaseMethodDef(json: json)
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
+        guard case let .object(reply) = result.data else {
+            return XCTFail("reply 应为对象")
+        }
+        XCTAssertEqual(reply["text"], .string("plain"))
+        XCTAssertEqual(reply["num"], .number(3.14))
+        XCTAssertEqual(reply["flag"], .bool(true))
+        XCTAssertEqual(reply["arr"], .array([.number(1), .string("two")]))
+        XCTAssertEqual(reply["obj"], .object(["inner": .number(42)]))
+    }
+
+    func testReplyArrayInTemplateResolvesPaths() throws {
+        let json: [String: Any] = [
+            "name": "arr.tpl",
+            "steps": [
+                ["type": "aggregate", "table": "expenses", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
+                ["type": "reply", "template": ["series": ["$agg.0.total", "$missing"]]]
+            ]
+        ]
+        let def = try BaseMethodDef(json: json)
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
+        guard case let .object(reply) = result.data, case let .array(series)? = reply["series"] else {
+            return XCTFail("series 应为数组")
+        }
+        XCTAssertEqual(series, [.number(143), .null])
+    }
+
     // MARK: M2-K2 跨 App exported 调用
 
     /// 造一个订阅 App（subs）子库：表 subs，一条记录 amount=200。
