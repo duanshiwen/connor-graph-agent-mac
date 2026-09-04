@@ -325,9 +325,18 @@ public final class BaseLibraryStore: @unchecked Sendable {
 
     /// 解析方法调用目标（base.method.invoke / 解释器 call 步骤用）。
     /// reference 形如 `methodName`（同 App）或 `appID.methodName`（跨 App）。
+    /// 解析优先级：先在 callingAppID 内按完整 reference 找同名方法（方法名本身可含点，如 summary.monthly）；
+    /// 找不到再按 `appID.methodName` 切分做跨 App 解析。
     /// 跨 App：调用方 manifest imports 须声明目标 appID（v0.12 §2.3/§5.3），且目标方法须 exported。
     /// 返回的目标 store 由调用方负责 close。
     public func methodTarget(callingAppID: String, reference: String) throws -> BaseMethodTarget? {
+        // 1) 同 App 优先：方法名本身可含点，先在当前 App 内找完整 reference。
+        if let localDef = try methodDef(appID: callingAppID, name: reference) {
+            let store = try openStore(appID: callingAppID)
+            let schema = try currentSchema(appID: callingAppID)
+            return BaseMethodTarget(appID: callingAppID, store: store, schema: schema, method: localDef)
+        }
+        // 2) 跨 App：按 `appID.methodName` 切分。
         let parts = reference.split(separator: ".").map(String.init)
         let targetAppID: String
         let methodName: String
