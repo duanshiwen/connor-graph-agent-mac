@@ -997,13 +997,16 @@ enum LocalShellExecutor {
 
         try process.run()
 
+        // 以声明超时为硬期限等待进程退出，期间实时响应任务取消。
+        // 到达期限或收到取消时执行「两步击杀」：先 SIGTERM 优雅终止，
+        // 宽限期内仍未退出再 SIGKILL 强杀，避免忽略 SIGTERM 的进程让工具永久卡死。
         let timeoutState = LocalShellTimeoutState()
         let timeoutTimer = DispatchSource.makeTimerSource(
-            queue: DispatchQueue(label: "com.connor.local-shell-timeout.(UUID().uuidString)")
+            queue: DispatchQueue(label: "com.connor.local-shell-timeout.\(UUID().uuidString)")
         )
         timeoutTimer.schedule(deadline: .now() + .seconds(timeoutSeconds))
         timeoutTimer.setEventHandler {
-            timeoutState.terminateIfRunning(process)
+            timeoutState.markTimedOut()
         }
         timeoutTimer.resume()
         defer {
@@ -1011,17 +1014,27 @@ enum LocalShellExecutor {
             timeoutTimer.cancel()
         }
 
-        while process.isRunning {
+        while process.isRunning, !timeoutState.didTimeout, !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
-        if timeoutState.didTimeout {
-            process.waitUntilExit()
+        let cancelled = Task.isCancelled
+        if process.isRunning, timeoutState.didTimeout || cancelled {
+            process.terminate()
+            let killDeadline = ContinuousClock.now + .seconds(2)
+            while process.isRunning, ContinuousClock.now < killDeadline {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+                process.waitUntilExit()
+            }
+            if cancelled { throw CancellationError() }
             throw LocalWorkspacePolicyError.commandTimedOut(command)
         }
         try stdoutHandle.close()
         try stderrHandle.close()
-        let stdoutData = try Data(contentsOf: stdoutURL)
-        let stderrData = try Data(contentsOf: stderrURL)
+        let stdoutData = try await LocalShellExecutor.readCaptureFile(at: stdoutURL)
+        let stderrData = try await LocalShellExecutor.readCaptureFile(at: stderrURL)
         let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
         let stderr = String(data: stderrData, encoding: .utf8) ?? ""
         let truncatedStdout = truncate(stdout, maxBytes: maxOutputBytes)
@@ -1033,6 +1046,19 @@ enum LocalShellExecutor {
             timedOut: false,
             truncated: truncatedStdout.truncated || truncatedStderr.truncated
         )
+    }
+
+    /// 在专用全局队列上执行阻塞读盘，避免占用 Swift 协作线程池（间歇性工具卡顿的常见原因）。
+    private static func readCaptureFile(at url: URL) async throws -> Data {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    continuation.resume(returning: try Data(contentsOf: url))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 
     private static func truncate(_ text: String, maxBytes: Int) -> (text: String, truncated: Bool) {
@@ -1054,12 +1080,8 @@ private final class LocalShellTimeoutState: @unchecked Sendable {
         lock.withLock { timedOut }
     }
 
-    func terminateIfRunning(_ process: Process) {
-        lock.withLock {
-            guard process.isRunning else { return }
-            timedOut = true
-            process.terminate()
-        }
+    func markTimedOut() {
+        lock.withLock { timedOut = true }
     }
 }
 
