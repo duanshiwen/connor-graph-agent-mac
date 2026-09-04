@@ -274,6 +274,47 @@ import ConnorGraphAppSupport
         await runtime.close()
     }
 
+    // MARK: - M1-M7 审计写入
+
+    @Test func auditWritesPerSubLibraryOnToolExecution() async throws {
+        let runtime = try makeRuntime()
+
+        let createArgs = #"""
+        {
+          "manifest": {"appID": "ledger", "name": "记账本", "domain": "记账", "visibility": "private"},
+          "schema": {"tables": [
+            {"name": "expenses", "fields": [
+              {"name": "amount", "type": "number", "required": true, "range": {"min": 0}},
+              {"name": "category", "type": "enum", "options": ["餐饮", "交通"]},
+              {"name": "note", "type": "text"}
+            ]}
+          ]},
+          "guide": {"whenToUse": "当用户说记一笔且是个人收支时用", "whenNotToUse": "当只是闲聊消费观时不用", "sections": []}
+        }
+        """#
+        var tool = BaseAgentTool(operation: .appCreate, runtime: runtime)
+        var result = try await tool.execute(arguments: try AgentToolArguments(json: createArgs), context: baseToolContext())
+        #expect(try parseEnvelope(result).ok == true)
+
+        let mutateArgs = #"""
+        {"appID": "ledger", "table": "expenses", "ops": [{"op": "insert", "record": {"amount": 93, "category": "餐饮", "note": "火锅"}}]}
+        """#
+        let mutateTool = BaseAgentTool(operation: .recordMutate, runtime: runtime)
+        result = try await mutateTool.execute(arguments: try AgentToolArguments(json: mutateArgs), context: baseToolContext())
+        #expect(try parseEnvelope(result).ok == true)
+
+        // 等 execute 末尾 defer 里的审计 Task 落地。
+        try await Task.sleep(for: .milliseconds(300))
+
+        let audit = await runtime.readAudit(appID: "ledger")
+        #expect(audit.contains { $0["operation"] == "base.app.create" })
+        #expect(audit.contains { $0["operation"] == "base.record.mutate" })
+        #expect(audit.contains { $0["detail"]?.contains("appID=ledger") == true })
+        #expect(audit.contains { $0["detail"]?.contains("table=expenses") == true })
+
+        await runtime.close()
+    }
+
     // MARK: - Helpers
 
     private func makeRuntime() throws -> BaseToolRuntime {

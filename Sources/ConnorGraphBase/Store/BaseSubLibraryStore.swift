@@ -98,6 +98,15 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
             );
             """)
         try executeVoid("INSERT OR IGNORE INTO base_record_seq (id, seq) VALUES (1, 0);")
+        // 审计日志表（M1-M7）：端侧、按子库分域、不参与同步对象（不同步）。
+        try executeVoid("""
+            CREATE TABLE IF NOT EXISTS base_audit_log (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                operation TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            """)
     }
 
     private func loadTypeCache() throws {
@@ -109,6 +118,22 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
                   let ty = row["column_type"] as? String else { continue }
             typeCache[t, default: [:]][c] = ty
         }
+    }
+
+    // MARK: 审计（M1-M7）
+
+    /// 写入一条审计记录（best-effort：日志失败不影响主流程，端侧、不同步）。
+    public func recordAudit(operation: String, detail: String) {
+        try? executeVoid(
+            "INSERT INTO base_audit_log (operation, detail, created_at) VALUES (?1, ?2, ?3);",
+            parameters: [operation, detail, BaseTime.isoNow()]
+        )
+    }
+
+    /// 读取审计记录（只读、端侧；base.audit.read 读取面在 M2 开放）。
+    public func readAudit(limit: Int = 100) -> [[String: Any]] {
+        let rows = (try? execute("SELECT seq, operation, detail, created_at FROM base_audit_log ORDER BY seq DESC LIMIT ?1", parameters: [limit])) ?? []
+        return rows
     }
 
     // MARK: 包版本（M3 同步直接复用）

@@ -37,6 +37,23 @@ public final class BaseLibraryStore: @unchecked Sendable {
         self.db = nil
     }
 
+    // MARK: 审计（M1-M7）
+
+    /// 写入一条审计记录到指定 App 子库（best-effort：子库不存在或失败即忽略）。
+    public func recordAudit(appID: String, operation: String, detail: String) {
+        guard let store = try? openStore(appID: appID) else { return }
+        store.recordAudit(operation: operation, detail: detail)
+        store.close()
+    }
+
+    /// 读取指定 App 子库的审计记录（只读、端侧）。
+    public func readAudit(appID: String, limit: Int = 100) -> [[String: Any]] {
+        guard let store = try? openStore(appID: appID) else { return [] }
+        let rows = store.readAudit(limit: limit)
+        store.close()
+        return rows
+    }
+
     // MARK: 注册库
 
     private func openRegistry() throws {
