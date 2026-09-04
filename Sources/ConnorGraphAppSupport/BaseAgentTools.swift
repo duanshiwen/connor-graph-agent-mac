@@ -302,6 +302,132 @@ public actor BaseToolRuntime {
         }
     }
 
+    // MARK: - 方法（M2-M1）
+
+    public func updateAppEnvelope(
+        appID: String,
+        manifest: [String: Any],
+        schema: [String: Any]?,
+        methods: [[String: Any]]?,
+        guide: [String: Any]?,
+        basePackageVersion: Int?
+    ) -> BaseEnvelope {
+        do {
+            // manifest + guide + 乐观并发（updateApp 内部校验 basePackageVersion 并单调前移版本）。
+            let card = try library.updateApp(
+                appID: appID,
+                manifest: manifest,
+                guide: guide,
+                basePackageVersion: basePackageVersion
+            )
+            // schema 显式提供则同步回写（签名级变更，packageVersion 前移）。
+            if let schema {
+                try library.updateSchema(appID: appID, schemaObject: schema)
+            }
+            // methods 显式提供则整包替换（先清后建，走方法存储）。
+            if let methods {
+                let existing = try library.methods(appID: appID)
+                for m in existing {
+                    if let name = m["name"] as? String {
+                        try library.removeMethod(appID: appID, name: name)
+                    }
+                }
+                for m in methods {
+                    try library.defineMethod(appID: appID, method: m)
+                }
+            }
+            var data = card
+            data["packageVersion"] = try library.packageVersion(appID: appID)
+            return .success(data: data)
+        } catch let error as BaseError {
+            return .failure(error)
+        } catch {
+            return .failure(BaseError(code: .internal, message: "更新 App 失败", hint: "\(error)"))
+        }
+    }
+
+    public func methodDefineEnvelope(appID: String, method: [String: Any]) -> BaseEnvelope {
+        do {
+            let def = try BaseMethodDef(json: method)
+            try library.defineMethod(appID: appID, method: method)
+            return .success(data: [
+                "appID": appID,
+                "method": def.name,
+                "readOnly": def.isReadOnly,
+                "exports": def.exports,
+                "packageVersion": try library.packageVersion(appID: appID)
+            ])
+        } catch let error as BaseError {
+            return .failure(error)
+        } catch {
+            return .failure(BaseError(code: .internal, message: "定义方法失败", hint: "\(error)"))
+        }
+    }
+
+    public func methodInvokeEnvelope(appID: String, method: String, input: [String: Any]) -> BaseEnvelope {
+        do {
+            guard let target = try library.methodTarget(callingAppID: appID, reference: method) else {
+                throw BaseError(code: .notFound, message: "方法不存在", hint: "App \(appID) 中找不到方法 \(method)")
+            }
+            let ownerAppID = target.appID
+            let interpreter = BaseMethodInterpreter(store: target.store, schema: target.schema)
+            let result = try interpreter.invoke(
+                method: target.method,
+                args: input,
+                resolver: { reference in
+                    try library.methodTarget(callingAppID: ownerAppID, reference: reference)
+                },
+                appID: ownerAppID
+            )
+            target.store.close()
+            return .success(data: [
+                "appID": ownerAppID,
+                "method": target.method.name,
+                "data": result.data.jsonObject,
+                "signals": result.signals.map { ["level": $0.level, "message": $0.message] }
+            ])
+        } catch let error as BaseError {
+            return .failure(error)
+        } catch {
+            return .failure(BaseError(code: .internal, message: "方法调用失败", hint: "\(error)"))
+        }
+    }
+
+    public func methodRemoveEnvelope(appID: String, methodName: String, basePackageVersion: Int?) -> BaseEnvelope {
+        do {
+            if let baseVersion = basePackageVersion {
+                let current = try library.packageVersion(appID: appID)
+                guard current == baseVersion else {
+                    throw BaseError(
+                        code: .versionMismatch,
+                        message: "包版本过期",
+                        hint: "当前版本 \(current)，提交基于 \(baseVersion)，请拉最新包 rebase 后重提"
+                    )
+                }
+            }
+            try library.removeMethod(appID: appID, name: methodName)
+            return .success(data: [
+                "appID": appID,
+                "removed": methodName,
+                "packageVersion": try library.packageVersion(appID: appID)
+            ])
+        } catch let error as BaseError {
+            return .failure(error)
+        } catch {
+            return .failure(BaseError(code: .internal, message: "移除方法失败", hint: "\(error)"))
+        }
+    }
+
+    public func auditReadEnvelope(appID: String, filter: [String: Any]?, page: [String: Any]?) -> BaseEnvelope {
+        let limit = (page?["limit"] as? Int) ?? 100
+        let rows = library.readAudit(appID: appID, limit: limit)
+        return .success(data: [
+            "appID": appID,
+            "rows": rows,
+            "count": rows.count
+        ])
+    }
+
     // MARK: - 辅助
 
     private static func rowsToCSV(rows: [[String: Any]], fieldNames: [String]) -> String {
@@ -355,6 +481,11 @@ public struct BaseAgentTool: AgentTool {
         case recordMutate = "base.record.mutate"
         case importCSV = "base.import.csv"
         case exportCSV = "base.export.csv"
+        case appUpdate = "base.app.update"
+        case methodDefine = "base.method.define"
+        case methodInvoke = "base.method.invoke"
+        case methodRemove = "base.method.remove"
+        case auditRead = "base.audit.read"
     }
 
     public let operation: Operation
@@ -377,6 +508,14 @@ public struct BaseAgentTool: AgentTool {
             .baseManageSchema
         case .appCreate, .appDelete:
             .baseManageApps
+        case .appUpdate:
+            .baseManageApps
+        case .methodDefine, .methodRemove:
+            .baseManageMethods
+        case .methodInvoke:
+            .baseExecute
+        case .auditRead:
+            .baseRead
         }
     }
 
@@ -408,6 +547,16 @@ public struct BaseAgentTool: AgentTool {
             "base.import.csv：导入 CSV 行数据到 App 表（rows 数组，走 mutate 同一条校验路径，dryRun 可预览）。属外部 CSV 文件通道，与跨库导入无关。"
         case .exportCSV:
             "base.export.csv：把表数据导出为 CSV 文本。属外部 CSV 文件通道。"
+        case .appUpdate:
+            "base.app.update：更新小应用（乐观并发：携带 basePackageVersion，过期返 VERSION_MISMATCH 需 rebase）。可更新 manifest/guide，可选整包替换 schema/methods；结构可演进、无需中间态。"
+        case .methodDefine:
+            "base.method.define：定义/更新声明式方法（方法 DAG：query/aggregate/mutate/assert/call/reply，六类步骤，无循环、无任意代码）。readOnly 方法体仅 query/aggregate + reply。"
+        case .methodInvoke:
+            "base.method.invoke：调用 App 的方法（入参按 inputSchema 校验；call 步骤可跨 App 调 exported 方法，深度上限 5）。返回方法结果 + warn 信号（level:warn 必呈现、不可压）。"
+        case .methodRemove:
+            "base.method.remove：移除 App 的声明式方法（签名级变更，packageVersion 前移）。"
+        case .auditRead:
+            "base.audit.read：读取 App 子库的审计记录（只读、端侧、不参与同步）。"
         }
     }
 
@@ -549,6 +698,55 @@ public struct BaseAgentTool: AgentTool {
                 "table": .string(description: "表名"),
                 "filter": .object(properties: [:], required: [])
             ], required: ["appID", "table"])
+        case .appUpdate:
+            return .object(properties: [
+                "appID": .string(description: "目标 appID"),
+                "basePackageVersion": .integer(description: "乐观并发：当前 latest 版本"),
+                "manifest": .object(properties: [
+                    "name": .string(description: "名称"),
+                    "domain": .string(description: "领域"),
+                    "visibility": .stringEnumeration(values: ["private", "shared", "public"], description: "三态"),
+                    "riskLevel": .string(description: "风险等级"),
+                    "requiredCapabilities": .array(items: .string(description: "能力点"), description: "能力点"),
+                    "imports": .array(items: .object(properties: ["appID": .string(description: "依赖 appID"), "methods": .array(items: .string(description: "方法名"), description: "方法列表")], required: ["appID"]), description: "跨 App 依赖")
+                ], required: []),
+                "schema": .object(properties: ["tables": .array(items: .object(properties: [:], required: []), description: "表定义")], required: []),
+                "methods": .array(items: .object(properties: [:], required: []), description: "方法定义数组"),
+                "guide": .object(properties: [:], required: [])
+            ], required: ["appID", "basePackageVersion"])
+        case .methodDefine:
+            return .closedObject(properties: [
+                "appID": .string(description: "目标 appID"),
+                "method": .object(properties: [
+                    "name": .string(description: "方法名"),
+                    "description": .string(description: "方法说明"),
+                    "inputSchema": .object(properties: [:], required: []),
+                    "steps": .array(items: .object(properties: [
+                        "type": .stringEnumeration(values: ["query", "aggregate", "mutate", "assert", "call", "reply"], description: "步骤类型"),
+                        "as": .string(description: "步骤输出变量名")
+                    ], required: ["type"]), description: "步骤 DAG"),
+                    "exports": .boolean(description: "是否 exported（可被跨 App 调用）"),
+                    "readOnly": .boolean(description: "是否只读方法")
+                ], required: ["name", "steps"])
+            ], required: ["appID", "method"])
+        case .methodInvoke:
+            return .closedObject(properties: [
+                "appID": .string(description: "目标 appID"),
+                "method": .string(description: "方法名（同 App）或全限定名 appID.method（跨 App exported）"),
+                "input": .object(properties: [:], required: [])
+            ], required: ["appID", "method", "input"])
+        case .methodRemove:
+            return .closedObject(properties: [
+                "appID": .string(description: "目标 appID"),
+                "methodName": .string(description: "要移除的方法名"),
+                "basePackageVersion": .integer(description: "乐观并发：当前 latest 版本")
+            ], required: ["appID", "methodName"])
+        case .auditRead:
+            return .object(properties: [
+                "appID": .string(description: "目标 appID"),
+                "filter": .object(properties: [:], required: []),
+                "page": .object(properties: ["limit": .integer(description: "返回条数上限（默认 100）"), "offset": .integer(description: "偏移")], required: [])
+            ], required: ["appID"])
         }
     }
 
@@ -643,6 +841,43 @@ public struct BaseAgentTool: AgentTool {
                 filter: try optionalObject("filter", arguments)
             )
             return makeResult(envelope, text: "CSV 导出结果已返回。", context: context)
+        case .appUpdate:
+            let envelope = await runtime.updateAppEnvelope(
+                appID: try requiredString("appID", arguments),
+                manifest: try optionalObject("manifest", arguments) ?? [:],
+                schema: try optionalObject("schema", arguments),
+                methods: try optionalArray("methods", arguments),
+                guide: try optionalObject("guide", arguments),
+                basePackageVersion: arguments.int("basePackageVersion")
+            )
+            return makeResult(envelope, text: "App 更新结果已返回（乐观并发 + 包版本前移）。", context: context)
+        case .methodDefine:
+            let envelope = await runtime.methodDefineEnvelope(
+                appID: try requiredString("appID", arguments),
+                method: try object("method", arguments)
+            )
+            return makeResult(envelope, text: "方法已定义（声明式 DAG，签名级变更）。", context: context)
+        case .methodInvoke:
+            let envelope = await runtime.methodInvokeEnvelope(
+                appID: try requiredString("appID", arguments),
+                method: try requiredString("method", arguments),
+                input: try optionalObject("input", arguments) ?? [:]
+            )
+            return makeResult(envelope, text: "方法调用结果已返回（数字出自内核，warn 信号必呈现）。", context: context)
+        case .methodRemove:
+            let envelope = await runtime.methodRemoveEnvelope(
+                appID: try requiredString("appID", arguments),
+                methodName: try requiredString("methodName", arguments),
+                basePackageVersion: arguments.int("basePackageVersion")
+            )
+            return makeResult(envelope, text: "方法移除结果已返回。", context: context)
+        case .auditRead:
+            let envelope = await runtime.auditReadEnvelope(
+                appID: try requiredString("appID", arguments),
+                filter: try optionalObject("filter", arguments),
+                page: try optionalObject("page", arguments)
+            )
+            return makeResult(envelope, text: "审计记录已返回（只读、端侧）。", context: context)
         }
     }
 
