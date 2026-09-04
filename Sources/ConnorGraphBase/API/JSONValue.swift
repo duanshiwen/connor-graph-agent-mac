@@ -66,3 +66,49 @@ public enum JSONValue: Codable, Equatable, Sendable {
         }
     }
 }
+
+// MARK: - Codable（任意 JSON：null/bool/number/string/array/object 单值解码；
+// 合成实现按 case 包装格式编解码，不适用于普通 JSON，故自实现。）
+
+extension JSONValue {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let bool = try? container.decode(Bool.self) {
+            self = .bool(bool)
+        } else if let number = try? container.decode(Double.self) {
+            self = .number(number)
+        } else if let string = try? container.decode(String.self) {
+            self = .string(string)
+        } else if let array = try? container.decode([JSONValue].self) {
+            self = .array(array)
+        } else if let object = try? container.decode([String: JSONValue].self) {
+            self = .object(object)
+        } else {
+            throw DecodingError.typeMismatch(
+                JSONValue.self,
+                DecodingError.Context(codingPath: decoder.codingPath,
+                                      debugDescription: "无法解码 JSONValue")
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null:
+            try container.encodeNil()
+        case .string(let s):
+            try container.encode(s)
+        case .number(let n):
+            try container.encode(n)
+        case .bool(let b):
+            try container.encode(b)
+        case .object(let dict):
+            try container.encode(dict)
+        case .array(let arr):
+            try container.encode(arr)
+        }
+    }
+}
