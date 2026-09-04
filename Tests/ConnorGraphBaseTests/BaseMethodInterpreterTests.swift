@@ -193,7 +193,7 @@ final class BaseMethodInterpreterTests: XCTestCase {
             "name": "assert.warn",
             "steps": [
                 ["type": "aggregate", "table": "expenses", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
-                ["type": "assert", "on": ["path": "$agg.0.total", "op": "gt", "value": 100], "onFail": "warn", "message": "超预算信号"],
+                ["type": "assert", "on": ["path": "$agg.0.total", "op": "lte", "value": 100], "onFail": "warn", "message": "超预算信号"],
                 ["type": "reply", "template": ["total": "$agg.0.total"]]
             ]
         ]
@@ -209,8 +209,8 @@ final class BaseMethodInterpreterTests: XCTestCase {
             "name": "multi.warn",
             "steps": [
                 ["type": "aggregate", "table": "expenses", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
-                ["type": "assert", "on": ["path": "$agg.0.total", "op": "gt", "value": 100], "onFail": "warn", "message": "超预算"],
-                ["type": "assert", "on": ["path": "$agg.0.total", "op": "gt", "value": 130], "onFail": "warn", "message": "严重超预算"],
+                ["type": "assert", "on": ["path": "$agg.0.total", "op": "lte", "value": 100], "onFail": "warn", "message": "超预算"],
+                ["type": "assert", "on": ["path": "$agg.0.total", "op": "lte", "value": 130], "onFail": "warn", "message": "严重超预算"],
                 ["type": "reply", "template": ["total": "$agg.0.total"]]
             ]
         ]
@@ -230,13 +230,33 @@ final class BaseMethodInterpreterTests: XCTestCase {
                 ["type": "mutate", "table": "expenses", "as": "res",
                  "ops": [["op": "insert", "record": ["amount": 10, "category": "food"]]]],
                 ["type": "aggregate", "table": "expenses", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
-                ["type": "assert", "on": ["path": "$agg.0.total", "op": "gt", "value": 150], "onFail": "warn", "message": "已超 150"],
+                ["type": "assert", "on": ["path": "$agg.0.total", "op": "lte", "value": 150], "onFail": "warn", "message": "已超 150"],
                 ["type": "reply", "template": ["total": "$agg.0.total"]]
             ]
         ]
         let def = try BaseMethodDef(json: json)
         let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
         XCTAssertEqual(result.warnings, ["已超 150"])
+        XCTAssertEqual(result.signals.map(\.level), ["warn"])
+    }
+
+    func testAssertNumericComparisonBoundaries() throws {
+        // 回归（M2-M4 发现）：compare 曾用 `as? Double`（JSONValue 是枚举，永远 nil）
+        // 导致数值比较失效——gt/lt 恒假、gte/lte 恒真。修复后须按真实数值比较。
+        // 总支出 143：gt 100 通过（不 warn）、lte 142 失败（warn）、lte 143 边界通过（不 warn）。
+        let json: [String: Any] = [
+            "name": "numeric.boundary",
+            "steps": [
+                ["type": "aggregate", "table": "expenses", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
+                ["type": "assert", "on": ["path": "$agg.0.total", "op": "gt", "value": 100], "onFail": "warn", "message": "不该触发：143>100 通过"],
+                ["type": "assert", "on": ["path": "$agg.0.total", "op": "lte", "value": 142], "onFail": "warn", "message": "应触发：143>142"],
+                ["type": "assert", "on": ["path": "$agg.0.total", "op": "lte", "value": 143], "onFail": "warn", "message": "不该触发：143<=143 边界通过"],
+                ["type": "reply", "template": ["total": "$agg.0.total"]]
+            ]
+        ]
+        let def = try BaseMethodDef(json: json)
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
+        XCTAssertEqual(result.warnings, ["应触发：143>142"])
         XCTAssertEqual(result.signals.map(\.level), ["warn"])
     }
 
