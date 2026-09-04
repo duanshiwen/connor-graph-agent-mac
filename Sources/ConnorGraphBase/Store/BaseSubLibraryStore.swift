@@ -213,6 +213,32 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
         typeCache[table.name] = Dictionary(uniqueKeysWithValues: table.fields.map { ($0.name, $0.type) })
     }
 
+    /// M1 表变更：向既有表追加一列（ALTER TABLE ADD COLUMN + schema cache 同步）。
+    /// 由 base.table.alter 的 addField 变更走，属于签名级变更（包版本由外层前移）。
+    public func addColumn(_ field: BaseFieldDef, to table: String) throws {
+        guard try tableExists(table) else {
+            throw BaseError(code: .notFound, message: "表不存在", hint: "子库无表 \(table)")
+        }
+        guard BaseSchemaValidator.isValidName(field.name) else {
+            throw BaseError.validation(.invalidFieldName(field.name))
+        }
+        guard columnType(of: field.name, in: table) == nil else {
+            throw BaseError.validation(.duplicateField(field.name))
+        }
+        var ddl = "ALTER TABLE \"\(table)\" ADD COLUMN \"\(field.name)\" \(sqlColumnType(field.type))"
+        if field.unique { ddl += " UNIQUE" }
+        try withTransaction {
+            try executeVoid(ddl)
+            try executeVoid(
+                "INSERT INTO base_schema_cache (table_name, column_name, column_type) VALUES (?1, ?2, ?3)",
+                parameters: [table, field.name, field.type]
+            )
+        }
+        var cache = typeCache[table] ?? [:]
+        cache[field.name] = field.type
+        typeCache[table] = cache
+    }
+
     public func fields(of table: String) -> [String: String] {
         typeCache[table] ?? [:]
     }
