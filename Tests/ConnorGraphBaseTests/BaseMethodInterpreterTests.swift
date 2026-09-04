@@ -108,7 +108,7 @@ final class BaseMethodInterpreterTests: XCTestCase {
             ]
         ]
         let def = try BaseMethodDef(json: json)
-        let result = try makeInterpreter().invoke(appID: "acct", method: def, args: [:], registry: { _ in nil })
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
         guard case let .object(reply) = result.data else {
             return XCTFail("reply 应为对象")
         }
@@ -127,7 +127,7 @@ final class BaseMethodInterpreterTests: XCTestCase {
             ]
         ]
         let def = try BaseMethodDef(json: json)
-        let result = try makeInterpreter().invoke(appID: "acct", method: def, args: [:], registry: { _ in nil })
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
         guard case let .object(reply) = result.data, case let .number(total)? = reply["total"] else {
             return XCTFail("total 应为数字")
         }
@@ -146,7 +146,7 @@ final class BaseMethodInterpreterTests: XCTestCase {
             ]
         ]
         let def = try BaseMethodDef(json: json)
-        let result = try makeInterpreter().invoke(appID: "acct", method: def, args: [:], registry: { _ in nil })
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
         guard case let .object(reply) = result.data, case let .number(affected)? = reply["affected"] else {
             return XCTFail("affected 应为数字")
         }
@@ -164,7 +164,7 @@ final class BaseMethodInterpreterTests: XCTestCase {
             ]
         ]
         let def = try BaseMethodDef(json: json)
-        XCTAssertThrowsError(try makeInterpreter().invoke(appID: "acct", method: def, args: [:], registry: { _ in nil })) { error in
+        XCTAssertThrowsError(try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")) { error in
             let e = error as! BaseError
             XCTAssertEqual(e.code, "VALIDATION_FAILED")
             XCTAssertTrue(e.message.contains("只读方法禁止包含 mutate 步骤"))
@@ -183,7 +183,7 @@ final class BaseMethodInterpreterTests: XCTestCase {
             ]
         ]
         let def = try BaseMethodDef(json: json)
-        XCTAssertThrowsError(try makeInterpreter().invoke(appID: "acct", method: def, args: [:], registry: { _ in nil })) { error in
+        XCTAssertThrowsError(try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")) { error in
             XCTAssertEqual((error as! BaseError).code, "VALIDATION_FAILED")
         }
     }
@@ -198,7 +198,7 @@ final class BaseMethodInterpreterTests: XCTestCase {
             ]
         ]
         let def = try BaseMethodDef(json: json)
-        let result = try makeInterpreter().invoke(appID: "acct", method: def, args: [:], registry: { _ in nil })
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
         XCTAssertEqual(result.warnings, ["超预算信号"])
     }
 
@@ -211,7 +211,7 @@ final class BaseMethodInterpreterTests: XCTestCase {
             "steps": [["type": "reply", "template": ["month": "$month"]]]
         ]
         let def = try BaseMethodDef(json: json)
-        XCTAssertThrowsError(try makeInterpreter().invoke(appID: "acct", method: def, args: [:], registry: { _ in nil })) { error in
+        XCTAssertThrowsError(try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")) { error in
             XCTAssertTrue((error as! BaseError).message.contains("缺必填入参"))
         }
     }
@@ -233,10 +233,10 @@ final class BaseMethodInterpreterTests: XCTestCase {
                 ["type": "reply", "template": ["grand": "$inner.total"]]
             ]
         ])
-        let registry: (String) throws -> BaseMethodDef? = { name in
-            name == "expenses.total" ? totalDef : nil
+        let resolver: (String) throws -> BaseMethodTarget? = { name in
+            name == "expenses.total" ? BaseMethodTarget(appID: "acct", store: self.store, schema: self.schema, method: totalDef) : nil
         }
-        let result = try makeInterpreter().invoke(appID: "acct", method: caller, args: [:], registry: registry)
+        let result = try makeInterpreter().invoke(method: caller, args: [:], resolver: resolver, appID: "acct")
         guard case let .object(reply) = result.data, case let .number(grand)? = reply["grand"] else {
             return XCTFail("grand 应为数字")
         }
@@ -253,13 +253,15 @@ final class BaseMethodInterpreterTests: XCTestCase {
         ])
         defs["a"] = loopA
         defs["b"] = loopB
-        let registry: (String) throws -> BaseMethodDef? = { defs[$0] }
-        XCTAssertThrowsError(try makeInterpreter().invoke(appID: "acct", method: loopA, args: [:], registry: registry)) { error in
+        let resolver: (String) throws -> BaseMethodTarget? = { defs[$0].map { BaseMethodTarget(appID: "acct", store: self.store, schema: self.schema, method: $0) } }
+        XCTAssertThrowsError(try makeInterpreter().invoke(method: loopA, args: [:], resolver: resolver, appID: "acct")) { error in
             let e = error as! BaseError
             XCTAssertEqual(e.code, "QUOTA_EXCEEDED")
             XCTAssertTrue(e.message.contains("maxCrossAppCallDepth"))
         }
     }
+
+    // MARK: reply 转义
 
     // MARK: reply 转义
 
@@ -269,10 +271,107 @@ final class BaseMethodInterpreterTests: XCTestCase {
             "steps": [["type": "reply", "template": ["literal": "$$money"]]]
         ]
         let def = try BaseMethodDef(json: json)
-        let result = try makeInterpreter().invoke(appID: "acct", method: def, args: [:], registry: { _ in nil })
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
         guard case let .object(reply) = result.data, case let .string(literal)? = reply["literal"] else {
             return XCTFail("literal 应为字符串")
         }
         XCTAssertEqual(literal, "$money")
+    }
+
+    // MARK: M2-K2 跨 App exported 调用
+
+    /// 造一个订阅 App（subs）子库：表 subs，一条记录 amount=200。
+    private func makeSubsContext() throws -> (store: BaseSubLibraryStore, schema: BaseAppSchema) {
+        let subsDir = tmpDir.appendingPathComponent("subs-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: subsDir, withIntermediateDirectories: true)
+        let subsStore = try BaseSubLibraryStore(appID: "subs", directory: subsDir)
+        let subsTable = BaseTableDef(name: "subs", fields: [
+            BaseFieldDef(name: "amount", type: "number", required: true)
+        ])
+        let subsSchema = BaseAppSchema(tables: [subsTable])
+        try subsStore.createTable(subsTable)
+        try subsStore.insert(id: try subsStore.nextRecordID(), table: "subs", values: ["amount": .number(200)])
+        return (subsStore, subsSchema)
+    }
+
+    func testCrossAppCallExecutesInOwnerContext() throws {
+        let subs = try makeSubsContext()
+        defer { subs.store.close() }
+        let subsMonthly = try BaseMethodDef(json: [
+            "name": "subs.monthly",
+            "description": "订阅本月待扣总额",
+            "exports": true,
+            "steps": [
+                ["type": "aggregate", "table": "subs", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
+                ["type": "reply", "template": ["total": "$agg.0.total"]]
+            ]
+        ])
+        // acct 侧方法调用 subs.monthly，引用其返回值
+        let summary = try BaseMethodDef(json: [
+            "name": "acct.summary",
+            "steps": [
+                ["type": "call", "method": "subs.monthly", "as": "subsTotal"],
+                ["type": "reply", "template": ["subsTotal": "$subsTotal.total"]]
+            ]
+        ])
+        let resolver: (String) throws -> BaseMethodTarget? = { ref in
+            if ref == "subs.monthly" {
+                return BaseMethodTarget(appID: "subs", store: subs.store, schema: subs.schema, method: subsMonthly)
+            }
+            return nil
+        }
+        let result = try makeInterpreter().invoke(method: summary, args: [:], resolver: resolver, appID: "acct")
+        guard case let .object(reply) = result.data, case let .number(total)? = reply["subsTotal"] else {
+            return XCTFail("subsTotal 应为数字")
+        }
+        XCTAssertEqual(total, 200)
+    }
+
+    func testCrossAppCallRequiresExported() throws {
+        let subs = try makeSubsContext()
+        defer { subs.store.close() }
+        let privateMethod = try BaseMethodDef(json: [
+            "name": "subs.private",
+            "exports": false,
+            "steps": [["type": "reply", "template": ["ok": true]]]
+        ])
+        let caller = try BaseMethodDef(json: [
+            "name": "acct.sneaky",
+            "steps": [["type": "call", "method": "subs.private"]]
+        ])
+        let resolver: (String) throws -> BaseMethodTarget? = { ref in
+            ref == "subs.private" ? BaseMethodTarget(appID: "subs", store: subs.store, schema: subs.schema, method: privateMethod) : nil
+        }
+        XCTAssertThrowsError(try makeInterpreter().invoke(method: caller, args: [:], resolver: resolver, appID: "acct")) { error in
+            let e = error as! BaseError
+            XCTAssertEqual(e.code, "PERMISSION_DENIED")
+            XCTAssertTrue(e.message.contains("未导出"))
+        }
+    }
+
+    func testSameAppCallDoesNotRequireExported() throws {
+        let local = try BaseMethodDef(json: [
+            "name": "expenses.helper",
+            "exports": false,
+            "steps": [
+                ["type": "aggregate", "table": "expenses", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
+                ["type": "reply", "template": ["total": "$agg.0.total"]]
+            ]
+        ])
+        let caller = try BaseMethodDef(json: [
+            "name": "expenses.wrapper",
+            "steps": [
+                ["type": "call", "method": "expenses.helper", "as": "inner"],
+                ["type": "reply", "template": ["grand": "$inner.total"]]
+            ]
+        ])
+        let resolver: (String) throws -> BaseMethodTarget? = { ref in
+            ref == "expenses.helper" ? BaseMethodTarget(appID: "acct", store: self.store, schema: self.schema, method: local) : nil
+        }
+        let result = try makeInterpreter().invoke(method: caller, args: [:], resolver: resolver, appID: "acct")
+        guard case let .object(reply) = result.data, case let .number(grand)? = reply["grand"] else {
+            return XCTFail("grand 应为数字")
+        }
+        XCTAssertEqual(grand, 143)
     }
 }

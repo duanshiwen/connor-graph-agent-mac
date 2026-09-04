@@ -97,6 +97,23 @@ public struct BaseMethodResult {
     }
 }
 
+/// 方法调用目标：解析后的执行上下文（appID + 子库 + schema + 方法定义）。
+/// M2-K2：call 步骤可切换上下文——同 App 调用解析为当前子库；跨 App 调用由宿主解析为属主子库，
+/// 在属主上下文执行、受属主权限约束（target.appID 即执行归属）。
+public struct BaseMethodTarget {
+    public let appID: String
+    public let store: BaseSubLibraryStore
+    public let schema: BaseAppSchema
+    public let method: BaseMethodDef
+
+    public init(appID: String, store: BaseSubLibraryStore, schema: BaseAppSchema, method: BaseMethodDef) {
+        self.appID = appID
+        self.store = store
+        self.schema = schema
+        self.method = method
+    }
+}
+
 /// 方法 DAG 解释器：顺序执行步骤，变量上下文驱动 assert/call/reply。
 public struct BaseMethodInterpreter {
     public static let maxMethodSteps = 20
@@ -112,16 +129,17 @@ public struct BaseMethodInterpreter {
 
     /// 执行方法。
     /// - Parameters:
-    ///   - appID: 当前 App（write 归属与错误上下文）。
     ///   - method: 方法定义。
     ///   - args: 入参（inputSchema required 校验）。
-    ///   - registry: 方法名解析器（call 步骤用；同 App 与跨 App 均由宿主注入）。
+    ///   - resolver: 方法引用解析器（call 步骤用）。同 App 名解析为当前子库上下文；
+    ///     全限定名 `appID.method` 由宿主解析为属主子库上下文（并完成 imports 校验）。
+    ///   - appID: 当前 App（write 归属、跨 App exported 判定与错误上下文）。
     ///   - callDepth: 当前 call 深度（递归调用时 +1）。
     public func invoke(
-        appID: String,
         method: BaseMethodDef,
         args: [String: Any],
-        registry: (String) throws -> BaseMethodDef?,
+        resolver: (String) throws -> BaseMethodTarget?,
+        appID: String,
         callDepth: Int = 0
     ) throws -> BaseMethodResult {
         try validateArgs(method: method, args: args)
@@ -148,7 +166,7 @@ public struct BaseMethodInterpreter {
             case .assert:
                 try runAssert(step, vars: vars, warnings: &warnings)
             case .call:
-                lastData = try runCall(step, appID: appID, method: method, args: args, vars: vars, registry: registry, callDepth: callDepth)
+                lastData = try runCall(step, appID: appID, method: method, args: args, vars: vars, resolver: resolver, callDepth: callDepth)
             case .reply:
                 lastData = try runReply(step, vars: vars)
                 // reply 为终止步骤。
@@ -245,7 +263,7 @@ public struct BaseMethodInterpreter {
         method: BaseMethodDef,
         args: [String: Any],
         vars: [String: JSONValue],
-        registry: (String) throws -> BaseMethodDef?,
+        resolver: (String) throws -> BaseMethodTarget?,
         callDepth: Int
     ) throws -> JSONValue {
         if callDepth >= Self.maxCrossAppCallDepth {
@@ -264,14 +282,24 @@ public struct BaseMethodInterpreter {
         } else {
             callArgs = args
         }
-        guard let targetMethod = try registry(target) else {
+        guard let t = try resolver(target) else {
             throw BaseError(code: .notFound, message: "方法不存在", hint: target)
         }
-        let result = try invoke(
-            appID: appID,
-            method: targetMethod,
+        // M2-K2 跨 App 门禁：目标 app 不同于当前 app 时，方法必须 exported。
+        if t.appID != appID && !t.method.exports {
+            throw BaseError(
+                code: .permissionDenied,
+                message: "方法 \(t.method.name) 未导出，无法被跨 App 调用",
+                hint: "请属主在方法定义中设置 exports=true"
+            )
+        }
+        // 切换执行上下文：在属主子库/schema 中解释目标方法。
+        let targetInterpreter = BaseMethodInterpreter(store: t.store, schema: t.schema)
+        let result = try targetInterpreter.invoke(
+            method: t.method,
             args: callArgs,
-            registry: registry,
+            resolver: resolver,
+            appID: t.appID,
             callDepth: callDepth + 1
         )
         return result.data
