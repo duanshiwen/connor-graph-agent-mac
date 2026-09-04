@@ -263,6 +263,167 @@ public final class BaseLibraryStore: @unchecked Sendable {
         }
     }
 
+    // MARK: 方法定义与调用解析（M2-M1 / M2-K2）
+
+    /// 包内方法清单（契约 methodDef 数组同构）。
+    public func methods(appID: String) throws -> [[String: Any]] {
+        guard let row = try appRow(appID) else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        return (try? Self.decodeArray(row["methods_json"] as? String)) ?? []
+    }
+
+    /// 读取单个方法定义（解析为 BaseMethodDef）。
+    public func methodDef(appID: String, name: String) throws -> BaseMethodDef? {
+        let list = try methods(appID: appID)
+        guard let json = list.first(where: { ($0["name"] as? String) == name }) else {
+            return nil
+        }
+        return try BaseMethodDef(json: json)
+    }
+
+    /// 定义/更新方法（base.method.define）：签名级变更 → 单调前移 packageVersion。
+    public func defineMethod(appID: String, method: [String: Any]) throws {
+        // 先解析校验（步骤类型/配额/只读推导），失败即拒。
+        let def = try BaseMethodDef(json: method)
+        guard try appExists(appID) else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        var list = try methods(appID: appID)
+        if let idx = list.firstIndex(where: { ($0["name"] as? String) == def.name }) {
+            list[idx] = method
+        } else {
+            list.append(method)
+        }
+        try updatePackageMethods(appID: appID, methods: list)
+    }
+
+    /// 移除方法（base.method.remove）：签名级变更 → 单调前移 packageVersion。
+    public func removeMethod(appID: String, name: String) throws {
+        guard try appExists(appID) else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        var list = try methods(appID: appID)
+        let before = list.count
+        list.removeAll { ($0["name"] as? String) == name }
+        guard list.count < before else {
+            throw BaseError(code: .notFound, message: "方法不存在", hint: name)
+        }
+        try updatePackageMethods(appID: appID, methods: list)
+    }
+
+    private func updatePackageMethods(appID: String, methods: [[String: Any]]) throws {
+        let updated = try executeVoid("""
+            UPDATE base_apps
+            SET methods_json = ?1, package_version = package_version + 1, updated_at = ?2
+            WHERE app_id = ?3
+            """, parameters: [Self.jsonString(methods), BaseTime.isoNow(), appID])
+        guard updated > 0 else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+    }
+
+    /// 解析方法调用目标（base.method.invoke / 解释器 call 步骤用）。
+    /// reference 形如 `methodName`（同 App）或 `appID.methodName`（跨 App）。
+    /// 跨 App：调用方 manifest imports 须声明目标 appID（v0.12 §2.3/§5.3），且目标方法须 exported。
+    /// 返回的目标 store 由调用方负责 close。
+    public func methodTarget(callingAppID: String, reference: String) throws -> BaseMethodTarget? {
+        let parts = reference.split(separator: ".").map(String.init)
+        let targetAppID: String
+        let methodName: String
+        if parts.count >= 2 {
+            targetAppID = parts[0]
+            methodName = parts[1...].joined(separator: ".")
+        } else {
+            targetAppID = callingAppID
+            methodName = reference
+        }
+        guard try appExists(targetAppID) else {
+            throw BaseError(code: .notFound, message: "目标 App 不存在", hint: targetAppID)
+        }
+        guard let def = try methodDef(appID: targetAppID, name: methodName) else {
+            return nil
+        }
+        if targetAppID != callingAppID {
+            // imports 校验：调用方 manifest imports 须声明目标 appID。
+            guard let callerRow = try appRow(callingAppID),
+                  let callerImports = (try? Self.decodeArray(callerRow["imports_json"] as? String)) as [[String: Any]]?,
+                  callerImports.contains(where: { ($0["appID"] as? String) == targetAppID }) else {
+                throw BaseError(code: .permissionDenied, message: "未声明跨 App 依赖", hint: "在调用方 manifest imports 中声明 \(targetAppID)")
+            }
+            // exported 门禁（解释器跨上下文也会再校验一次）。
+            guard def.exports else {
+                throw BaseError(code: .permissionDenied, message: "方法 \(methodName) 未导出，无法被跨 App 调用", hint: "请属主设置 exports=true")
+            }
+        }
+        let store = try openStore(appID: targetAppID)
+        let schema = try currentSchema(appID: targetAppID)
+        return BaseMethodTarget(appID: targetAppID, store: store, schema: schema, method: def)
+    }
+
+    /// 更新 App 元数据（base.app.update）：乐观并发 + 可选指南同步。
+    /// 携带 basePackageVersion 时，过期提交返 VERSION_MISMATCH（结构写串行化，v0.8）。
+    public func updateApp(
+        appID: String,
+        manifest: [String: Any],
+        guide: [String: Any]?,
+        basePackageVersion: Int?
+    ) throws -> [String: Any] {
+        guard var row = try appRow(appID) else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        if let baseVersion = basePackageVersion {
+            let current = (row["package_version"] as? Int64).map(Int.init) ?? 0
+            guard current == baseVersion else {
+                throw BaseError(
+                    code: .versionMismatch,
+                    message: "包版本过期",
+                    hint: "当前版本 \(current)，提交基于 \(baseVersion)，请拉最新包 rebase 后重提"
+                )
+            }
+        }
+        let name = manifest["name"] as? String ?? (row["name"] as? String ?? appID)
+        let domain = manifest["domain"] as? String ?? (row["domain"] as? String ?? "")
+        let visibility = manifest["visibility"] as? String ?? (row["visibility"] as? String ?? "private")
+        let riskLevel = manifest["riskLevel"] as? String ?? (row["risk_level"] as? String ?? "low")
+        let sdkVersion = (manifest["sdkVersion"] as? Int) ?? (row["sdk_version"] as? Int ?? 1)
+        // 能力点重新门禁：仅当显式提供 requiredCapabilities 时校验并更新。
+        if let capabilities = manifest["requiredCapabilities"] as? [String] {
+            for capability in capabilities {
+                guard Self.grantedCapabilities.contains(capability) else {
+                    throw BaseError(code: .capabilityRequired, message: "能力点不发放", hint: "\(capability) 未发放")
+                }
+            }
+            row["capabilities_json"] = Self.jsonString(capabilities)
+        }
+        // imports 显式提供则更新。
+        if let imports = manifest["imports"] as? [[String: Any]] {
+            row["imports_json"] = Self.jsonString(imports)
+        }
+        // 指南显式提供则同步更新（防止漂移）。
+        var guideJSON: String = row["guide_json"] as? String ?? ""
+        if let guide, !guide.isEmpty {
+            guideJSON = Self.jsonString(guide)
+        }
+        let updated = try executeVoid("""
+            UPDATE base_apps
+            SET name = ?1, domain = ?2, visibility = ?3, risk_level = ?4, sdk_version = ?5,
+                capabilities_json = ?6, imports_json = ?7, guide_json = ?8,
+                package_version = package_version + 1, updated_at = ?9
+            WHERE app_id = ?10
+            """, parameters: [
+                name, domain, visibility, riskLevel, sdkVersion,
+                row["capabilities_json"] as? String ?? "[]",
+                row["imports_json"] as? String ?? "[]",
+                guideJSON,
+                BaseTime.isoNow(), appID
+            ])
+        guard updated > 0 else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        return try appCard(appID: appID) ?? [:]
+    }
+
     // MARK: 行读取
 
     private func appRow(_ appID: String) throws -> [String: Any]? {
