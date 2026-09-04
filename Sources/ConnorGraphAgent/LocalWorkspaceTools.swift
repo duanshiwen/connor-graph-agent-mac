@@ -1019,40 +1019,19 @@ enum LocalShellExecutor {
 
         try process.run()
 
-        // 以声明超时为硬期限等待进程退出，期间实时响应任务取消。
-        // 到达期限或收到取消时执行「两步击杀」：先 SIGTERM 优雅终止，
-        // 宽限期内仍未退出再 SIGKILL 强杀，避免忽略 SIGTERM 的进程让工具永久卡死。
-        let timeoutState = LocalShellTimeoutState()
-        let timeoutTimer = DispatchSource.makeTimerSource(
-            queue: DispatchQueue(label: "com.connor.local-shell-timeout.\(UUID().uuidString)")
-        )
-        timeoutTimer.schedule(deadline: .now() + .seconds(timeoutSeconds))
-        timeoutTimer.setEventHandler {
-            timeoutState.markTimedOut()
-        }
-        timeoutTimer.resume()
-        defer {
-            timeoutTimer.setEventHandler {}
-            timeoutTimer.cancel()
+        // 进程等待全程在专用 GCD 队列上完成：退出检测（DispatchSourceProcess）、
+        // 超时 SIGTERM→SIGKILL 两步击杀都在 GCD 上执行，不依赖协作线程池调度——
+        // 满载/长会话下协作池饥饿既会导致工具间歇性卡顿，也会让完成/超时误判。
+        let outcome = await LocalShellExecutor.waitForExit(process, timeoutSeconds: timeoutSeconds)
+        switch outcome {
+        case .cancelled:
+            throw CancellationError()
+        case .timedOut:
+            throw LocalWorkspacePolicyError.commandTimedOut(command)
+        case .exited:
+            break
         }
 
-        while process.isRunning, !timeoutState.didTimeout, !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-        let cancelled = Task.isCancelled
-        if process.isRunning, timeoutState.didTimeout || cancelled {
-            process.terminate()
-            let killDeadline = ContinuousClock.now + .seconds(2)
-            while process.isRunning, ContinuousClock.now < killDeadline {
-                try? await Task.sleep(nanoseconds: 20_000_000)
-            }
-            if process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-                process.waitUntilExit()
-            }
-            if cancelled { throw CancellationError() }
-            throw LocalWorkspacePolicyError.commandTimedOut(command)
-        }
         try stdoutHandle.close()
         try stderrHandle.close()
         let stdoutData = try await LocalShellExecutor.readCaptureFile(at: stdoutURL)
@@ -1068,6 +1047,80 @@ enum LocalShellExecutor {
             timedOut: false,
             truncated: truncatedStdout.truncated || truncatedStderr.truncated
         )
+    }
+
+    private enum ShellWaitOutcome: Sendable {
+        case exited
+        case timedOut
+        case cancelled
+    }
+
+    /// 在专用 GCD 队列上等待进程退出/超时，协作线程池只轮询状态并响应任务取消。
+    ///
+    /// - 退出检测用 DispatchSourceProcess：进程一退出立即记录，哪怕协作池繁忙也不会
+    ///   把已按时完成的命令误判为超时；
+    /// - 超时用 GCD 定时器：到期限先 SIGTERM，宽限 2 秒仍未退出再 SIGKILL 强杀并回收，
+    ///   保证声明超时硬生效、忽略 SIGTERM 的进程也不会让工具永久卡死；
+    /// - 任务取消时同样执行两步击杀并返回 .cancelled。
+    private static func waitForExit(_ process: Process, timeoutSeconds: Int) async -> ShellWaitOutcome {
+        let state = LocalShellWaitState()
+        let waitQueue = DispatchQueue(label: "com.connor.local-shell-wait.\(UUID().uuidString)")
+
+        let exitSource = DispatchSource.makeProcessSource(
+            identifier: process.processIdentifier,
+            eventMask: [.exit],
+            queue: waitQueue
+        )
+        exitSource.setEventHandler {
+            if state.markExited() {
+                process.waitUntilExit()
+            }
+        }
+
+        let timer = DispatchSource.makeTimerSource(queue: waitQueue)
+        timer.schedule(deadline: .now() + .seconds(timeoutSeconds))
+        timer.setEventHandler {
+            guard state.markTimedOutIfNeeded() else { return }
+            if process.isRunning {
+                process.terminate()
+            }
+            waitQueue.asyncAfter(deadline: .now() + .seconds(2)) {
+                if !state.snapshot().exited, process.isRunning {
+                    kill(process.processIdentifier, SIGKILL)
+                    process.waitUntilExit()
+                }
+            }
+        }
+
+        exitSource.resume()
+        timer.resume()
+        defer {
+            exitSource.cancel()
+            timer.cancel()
+        }
+
+        while true {
+            if Task.isCancelled {
+                // 取消时同步完成两步击杀（有界等待，最长约 2.2s），确保进程被终止并回收、不残留。
+                if process.isRunning {
+                    process.terminate()
+                    let killDeadline = ContinuousClock.now + .seconds(2)
+                    while process.isRunning, ContinuousClock.now < killDeadline {
+                        try? await Task.sleep(nanoseconds: 20_000_000)
+                    }
+                    if process.isRunning {
+                        kill(process.processIdentifier, SIGKILL)
+                        process.waitUntilExit()
+                    }
+                }
+                return .cancelled
+            }
+            let (exited, timedOut) = state.snapshot()
+            if exited {
+                return timedOut ? .timedOut : .exited
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
     }
 
     /// 在专用全局队列上执行阻塞读盘，避免占用 Swift 协作线程池（间歇性工具卡顿的常见原因）。
@@ -1094,16 +1147,31 @@ enum LocalShellExecutor {
     }
 }
 
-private final class LocalShellTimeoutState: @unchecked Sendable {
+private final class LocalShellWaitState: @unchecked Sendable {
     private let lock = NSLock()
-    private var timedOut = false
+    private var isExited = false
+    private var isTimedOut = false
 
-    var didTimeout: Bool {
-        lock.withLock { timedOut }
+    func snapshot() -> (exited: Bool, timedOut: Bool) {
+        lock.withLock { (isExited, isTimedOut) }
     }
 
-    func markTimedOut() {
-        lock.withLock { timedOut = true }
+    /// 标记进程已退出；返回 true 表示这是首次标记（随后应回收进程）。
+    func markExited() -> Bool {
+        lock.withLock {
+            let first = !isExited
+            isExited = true
+            return first
+        }
+    }
+
+    /// 标记超时；已退出或已标记过则返回 false。
+    func markTimedOutIfNeeded() -> Bool {
+        lock.withLock {
+            guard !isExited, !isTimedOut else { return false }
+            isTimedOut = true
+            return true
+        }
     }
 }
 
