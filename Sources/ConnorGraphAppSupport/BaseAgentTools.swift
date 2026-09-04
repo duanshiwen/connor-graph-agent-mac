@@ -30,6 +30,25 @@ public actor BaseToolRuntime {
         library.close()
     }
 
+    // MARK: - 审计（M1-M7）
+
+    /// 写入一条审计记录到目标 App 子库（best-effort：子库不存在或失败即忽略；端侧、不同步）。
+    public func recordAudit(appID: String, operation: String, detail: String) {
+        library.recordAudit(appID: appID, operation: operation, detail: detail)
+    }
+
+    /// 读取指定 App 子库的审计记录（只读、端侧；base.audit.read 读取面在 M2 开放）。
+    public func readAudit(appID: String) -> [[String: String]] {
+        library.readAudit(appID: appID).map { row in
+            [
+                "seq": row["seq"] .map { String(describing: $0) } ?? "",
+                "operation": row["operation"] as? String ?? "",
+                "detail": row["detail"] as? String ?? "",
+                "created_at": row["created_at"] as? String ?? ""
+            ]
+        }
+    }
+
     // MARK: - 契约
 
     /// base.guide：返回平台契约全文或指定章节。
@@ -534,6 +553,22 @@ public struct BaseAgentTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        // M1-M7 审计（best-effort）：记录工具调用轨迹到目标 App 子库；端侧、不同步、不进返回信封。
+        var auditAppID = arguments.string("appID")
+        if operation == .appCreate {
+            // app.create 的 appID 嵌在 manifest 里。
+            if case .object(let manifest)? = arguments.values["manifest"],
+               case .string(let id)? = manifest["appID"] {
+                auditAppID = id
+            }
+        }
+        let auditOperation = operation.rawValue
+        let auditDetail = arguments.compactSummary()
+        defer {
+            if let appID = auditAppID {
+                Task { await runtime.recordAudit(appID: appID, operation: auditOperation, detail: auditDetail) }
+            }
+        }
         switch operation {
         case .guide:
             let envelope = await runtime.guideEnvelope(section: arguments.string("section"))
