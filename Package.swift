@@ -40,6 +40,7 @@ let package = Package(
                 "ConnorGraphStore",
                 "ConnorGraphSearch",
                 "ConnorGraphAgent",
+                "ConnorGraphBase",
                 .product(name: "MailCore", package: "MailCoreSPM")
             ],
             resources: [
