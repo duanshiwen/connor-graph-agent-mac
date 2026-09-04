@@ -84,17 +84,32 @@ public struct BaseMethodDef {
     public var isReadOnly: Bool { readOnly || derivedReadOnly }
 }
 
+/// 断言信号：v0.12 §2.7.4 事实层——warn 信号必出内核、不可压。
+/// 当前仅 `warn`（onFail: reject 直接抛错，不入信号）；level 字段留给后续扩展。
+public struct BaseMethodSignal: Equatable {
+    public let level: String
+    public let message: String
+
+    public init(level: String = "warn", message: String) {
+        self.level = level
+        self.message = message
+    }
+}
+
 /// 方法执行结果：reply 数据（或末步骤输出）+ warn 信号 + 变量上下文。
 public struct BaseMethodResult {
     public let data: JSONValue
-    public let warnings: [String]
+    public let signals: [BaseMethodSignal]
     public let variables: [String: JSONValue]
 
-    public init(data: JSONValue, warnings: [String], variables: [String: JSONValue]) {
+    public init(data: JSONValue, signals: [BaseMethodSignal], variables: [String: JSONValue]) {
         self.data = data
-        self.warnings = warnings
+        self.signals = signals
         self.variables = variables
     }
+
+    /// warn 消息列表（便捷访问，供信封/富集层用）。
+    public var warnings: [String] { signals.map(\.message) }
 }
 
 /// 方法调用目标：解析后的执行上下文（appID + 子库 + schema + 方法定义）。
@@ -145,7 +160,7 @@ public struct BaseMethodInterpreter {
         try validateArgs(method: method, args: args)
 
         var vars: [String: JSONValue] = [:]
-        var warnings: [String] = []
+        var signals: [BaseMethodSignal] = []
         var lastData: JSONValue = .object([:])
 
         for step in method.steps {
@@ -164,19 +179,19 @@ public struct BaseMethodInterpreter {
                 }
                 lastData = try runMutate(step, appID: appID)
             case .assert:
-                try runAssert(step, vars: vars, warnings: &warnings)
+                try runAssert(step, vars: vars, signals: &signals)
             case .call:
                 lastData = try runCall(step, appID: appID, method: method, args: args, vars: vars, resolver: resolver, callDepth: callDepth)
             case .reply:
                 lastData = try runReply(step, vars: vars)
                 // reply 为终止步骤。
-                return BaseMethodResult(data: lastData, warnings: warnings, variables: vars)
+                return BaseMethodResult(data: lastData, signals: signals, variables: vars)
             }
             if let name = step.raw["as"] as? String, !name.isEmpty {
                 vars[name] = lastData
             }
         }
-        return BaseMethodResult(data: lastData, warnings: warnings, variables: vars)
+        return BaseMethodResult(data: lastData, signals: signals, variables: vars)
     }
 
     // MARK: - 入参校验
@@ -241,7 +256,7 @@ public struct BaseMethodInterpreter {
         return JSONValue(json: result) ?? .null
     }
 
-    private func runAssert(_ step: BaseMethodStep, vars: [String: JSONValue], warnings: inout [String]) throws {
+    private func runAssert(_ step: BaseMethodStep, vars: [String: JSONValue], signals: inout [BaseMethodSignal]) throws {
         guard let on = step.raw["on"] as? [String: Any] else {
             throw BaseError(code: .validationFailed, message: "assert 步骤缺 on", hint: "assert 步骤必须携带 on 表达式")
         }
@@ -250,7 +265,7 @@ public struct BaseMethodInterpreter {
         let passes = try evaluate(on, vars: vars)
         if !passes {
             if onFail == "warn" {
-                warnings.append(message)
+                signals.append(BaseMethodSignal(level: "warn", message: message))
             } else {
                 throw BaseError(code: .validationFailed, message: message, hint: "assert 拒绝")
             }

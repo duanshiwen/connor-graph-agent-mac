@@ -200,6 +200,44 @@ final class BaseMethodInterpreterTests: XCTestCase {
         let def = try BaseMethodDef(json: json)
         let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
         XCTAssertEqual(result.warnings, ["超预算信号"])
+        XCTAssertEqual(result.signals.map(\.level), ["warn"])
+        XCTAssertEqual(result.signals.map(\.message), ["超预算信号"])
+    }
+
+    func testMultipleWarnAssertsContinueToReply() throws {
+        let json: [String: Any] = [
+            "name": "multi.warn",
+            "steps": [
+                ["type": "aggregate", "table": "expenses", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
+                ["type": "assert", "on": ["path": "$agg.0.total", "op": "gt", "value": 100], "onFail": "warn", "message": "超预算"],
+                ["type": "assert", "on": ["path": "$agg.0.total", "op": "gt", "value": 130], "onFail": "warn", "message": "严重超预算"],
+                ["type": "reply", "template": ["total": "$agg.0.total"]]
+            ]
+        ]
+        let def = try BaseMethodDef(json: json)
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
+        XCTAssertEqual(result.warnings, ["超预算", "严重超预算"])
+        guard case let .object(reply) = result.data, case let .number(total)? = reply["total"] else {
+            return XCTFail("reply 应含 total")
+        }
+        XCTAssertEqual(total, 143)
+    }
+
+    func testWarnSignalPreservedAfterMutate() throws {
+        let json: [String: Any] = [
+            "name": "warn.after.mutate",
+            "steps": [
+                ["type": "mutate", "table": "expenses", "as": "res",
+                 "ops": [["op": "insert", "record": ["amount": 10, "category": "food"]]]],
+                ["type": "aggregate", "table": "expenses", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
+                ["type": "assert", "on": ["path": "$agg.0.total", "op": "gt", "value": 150], "onFail": "warn", "message": "已超 150"],
+                ["type": "reply", "template": ["total": "$agg.0.total"]]
+            ]
+        ]
+        let def = try BaseMethodDef(json: json)
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
+        XCTAssertEqual(result.warnings, ["已超 150"])
+        XCTAssertEqual(result.signals.map(\.level), ["warn"])
     }
 
     // MARK: 入参校验
