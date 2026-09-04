@@ -615,6 +615,7 @@ public struct BaseAgentTool: AgentTool {
                     "appID": .string(description: "小写 appID，匹配 ^[a-z0-9_-]{1,48}$"),
                     "name": .string(description: "App 名称"),
                     "domain": .string(description: "领域（如 记账/项目进度/库存）"),
+                    "purpose": .string(description: "一句话用途（能力搜索 catalog 检索字段，Card 展示；如「记录个人收支、按月给预算」）"),
                     "visibility": .stringEnumeration(values: ["private", "shared", "public"], description: "三态：private 私有 / shared 好友可见 / public 全员公开"),
                     "requiredCapabilities": .array(items: .string(description: "能力点"), description: "v1 仅发放 imports/network/asset；import 跨库只读导入不发放"),
                     "imports": .array(items: .object(properties: ["appID": .string(description: "目标 App"), "method": .string(description: "exported 方法全限定名")], required: ["appID", "method"]), description: "跨 App 依赖（仅 exported 方法调用，v1 唯一跨库通路）"),
@@ -732,6 +733,7 @@ public struct BaseAgentTool: AgentTool {
                 "manifest": .object(properties: [
                     "name": .string(description: "名称"),
                     "domain": .string(description: "领域"),
+                    "purpose": .string(description: "一句话用途（能力搜索 catalog 检索字段）"),
                     "visibility": .stringEnumeration(values: ["private", "shared", "public"], description: "三态"),
                     "riskLevel": .string(description: "风险等级"),
                     "requiredCapabilities": .array(items: .string(description: "能力点"), description: "能力点"),
