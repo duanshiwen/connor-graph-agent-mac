@@ -313,6 +313,15 @@ public actor BaseToolRuntime {
         basePackageVersion: Int?
     ) -> BaseEnvelope {
         do {
+            // 签名级变更（schema/methods）必须同批改指南，漂移即拒（v0.12 §6.4）。
+            let hasSignatureChange = schema != nil || methods != nil
+            if hasSignatureChange && (guide == nil || guide!.isEmpty) {
+                throw BaseError(
+                    code: .guideOutOfSync,
+                    message: "签名级变更未同批改指南",
+                    hint: "schema/methods 变更须同批提供新版 App Guide（十一段）"
+                )
+            }
             // manifest + guide + 乐观并发（updateApp 内部校验 basePackageVersion 并单调前移版本）。
             let card = try library.updateApp(
                 appID: appID,
@@ -346,10 +355,14 @@ public actor BaseToolRuntime {
         }
     }
 
-    public func methodDefineEnvelope(appID: String, method: [String: Any]) -> BaseEnvelope {
+    public func methodDefineEnvelope(appID: String, method: [String: Any], guide: [String: Any]?) -> BaseEnvelope {
         do {
             let def = try BaseMethodDef(json: method)
             try library.defineMethod(appID: appID, method: method)
+            // 签名级变更：若同批提供新版指南则同步（消除漂移），否则保持漂移（invoke 拒）。
+            if let guide, !guide.isEmpty {
+                try library.syncGuide(appID: appID, guide: guide)
+            }
             return .success(data: [
                 "appID": appID,
                 "method": def.name,
@@ -364,10 +377,24 @@ public actor BaseToolRuntime {
         }
     }
 
+    /// 指南是否与当前签名不一致（漂移）。测试/诊断用只读访问器。
+    public func isGuideOutOfSync(appID: String) throws -> Bool {
+        try library.isGuideOutOfSync(appID: appID)
+    }
+
     public func methodInvokeEnvelope(appID: String, method: String, input: [String: Any]) -> BaseEnvelope {
         do {
             guard let target = try library.methodTarget(callingAppID: appID, reference: method) else {
                 throw BaseError(code: .notFound, message: "方法不存在", hint: "App \(appID) 中找不到方法 \(method)")
+            }
+            // 漂移即拒：目标 App 指南与签名不一致时，禁止按过期指南调用方法（v0.12 §6.4）。
+            if try library.isGuideOutOfSync(appID: target.appID) {
+                target.store.close()
+                throw BaseError(
+                    code: .guideOutOfSync,
+                    message: "App Guide 与签名不一致",
+                    hint: "请先用 base.app.update 同批更新 App Guide（同步签名级变更）后重试"
+                )
             }
             let ownerAppID = target.appID
             let interpreter = BaseMethodInterpreter(store: target.store, schema: target.schema)
@@ -727,7 +754,8 @@ public struct BaseAgentTool: AgentTool {
                     ], required: ["type"]), description: "步骤 DAG"),
                     "exports": .boolean(description: "是否 exported（可被跨 App 调用）"),
                     "readOnly": .boolean(description: "是否只读方法")
-                ], required: ["name", "steps"])
+                ], required: ["name", "steps"]),
+                "guide": .object(properties: [:], required: [])
             ], required: ["appID", "method"])
         case .methodInvoke:
             return .closedObject(properties: [
@@ -854,9 +882,10 @@ public struct BaseAgentTool: AgentTool {
         case .methodDefine:
             let envelope = await runtime.methodDefineEnvelope(
                 appID: try requiredString("appID", arguments),
-                method: try object("method", arguments)
+                method: try object("method", arguments),
+                guide: try optionalObject("guide", arguments)
             )
-            return makeResult(envelope, text: "方法已定义（声明式 DAG，签名级变更）。", context: context)
+            return makeResult(envelope, text: "方法已定义（声明式 DAG，签名级变更；同批指南已同步）。", context: context)
         case .methodInvoke:
             let envelope = await runtime.methodInvokeEnvelope(
                 appID: try requiredString("appID", arguments),

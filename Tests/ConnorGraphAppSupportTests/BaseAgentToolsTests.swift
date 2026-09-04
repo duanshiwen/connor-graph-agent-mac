@@ -348,7 +348,8 @@ import ConnorGraphAppSupport
               {"type": "reply", "template": {"total": "$agg.0.total"}}
             ],
             "readOnly": true
-          }
+          },
+          "guide": {"whenToUse": "x", "whenNotToUse": "y", "sections": []}
         }
         """#
         result = try await defineTool.execute(arguments: try AgentToolArguments(json: defineArgs), context: baseToolContext())
@@ -417,7 +418,8 @@ import ConnorGraphAppSupport
               {"type": "reply", "template": {"total": "$agg.0.total"}}
             ],
             "readOnly": true
-          }
+          },
+          "guide": {"whenToUse": "x", "whenNotToUse": "y", "sections": []}
         }
         """#
         result = try await defineTool.execute(arguments: try AgentToolArguments(json: defineArgs), context: baseToolContext())
@@ -501,7 +503,8 @@ import ConnorGraphAppSupport
             ],
             "readOnly": true,
             "exports": true
-          }
+          },
+          "guide": {"whenToUse": "x", "whenNotToUse": "y", "sections": []}
         }
         """#
         result = try await defineTool.execute(arguments: try AgentToolArguments(json: defineArgs), context: baseToolContext())
@@ -609,6 +612,124 @@ import ConnorGraphAppSupport
         #expect(rows.count >= 2)
         #expect(rows.contains { ($0["operation"] as? String) == "base.app.create" })
         #expect(rows.contains { ($0["operation"] as? String) == "base.record.mutate" })
+
+        await runtime.close()
+    }
+
+    @Test func guideDriftBlocksInvokeUntilSynced() async throws {
+        let runtime = try makeRuntime()
+        let create = BaseAgentTool(operation: .appCreate, runtime: runtime)
+        var result = try await create.execute(arguments: try AgentToolArguments(json: #"""
+        {
+          "manifest": {"appID": "ledger", "name": "记账本", "domain": "记账", "visibility": "private"},
+          "schema": {"tables": [{"name": "expenses", "fields": [{"name": "amount", "type": "number"}]}]},
+          "guide": {"whenToUse": "x", "whenNotToUse": "y", "sections": []}
+        }
+        """#), context: baseToolContext())
+        #expect(try parseEnvelope(result).ok == true)
+
+        // 签名级变更 method.define 未同批改指南 → 指南漂移。
+        let defineTool = BaseAgentTool(operation: .methodDefine, runtime: runtime)
+        result = try await defineTool.execute(arguments: try AgentToolArguments(json: #"""
+        {
+          "appID": "ledger",
+          "method": {"name": "expenses.total", "steps": [
+            {"type": "aggregate", "table": "expenses", "aggregations": [{"op": "sum", "field": "amount", "alias": "total"}], "as": "agg"},
+            {"type": "reply", "template": {"total": "$agg.0.total"}}
+          ], "readOnly": true}
+        }
+        """#), context: baseToolContext())
+        #expect(try parseEnvelope(result).ok == true)
+
+        // invoke 被漂移检测拒：GUIDE_OUT_OF_SYNC（不能按过期指南调用）。
+        let invokeTool = BaseAgentTool(operation: .methodInvoke, runtime: runtime)
+        result = try await invokeTool.execute(arguments: try AgentToolArguments(json: #"{"appID": "ledger", "method": "expenses.total", "input": {}}"#), context: baseToolContext())
+        let driftEnvelope = try parseEnvelope(result)
+        #expect(driftEnvelope.ok == false)
+        #expect(driftEnvelope.errorCode == "GUIDE_OUT_OF_SYNC")
+
+        // 用 base.app.update 同批同步指南后，invoke 恢复可用。
+        let updateTool = BaseAgentTool(operation: .appUpdate, runtime: runtime)
+        result = try await updateTool.execute(arguments: try AgentToolArguments(json: #"""
+        {
+          "appID": "ledger", "basePackageVersion": 2,
+          "guide": {"whenToUse": "x", "whenNotToUse": "y", "sections": [], "methods": ["expenses.total"]}
+        }
+        """#), context: baseToolContext())
+        #expect(try parseEnvelope(result).ok == true)
+
+        result = try await invokeTool.execute(arguments: try AgentToolArguments(json: #"{"appID": "ledger", "method": "expenses.total", "input": {}}"#), context: baseToolContext())
+        let syncedEnvelope = try parseEnvelope(result)
+        #expect(syncedEnvelope.ok == true)
+
+        await runtime.close()
+    }
+
+    @Test func appUpdateWithSchemaWithoutGuideRejectsGuideOutOfSync() async throws {
+        let runtime = try makeRuntime()
+        let create = BaseAgentTool(operation: .appCreate, runtime: runtime)
+        var result = try await create.execute(arguments: try AgentToolArguments(json: #"""
+        {
+          "manifest": {"appID": "ledger", "name": "记账本", "domain": "记账", "visibility": "private"},
+          "schema": {"tables": [{"name": "expenses", "fields": [{"name": "amount", "type": "number"}]}]},
+          "guide": {"whenToUse": "x", "whenNotToUse": "y", "sections": []}
+        }
+        """#), context: baseToolContext())
+        #expect(try parseEnvelope(result).ok == true)
+
+        // app.update 带 schema 变更但未同批带 guide → GUIDE_OUT_OF_SYNC。
+        let updateTool = BaseAgentTool(operation: .appUpdate, runtime: runtime)
+        result = try await updateTool.execute(arguments: try AgentToolArguments(json: #"""
+        {
+          "appID": "ledger", "basePackageVersion": 1,
+          "schema": {"tables": [
+            {"name": "expenses", "fields": [{"name": "amount", "type": "number"}]},
+            {"name": "categories", "fields": [{"name": "name", "type": "text"}]}
+          ]}
+        }
+        """#), context: baseToolContext())
+        let envelope = try parseEnvelope(result)
+        #expect(envelope.ok == false)
+        #expect(envelope.errorCode == "GUIDE_OUT_OF_SYNC")
+
+        await runtime.close()
+    }
+
+    @Test func syncGuideViaAppUpdateClearsDriftAndCardShowsFlag() async throws {
+        let runtime = try makeRuntime()
+        let create = BaseAgentTool(operation: .appCreate, runtime: runtime)
+        var result = try await create.execute(arguments: try AgentToolArguments(json: #"""
+        {
+          "manifest": {"appID": "ledger", "name": "记账本", "domain": "记账", "visibility": "private"},
+          "schema": {"tables": [{"name": "expenses", "fields": [{"name": "amount", "type": "number"}]}]},
+          "guide": {"whenToUse": "x", "whenNotToUse": "y", "sections": []}
+        }
+        """#), context: baseToolContext())
+        #expect(try parseEnvelope(result).ok == true)
+
+        // 签名级变更：建第二张表（table.create），指南未同步 → 漂移。
+        let tableTool = BaseAgentTool(operation: .tableCreate, runtime: runtime)
+        result = try await tableTool.execute(arguments: try AgentToolArguments(json: #"{"appID": "ledger", "table": {"name": "categories", "fields": [{"name": "name", "type": "text"}]}}"#), context: baseToolContext())
+        #expect(try parseEnvelope(result).ok == true)
+        #expect(try await runtime.isGuideOutOfSync(appID: "ledger") == true)
+
+        // app.update 同批带 guide 同步 → 漂移消除。
+        let updateTool = BaseAgentTool(operation: .appUpdate, runtime: runtime)
+        result = try await updateTool.execute(arguments: try AgentToolArguments(json: #"""
+        {
+          "appID": "ledger", "basePackageVersion": 2,
+          "guide": {"whenToUse": "x", "whenNotToUse": "y", "sections": [], "tables": ["expenses", "categories"]}
+        }
+        """#), context: baseToolContext())
+        #expect(try parseEnvelope(result).ok == true)
+        #expect(try await runtime.isGuideOutOfSync(appID: "ledger") == false)
+
+        // Card 暴露 guideOutOfSync 标志。
+        let getTool = BaseAgentTool(operation: .appGet, runtime: runtime)
+        result = try await getTool.execute(arguments: try AgentToolArguments(json: #"{"appID": "ledger"}"#), context: baseToolContext())
+        let getEnvelope = try parseEnvelope(result)
+        #expect(getEnvelope.ok == true)
+        #expect(getEnvelope.data?["guideOutOfSync"] as? Bool == false)
 
         await runtime.close()
     }
