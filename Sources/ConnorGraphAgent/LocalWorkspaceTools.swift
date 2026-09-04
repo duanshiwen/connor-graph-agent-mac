@@ -46,6 +46,28 @@ private func requireLargeWriteApprovalIfNeeded(
     }
 }
 
+/// 在工作区外的全局队列上执行阻塞读盘，避免占用 Swift 协作线程池。
+/// 长会话/并发工具调用下协作池饥饿是工具间歇性卡顿的常见原因；
+/// 非 UTF-8 文件给出明确诊断（.nonUTF8EncodedFile）而非模糊的 CocoaError。
+enum LocalFileReader {
+    static func readUTF8(from path: URL) async throws -> String {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let data = try Data(contentsOf: path)
+                    guard let text = String(data: data, encoding: .utf8) else {
+                        continuation.resume(throwing: LocalWorkspacePolicyError.nonUTF8EncodedFile(path.path))
+                        return
+                    }
+                    continuation.resume(returning: text)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+}
+
 public struct LocalReadFileTool: AgentTool {
     public let name = "Read"
     public let description = "Read a text file from the configured local workspace. Without an explicit window, a small file is returned completely in one call, and a larger file is read from the start, truncated to the output budget, returning nextOffset so you can continue with Read(filePath, offset: nextOffset). Pass optional 1-based offset and/or limit to read an explicit line window on any file: reading then always starts at the requested offset, never from the top. Output lines carry a presentation-only 'N: ' line-number prefix; the exact file text excludes that prefix, so ApplyPatch oldText/newText must be built from the raw file text. Paths must stay inside allowed workspace roots."
@@ -69,7 +91,7 @@ public struct LocalReadFileTool: AgentTool {
         let path = try policy.resolvePath(rawPath)
         try policy.validateReadablePath(path)
         try policy.validateReadableSize(path: path)
-        let text = try String(contentsOf: path, encoding: .utf8)
+        let text = try await LocalFileReader.readUTF8(from: path)
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let maxBytes = max(policy.maxToolOutputBytes, 1)
         let allFormatted = lines.enumerated().map { "\($0.offset + 1): \($0.element)" }
@@ -451,7 +473,7 @@ public struct LocalReadManyTool: AgentTool {
                 let path = try policy.resolvePath(request.filePath)
                 try policy.validateReadablePath(path)
                 try policy.validateReadableSize(path: path)
-                let text = try String(contentsOf: path, encoding: .utf8)
+                let text = try await LocalFileReader.readUTF8(from: path)
                 let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
                 let limit = max(request.limit ?? min(lines.count, 2000), 0)
                 let start = min(request.offset - 1, lines.count)
