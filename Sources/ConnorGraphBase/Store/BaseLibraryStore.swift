@@ -82,6 +82,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
                 imports_json TEXT NOT NULL DEFAULT '[]',
                 schema_json TEXT NOT NULL DEFAULT '{"tables":[]}',
                 guide_json TEXT NOT NULL DEFAULT '{}',
+                guide_version INTEGER NOT NULL DEFAULT 0,
                 methods_json TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -132,8 +133,8 @@ public final class BaseLibraryStore: @unchecked Sendable {
         try executeVoid("""
             INSERT INTO base_apps
                 (app_id, name, domain, visibility, package_version, sdk_version, risk_level,
-                 capabilities_json, imports_json, schema_json, guide_json, methods_json, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)
+                 capabilities_json, imports_json, schema_json, guide_json, guide_version, methods_json, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?11, ?12, ?12)
             """, parameters: [
                 appID, name, domain, visibility,
                 sdkVersion, riskLevel,
@@ -226,6 +227,37 @@ public final class BaseLibraryStore: @unchecked Sendable {
             throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
         }
         return Int(v)
+    }
+
+    // MARK: 指南同步与漂移检测（M2-M2）
+
+    /// 指南是否漂移：签名级变更（schema/methods）后未同批改指南 → guide_version < package_version。
+    public func isGuideOutOfSync(appID: String) throws -> Bool {
+        let rows = try execute("SELECT package_version, guide_version FROM base_apps WHERE app_id = ?1", parameters: [appID])
+        guard let row = rows.first else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        let pkg = (row["package_version"] as? Int64) ?? 0
+        let guide = (row["guide_version"] as? Int64) ?? 0
+        return pkg > guide
+    }
+
+    /// 显式同步指南：写入新版 guide 并把 guide_version 对齐当前 package_version（消除漂移）。
+    public func syncGuide(appID: String, guide: [String: Any]) throws {
+        guard try appExists(appID) else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        guard !guide.isEmpty else {
+            throw BaseError(code: .validationFailed, message: "指南不能为空", hint: "App Guide 为十一段结构化对象")
+        }
+        let updated = try executeVoid("""
+            UPDATE base_apps
+            SET guide_json = ?1, guide_version = package_version, updated_at = ?2
+            WHERE app_id = ?3
+            """, parameters: [Self.jsonString(guide), BaseTime.isoNow(), appID])
+        guard updated > 0 else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
     }
 
     // MARK: 子库访问
@@ -411,14 +443,18 @@ public final class BaseLibraryStore: @unchecked Sendable {
         }
         // 指南显式提供则同步更新（防止漂移）。
         var guideJSON: String = row["guide_json"] as? String ?? ""
+        var guideVersionSQL = ""
+        var guideVersionParam: Int = 0
         if let guide, !guide.isEmpty {
             guideJSON = Self.jsonString(guide)
+            // 指南随签名级变更同步：guide_version 对齐新 package_version。
+            guideVersionSQL = ", guide_version = package_version + 1"
         }
         let updated = try executeVoid("""
             UPDATE base_apps
             SET name = ?1, domain = ?2, visibility = ?3, risk_level = ?4, sdk_version = ?5,
                 capabilities_json = ?6, imports_json = ?7, guide_json = ?8,
-                package_version = package_version + 1, updated_at = ?9
+                package_version = package_version + 1\(guideVersionSQL), updated_at = ?9
             WHERE app_id = ?10
             """, parameters: [
                 name, domain, visibility, riskLevel, sdkVersion,
@@ -457,6 +493,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
             "domain": row["domain"] ?? "",
             "visibility": row["visibility"] ?? "private",
             "packageVersion": row["package_version"] as? Int64 ?? 0,
+            "guideOutOfSync": ((row["package_version"] as? Int64) ?? 0) > ((row["guide_version"] as? Int64) ?? 0),
             "sdkVersion": row["sdk_version"] as? Int64 ?? 1,
             "riskLevel": row["risk_level"] ?? "low",
             "requiredCapabilities": (try? Self.decodeArray(row["capabilities_json"] as? String)) ?? [],
