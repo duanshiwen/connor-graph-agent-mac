@@ -202,6 +202,78 @@ import ConnorGraphAppSupport
         await runtime.close()
     }
 
+    // MARK: - M1-M6 记账场景纵切
+
+    @Test func bookkeepingVerticalSliceMonthlyAggregateAndErrorPaths() async throws {
+        let runtime = try makeRuntime()
+
+        // 建正式私有记账 App（四件套同批）。
+        let createArgs = #"""
+        {
+          "manifest": {"appID": "ledger", "name": "记账本", "domain": "记账", "visibility": "private"},
+          "schema": {"tables": [
+            {"name": "expenses", "fields": [
+              {"name": "amount", "type": "number", "required": true, "range": {"min": 0}},
+              {"name": "category", "type": "enum", "options": ["餐饮", "交通", "购物"]},
+              {"name": "note", "type": "text"}
+            ]}
+          ]},
+          "guide": {"whenToUse": "当用户说记一笔且是个人收支时用", "whenNotToUse": "当只是闲聊消费观时不用", "sections": []}
+        }
+        """#
+        var tool = BaseAgentTool(operation: .appCreate, runtime: runtime)
+        var result = try await tool.execute(arguments: try AgentToolArguments(json: createArgs), context: baseToolContext())
+        var envelope = try parseEnvelope(result)
+        #expect(envelope.ok == true)
+
+        // “记一笔火锅 93” → mutate insert（含一笔交通、一笔咖啡）。
+        var mutateTool = BaseAgentTool(operation: .recordMutate, runtime: runtime)
+        let insertArgs = #"""
+        {"appID": "ledger", "table": "expenses", "ops": [
+          {"op": "insert", "record": {"amount": 93, "category": "餐饮", "note": "火锅"}},
+          {"op": "insert", "record": {"amount": 35, "category": "交通", "note": "地铁"}},
+          {"op": "insert", "record": {"amount": 68, "category": "餐饮", "note": "咖啡"}}
+        ]}
+        """#
+        result = try await mutateTool.execute(arguments: try AgentToolArguments(json: insertArgs), context: baseToolContext())
+        envelope = try parseEnvelope(result)
+        #expect(envelope.ok == true)
+        #expect(envelope.data?["affected"] as? Int == 3)
+
+        // “本月餐饮花了多少” → aggregate sum(amount) where category in [餐饮]（数字必出内核）。
+        var aggTool = BaseAgentTool(operation: .queryAggregate, runtime: runtime)
+        let aggArgs = #"""
+        {"appID": "ledger", "table": "expenses", "aggregations": [{"op": "sum", "field": "amount", "alias": "total"}],
+         "filter": {"and": [{"field": "category", "op": "in", "value": ["餐饮"]}]}}
+        """#
+        result = try await aggTool.execute(arguments: try AgentToolArguments(json: aggArgs), context: baseToolContext())
+        envelope = try parseEnvelope(result)
+        #expect(envelope.ok == true)
+        let rows = envelope.data?["rows"] as? [[String: Any]] ?? []
+        #expect((rows.first?["total"] as? NSNumber)?.doubleValue == 161)
+
+        // 缺金额 → VALIDATION_FAILED + hint 含 amount（缺参纠错）。
+        let missingAmountArgs = #"""
+        {"appID": "ledger", "table": "expenses", "ops": [{"op": "insert", "record": {"category": "餐饮", "note": "缺金额"}}]}
+        """#
+        result = try await mutateTool.execute(arguments: try AgentToolArguments(json: missingAmountArgs), context: baseToolContext())
+        envelope = try parseEnvelope(result)
+        #expect(envelope.ok == false)
+        #expect(envelope.errorCode == "VALIDATION_FAILED")
+        #expect(envelope.errorHint?.contains("amount") == true)
+
+        // 越界 → 负金额被 schema range 拒绝（VALIDATION_FAILED）。
+        let negativeArgs = #"""
+        {"appID": "ledger", "table": "expenses", "ops": [{"op": "insert", "record": {"amount": -50, "category": "餐饮"}}]}
+        """#
+        result = try await mutateTool.execute(arguments: try AgentToolArguments(json: negativeArgs), context: baseToolContext())
+        envelope = try parseEnvelope(result)
+        #expect(envelope.ok == false)
+        #expect(envelope.errorCode == "VALIDATION_FAILED")
+
+        await runtime.close()
+    }
+
     // MARK: - Helpers
 
     private func makeRuntime() throws -> BaseToolRuntime {
@@ -225,6 +297,7 @@ import ConnorGraphAppSupport
         var ok: Bool
         var data: [String: Any]?
         var errorCode: String?
+        var errorHint: String?
     }
 
     private func parseEnvelope(_ result: AgentToolResult) throws -> EnvelopeBox {
@@ -233,6 +306,6 @@ import ConnorGraphAppSupport
         let ok = object["ok"] as? Bool ?? false
         let data = object["data"] as? [String: Any]
         let error = object["error"] as? [String: Any]
-        return EnvelopeBox(ok: ok, data: data, errorCode: error?["code"] as? String)
+        return EnvelopeBox(ok: ok, data: data, errorCode: error?["code"] as? String, errorHint: error?["hint"] as? String)
     }
 }
