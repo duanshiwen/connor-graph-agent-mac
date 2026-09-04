@@ -74,6 +74,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
                 app_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 domain TEXT NOT NULL DEFAULT '',
+                purpose TEXT NOT NULL DEFAULT '',
                 visibility TEXT NOT NULL DEFAULT 'private',
                 package_version INTEGER NOT NULL DEFAULT 0,
                 sdk_version INTEGER NOT NULL DEFAULT 1,
@@ -88,6 +89,11 @@ public final class BaseLibraryStore: @unchecked Sendable {
                 updated_at TEXT NOT NULL
             );
             """)
+        // 迁移：旧库补 purpose 列（M2-M3 catalog 检索字段，dev 演进）。
+        let columns = try execute("PRAGMA table_info(base_apps)")
+        if !columns.contains(where: { ($0["name"] as? String) == "purpose" }) {
+            try executeVoid("ALTER TABLE base_apps ADD COLUMN purpose TEXT NOT NULL DEFAULT ''", parameters: [])
+        }
     }
 
     // MARK: App 生命周期
@@ -125,6 +131,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
         }
         let name = manifest["name"] as? String ?? appID
         let domain = manifest["domain"] as? String ?? ""
+        let purpose = manifest["purpose"] as? String ?? ""
         let visibility = manifest["visibility"] as? String ?? "private"
         let riskLevel = manifest["riskLevel"] as? String ?? "low"
         let sdkVersion = (manifest["sdkVersion"] as? Int) ?? 1
@@ -132,11 +139,11 @@ public final class BaseLibraryStore: @unchecked Sendable {
         let now = BaseTime.isoNow()
         try executeVoid("""
             INSERT INTO base_apps
-                (app_id, name, domain, visibility, package_version, sdk_version, risk_level,
+                (app_id, name, domain, purpose, visibility, package_version, sdk_version, risk_level,
                  capabilities_json, imports_json, schema_json, guide_json, guide_version, methods_json, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?11, ?12, ?12)
+            VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?13, ?13)
             """, parameters: [
-                appID, name, domain, visibility,
+                appID, name, domain, purpose, visibility,
                 sdkVersion, riskLevel,
                 Self.jsonString(capabilities), Self.jsonString(imports),
                 Self.jsonString(schemaObject), Self.jsonString(guide), Self.jsonString(methods),
@@ -170,6 +177,9 @@ public final class BaseLibraryStore: @unchecked Sendable {
         return !rows.isEmpty
     }
 
+    /// 能力搜索 catalog（§6.6/§6.7）：scope 过滤 + 关键词检索。
+    /// 检索字段：名称/领域/appID/一句话用途/方法名——「解锁你不知道自己有的应用」与「解锁你没用过的方法」。
+    /// v1 端侧来源均为本人创建（source=private）；shared/installed 随 M4 服务端加入。
     public func listApps(scope: String? = nil, query: String? = nil) throws -> [[String: Any]] {
         var sql = "SELECT * FROM base_apps"
         var params: [Any] = []
@@ -178,15 +188,30 @@ public final class BaseLibraryStore: @unchecked Sendable {
             clauses.append("visibility = ?")
             params.append(scope)
         }
-        if let query, !query.isEmpty {
-            clauses.append("(name LIKE ? OR domain LIKE ? OR app_id LIKE ?)")
-            let like = "%\(query)%"
-            params.append(like); params.append(like); params.append(like)
-        }
         if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
         sql += " ORDER BY updated_at DESC"
         let rows = try execute(sql, parameters: params)
-        return try rows.map { try card(from: $0) }
+        guard let query, !query.isEmpty else {
+            return try rows.map { try card(from: $0) }
+        }
+        let needle = query.lowercased()
+        var matched: [[String: Any]] = []
+        for row in rows {
+            let card = try card(from: row)
+            let methods = (try? Self.decodeArray(row["methods_json"] as? String)) ?? []
+            let methodNames = methods.compactMap { $0["name"] as? String }.joined(separator: " ")
+            let haystack = [
+                row["name"] as? String ?? "",
+                row["domain"] as? String ?? "",
+                row["app_id"] as? String ?? "",
+                row["purpose"] as? String ?? "",
+                methodNames
+            ].joined(separator: " ").lowercased()
+            if haystack.contains(needle) {
+                matched.append(card)
+            }
+        }
+        return matched
     }
 
     /// App Card：能力搜索面的确定性卡片（无 views 字段，v0.7）。
@@ -425,6 +450,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
         }
         let name = manifest["name"] as? String ?? (row["name"] as? String ?? appID)
         let domain = manifest["domain"] as? String ?? (row["domain"] as? String ?? "")
+        let purpose = manifest["purpose"] as? String ?? (row["purpose"] as? String ?? "")
         let visibility = manifest["visibility"] as? String ?? (row["visibility"] as? String ?? "private")
         let riskLevel = manifest["riskLevel"] as? String ?? (row["risk_level"] as? String ?? "low")
         let sdkVersion = (manifest["sdkVersion"] as? Int) ?? (row["sdk_version"] as? Int ?? 1)
@@ -452,12 +478,12 @@ public final class BaseLibraryStore: @unchecked Sendable {
         }
         let updated = try executeVoid("""
             UPDATE base_apps
-            SET name = ?1, domain = ?2, visibility = ?3, risk_level = ?4, sdk_version = ?5,
-                capabilities_json = ?6, imports_json = ?7, guide_json = ?8,
-                package_version = package_version + 1\(guideVersionSQL), updated_at = ?9
-            WHERE app_id = ?10
+            SET name = ?1, domain = ?2, purpose = ?3, visibility = ?4, risk_level = ?5, sdk_version = ?6,
+                capabilities_json = ?7, imports_json = ?8, guide_json = ?9,
+                package_version = package_version + 1\(guideVersionSQL), updated_at = ?10
+            WHERE app_id = ?11
             """, parameters: [
-                name, domain, visibility, riskLevel, sdkVersion,
+                name, domain, purpose, visibility, riskLevel, sdkVersion,
                 row["capabilities_json"] as? String ?? "[]",
                 row["imports_json"] as? String ?? "[]",
                 guideJSON,
@@ -491,8 +517,11 @@ public final class BaseLibraryStore: @unchecked Sendable {
             "appID": appID,
             "name": row["name"] ?? "",
             "domain": row["domain"] ?? "",
+            "purpose": row["purpose"] ?? "",
             "visibility": row["visibility"] ?? "private",
+            "source": "private",
             "packageVersion": row["package_version"] as? Int64 ?? 0,
+            "compatible": (row["sdk_version"] as? Int64 ?? 1) <= 1,
             "guideOutOfSync": ((row["package_version"] as? Int64) ?? 0) > ((row["guide_version"] as? Int64) ?? 0),
             "sdkVersion": row["sdk_version"] as? Int64 ?? 1,
             "riskLevel": row["risk_level"] ?? "low",
