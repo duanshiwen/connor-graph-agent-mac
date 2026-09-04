@@ -350,10 +350,10 @@ public struct BaseMethodInterpreter {
         switch op {
         case "eq": return lhs == rhs
         case "neq": return lhs != rhs
-        case "gt": return (lhs as? Double) ?? -Double.greatestFiniteMagnitude > (rhs as? Double) ?? -Double.greatestFiniteMagnitude
-        case "gte": return (lhs as? Double) ?? -Double.greatestFiniteMagnitude >= (rhs as? Double) ?? -Double.greatestFiniteMagnitude
-        case "lt": return (lhs as? Double) ?? Double.greatestFiniteMagnitude < (rhs as? Double) ?? Double.greatestFiniteMagnitude
-        case "lte": return (lhs as? Double) ?? Double.greatestFiniteMagnitude <= (rhs as? Double) ?? Double.greatestFiniteMagnitude
+        case "gt": return (lhs.numberValue ?? -Double.greatestFiniteMagnitude) > (rhs.numberValue ?? -Double.greatestFiniteMagnitude)
+        case "gte": return (lhs.numberValue ?? -Double.greatestFiniteMagnitude) >= (rhs.numberValue ?? -Double.greatestFiniteMagnitude)
+        case "lt": return (lhs.numberValue ?? Double.greatestFiniteMagnitude) < (rhs.numberValue ?? Double.greatestFiniteMagnitude)
+        case "lte": return (lhs.numberValue ?? Double.greatestFiniteMagnitude) <= (rhs.numberValue ?? Double.greatestFiniteMagnitude)
         default:
             return false
         }

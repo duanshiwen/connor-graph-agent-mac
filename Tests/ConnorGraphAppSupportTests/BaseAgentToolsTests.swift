@@ -405,6 +405,7 @@ import ConnorGraphAppSupport
         #expect(try parseEnvelope(result).ok == true)
 
         // 定义带 assert warn 的方法：总额 > 100 发超预算信号（事实层不可压）。
+        // assert 语义 = 不变量须成立；「不超 100」的不变量是 total <= 100，被违反（total>100）→ warn。
         let defineTool = BaseAgentTool(operation: .methodDefine, runtime: runtime)
         let defineArgs = #"""
         {
@@ -414,7 +415,7 @@ import ConnorGraphAppSupport
             "description": "总额检查",
             "steps": [
               {"type": "aggregate", "table": "expenses", "aggregations": [{"op": "sum", "field": "amount", "alias": "total"}], "as": "agg"},
-              {"type": "assert", "on": {"path": "$agg.0.total", "op": "gt", "value": 100}, "onFail": "warn", "message": "本月支出超 100 元"},
+              {"type": "assert", "on": {"path": "$agg.0.total", "op": "lte", "value": 100}, "onFail": "warn", "message": "本月支出超 100 元"},
               {"type": "reply", "template": {"total": "$agg.0.total"}}
             ],
             "readOnly": true
@@ -730,6 +731,99 @@ import ConnorGraphAppSupport
         let getEnvelope = try parseEnvelope(result)
         #expect(getEnvelope.ok == true)
         #expect(getEnvelope.data?["guideOutOfSync"] as? Bool == false)
+
+        await runtime.close()
+    }
+
+    // MARK: - M2-M4 只读报表方法纵切（记账月度报表）
+
+    /// 报表 = 只读方法（v0.12 §2.4）：多聚合 + 趋势对比 + 预算超线 warn + reply 组合，数字必出内核。
+    /// 方法体内无算术算子——reply 只做 JSONPath 替换；趋势/信号均出自内核返回。
+    @Test func bookkeepingMonthlyReportReadOnlyVerticalSlice() async throws {
+        let runtime = try makeRuntime()
+
+        // 1) 建正式私有记账 App（四件套同批，manifest 带一句话用途）。
+        let create = BaseAgentTool(operation: .appCreate, runtime: runtime)
+        let createArgs = #"""
+        {
+          "manifest": {"appID": "ledger", "name": "记账本", "domain": "记账", "visibility": "private", "purpose": "记录个人收支、按月给预算"},
+          "schema": {"tables": [
+            {"name": "expenses", "fields": [
+              {"name": "amount", "type": "number", "required": true, "range": {"min": 0}},
+              {"name": "category", "type": "enum", "options": ["餐饮", "交通"]},
+              {"name": "month", "type": "enum", "options": ["2026-08", "2026-09"]},
+              {"name": "paid", "type": "boolean", "default": false}
+            ]}
+          ]},
+          "guide": {"whenToUse": "当用户说记一笔且是个人收支时用", "whenNotToUse": "当只是闲聊消费观时不用", "sections": []}
+        }
+        """#
+        var result = try await create.execute(arguments: try AgentToolArguments(json: createArgs), context: baseToolContext())
+        #expect(try parseEnvelope(result).ok == true)
+
+        // 2) 写 5 笔（本月 3 笔共 485，上月 2 笔共 260）。
+        let mutate = BaseAgentTool(operation: .recordMutate, runtime: runtime)
+        let mutateArgs = #"""
+        {"appID": "ledger", "table": "expenses", "ops": [
+          {"op": "insert", "record": {"amount": 320, "category": "餐饮", "month": "2026-09", "paid": true}},
+          {"op": "insert", "record": {"amount": 45, "category": "交通", "month": "2026-09", "paid": true}},
+          {"op": "insert", "record": {"amount": 120, "category": "餐饮", "month": "2026-09", "paid": false}},
+          {"op": "insert", "record": {"amount": 200, "category": "餐饮", "month": "2026-08", "paid": true}},
+          {"op": "insert", "record": {"amount": 60, "category": "交通", "month": "2026-08", "paid": true}}
+        ]}
+        """#
+        result = try await mutate.execute(arguments: try AgentToolArguments(json: mutateArgs), context: baseToolContext())
+        #expect(try parseEnvelope(result).ok == true)
+
+        // 3) 定义只读月度报表方法：本月 sum+count、上月 sum、预算超线 warn、reply 组合。
+        let define = BaseAgentTool(operation: .methodDefine, runtime: runtime)
+        let defineArgs = #"""
+        {
+          "appID": "ledger",
+          "method": {
+            "name": "expenses.monthlyReport",
+            "description": "月度支出报表：本月合计/笔数 + 对比上月 + 预算超线 warn",
+            "steps": [
+              {"type": "aggregate", "table": "expenses", "filter": {"and": [{"field": "month", "op": "in", "value": ["2026-09"]}]},
+               "aggregations": [{"op": "sum", "field": "amount", "alias": "total"}, {"op": "count", "field": "id", "alias": "count"}], "as": "cur"},
+              {"type": "aggregate", "table": "expenses", "filter": {"and": [{"field": "month", "op": "in", "value": ["2026-08"]}]},
+               "aggregations": [{"op": "sum", "field": "amount", "alias": "total"}], "as": "prev"},
+              {"type": "assert", "on": {"path": "$cur.0.total", "op": "lte", "value": 450}, "onFail": "warn", "message": "本月支出超预算线 450"},
+              {"type": "reply", "template": {"month": "2026-09", "total": "$cur.0.total", "count": "$cur.0.count", "prevTotal": "$prev.0.total"}}
+            ],
+            "readOnly": true
+          },
+          "guide": {"whenToUse": "x", "whenNotToUse": "y", "sections": []}
+        }
+        """#
+        result = try await define.execute(arguments: try AgentToolArguments(json: defineArgs), context: baseToolContext())
+        let defEnvelope = try parseEnvelope(result)
+        #expect(defEnvelope.ok == true)
+        #expect(defEnvelope.data?["readOnly"] as? Bool == true)
+
+        // 4) 调用报表方法：数字必出内核（total=485、count=3、prevTotal=260），预算超线 warn 必现（事实层不可压）。
+        let invoke = BaseAgentTool(operation: .methodInvoke, runtime: runtime)
+        result = try await invoke.execute(arguments: try AgentToolArguments(json: #"{"appID": "ledger", "method": "expenses.monthlyReport", "input": {}}"#), context: baseToolContext())
+        let envelope = try parseEnvelope(result)
+        #expect(envelope.ok == true)
+        let inner = envelope.data?["data"] as? [String: Any] ?? [:]
+        #expect((inner["total"] as? NSNumber)?.doubleValue == 485)
+        #expect((inner["count"] as? NSNumber)?.doubleValue == 3)
+        #expect((inner["prevTotal"] as? NSNumber)?.doubleValue == 260)
+        let signals = envelope.data?["signals"] as? [[String: Any]] ?? []
+        #expect(signals.count == 1)
+        #expect(signals[0]["level"] as? String == "warn")
+        #expect((signals[0]["message"] as? String)?.contains("超预算线 450") == true)
+
+        // 5) 报表方法进入 App Card 方法摘要（catalog「解锁你没用过的方法」）：只读方法可发现。
+        let get = BaseAgentTool(operation: .appGet, runtime: runtime)
+        result = try await get.execute(arguments: try AgentToolArguments(json: #"{"appID": "ledger"}"#), context: baseToolContext())
+        let getEnvelope = try parseEnvelope(result)
+        #expect(getEnvelope.ok == true)
+        let methods = getEnvelope.data?["methods"] as? [[String: Any]] ?? []
+        let report = try #require(methods.first { ($0["name"] as? String) == "expenses.monthlyReport" })
+        #expect(report["readOnly"] as? Bool == true)
+        #expect(report["description"] as? String != nil)
 
         await runtime.close()
     }
