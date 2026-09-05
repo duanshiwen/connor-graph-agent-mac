@@ -16,6 +16,9 @@ public struct BasePackageSnapshot: Sendable, Equatable {
     public var schema: JSONValue?
     public var methods: [JSONValue]?
     public var guide: JSONValue
+    /// M4-K2 · 授权/信任状态（ACL）：可选段，仅 shared 应用授权后非空。
+    /// 序列化时**非空才输出**（private 无 ACL 应用指纹不变，K9 固化值不受影响）。
+    public var acls: [JSONValue]?
 
     public init(
         appID: String,
@@ -23,7 +26,8 @@ public struct BasePackageSnapshot: Sendable, Equatable {
         manifest: [String: Any],
         schema: [String: Any]?,
         methods: [[String: Any]]?,
-        guide: [String: Any]
+        guide: [String: Any],
+        acls: [[String: Any]]? = nil
     ) {
         self.appID = appID
         self.packageVersion = packageVersion
@@ -31,6 +35,7 @@ public struct BasePackageSnapshot: Sendable, Equatable {
         self.schema = schema.flatMap { JSONValue(json: $0) }
         self.methods = methods?.map { JSONValue(json: $0) ?? .object([:]) }
         self.guide = JSONValue(json: guide) ?? .object([:])
+        self.acls = acls?.map { JSONValue(json: $0) ?? .object([:]) }
     }
 
     // MARK: 恢复访问器（还原为 Foundation 字典）
@@ -55,7 +60,12 @@ public struct BasePackageSnapshot: Sendable, Equatable {
         guide.jsonObject as? [String: Any] ?? [:]
     }
 
-    /// 载荷字典（四件套 + 版本）。
+    /// ACL 记录数组（peer/granted/updatedAt）。
+    public var aclsObjects: [[String: Any]] {
+        (acls ?? []).map { $0.jsonObject as? [String: Any] ?? [:] }
+    }
+
+    /// 载荷字典（四件套 + 版本 + 可选 ACL 段）。
     public var payload: [String: Any] {
         var d: [String: Any] = [
             "appID": appID,
@@ -65,6 +75,10 @@ public struct BasePackageSnapshot: Sendable, Equatable {
         ]
         if let schema { d["schema"] = schema.jsonObject }
         if let methods { d["methods"] = methods.map { $0.jsonObject } }
+        // M4-K2 · ACL 段非空才输出（授权状态随包状态同步；private 无 ACL 指纹不变）。
+        if let acls, !acls.isEmpty {
+            d["acls"] = acls.map { $0.jsonObject }
+        }
         return d
     }
 

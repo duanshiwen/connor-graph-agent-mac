@@ -17,13 +17,16 @@ extension BaseLibraryStore {
         let methods = pkg["methods"] as? [[String: Any]]
         let guide = pkg["guide"] as? [String: Any] ?? [:]
         let version = (pkg["packageVersion"] as? Int64).map(Int.init) ?? 1
+        // M4-K2 · 快照附 ACL 段（授权状态随包状态同步）。
+        let acls = try grants(appID: appID)
         return BasePackageSnapshot(
             appID: appID,
             packageVersion: version,
             manifest: manifest,
             schema: schema,
             methods: methods,
-            guide: guide
+            guide: guide,
+            acls: acls.isEmpty ? nil : acls
         )
     }
 
@@ -43,6 +46,8 @@ extension BaseLibraryStore {
             }
             // M3-K6：原地升级（迁移随包确定性重放，数据保留）。
             _ = try upgradePackageSnapshot(snapshot)
+            // M4-K2 · 升级后恢复授权状态（随包同步）。
+            try restoreGrants(appID: snapshot.appID, acls: snapshot.aclsObjects)
             return try snapshot.digest()
         }
         // fresh restore：四件套同批创建
@@ -54,6 +59,8 @@ extension BaseLibraryStore {
         )
         // 版本对齐：createApp 置 1，恢复目标版本为快照版本（latest 单调，不倒退）
         try alignPackageVersion(appID: snapshot.appID, to: snapshot.packageVersion)
+        // M4-K2 · 恢复授权状态（随包同步，新设备免重新授权）。
+        try restoreGrants(appID: snapshot.appID, acls: snapshot.aclsObjects)
         return try snapshot.digest()
     }
 }
