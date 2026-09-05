@@ -16,6 +16,9 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
 
     private var db: OpaquePointer?
     private var typeCache: [String: [String: String]] = [:] // table -> column -> type
+    /// 当前连接是否处于外层事务中（M3-K6：DDL 内层 withTransaction 并入外层事务，
+    /// 避免嵌套 BEGIN IMMEDIATE 被内层 COMMIT 提前提交导致外层 ROLLBACK 失效——禁半迁移）。
+    private var inTransaction = false
 
     // MARK: 生命周期
 
@@ -429,13 +432,26 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
 
     public func withTransaction<T>(_ body: () throws -> T) throws -> T {
         guard let db else { throw BaseError.internal("子库未打开") }
-        sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
+        // 已在事务内（M3-K6 外层升级事务）：并入外层，不嵌套 BEGIN（SQLite 禁止嵌套事务）。
+        if inTransaction {
+            return try body()
+        }
+        guard sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
+            throw BaseError.internal("子库事务开启失败：\(lastMessage(db))")
+        }
+        inTransaction = true
         do {
             let result = try body()
-            sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+            guard sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                inTransaction = false
+                throw BaseError.internal("子库事务提交失败：\(lastMessage(db))")
+            }
+            inTransaction = false
             return result
         } catch {
             sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            inTransaction = false
             throw error
         }
     }

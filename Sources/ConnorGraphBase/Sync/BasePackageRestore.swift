@@ -2,8 +2,9 @@ import Foundation
 
 /// M3-K1 · 包快照/恢复：在 BaseLibraryStore 上提供「生成快照」与「确定性恢复」。
 ///
-/// 恢复语义：新设备重建（fresh restore）走 createApp 四件套同批；已存在且版本落后时，
-/// 原地升级（迁移随包重放、数据保留）由 M3-K6 承担，此处幂等返回或抛 VERSION_MISMATCH。
+/// 恢复语义：新设备重建（fresh restore）走 createApp 四件套同批；已存在且不落后时幂等返回；
+/// 已存在且版本落后时由 M3-K6 原地升级（迁移随包确定性重放、数据保留），
+/// 失败 `MIGRATION_FAILED` 停留旧版（版本链缺失同样无法重放）。
 extension BaseLibraryStore {
 
     /// 生成 App 的不可变包快照（含 SHA-256 指纹）。
@@ -30,7 +31,8 @@ extension BaseLibraryStore {
     ///
     /// - App 不存在：四件套同批创建（fresh restore）。
     /// - App 已存在且 packageVersion 不落后：幂等返回，不重放。
-    /// - App 已存在且版本落后：抛 `VERSION_MISMATCH`（原地升级/迁移重放见 M3-K6）。
+    /// - App 已存在且版本落后：M3-K6 原地升级——按版本记录链确定性重放迁移（数据保留），
+    ///   失败 `MIGRATION_FAILED` 停留旧版；版本链缺失同样无法重放。
     @discardableResult
     public func applyPackageSnapshot(_ snapshot: BasePackageSnapshot) throws -> String {
         let exists = try appExists(snapshot.appID)
@@ -39,11 +41,9 @@ extension BaseLibraryStore {
             if current >= snapshot.packageVersion {
                 return try snapshot.digest()
             }
-            throw BaseError(
-                code: .versionMismatch,
-                message: "App \(snapshot.appID) 已存在且版本落后（当前 \(current) < 目标 \(snapshot.packageVersion)），原地升级（迁移重放）由 M3-K6 承担",
-                hint: "新设备重建场景请用空注册表恢复"
-            )
+            // M3-K6：原地升级（迁移随包确定性重放，数据保留）。
+            _ = try upgradePackageSnapshot(snapshot)
+            return try snapshot.digest()
         }
         // fresh restore：四件套同批创建
         try createApp(
