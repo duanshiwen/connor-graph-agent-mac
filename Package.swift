@@ -100,6 +100,6 @@ let package = Package(
         .testTarget(name: "ConnorGraphAppSupportTests", dependencies: ["ConnorGraphAppSupport"]),
         .testTarget(name: "ConnorGraphBaseTests",
                     dependencies: ["ConnorGraphBase"],
-                    resources: [.copy("Golden")])
+                    resources: [.copy("Golden"), .copy("GoldenSync")])
     ]
 )

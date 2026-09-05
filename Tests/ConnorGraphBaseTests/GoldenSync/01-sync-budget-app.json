@@ -1,0 +1,66 @@
+{
+  "name": "sync-01-budget-app",
+  "kind": "sync",
+  "package": {
+    "manifest": {
+      "appID": "budget",
+      "name": "记账",
+      "domain": "finance",
+      "purpose": "记录支出并按类别汇总",
+      "visibility": "private",
+      "requiredCapabilities": [],
+      "imports": [],
+      "riskLevel": "low",
+      "sdkVersion": 1
+    },
+    "schema": {
+      "tables": [
+        {
+          "name": "expenses",
+          "description": "支出记录",
+          "fields": [
+            {"name": "amount", "type": "number", "required": true},
+            {"name": "category", "type": "enum", "enum": ["food", "transport", "other"], "required": true}
+          ]
+        }
+      ]
+    },
+    "methods": [
+      {
+        "name": "totalAmount",
+        "description": "支出总额",
+        "readOnly": true,
+        "steps": [
+          {"type": "aggregate", "table": "expenses", "aggregations": [{"op": "sum", "field": "amount", "as": "total"}]}
+        ]
+      }
+    ],
+    "guide": {
+      "appID": "budget",
+      "title": "记账",
+      "whenToUse": "需要记录支出或查询支出汇总时",
+      "whenNotToUse": "与记账无关的对话",
+      "sections": [
+        {"title": "记录支出", "body": "使用 record.mutate 写入 expenses 表"},
+        {"title": "汇总查询", "body": "调用 totalAmount 方法查看支出总额"}
+      ]
+    }
+  },
+  "seed": {
+    "expenses": [
+      {"id": "e1", "amount": 12.5, "category": "food"},
+      {"id": "e2", "amount": 8.0, "category": "transport"},
+      {"id": "e3", "amount": 20.0, "category": "food"}
+    ]
+  },
+  "invoke": {
+    "method": "totalAmount",
+    "args": {}
+  },
+  "then": {
+    "packageFingerprint": "4191b4048e26c2298e9b4f0533a423f59c207729b82d1fb2ba5bae0211f13e6f",
+    "cardFingerprint": "db109159c890ba794fe486d72c924b1dd57331f181b3c17fdea87b6fddfac7af",
+    "guideFingerprint": "f61e73b20c2dae638e8a6f4387c8212528b33359d2f59de5968f56a2ed075da5",
+    "methodResult": [{"sum_amount": 40.5}]
+  }
+}
