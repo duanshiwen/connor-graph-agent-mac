@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "base.app-package.schema.v1",
+  "contractVersion": "1.0.0",
+  "title": "Connor Base · AppPackage 结构与校验 Schema v1",
+  "description": "小应用包（AppPackage）四件套的结构定义与校验 Schema：manifest（清单）+ schema（结构 DDL + 确定性迁移）+ methods（声明式方法 DAG）+ guide（使用指南十一段）。另含 App Card（内核确定性编译，含 compatible 标志，无 views 字段）与同步记录布局（base_apps/base_pkg_/base_records_/base_keys/墓碑/grant/install）的规范化描述。四件套同批、指南必随，签名级变更触发迁移与指南漂移校验（GUIDE_OUT_OF_SYNC）。",
+  "source": {
+    "spec": "《Connor Base · 通用小应用平台方案细化（v0.12 · 全量合订版）》§2.1/§3.4/§6.4",
+    "implementation": "CONNOR-BASE-ENGINEERING-PLAN.md v1.5"
+  },
+  "type": "object",
+  "required": ["manifest", "schema", "guide"],
+  "properties": {
+    "manifest": { "$ref": "#/$defs/manifestDef" },
+    "schema": { "$ref": "#/$defs/schemaDef" },
+    "methods": { "type": "array", "items": { "$ref": "#/$defs/methodDef" }, "default": [] },
+    "guide": { "$ref": "#/$defs/guideDef" }
+  },
+  "additionalProperties": false,
+  "principles": {
+    "description": "平台口径（v0.9/v0.10/v0.12），创建与修改 App 前必读。",
+    "noIntermediateState": "不设任何中间态（v0.12）：无个人工作台、无散表、无「先临时散记、日后转正」机制，不存在「先落临时台、重复用再转正」路径；一次性/探索性信息走非结构化记忆不建表；需要表（会重复写入、要按数值时间统计、数字错了有代价）经用户确认后直接 base.app.create 正式私有小应用（四件套同批、私有态起步、结构可 app.update 演进、日后可切 shared/public）。",
+    "routing": "三问路由测试（会重复写入吗 / 未来要按数值时间计算统计吗 / 数字错了有实际代价吗），任一为「是」走小应用（结构化记忆），全「否」走非结构化记忆；用/改/装/建四动作：先能力搜索 → 命中按指南用 → 差一点同域扩展修改 → 市集模板安装解锁 → 都没有且长期重复才新建。",
+    "enrichment": "交互富集（v0.10）：写方法在指南第 5 段声明伴随读取；回复 = 操作回执 + 域状态快照（2–4 指标）+ 趋势/对比 + 一句立场建议；数字与 warn 信号必出内核、跨人格一致，事实先行、立场随后，任何人格不得压下 warn 信号。"
+  },
+  "$defs": {
+    "manifestDef": {
+      "type": "object",
+      "required": ["appID", "name", "domain", "visibility", "sdkVersion"],
+      "properties": {
+        "appID": { "type": "string", "pattern": "^[a-z0-9_-]{1,48}$", "description": "小写字母/数字/下划线/连字符，1–48 字符。" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "domain": { "type": "string", "minLength": 1, "maxLength": 32, "description": "领域，如 finance/project/health/habit。一个 App 一个领域。" },
+        "visibility": { "enum": ["private", "shared", "public"], "default": "private", "description": "三态：私人/好友可见/全员公开，可随时切换（base.publish）。" },
+        "requiredCapabilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "v1 可声明：imports（跨 App 调用）/network（网络）/asset（附件）。声明 import（跨库只读导入）即被契约校验拒绝（CAPABILITY_REQUIRED，v1 deferred）。"
+        },
+        "imports": {
+          "type": "array",
+          "items": { "type": "object", "required": ["appID", "method"], "properties": { "appID": { "type": "string", "pattern": "^[a-z0-9_-]{1,48}$" }, "method": { "type": "string" } }, "additionalProperties": false },
+          "description": "v1 唯一的跨库依赖形态：依赖其他 App 的 exported 方法（全限定名、深度上限 5）。只表达方法依赖，不表达表/视图数据导入。"
+        },
+        "riskLevel": { "enum": ["low", "medium", "high"], "default": "low" },
+        "sdkVersion": { "type": "integer", "minimum": 1, "description": "包声明的 sdkVersion，超本端能力则 Card.compatible=false，不进调用面。" }
+      },
+      "additionalProperties": false
+    },
+    "schemaDef": {
+      "type": "object",
+      "required": ["tables"],
+      "properties": {
+        "tables": { "type": "array", "items": { "$ref": "#/$defs/tableDef" } },
+        "migrations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/migrationDef" },
+          "description": "确定性迁移步骤序列：随包版本不可变，对端按序确定性重放；失败返 MIGRATION_FAILED 停留旧版。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tableDef": {
+      "type": "object",
+      "required": ["name", "fields"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,47}$" },
+        "description": { "type": "string" },
+        "fields": { "type": "array", "items": { "$ref": "#/$defs/fieldDef" } }
+      },
+      "additionalProperties": false
+    },
+    "fieldDef": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,47}$" },
+        "type": { "enum": ["text", "number", "boolean", "date", "enum", "relation", "asset"] },
+        "required": { "type": "boolean", "default": false },
+        "unique": { "type": "boolean", "default": false },
+        "range": { "type": "object", "properties": { "min": { "type": "number" }, "max": { "type": "number" } }, "description": "number 字段范围约束。" },
+        "pattern": { "type": "string", "description": "text 字段 RE2 正则约束。" },
+        "enum": { "type": "array", "items": { "type": "string" }, "description": "enum 字段允许值。" },
+        "default": { "description": "默认值，需与 type 匹配。" },
+        "relation": { "type": "object", "properties": { "table": { "type": "string" }, "on": { "type": "string" } }, "description": "relation 字段跨表 lookup 目标。" }
+      },
+      "additionalProperties": false
+    },
+    "migrationDef": {
+      "type": "object",
+      "required": ["version", "steps"],
+      "properties": {
+        "version": { "type": "integer", "minimum": 1 },
+        "steps": { "type": "array", "items": { "type": "object" }, "description": "确定性 DDL 编译后的迁移步骤（createTable/addField/alterField/dropField 等），不得含任意代码。" }
+      },
+      "additionalProperties": false
+    },
+    "methodDef": {
+      "type": "object",
+      "required": ["name", "description", "inputSchema", "steps"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9_.]{0,63}$", "description": "本 App 内方法名；exported 方法跨 App 以全限定名 appID.method 调用。" },
+        "description": { "type": "string" },
+        "inputSchema": { "type": "object", "description": "入参 JSON Schema（结构可复用 app-package 的字段类型表达）。" },
+        "steps": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/stepDef" } },
+        "exports": { "type": "boolean", "default": false, "description": "true 则该方法可被其他 App 通过 call 步骤调用（跨 App 调用只能命中 exported 方法）。" },
+        "readOnly": { "type": "boolean", "default": false, "description": "true 则方法体仅允许 query/aggregate + reply；看板/报表沉淀为只读方法。" }
+      },
+      "additionalProperties": false
+    },
+    "stepDef": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["query", "aggregate", "mutate", "assert", "call", "reply"] },
+        "table": { "type": "string", "description": "query/aggregate/mutate 步骤目标表。" },
+        "query": { "type": "object", "description": "结构化查询对象（见 base.sdk.v1.json query）。" },
+        "aggregations": { "type": "array", "description": "aggregate 步骤的聚合列表。" },
+        "ops": { "type": "array", "description": "mutate 步骤的有序写操作（同 mutate 工具语义，单事务原子）。" },
+        "assert": { "type": "object", "properties": { "condition": { "type": "object" }, "onFail": { "enum": ["reject", "warn"] } }, "description": "断言：onFail=reject 中止并返 VALIDATION_FAILED；onFail=warn 返回 level:warn 信号但不中止。" },
+        "call": { "type": "object", "properties": { "appID": { "type": "string" }, "method": { "type": "string" }, "input": { "type": "object" } }, "description": "跨 App exported 方法调用：属主上下文执行、受属主权限约束、深度计数（上限 5）。v1 唯一跨库通路。" },
+        "reply": { "type": "object", "description": "回复模板，引用上游步骤输出（JSONPath）。" }
+      },
+      "additionalProperties": false
+    },
+    "guideDef": {
+      "type": "object",
+      "description": "App Guide 十一段：创建时同步写、签名级变更时同步改，漂移即拒（GUIDE_OUT_OF_SYNC）。",
+      "required": ["frontmatter", "sections"],
+      "properties": {
+        "frontmatter": {
+          "type": "object",
+          "required": ["appID", "name", "domain", "visibility", "sdkVersion", "whenToUse", "whenNotToUse"],
+          "properties": {
+            "appID": { "type": "string" },
+            "name": { "type": "string" },
+            "domain": { "type": "string" },
+            "visibility": { "enum": ["private", "shared", "public"] },
+            "sdkVersion": { "type": "integer" },
+            "whenToUse": { "type": "string", "description": "路由判据（v0.9）：用用户真实触发语气写场景句，如「当用户说『记一笔』且是个人收支时用」。" },
+            "whenNotToUse": { "type": "string", "description": "路由判据：如「当只是闲聊消费观时不用」。" }
+          },
+          "additionalProperties": false
+        },
+        "sections": {
+          "type": "array",
+          "minItems": 11,
+          "maxItems": 11,
+          "description": "十一段（v0.6 起；v0.10 增第 5/7/10 段规范），索引 1–11。",
+          "sectionTitles": ["是什么", "什么时候用（whenToUse/whenNotToUse，路由判据）", "边界与反模式", "数据结构", "方法工作流（写方法声明伴随读取）", "权限与风险", "禁令（数字必出内核、warn 必呈现、不凭记忆假设）", "跨 App 依赖（v1 只有 exported 方法调用一条路）", "常见错误与重试", "结果呈现规范（富集模板）", "维护与版本"],
+          "items": {
+            "type": "object",
+            "required": ["index", "title", "body"],
+            "properties": {
+              "index": { "type": "integer", "minimum": 1, "maximum": 11 },
+              "title": { "type": "string" },
+              "body": { "type": "string", "description": "该段正文。第 5 段（index=5）须含写方法的「伴随读取」声明（完成后调哪个只读方法、取哪几个默认快照指标）；第 10 段（index=10）须含富集模板（操作回执 + 域状态快照 2-4 指标 + 趋势/对比 + 一句立场建议）；各段不得出现个人工作台/散表/转正中间态语义（v0.12）。" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "cardDef": {
+      "type": "object",
+      "description": "App Card：内核按包确定性编译，同包必同 Card（golden 对账）。无 views 字段（v0.7）。",
+      "required": ["appID", "name", "domain", "visibility", "purpose", "methods", "requiredCapabilities", "imports", "riskLevel", "sdkVersion", "packageVersion", "compatible", "guideRef"],
+      "properties": {
+        "appID": { "type": "string" },
+        "name": { "type": "string" },
+        "domain": { "type": "string" },
+        "visibility": { "enum": ["private", "shared", "public"] },
+        "purpose": { "type": "string", "description": "一句话用途。" },
+        "methods": { "type": "array", "items": { "type": "object", "required": ["name", "readOnly", "exports"], "properties": { "name": { "type": "string" }, "inputSummary": { "type": "string" }, "readOnly": { "type": "boolean" }, "exports": { "type": "boolean" } } } },
+        "requiredCapabilities": { "type": "array", "items": { "type": "string" } },
+        "imports": { "type": "array", "items": { "type": "string" } },
+        "riskLevel": { "enum": ["low", "medium", "high"] },
+        "sdkVersion": { "type": "integer" },
+        "packageVersion": { "type": "integer", "description": "当前包版本（单调 latest）。" },
+        "compatible": { "type": "boolean", "description": "包 sdkVersion 超本端能力则 false，不进能力搜索调用面。" },
+        "guideRef": { "type": "string", "description": "指南全文引用（哈希）。" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "syncRecords": {
+    "description": "四类同步集合与状态记录布局（v0.8，应用整体同步）。私有 App 无 ACL 无需同步权限；共享/公有服务端 ACL 权威；安装注册表随本人 E2EE。",
+    "collections": [
+      { "collection": "base_apps", "content": "包状态记录：appID、latest 包版本指针、三态、授权（grant）/安装（install）状态、墓碑标记。" },
+      { "collection": "base_pkg_<appID>", "content": "不可变包版本记录：四件套全文 + migration 序列，按版本单调；超 1MiB 走分块，latest 指针整块到位才移动。" },
+      { "collection": "base_records_<appID>", "content": "子库行数据：字段级 LWW（last-writer-wins），离线优先、自动合并。" },
+      { "collection": "base_keys", "content": "密钥：每子库一把密钥，随包状态 E2EE 同步；新设备引导用。" }
+    ],
+    "tombstone": "删 App = 包 + 版本 + 数据 + 安装注册一起墓碑传播；对端删库文件、移出能力搜索，不留「数据没了壳还在」。",
+    "writeSemantics": [
+      "数据写（高频）：字段级 LWW，乐观并发，自动合并。",
+      "包写（低频结构写）：不可变版本 + 单调 latest + 乐观并发；过期提交返 VERSION_MISMATCH，拉最新包 rebase 后重提；结构变更永不自动合并，裁决不靠端时钟。"
+    ],
+    "migrationReplay": "迁移随包确定性重放：对端按 schema_migrations 记录版本顺序逐版重放；失败返 MIGRATION_FAILED 停留旧版、旧数据可用、禁止半迁移。",
+    "newDeviceRebuild": "新设备「应用完整重建」六步：主密钥就位 → 拉包状态/密钥 → 拉包版本 → 建子库 → 按序重放迁移 → 灌数据 → 编译 Card → 注册进能力搜索（按 App 幂等可重入）。"
+  }
+}
