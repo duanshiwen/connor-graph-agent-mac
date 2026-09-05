@@ -156,6 +156,10 @@ public final class BaseLibraryStore: @unchecked Sendable {
         for table in schema.tables {
             try store.createTable(table)
         }
+        // M3-K2：包版本链——写 v1 不可变版本记录（应用整体同步的版本面，latest=1）。
+        let pkgSnapshot = try packageSnapshot(appID: appID)
+        try ensurePackageVersionTable(appID: appID)
+        try writePackageVersion(appID: appID, snapshot: pkgSnapshot, migrations: [])
         return try appCard(appID: appID) ?? [:]
     }
 
@@ -547,6 +551,20 @@ public final class BaseLibraryStore: @unchecked Sendable {
             "createdAt": row["created_at"] ?? "",
             "updatedAt": row["updated_at"] ?? ""
         ]
+    }
+
+    // MARK: 同步集合 SQL 访问（M3-K2）
+
+    /// 注册库只读查询透传（M3 同步集合实现用；与子库 public execute 对齐）。
+    @discardableResult
+    public func registryExecute(_ sql: String, parameters: [Any] = []) throws -> [[String: Any]] {
+        try execute(sql, parameters: parameters)
+    }
+
+    /// 注册库写透传（M3 同步集合实现用）。
+    @discardableResult
+    public func registryExecuteVoid(_ sql: String, parameters: [Any] = []) throws -> Int {
+        try executeVoid(sql, parameters: parameters)
     }
 
     // MARK: JSON / SQLite 辅助
