@@ -69,9 +69,13 @@ public actor AgentPolicyEngine: Sendable {
     }
 
     private func outcome(for capability: AgentPermissionCapability) -> AgentPermissionOutcome {
-        // 执行模式（trustedWrite/allowAll）下所有能力（含发送邮件与发布互动网页）自动批准，
-        // 不显示人工审批；询问/只读模式按下方细分规则逐项判定。
+        // 执行模式（trustedWrite/allowAll）下自动批准（含发送邮件与发布互动网页），
+        // 不显示人工审批；但 basePublish 是硬门禁：发布/公开动作任何执行模式下都需人工确认（R7）。
+        // 询问/只读模式按下方细分规则逐项判定。
         if permissionMode == .trustedWrite || permissionMode == .allowAll {
+            if capability == .basePublish {
+                return .needsApproval
+            }
             return .approved
         }
         if capability == .mutateContacts
@@ -84,23 +88,25 @@ public actor AgentPolicyEngine: Sendable {
         }
         switch permissionMode {
         case .allowAll:
-            return .approved
+            return capability == .basePublish ? .needsApproval : .approved
         case .readOnly:
             switch capability {
-            case .readGraph, .readSession, .modelCall, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML, .readBrowserPage:
+            case .readGraph, .readSession, .modelCall, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML, .readBrowserPage, .baseRead:
                 return .approved
-            case .mutateSessionStatus, .deleteSession, .mutatePersonality, .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .externalNetwork, .navigateBrowser, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML, .createInteractiveWebDraft, .publishInteractiveWeb, .largeWorkspaceWrite:
+            case .mutateSessionStatus, .deleteSession, .mutatePersonality, .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .externalNetwork, .navigateBrowser, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML, .createInteractiveWebDraft, .publishInteractiveWeb, .largeWorkspaceWrite,
+             .baseWrite, .baseManageSchema, .baseManageMethods, .baseManageApps, .baseExecute, .basePublish:
                 return .denied
             }
         case .askToWrite:
             switch capability {
-            case .readGraph, .readSession, .mutatePersonality, .modelCall, .proposeGraphWrite, .externalNetwork, .readBrowserPage, .navigateBrowser, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .createMailDraft, .readContacts, .readCalendar, .readRSS, .readRSSContent, .syncRSSSources, .exportRSSOPML, .createInteractiveWebDraft:
+            case .readGraph, .readSession, .mutatePersonality, .modelCall, .proposeGraphWrite, .externalNetwork, .readBrowserPage, .navigateBrowser, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .createMailDraft, .readContacts, .readCalendar, .readRSS, .readRSSContent, .syncRSSSources, .exportRSSOPML, .createInteractiveWebDraft, .baseRead:
                 return .approved
-            case .mutateSessionStatus, .deleteSession, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .importRSSOPML, .publishInteractiveWeb, .largeWorkspaceWrite:
+            case .mutateSessionStatus, .deleteSession, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .importRSSOPML, .publishInteractiveWeb, .largeWorkspaceWrite,
+             .baseWrite, .baseManageSchema, .baseManageMethods, .baseManageApps, .baseExecute, .basePublish:
                 return .needsApproval
             }
         case .trustedWrite:
-            return .approved
+            return capability == .basePublish ? .needsApproval : .approved
         }
     }
 
