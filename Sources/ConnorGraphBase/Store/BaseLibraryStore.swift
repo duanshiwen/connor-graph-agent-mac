@@ -327,17 +327,30 @@ public final class BaseLibraryStore: @unchecked Sendable {
     }
 
     /// 签名级变更（table.create/alter）后回写包 schema 并单调前移 packageVersion。
-    /// 结构变更永不自动合并（乐观并发，M3）；本方法只做本地 latest 前移。
-    public func updateSchema(appID: String, schemaObject: [String: Any]) throws {
+    /// M3-K5 收口：结构变更永不自动合并，统一走「不可变版本记录 + 单调 latest」（commitPackageVersion）。
+    /// basePackageVersion 提供时须等于当前 latest，否则 VERSION_MISMATCH（拉最新包 rebase 后重提）；
+    /// 缺省 nil 取当前 latest（无 token 调用面兼容）。
+    public func updateSchema(appID: String, schemaObject: [String: Any], basePackageVersion: Int? = nil) throws {
         _ = try BaseSchemaValidator.parseSchema(schemaObject, validateRelations: true)
+        let current = try packageVersion(appID: appID)
+        // 乐观并发前置校验：过期提交零副作用（不写 schema_json、不建版本记录）。
+        if let base = basePackageVersion, base != current {
+            throw BaseError(
+                code: .versionMismatch,
+                message: "包版本过期",
+                hint: "当前版本 \(current)，提交基于 \(base)，请拉最新包 rebase 后重提"
+            )
+        }
         let updated = try executeVoid("""
             UPDATE base_apps
-            SET schema_json = ?1, package_version = package_version + 1, updated_at = ?2
+            SET schema_json = ?1, updated_at = ?2
             WHERE app_id = ?3
             """, parameters: [Self.jsonString(schemaObject), BaseTime.isoNow(), appID])
         guard updated > 0 else {
             throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
         }
+        // M3-K5：不可变版本记录 + 单调 latest（结构变更保留指南漂移位）。
+        _ = try commitPackageVersion(appID: appID, basePackageVersion: basePackageVersion ?? current, alignGuide: false)
     }
 
     // MARK: 方法定义与调用解析（M2-M1 / M2-K2）
@@ -390,14 +403,17 @@ public final class BaseLibraryStore: @unchecked Sendable {
     }
 
     private func updatePackageMethods(appID: String, methods: [[String: Any]]) throws {
+        let current = try packageVersion(appID: appID)
         let updated = try executeVoid("""
             UPDATE base_apps
-            SET methods_json = ?1, package_version = package_version + 1, updated_at = ?2
+            SET methods_json = ?1, updated_at = ?2
             WHERE app_id = ?3
             """, parameters: [Self.jsonString(methods), BaseTime.isoNow(), appID])
         guard updated > 0 else {
             throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
         }
+        // M3-K5：不可变版本记录 + 单调 latest（方法签名级变更，保留指南漂移位）。
+        _ = try commitPackageVersion(appID: appID, basePackageVersion: current, alignGuide: false)
     }
 
     /// 解析方法调用目标（base.method.invoke / 解释器 call 步骤用）。
@@ -489,18 +505,13 @@ public final class BaseLibraryStore: @unchecked Sendable {
         }
         // 指南显式提供则同步更新（防止漂移）。
         var guideJSON: String = row["guide_json"] as? String ?? ""
-        var guideVersionSQL = ""
-        var guideVersionParam: Int = 0
         if let guide, !guide.isEmpty {
             guideJSON = Self.jsonString(guide)
-            // 指南随签名级变更同步：guide_version 对齐新 package_version。
-            guideVersionSQL = ", guide_version = package_version + 1"
         }
         let updated = try executeVoid("""
             UPDATE base_apps
             SET name = ?1, domain = ?2, purpose = ?3, visibility = ?4, risk_level = ?5, sdk_version = ?6,
-                capabilities_json = ?7, imports_json = ?8, guide_json = ?9,
-                package_version = package_version + 1\(guideVersionSQL), updated_at = ?10
+                capabilities_json = ?7, imports_json = ?8, guide_json = ?9, updated_at = ?10
             WHERE app_id = ?11
             """, parameters: [
                 name, domain, purpose, visibility, riskLevel, sdkVersion,
@@ -512,6 +523,13 @@ public final class BaseLibraryStore: @unchecked Sendable {
         guard updated > 0 else {
             throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
         }
+        // M3-K5：不可变版本记录 + 单调 latest；指南随签名级变更同步（guide 提供时 guide_version 对齐防漂移）。
+        let current = (row["package_version"] as? Int64).map(Int.init) ?? 0
+        _ = try commitPackageVersion(
+            appID: appID,
+            basePackageVersion: current,
+            alignGuide: (guide?.isEmpty == false)
+        )
         return try appCard(appID: appID) ?? [:]
     }
 
