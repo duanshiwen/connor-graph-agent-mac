@@ -40,6 +40,7 @@ let package = Package(
                 "ConnorGraphStore",
                 "ConnorGraphSearch",
                 "ConnorGraphAgent",
+                "ConnorGraphBase",
                 .product(name: "MailCore", package: "MailCoreSPM")
             ],
             resources: [
@@ -85,6 +86,9 @@ let package = Package(
             name: "ConnorGraphBase",
             resources: [
                 .copy("Resources/Contracts")
+            ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
             ]
         ),
         .testTarget(name: "ConnorGraphCoreTests", dependencies: ["ConnorGraphCore"]),
@@ -94,6 +98,8 @@ let package = Package(
         .testTarget(name: "ConnorGraphAgentTests", dependencies: ["ConnorGraphAgent"]),
         .testTarget(name: "ConnorGraphAgentMacTests", dependencies: ["ConnorGraphAgentMac"]),
         .testTarget(name: "ConnorGraphAppSupportTests", dependencies: ["ConnorGraphAppSupport"]),
-        .testTarget(name: "ConnorGraphBaseTests", dependencies: ["ConnorGraphBase"])
+        .testTarget(name: "ConnorGraphBaseTests",
+                    dependencies: ["ConnorGraphBase"],
+                    resources: [.copy("Golden")])
     ]
 )
