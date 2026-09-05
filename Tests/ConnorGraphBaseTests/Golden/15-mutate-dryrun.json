@@ -1,0 +1,21 @@
+{
+  "name": "15-mutate-dryrun",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [
+      { "name": "amount", "type": "number", "required": true, "range": { "min": 0 } },
+      { "name": "category", "type": "enum", "enum": ["food", "transport", "home", "other"] },
+      { "name": "date", "type": "date", "required": true },
+      { "name": "note", "type": "text" }
+    ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.record.mutate",
+      "args": { "appID": "acct", "table": "expenses", "dryRun": true, "ops": [ { "op": "insert", "record": { "amount": 360, "category": "food", "date": "2026-09-03", "note": "聚餐" } } ] }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": true, "data": { "dryRun": true, "wouldAffect": 1, "diff": [ { "op": "insert", "id": "rec_1", "before": null, "after": { "amount": 360, "category": "food", "date": "2026-09-03", "note": "聚餐" } } ] }, "error": null, "site": "local" },
+    "errorCode": null
+  }
+}

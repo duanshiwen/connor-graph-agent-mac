@@ -1,0 +1,22 @@
+{
+  "name": "10-filter-date-range",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [
+      { "name": "amount", "type": "number" },
+      { "name": "category", "type": "enum", "enum": ["food", "transport", "home", "other"] },
+      { "name": "date", "type": "date" },
+      { "name": "note", "type": "text" },
+      { "name": "owner", "type": "relation", "relation": { "table": "members", "on": "id" } }
+    ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.query.select",
+      "args": { "appID": "acct", "table": "expenses", "filter": { "field": "date", "op": "range", "value": ["2026-09-01", "2026-09-30"] } }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": true, "data": { "rows": [] }, "error": null, "site": "local" },
+    "errorCode": null
+  }
+}
