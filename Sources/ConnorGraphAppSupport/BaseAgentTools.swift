@@ -95,6 +95,18 @@ public actor BaseToolRuntime {
         }
     }
 
+    /// base.app.grant：shared 态授权/回收（M4）。授权状态随包 E2EE 同步，新设备免重新授权。
+    public func grantAccessEnvelope(appID: String, peer: String, grant: Bool) -> BaseEnvelope {
+        do {
+            let nextVersion = try library.grantAccess(appID: appID, peer: peer, grant: grant)
+            return .success(data: ["appID": appID, "peer": peer, "grant": grant, "packageVersion": nextVersion])
+        } catch let error as BaseError {
+            return .failure(error)
+        } catch {
+            return .failure(BaseError(code: .internal, message: "授权/回收失败", hint: "\(error)"))
+        }
+    }
+
     public func listAppsEnvelope(scope: String?, query: String?) -> BaseEnvelope {
         do {
             let apps = try library.listApps(scope: scope, query: query)
@@ -498,6 +510,7 @@ public struct BaseAgentTool: AgentTool {
         case guide = "base.guide"
         case appCreate = "base.app.create"
         case appDelete = "base.app.delete"
+        case appGrant = "base.app.grant"
         case appList = "base.app.list"
         case appGet = "base.app.get"
         case tableCreate = "base.table.create"
@@ -535,6 +548,8 @@ public struct BaseAgentTool: AgentTool {
             .baseManageSchema
         case .appCreate, .appDelete:
             .baseManageApps
+        case .appGrant:
+            .baseManageApps
         case .appUpdate:
             .baseManageApps
         case .methodDefine, .methodRemove:
@@ -554,6 +569,8 @@ public struct BaseAgentTool: AgentTool {
             "base.app.create：创建正式小应用（AppPackage 四件套同批：manifest + schema + guide + methods）。不设工作台/散表/转正中间态——需要表（会重复写入、要按数值时间统计、数字错了有代价）就经用户确认后直接建正式私有小应用（私有态起步、结构可 app.update 演进、日后可切 shared/public）。创建前先读 base.guide 契约。"
         case .appDelete:
             "base.app.delete：删除小应用（注册行 + 独立子库文件一并清除，不留数据残壳）。"
+        case .appGrant:
+            "base.app.grant：shared 态授权/回收（permission baseManageApps）。仅 visibility=shared 应用可操作；授权/信任状态随包状态 E2EE 同步，新设备免重新授权；服务端 ACL 权威。"
         case .appList:
             "base.app.list：列出当前可用的小应用（私有 + 共享 + 已安装公开），按 scope 过滤、按名称/领域/ID 检索。能力搜索的第一步。"
         case .appGet:
@@ -646,6 +663,12 @@ public struct BaseAgentTool: AgentTool {
             ], required: ["manifest", "schema", "guide"])
         case .appDelete:
             return .closedObject(properties: ["appID": .string(description: "要删除的 appID")], required: ["appID"])
+        case .appGrant:
+            return .closedObject(properties: [
+                "appID": .string(description: "目标 appID"),
+                "peer": .string(description: "被授权好友标识"),
+                "grant": .boolean(description: "true 授权 / false 回收")
+            ], required: ["appID", "peer", "grant"])
         case .appList:
             return .closedObject(properties: [
                 "scope": .stringEnumeration(values: ["all", "private", "shared", "public"], description: "按三态过滤，默认 all"),
@@ -812,6 +835,16 @@ public struct BaseAgentTool: AgentTool {
         case .appDelete:
             let envelope = await runtime.deleteAppEnvelope(appID: try requiredString("appID", arguments))
             return makeResult(envelope, text: "App 删除结果已返回。", context: context)
+        case .appGrant:
+            guard let grant = arguments.bool("grant") else {
+                throw AgentToolError.invalidArguments("missing required argument: grant")
+            }
+            let envelope = await runtime.grantAccessEnvelope(
+                appID: try requiredString("appID", arguments),
+                peer: try requiredString("peer", arguments),
+                grant: grant
+            )
+            return makeResult(envelope, text: grant ? "已授权（授权状态随包 E2EE 同步，新设备免重新授权）。" : "已回收授权。", context: context)
         case .appList:
             let envelope = await runtime.listAppsEnvelope(scope: arguments.string("scope"), query: arguments.string("query"))
             return makeResult(envelope, text: "App 列表已返回。", context: context)
