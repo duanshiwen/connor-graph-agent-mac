@@ -1080,10 +1080,21 @@ enum LocalShellExecutor {
         let timer = DispatchSource.makeTimerSource(queue: waitQueue)
         timer.schedule(deadline: .now() + .seconds(timeoutSeconds))
         timer.setEventHandler {
+            // 关键：只有进程在期限到来时仍然存活，超时才算有效。
+            // Process.isRunning 对僵尸进程返回 true（kill(pid,0) 对僵尸也成功），
+            // 而 DispatchSourceProcess 的退出事件投递存在亚毫秒~数十毫秒延迟——
+            // 若命令恰好在期限附近自然完成，直接按 isRunning 判断会把完成在期限内的
+            // 长命令误判为超时，表现为「命令跑很久后 Shell 结果返回为空/报超时」。
+            // 用 waitid(WNOHANG | WNOWAIT) 精确探测：返回 si_pid != 0 说明进程已退出
+            // （僵尸未回收），不回收地放行给退出事件处理，判为正常完成；
+            // 只有确认进程仍在运行时才发起超时击杀。
+            if state.snapshot().exited { return }
+            var info = siginfo_t()
+            let waitResult = waitid(P_PID, id_t(process.processIdentifier), &info, WEXITED | WNOHANG | WNOWAIT)
+            let alreadyExited = (waitResult == 0 && info.si_pid != 0) || (waitResult != 0 && errno == ECHILD)
+            guard !alreadyExited else { return }
             guard state.markTimedOutIfNeeded() else { return }
-            if process.isRunning {
-                process.terminate()
-            }
+            process.terminate()
             waitQueue.asyncAfter(deadline: .now() + .seconds(2)) {
                 if !state.snapshot().exited, process.isRunning {
                     kill(process.processIdentifier, SIGKILL)
