@@ -72,7 +72,12 @@ public struct AgentToolResultGate: Sendable, Equatable {
         let tokenLimit = max(0, maximumEstimatedTokens)
         let originalTokens = estimator.estimate(content).estimatedTokenCount
         guard originalTokens > tokenLimit else { return content }
-        guard tokenLimit > 0 else { return "" }
+        // token 预算为 0：绝不能让长会话下的工具结果静默变空串——
+        // 否则 Shell 等工具「跑久了结果返回为空」，模型无法区分「工具真的没输出」
+        // 与「结果因预算被丢弃」。至少留下一条截断说明，保持行为可观测。
+        guard tokenLimit > 0 else {
+            return "\n...[tool result omitted: context token budget exhausted, original=\(originalTokens) tokens]"
+        }
 
         let marker = "\n...[truncated tool result to fit context: tool=\(result.toolName), original~\(originalTokens) tokens]"
         let markerTokens = estimator.estimate(marker).estimatedTokenCount

@@ -112,4 +112,80 @@ final class BaseLibraryStoreTests: XCTestCase {
             XCTAssertEqual(e?.code, BaseErrorCode.capabilityRequired.rawValue)
         }
     }
+
+    // MARK: - M2-M3 能力搜索 catalog（v0.12 §6.6/§6.7）
+
+    /// 一句话用途（purpose）进入 catalog 检索字段：query 命中 purpose 但未命中名称/领域/appID。
+    func testCatalogSearchMatchesPurpose() throws {
+        let library = try BaseLibraryStore(directory: tmpDir)
+        defer { library.close() }
+        var m = manifest("ledger")
+        m["name"] = "我的本子"
+        m["purpose"] = "记录个人收支、按月给预算"
+        _ = try library.createApp(manifest: m, schemaObject: schema(), guide: guide("ledger"))
+
+        XCTAssertEqual(try library.listApps(query: "预算").count, 1, "query 应命中一句话用途")
+        XCTAssertEqual(try library.listApps(query: "我的本子").count, 1, "query 应命中名称")
+        XCTAssertTrue(try library.listApps(query: "不存在的词").isEmpty)
+    }
+
+    /// 方法名进入 catalog 检索字段（解锁你没用过的方法）：query 命中方法名。
+    func testCatalogSearchMatchesMethodName() throws {
+        let library = try BaseLibraryStore(directory: tmpDir)
+        defer { library.close() }
+        let methods: [[String: Any]] = [
+            ["name": "monthlyTotal", "description": "本月合计", "readOnly": true, "exports": false]
+        ]
+        _ = try library.createApp(manifest: manifest("ledger"), schemaObject: schema(), guide: guide("ledger"), methods: methods)
+
+        XCTAssertEqual(try library.listApps(query: "monthlyTotal").count, 1)
+        XCTAssertEqual(try library.listApps(query: "monthly").count, 1, "子串命中")
+    }
+
+    /// scope + query 组合：v1 端侧均为 private（本人创建），scope=private 返回全部、query 进一步收敛。
+    func testCatalogSearchScopeAndQuery() throws {
+        let library = try BaseLibraryStore(directory: tmpDir)
+        defer { library.close() }
+        _ = try library.createApp(manifest: manifest("ledger"), schemaObject: schema(), guide: guide("ledger"))
+        var m2 = manifest("habits")
+        m2["name"] = "习惯打卡"
+        m2["domain"] = "habit"
+        _ = try library.createApp(manifest: m2, schemaObject: schema(), guide: guide("habits"))
+
+        XCTAssertEqual(try library.listApps(scope: "private").count, 2)
+        XCTAssertEqual(try library.listApps(scope: "private", query: "ledger").count, 1)
+        XCTAssertEqual(try library.listApps(scope: "public").count, 0, "v1 端侧无私密外的共享/公开 App")
+    }
+
+    /// App Card 含一句话用途（purpose）、catalog 来源（source）与兼容标志（compatible），对齐 v0.12 §6.1。
+    func testCardIncludesPurposeSourceAndCompatible() throws {
+        let library = try BaseLibraryStore(directory: tmpDir)
+        defer { library.close() }
+        var m = manifest("ledger")
+        m["purpose"] = "记录个人收支"
+        _ = try library.createApp(manifest: m, schemaObject: schema(), guide: guide("ledger"))
+
+        let card = try XCTUnwrap(try library.appCard(appID: "ledger"))
+        XCTAssertEqual(card["purpose"] as? String, "记录个人收支")
+        XCTAssertEqual(card["source"] as? String, "private")
+        XCTAssertEqual(card["compatible"] as? Bool, true)
+        XCTAssertEqual(card["visibility"] as? String, "private")
+    }
+
+    /// purpose 随 create 写入、随 update 演进（manifest 更新路径）。
+    func testPurposeRoundTripThroughCreateAndUpdate() throws {
+        let library = try BaseLibraryStore(directory: tmpDir)
+        defer { library.close() }
+        _ = try library.createApp(manifest: manifest("ledger"), schemaObject: schema(), guide: guide("ledger"))
+        let card1 = try XCTUnwrap(try library.appCard(appID: "ledger"))
+        XCTAssertEqual(card1["purpose"] as? String, "")
+
+        var m = manifest("ledger")
+        m["purpose"] = "记录个人收支、按月给预算"
+        let updated = try library.updateApp(appID: "ledger", manifest: m, guide: nil, basePackageVersion: nil)
+        XCTAssertEqual(updated["packageVersion"] as? Int64, 2)
+        let card2 = try XCTUnwrap(try library.appCard(appID: "ledger"))
+        XCTAssertEqual(card2["purpose"] as? String, "记录个人收支、按月给预算")
+        XCTAssertEqual(try library.listApps(query: "预算").count, 1)
+    }
 }
