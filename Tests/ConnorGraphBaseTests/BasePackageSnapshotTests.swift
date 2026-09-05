@@ -162,8 +162,9 @@ final class BasePackageSnapshotTests: XCTestCase {
         XCTAssertEqual((pkg["methods"] as? [[String: Any]])?.count, 1)
     }
 
-    /// 已存在且版本落后 → VERSION_MISMATCH（原地升级/迁移重放由 M3-K6 承担）。
-    func testApplyOlderSnapshotThrowsVersionMismatch() throws {
+    /// 已存在且目标版本更高，但版本记录链缺失（只有 v1）→ 无法确定性重放 → MIGRATION_FAILED，停留旧版 v1。
+    /// （K1 占位断言为 VERSION_MISMATCH；K6 落地后由「迁移随包确定性重放」承担：链缺失即 MIGRATION_FAILED。）
+    func testApplyNewerSnapshotMissingChainThrowsMigrationFailed() throws {
         let src = try BaseLibraryStore(directory: tmpDir.appendingPathComponent("src", isDirectory: true))
         defer { src.close() }
         _ = try src.createApp(manifest: manifest("ledger"), schemaObject: schema(), guide: guide("ledger"), methods: methods())
@@ -173,11 +174,11 @@ final class BasePackageSnapshotTests: XCTestCase {
         defer { dst.close() }
         _ = try dst.applyPackageSnapshot(snap)
 
-        // 目标版本 2 > 当前 1 → 版本落后 → VERSION_MISMATCH，且停留旧版（version 不前进）。
+        // 目标版本 2 > 当前 1，但 dst 只有 v1 版本记录 → 链缺失 → MIGRATION_FAILED，且停留旧版（version 不前进）。
         let newer = try snapshot(version: 2)
         XCTAssertThrowsError(try dst.applyPackageSnapshot(newer)) { error in
             let e = error as? BaseError
-            XCTAssertEqual(e?.code, BaseErrorCode.versionMismatch.rawValue)
+            XCTAssertEqual(e?.code, BaseErrorCode.migrationFailed.rawValue)
         }
         XCTAssertEqual(try dst.packageVersion(appID: "ledger"), 1)
     }
