@@ -163,17 +163,25 @@ public final class BaseLibraryStore: @unchecked Sendable {
         return try appCard(appID: appID) ?? [:]
     }
 
-    /// 删除 App：注册行 + 子库文件（含 WAL/SHM）一并清除（墓碑 v0.8 的本地形态）。
+    /// 删除 App：包 + 版本 + 数据 + 安装注册一起墓碑传播（v0.12 §3.4 / M3-K7）。
+    /// 产墓碑同步记录（被删时 latest 包版本 + 指纹）→ 删子库文件（含 WAL/SHM）→ 删注册行 →
+    /// 删包版本链表（不留「数据没了壳还在」）；能力搜索为派生查 base_apps，删注册行即移出搜索面。
     public func deleteApp(appID: String) throws {
         guard try appExists(appID) else {
             throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
         }
+        // M3-K7 一体墓碑：捕获被删时 latest 包版本与指纹（版本链表删除前先取）。
+        let fingerprints = try allPackageVersionFingerprints(appID: appID)
+        let latest = fingerprints.keys.max() ?? 1
+        try recordTombstone(appID: appID, packageVersion: latest,
+                            fingerprint: fingerprints[latest] ?? "", deletedAt: BaseTime.isoNow())
         let store = try BaseSubLibraryStore(appID: appID, directory: librariesDirectory)
         store.close()
         try? FileManager.default.removeItem(at: store.dbURL)
         try? FileManager.default.removeItem(at: URL(fileURLWithPath: store.dbURL.path + "-wal"))
         try? FileManager.default.removeItem(at: URL(fileURLWithPath: store.dbURL.path + "-shm"))
         try executeVoid("DELETE FROM base_apps WHERE app_id = ?1", parameters: [appID])
+        try registryExecuteVoid("DROP TABLE IF EXISTS \"base_pkg_\(appID)\"", parameters: [])
     }
 
     public func appExists(_ appID: String) throws -> Bool {
