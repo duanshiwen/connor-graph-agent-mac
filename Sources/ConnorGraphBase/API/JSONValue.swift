@@ -65,6 +65,20 @@ public enum JSONValue: Codable, Equatable, Sendable {
             return arr.map { $0.jsonObject }
         }
     }
+
+    /// 数值提取（assert 数值比较用）：number 直取；bool 转 0/1；数字字符串按 Double 解析。
+    public var numberValue: Double? {
+        switch self {
+        case .number(let n):
+            return n
+        case .bool(let b):
+            return b ? 1 : 0
+        case .string(let s):
+            return Double(s)
+        default:
+            return nil
+        }
+    }
 }
 
 // MARK: - Codable（任意 JSON：null/bool/number/string/array/object 单值解码；

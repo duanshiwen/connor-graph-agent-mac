@@ -74,6 +74,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
                 app_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 domain TEXT NOT NULL DEFAULT '',
+                purpose TEXT NOT NULL DEFAULT '',
                 visibility TEXT NOT NULL DEFAULT 'private',
                 package_version INTEGER NOT NULL DEFAULT 0,
                 sdk_version INTEGER NOT NULL DEFAULT 1,
@@ -82,11 +83,17 @@ public final class BaseLibraryStore: @unchecked Sendable {
                 imports_json TEXT NOT NULL DEFAULT '[]',
                 schema_json TEXT NOT NULL DEFAULT '{"tables":[]}',
                 guide_json TEXT NOT NULL DEFAULT '{}',
+                guide_version INTEGER NOT NULL DEFAULT 0,
                 methods_json TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
             """)
+        // 迁移：旧库补 purpose 列（M2-M3 catalog 检索字段，dev 演进）。
+        let columns = try execute("PRAGMA table_info(base_apps)")
+        if !columns.contains(where: { ($0["name"] as? String) == "purpose" }) {
+            try executeVoid("ALTER TABLE base_apps ADD COLUMN purpose TEXT NOT NULL DEFAULT ''", parameters: [])
+        }
     }
 
     // MARK: App 生命周期
@@ -124,6 +131,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
         }
         let name = manifest["name"] as? String ?? appID
         let domain = manifest["domain"] as? String ?? ""
+        let purpose = manifest["purpose"] as? String ?? ""
         let visibility = manifest["visibility"] as? String ?? "private"
         let riskLevel = manifest["riskLevel"] as? String ?? "low"
         let sdkVersion = (manifest["sdkVersion"] as? Int) ?? 1
@@ -131,11 +139,11 @@ public final class BaseLibraryStore: @unchecked Sendable {
         let now = BaseTime.isoNow()
         try executeVoid("""
             INSERT INTO base_apps
-                (app_id, name, domain, visibility, package_version, sdk_version, risk_level,
-                 capabilities_json, imports_json, schema_json, guide_json, methods_json, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)
+                (app_id, name, domain, purpose, visibility, package_version, sdk_version, risk_level,
+                 capabilities_json, imports_json, schema_json, guide_json, guide_version, methods_json, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?13, ?13)
             """, parameters: [
-                appID, name, domain, visibility,
+                appID, name, domain, purpose, visibility,
                 sdkVersion, riskLevel,
                 Self.jsonString(capabilities), Self.jsonString(imports),
                 Self.jsonString(schemaObject), Self.jsonString(guide), Self.jsonString(methods),
@@ -169,6 +177,9 @@ public final class BaseLibraryStore: @unchecked Sendable {
         return !rows.isEmpty
     }
 
+    /// 能力搜索 catalog（§6.6/§6.7）：scope 过滤 + 关键词检索。
+    /// 检索字段：名称/领域/appID/一句话用途/方法名——「解锁你不知道自己有的应用」与「解锁你没用过的方法」。
+    /// v1 端侧来源均为本人创建（source=private）；shared/installed 随 M4 服务端加入。
     public func listApps(scope: String? = nil, query: String? = nil) throws -> [[String: Any]] {
         var sql = "SELECT * FROM base_apps"
         var params: [Any] = []
@@ -177,15 +188,30 @@ public final class BaseLibraryStore: @unchecked Sendable {
             clauses.append("visibility = ?")
             params.append(scope)
         }
-        if let query, !query.isEmpty {
-            clauses.append("(name LIKE ? OR domain LIKE ? OR app_id LIKE ?)")
-            let like = "%\(query)%"
-            params.append(like); params.append(like); params.append(like)
-        }
         if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
         sql += " ORDER BY updated_at DESC"
         let rows = try execute(sql, parameters: params)
-        return try rows.map { try card(from: $0) }
+        guard let query, !query.isEmpty else {
+            return try rows.map { try card(from: $0) }
+        }
+        let needle = query.lowercased()
+        var matched: [[String: Any]] = []
+        for row in rows {
+            let card = try card(from: row)
+            let methods = (try? Self.decodeArray(row["methods_json"] as? String)) ?? []
+            let methodNames = methods.compactMap { $0["name"] as? String }.joined(separator: " ")
+            let haystack = [
+                row["name"] as? String ?? "",
+                row["domain"] as? String ?? "",
+                row["app_id"] as? String ?? "",
+                row["purpose"] as? String ?? "",
+                methodNames
+            ].joined(separator: " ").lowercased()
+            if haystack.contains(needle) {
+                matched.append(card)
+            }
+        }
+        return matched
     }
 
     /// App Card：能力搜索面的确定性卡片（无 views 字段，v0.7）。
@@ -228,6 +254,37 @@ public final class BaseLibraryStore: @unchecked Sendable {
         return Int(v)
     }
 
+    // MARK: 指南同步与漂移检测（M2-M2）
+
+    /// 指南是否漂移：签名级变更（schema/methods）后未同批改指南 → guide_version < package_version。
+    public func isGuideOutOfSync(appID: String) throws -> Bool {
+        let rows = try execute("SELECT package_version, guide_version FROM base_apps WHERE app_id = ?1", parameters: [appID])
+        guard let row = rows.first else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        let pkg = (row["package_version"] as? Int64) ?? 0
+        let guide = (row["guide_version"] as? Int64) ?? 0
+        return pkg > guide
+    }
+
+    /// 显式同步指南：写入新版 guide 并把 guide_version 对齐当前 package_version（消除漂移）。
+    public func syncGuide(appID: String, guide: [String: Any]) throws {
+        guard try appExists(appID) else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        guard !guide.isEmpty else {
+            throw BaseError(code: .validationFailed, message: "指南不能为空", hint: "App Guide 为十一段结构化对象")
+        }
+        let updated = try executeVoid("""
+            UPDATE base_apps
+            SET guide_json = ?1, guide_version = package_version, updated_at = ?2
+            WHERE app_id = ?3
+            """, parameters: [Self.jsonString(guide), BaseTime.isoNow(), appID])
+        guard updated > 0 else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+    }
+
     // MARK: 子库访问
 
     /// 打开 App 子库（物理隔离文件，D3）。调用方负责 close。
@@ -263,6 +320,181 @@ public final class BaseLibraryStore: @unchecked Sendable {
         }
     }
 
+    // MARK: 方法定义与调用解析（M2-M1 / M2-K2）
+
+    /// 包内方法清单（契约 methodDef 数组同构）。
+    public func methods(appID: String) throws -> [[String: Any]] {
+        guard let row = try appRow(appID) else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        return (try? Self.decodeArray(row["methods_json"] as? String)) ?? []
+    }
+
+    /// 读取单个方法定义（解析为 BaseMethodDef）。
+    public func methodDef(appID: String, name: String) throws -> BaseMethodDef? {
+        let list = try methods(appID: appID)
+        guard let json = list.first(where: { ($0["name"] as? String) == name }) else {
+            return nil
+        }
+        return try BaseMethodDef(json: json)
+    }
+
+    /// 定义/更新方法（base.method.define）：签名级变更 → 单调前移 packageVersion。
+    public func defineMethod(appID: String, method: [String: Any]) throws {
+        // 先解析校验（步骤类型/配额/只读推导），失败即拒。
+        let def = try BaseMethodDef(json: method)
+        guard try appExists(appID) else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        var list = try methods(appID: appID)
+        if let idx = list.firstIndex(where: { ($0["name"] as? String) == def.name }) {
+            list[idx] = method
+        } else {
+            list.append(method)
+        }
+        try updatePackageMethods(appID: appID, methods: list)
+    }
+
+    /// 移除方法（base.method.remove）：签名级变更 → 单调前移 packageVersion。
+    public func removeMethod(appID: String, name: String) throws {
+        guard try appExists(appID) else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        var list = try methods(appID: appID)
+        let before = list.count
+        list.removeAll { ($0["name"] as? String) == name }
+        guard list.count < before else {
+            throw BaseError(code: .notFound, message: "方法不存在", hint: name)
+        }
+        try updatePackageMethods(appID: appID, methods: list)
+    }
+
+    private func updatePackageMethods(appID: String, methods: [[String: Any]]) throws {
+        let updated = try executeVoid("""
+            UPDATE base_apps
+            SET methods_json = ?1, package_version = package_version + 1, updated_at = ?2
+            WHERE app_id = ?3
+            """, parameters: [Self.jsonString(methods), BaseTime.isoNow(), appID])
+        guard updated > 0 else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+    }
+
+    /// 解析方法调用目标（base.method.invoke / 解释器 call 步骤用）。
+    /// reference 形如 `methodName`（同 App）或 `appID.methodName`（跨 App）。
+    /// 解析优先级：先在 callingAppID 内按完整 reference 找同名方法（方法名本身可含点，如 summary.monthly）；
+    /// 找不到再按 `appID.methodName` 切分做跨 App 解析。
+    /// 跨 App：调用方 manifest imports 须声明目标 appID（v0.12 §2.3/§5.3），且目标方法须 exported。
+    /// 返回的目标 store 由调用方负责 close。
+    public func methodTarget(callingAppID: String, reference: String) throws -> BaseMethodTarget? {
+        // 1) 同 App 优先：方法名本身可含点，先在当前 App 内找完整 reference。
+        if let localDef = try methodDef(appID: callingAppID, name: reference) {
+            let store = try openStore(appID: callingAppID)
+            let schema = try currentSchema(appID: callingAppID)
+            return BaseMethodTarget(appID: callingAppID, store: store, schema: schema, method: localDef)
+        }
+        // 2) 跨 App：按 `appID.methodName` 切分。
+        let parts = reference.split(separator: ".").map(String.init)
+        let targetAppID: String
+        let methodName: String
+        if parts.count >= 2 {
+            targetAppID = parts[0]
+            methodName = parts[1...].joined(separator: ".")
+        } else {
+            targetAppID = callingAppID
+            methodName = reference
+        }
+        guard try appExists(targetAppID) else {
+            throw BaseError(code: .notFound, message: "目标 App 不存在", hint: targetAppID)
+        }
+        guard let def = try methodDef(appID: targetAppID, name: methodName) else {
+            return nil
+        }
+        if targetAppID != callingAppID {
+            // imports 校验：调用方 manifest imports 须声明目标 appID。
+            guard let callerRow = try appRow(callingAppID),
+                  let callerImports = (try? Self.decodeArray(callerRow["imports_json"] as? String)) as [[String: Any]]?,
+                  callerImports.contains(where: { ($0["appID"] as? String) == targetAppID }) else {
+                throw BaseError(code: .permissionDenied, message: "未声明跨 App 依赖", hint: "在调用方 manifest imports 中声明 \(targetAppID)")
+            }
+            // exported 门禁（解释器跨上下文也会再校验一次）。
+            guard def.exports else {
+                throw BaseError(code: .permissionDenied, message: "方法 \(methodName) 未导出，无法被跨 App 调用", hint: "请属主设置 exports=true")
+            }
+        }
+        let store = try openStore(appID: targetAppID)
+        let schema = try currentSchema(appID: targetAppID)
+        return BaseMethodTarget(appID: targetAppID, store: store, schema: schema, method: def)
+    }
+
+    /// 更新 App 元数据（base.app.update）：乐观并发 + 可选指南同步。
+    /// 携带 basePackageVersion 时，过期提交返 VERSION_MISMATCH（结构写串行化，v0.8）。
+    public func updateApp(
+        appID: String,
+        manifest: [String: Any],
+        guide: [String: Any]?,
+        basePackageVersion: Int?
+    ) throws -> [String: Any] {
+        guard var row = try appRow(appID) else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        if let baseVersion = basePackageVersion {
+            let current = (row["package_version"] as? Int64).map(Int.init) ?? 0
+            guard current == baseVersion else {
+                throw BaseError(
+                    code: .versionMismatch,
+                    message: "包版本过期",
+                    hint: "当前版本 \(current)，提交基于 \(baseVersion)，请拉最新包 rebase 后重提"
+                )
+            }
+        }
+        let name = manifest["name"] as? String ?? (row["name"] as? String ?? appID)
+        let domain = manifest["domain"] as? String ?? (row["domain"] as? String ?? "")
+        let purpose = manifest["purpose"] as? String ?? (row["purpose"] as? String ?? "")
+        let visibility = manifest["visibility"] as? String ?? (row["visibility"] as? String ?? "private")
+        let riskLevel = manifest["riskLevel"] as? String ?? (row["risk_level"] as? String ?? "low")
+        let sdkVersion = (manifest["sdkVersion"] as? Int) ?? (row["sdk_version"] as? Int ?? 1)
+        // 能力点重新门禁：仅当显式提供 requiredCapabilities 时校验并更新。
+        if let capabilities = manifest["requiredCapabilities"] as? [String] {
+            for capability in capabilities {
+                guard Self.grantedCapabilities.contains(capability) else {
+                    throw BaseError(code: .capabilityRequired, message: "能力点不发放", hint: "\(capability) 未发放")
+                }
+            }
+            row["capabilities_json"] = Self.jsonString(capabilities)
+        }
+        // imports 显式提供则更新。
+        if let imports = manifest["imports"] as? [[String: Any]] {
+            row["imports_json"] = Self.jsonString(imports)
+        }
+        // 指南显式提供则同步更新（防止漂移）。
+        var guideJSON: String = row["guide_json"] as? String ?? ""
+        var guideVersionSQL = ""
+        var guideVersionParam: Int = 0
+        if let guide, !guide.isEmpty {
+            guideJSON = Self.jsonString(guide)
+            // 指南随签名级变更同步：guide_version 对齐新 package_version。
+            guideVersionSQL = ", guide_version = package_version + 1"
+        }
+        let updated = try executeVoid("""
+            UPDATE base_apps
+            SET name = ?1, domain = ?2, purpose = ?3, visibility = ?4, risk_level = ?5, sdk_version = ?6,
+                capabilities_json = ?7, imports_json = ?8, guide_json = ?9,
+                package_version = package_version + 1\(guideVersionSQL), updated_at = ?10
+            WHERE app_id = ?11
+            """, parameters: [
+                name, domain, purpose, visibility, riskLevel, sdkVersion,
+                row["capabilities_json"] as? String ?? "[]",
+                row["imports_json"] as? String ?? "[]",
+                guideJSON,
+                BaseTime.isoNow(), appID
+            ])
+        guard updated > 0 else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
+        return try appCard(appID: appID) ?? [:]
+    }
+
     // MARK: 行读取
 
     private func appRow(_ appID: String) throws -> [String: Any]? {
@@ -285,8 +517,12 @@ public final class BaseLibraryStore: @unchecked Sendable {
             "appID": appID,
             "name": row["name"] ?? "",
             "domain": row["domain"] ?? "",
+            "purpose": row["purpose"] ?? "",
             "visibility": row["visibility"] ?? "private",
+            "source": "private",
             "packageVersion": row["package_version"] as? Int64 ?? 0,
+            "compatible": (row["sdk_version"] as? Int64 ?? 1) <= 1,
+            "guideOutOfSync": ((row["package_version"] as? Int64) ?? 0) > ((row["guide_version"] as? Int64) ?? 0),
             "sdkVersion": row["sdk_version"] as? Int64 ?? 1,
             "riskLevel": row["risk_level"] ?? "low",
             "requiredCapabilities": (try? Self.decodeArray(row["capabilities_json"] as? String)) ?? [],

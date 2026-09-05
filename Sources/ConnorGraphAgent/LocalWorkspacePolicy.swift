@@ -7,6 +7,7 @@ public enum LocalWorkspacePolicyError: Error, Sendable, Equatable, CustomStringC
     case notDirectory(String)
     case invalidPath(String)
     case fileTooLarge(path: String, bytes: Int, limit: Int)
+    case nonUTF8EncodedFile(String)
     case writeTooLarge(path: String, bytes: Int, limit: Int)
     case commandDenied(String)
     case commandTimedOut(String)
@@ -19,6 +20,7 @@ public enum LocalWorkspacePolicyError: Error, Sendable, Equatable, CustomStringC
         case .notDirectory(let path): return "Expected directory: \(path)"
         case .invalidPath(let path): return "Invalid path: \(path)"
         case .fileTooLarge(let path, let bytes, let limit): return "File too large to read: \(path) (\(bytes) bytes > \(limit) bytes)"
+        case .nonUTF8EncodedFile(let path): return "File is not valid UTF-8 text: \(path)"
         case .writeTooLarge(let path, let bytes, let limit): return "Content too large to write: \(path) (\(bytes) bytes > \(limit) bytes)"
         case .commandDenied(let reason): return "Command denied: \(reason)"
         case .commandTimedOut(let command): return "Command timed out: \(command)"
