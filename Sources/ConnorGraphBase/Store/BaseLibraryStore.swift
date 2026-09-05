@@ -231,6 +231,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
             "appID": row["app_id"] ?? "",
             "name": row["name"] ?? "",
             "domain": row["domain"] ?? "",
+            "purpose": row["purpose"] ?? "",
             "visibility": row["visibility"] ?? "private",
             "requiredCapabilities": (try? Self.decodeArray(row["capabilities_json"] as? String)) ?? [],
             "imports": (try? Self.decodeArray(row["imports_json"] as? String)) ?? [],
@@ -252,6 +253,21 @@ public final class BaseLibraryStore: @unchecked Sendable {
             throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
         }
         return Int(v)
+    }
+
+    // MARK: 包版本对齐（M3-K1 · 快照恢复专用）
+
+    /// 将 base_apps 行的 package_version/guide_version 对齐到目标版本（latest 单调，不倒退）。
+    /// fresh restore 后 createApp 置 1，这里把 latest 对齐到快照版本（应用整体同步的版本面）。
+    public func alignPackageVersion(appID: String, to version: Int) throws {
+        let updated = try executeVoid("""
+            UPDATE base_apps
+            SET package_version = ?, guide_version = ?, updated_at = ?
+            WHERE app_id = ?
+            """, parameters: [version, version, BaseTime.isoNow(), appID])
+        guard updated > 0 else {
+            throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+        }
     }
 
     // MARK: 指南同步与漂移检测（M2-M2）
