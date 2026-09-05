@@ -330,6 +330,60 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
         return decodeRow(row, table: table)
     }
 
+    // MARK: M3-K3 行数据导出/导入基础件
+
+    /// 用户表名列表（排除系统表与 sqlite_sequence，按表名字典序；M3-K3 导出枚举表）。
+    public func userTableNames() throws -> [String] {
+        let system: Set<String> = [
+            "base_pkg_state", "schema_migrations", "base_schema_cache",
+            "base_idempotency", "base_record_seq", "base_audit_log", "sqlite_sequence"
+        ]
+        let rows = try execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name", parameters: [])
+        return rows.compactMap { $0["name"] as? String }.filter { !system.contains($0) }
+    }
+
+    /// 表内行数（M3-K3 空库门禁）。
+    public func rowCount(in table: String) throws -> Int {
+        guard BaseSchemaValidator.isValidName(table) else {
+            throw BaseError.validation(.invalidTableName(table))
+        }
+        guard try tableExists(table) else { return 0 }
+        let rows = try execute("SELECT COUNT(*) AS c FROM \"\(table)\"", parameters: [])
+        if let c = rows.first?["c"] as? Int64 { return Int(c) }
+        return 0
+    }
+
+    /// 表内全部行（确定性：按 id 升序）；每行含 id、类型化字段值与 `_meta`（解析为对象）。
+    public func listRows(in table: String) throws -> [[String: Any]] {
+        guard BaseSchemaValidator.isValidName(table) else {
+            throw BaseError.validation(.invalidTableName(table))
+        }
+        guard try tableExists(table) else {
+            throw BaseError.notFound("子库无表 \(table)")
+        }
+        let rows = try execute("SELECT * FROM \"\(table)\" ORDER BY id", parameters: [])
+        var out: [[String: Any]] = []
+        for row in rows {
+            var rec: [String: Any] = [:]
+            if let id = row["id"] as? String { rec["id"] = id }
+            let decoded = decodeRow(row, table: table)
+            for (key, value) in decoded {
+                if key == "_meta" {
+                    if case .string(let s) = value, let data = s.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        rec["_meta"] = obj
+                    } else {
+                        rec["_meta"] = [:]
+                    }
+                } else {
+                    rec[key] = value.jsonObject
+                }
+            }
+            out.append(rec)
+        }
+        return out
+    }
+
     // MARK: 通用执行（K4 编译器产出参数化 SQL 后调用）
 
     @discardableResult
