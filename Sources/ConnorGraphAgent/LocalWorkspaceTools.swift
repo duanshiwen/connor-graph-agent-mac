@@ -1017,12 +1017,23 @@ enum LocalShellExecutor {
         process.standardOutput = stdoutHandle
         process.standardError = stderrHandle
 
+        // 回收与退出码统一交给 Foundation 的 terminationHandler：
+        // - 不能在协作线程上裸读 process.terminationStatus——若 Foundation 尚未感知终止，
+        //   会抛 NSInternalInconsistencyException，协作线程上无人捕获 → std::terminate →
+        //   abort（Task 105666 的崩溃根因）；
+        // - 也不能用 DispatchSourceProcess(.exit) 后再 waitUntilExit——kevent 抢先消费退出
+        //   事件时 waitUntilExit 可能永久挂起（实测）。terminationHandler 触发即代表已回收、
+        //   退出码可用，轮询侧只看 state 快照。
+        let waitState = LocalShellWaitState()
+        process.terminationHandler = { finishedProcess in
+            waitState.markExited(exitCode: finishedProcess.terminationStatus)
+        }
+
         try process.run()
 
-        // 进程等待全程在专用 GCD 队列上完成：退出检测（DispatchSourceProcess）、
-        // 超时 SIGTERM→SIGKILL 两步击杀都在 GCD 上执行，不依赖协作线程池调度——
-        // 满载/长会话下协作池饥饿既会导致工具间歇性卡顿，也会让完成/超时误判。
-        let outcome = await LocalShellExecutor.waitForExit(process, timeoutSeconds: timeoutSeconds)
+        // 超时 SIGTERM→SIGKILL 两步击杀在专用 GCD 队列上执行，协作线程池只轮询状态并响应
+        // 任务取消——满载/长会话下协作池饥饿既会导致工具间歇性卡顿，也会让完成/超时误判。
+        let outcome = await LocalShellExecutor.waitForExit(process, state: waitState, timeoutSeconds: timeoutSeconds)
         switch outcome {
         case .cancelled:
             throw CancellationError()
@@ -1043,7 +1054,7 @@ enum LocalShellExecutor {
         return LocalShellExecution(
             stdout: truncatedStdout.text,
             stderr: truncatedStderr.text,
-            exitCode: process.terminationStatus,
+            exitCode: waitState.exitCode(),
             timedOut: false,
             truncated: truncatedStdout.truncated || truncatedStderr.truncated
         )
@@ -1055,38 +1066,26 @@ enum LocalShellExecutor {
         case cancelled
     }
 
-    /// 在专用 GCD 队列上等待进程退出/超时，协作线程池只轮询状态并响应任务取消。
+    /// 轮询进程状态并响应任务取消；超时击杀在专用 GCD 队列上执行，协作线程池只负责轮询。
     ///
-    /// - 退出检测用 DispatchSourceProcess：进程一退出立即记录，哪怕协作池繁忙也不会
-    ///   把已按时完成的命令误判为超时；
-    /// - 超时用 GCD 定时器：到期限先 SIGTERM，宽限 2 秒仍未退出再 SIGKILL 强杀并回收，
+    /// - 退出检测依赖 Foundation 的 terminationHandler（见 run() 内注释）：触发即已回收、
+    ///   退出码已记入 state，协作线程池最多滞后一个轮询周期；
+    /// - 超时用 GCD 定时器：到期限先 SIGTERM，宽限 2 秒仍未退出再 SIGKILL 强杀，
     ///   保证声明超时硬生效、忽略 SIGTERM 的进程也不会让工具永久卡死；
     /// - 任务取消时同样执行两步击杀并返回 .cancelled。
-    private static func waitForExit(_ process: Process, timeoutSeconds: Int) async -> ShellWaitOutcome {
-        let state = LocalShellWaitState()
+    private static func waitForExit(_ process: Process, state: LocalShellWaitState, timeoutSeconds: Int) async -> ShellWaitOutcome {
         let waitQueue = DispatchQueue(label: "com.connor.local-shell-wait.\(UUID().uuidString)")
-
-        let exitSource = DispatchSource.makeProcessSource(
-            identifier: process.processIdentifier,
-            eventMask: [.exit],
-            queue: waitQueue
-        )
-        exitSource.setEventHandler {
-            if state.markExited() {
-                process.waitUntilExit()
-            }
-        }
 
         let timer = DispatchSource.makeTimerSource(queue: waitQueue)
         timer.schedule(deadline: .now() + .seconds(timeoutSeconds))
         timer.setEventHandler {
             // 关键：只有进程在期限到来时仍然存活，超时才算有效。
             // Process.isRunning 对僵尸进程返回 true（kill(pid,0) 对僵尸也成功），
-            // 而 DispatchSourceProcess 的退出事件投递存在亚毫秒~数十毫秒延迟——
+            // 而 Foundation 终止回调的投递存在亚毫秒~数十毫秒延迟——
             // 若命令恰好在期限附近自然完成，直接按 isRunning 判断会把完成在期限内的
             // 长命令误判为超时，表现为「命令跑很久后 Shell 结果返回为空/报超时」。
             // 用 waitid(WNOHANG | WNOWAIT) 精确探测：返回 si_pid != 0 说明进程已退出
-            // （僵尸未回收），不回收地放行给退出事件处理，判为正常完成；
+            // （僵尸未回收），不回收地放行给 terminationHandler，判为正常完成；
             // 只有确认进程仍在运行时才发起超时击杀。
             if state.snapshot().exited { return }
             var info = siginfo_t()
@@ -1098,30 +1097,31 @@ enum LocalShellExecutor {
             waitQueue.asyncAfter(deadline: .now() + .seconds(2)) {
                 if !state.snapshot().exited, process.isRunning {
                     kill(process.processIdentifier, SIGKILL)
-                    process.waitUntilExit()
+                    // 回收由 terminationHandler 完成，不在此处 waitUntilExit。
                 }
             }
         }
-
-        exitSource.resume()
         timer.resume()
-        defer {
-            exitSource.cancel()
-            timer.cancel()
-        }
+        defer { timer.cancel() }
 
         while true {
             if Task.isCancelled {
-                // 取消时同步完成两步击杀（有界等待，最长约 2.2s），确保进程被终止并回收、不残留。
-                if process.isRunning {
-                    process.terminate()
-                    let killDeadline = ContinuousClock.now + .seconds(2)
-                    while process.isRunning, ContinuousClock.now < killDeadline {
+                // 取消时同步完成两步击杀（有界等待，最长约 3s），确保进程被终止、不残留；
+                // 回收本身仍由 terminationHandler 负责。
+                if !state.snapshot().exited {
+                    if process.isRunning {
+                        process.terminate()
+                    }
+                    let termDeadline = ContinuousClock.now + .seconds(2)
+                    while !state.snapshot().exited, ContinuousClock.now < termDeadline {
                         try? await Task.sleep(nanoseconds: 20_000_000)
                     }
-                    if process.isRunning {
+                    if !state.snapshot().exited, process.isRunning {
                         kill(process.processIdentifier, SIGKILL)
-                        process.waitUntilExit()
+                        let killDeadline = ContinuousClock.now + .seconds(1)
+                        while !state.snapshot().exited, ContinuousClock.now < killDeadline {
+                            try? await Task.sleep(nanoseconds: 20_000_000)
+                        }
                     }
                 }
                 return .cancelled
@@ -1162,18 +1162,23 @@ private final class LocalShellWaitState: @unchecked Sendable {
     private let lock = NSLock()
     private var isExited = false
     private var isTimedOut = false
+    private var storedExitCode: Int32?
 
     func snapshot() -> (exited: Bool, timedOut: Bool) {
         lock.withLock { (isExited, isTimedOut) }
     }
 
-    /// 标记进程已退出；返回 true 表示这是首次标记（随后应回收进程）。
-    func markExited() -> Bool {
+    /// 记录退出码并标记已退出；调用方为 terminationHandler，触发时进程已被 Foundation 回收，
+    /// 退出码稳定可读——这是协作线程池侧唯一允许感知"已退出"的途径。
+    func markExited(exitCode: Int32) {
         lock.withLock {
-            let first = !isExited
+            if storedExitCode == nil { storedExitCode = exitCode }
             isExited = true
-            return first
         }
+    }
+
+    func exitCode() -> Int32 {
+        lock.withLock { storedExitCode ?? -1 }
     }
 
     /// 标记超时；已退出或已标记过则返回 false。
