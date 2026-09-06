@@ -802,6 +802,12 @@ final class AppRuntimeLifecycle {
             self.activityTimelineCacheWriter = ActivityTimelineCacheWriter(persistor: chatSessionRepository)
             let noteRepository = AppNoteRepository(store: repository.store)
             Task.detached(priority: .utility) {
+                // One-shot startup sweep: reclaim sessions/<id> directories
+                // leaked by sessions deleted before deleteSession started
+                // removing artifact directories itself.
+                _ = try? chatSessionRepository.sweepOrphanSessionDirectories()
+            }
+            Task.detached(priority: .utility) {
                 let projectionReconciler = NoteProjectionReconciler(repository: noteRepository)
                 var projectionResult = await projectionReconciler.reconcile()
                 while projectionResult.hasMore && projectionResult.failed == 0 && !Task.isCancelled {
