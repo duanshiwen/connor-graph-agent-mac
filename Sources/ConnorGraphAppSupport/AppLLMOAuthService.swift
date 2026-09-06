@@ -107,12 +107,13 @@ public final class AppLLMOAuthService: @unchecked Sendable {
             URLQueryItem(name: "client_id", value: "app_EMoamEEZ73f0CkXaXp7hrann"),
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "redirect_uri", value: "http://localhost:1455/auth/callback"),
-            URLQueryItem(name: "scope", value: "openid profile email offline_access"),
+            URLQueryItem(name: "scope", value: "openid profile email offline_access api.connectors.read api.connectors.invoke"),
             URLQueryItem(name: "code_challenge", value: challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "state", value: state),
             URLQueryItem(name: "codex_cli_simplified_flow", value: "true"),
-            URLQueryItem(name: "id_token_add_organizations", value: "true")
+            URLQueryItem(name: "id_token_add_organizations", value: "true"),
+            URLQueryItem(name: "originator", value: "codex_cli_rs")
         ]
         guard let url = components.url else { throw AppLLMOAuthError.invalidURL("ChatGPT auth URL") }
         let flow = ChatGPTPreparedFlow(authURL: url, state: state, codeVerifier: verifier, expiresAt: expiresAt)
@@ -320,9 +321,14 @@ private final class AppOAuthCallbackServer: @unchecked Sendable {
             try await withCheckedThrowingContinuation { continuation in
                 let state = CallbackState(continuation: continuation, callbackPath: callbackPath)
                 listener.stateUpdateHandler = { newState in
-                    if case .failed(let error) = newState {
+                    switch newState {
+                    case .failed(let error):
                         state.resume(throwing: AppLLMOAuthError.callbackServerFailed(error.localizedDescription))
                         listener.cancel()
+                    case .cancelled:
+                        state.resume(throwing: AppLLMOAuthError.callbackServerFailed("Callback server was cancelled."))
+                    default:
+                        break
                     }
                 }
                 listener.newConnectionHandler = { connection in
@@ -339,6 +345,8 @@ private final class AppOAuthCallbackServer: @unchecked Sendable {
     }
 
     private final class CallbackState: @unchecked Sendable {
+        private static let headerTerminator = Data("\r\n\r\n".utf8)
+
         private let continuation: CheckedContinuation<Callback, Error>
         private let callbackPath: String
         private var didResume = false
@@ -349,41 +357,64 @@ private final class AppOAuthCallbackServer: @unchecked Sendable {
         }
 
         func handle(connection: NWConnection, finish: @escaping @Sendable () -> Void) {
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { data, _, _, error in
-                defer {
+            receive(connection: connection, buffer: Data(), finish: finish)
+        }
+
+        // Browsers open speculative preconnections that never carry a request, and a
+        // single receive() can return a partial HTTP request head, so the server must
+        // keep reading until the full head arrives and drop empty connections instead
+        // of failing the whole login flow.
+        private func receive(connection: NWConnection, buffer: Data, finish: @escaping @Sendable () -> Void) {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 16384) { [self] data, _, isComplete, error in
+                guard !didResume else {
                     connection.cancel()
-                    finish()
-                }
-                if let error {
-                    self.resume(throwing: AppLLMOAuthError.callbackServerFailed(error.localizedDescription))
                     return
                 }
-                guard let data, let request = String(data: data, encoding: .utf8) else {
-                    self.resume(throwing: AppLLMOAuthError.callbackServerFailed("Invalid callback request"))
+                var accumulated = buffer
+                if let data { accumulated.append(data) }
+
+                if error == nil, !isComplete, accumulated.range(of: Self.headerTerminator) == nil {
+                    receive(connection: connection, buffer: accumulated, finish: finish)
+                    return
+                }
+                if accumulated.isEmpty {
+                    connection.cancel()
+                    return
+                }
+                guard let request = String(data: accumulated, encoding: .utf8) else {
+                    sendHTTP(connection: connection, status: "400 Bad Request", body: "Invalid callback request")
                     return
                 }
                 let firstLine = request.components(separatedBy: "\r\n").first ?? ""
                 let parts = firstLine.split(separator: " ")
-                guard parts.count >= 2 else {
-                    self.resume(throwing: AppLLMOAuthError.callbackServerFailed("Malformed callback request"))
+                guard parts.count >= 2, let components = URLComponents(string: "http://localhost\(parts[1])"), components.path == callbackPath else {
+                    sendHTTP(connection: connection, status: "404 Not Found", body: "Not found")
                     return
                 }
-                let target = String(parts[1])
-                guard target.hasPrefix(self.callbackPath), let components = URLComponents(string: "http://localhost\(target)") else {
-                    self.sendHTTP(connection: connection, status: "404 Not Found", body: "Not found")
-                    self.resume(throwing: AppLLMOAuthError.callbackServerFailed("Unexpected callback path"))
+                let queryItems = components.queryItems ?? []
+                if let oauthError = queryItems.first(where: { $0.name == "error" })?.value {
+                    let description = queryItems.first(where: { $0.name == "error_description" })?.value
+                    sendHTTP(connection: connection, status: "200 OK", body: "Authentication failed: \(oauthError). You can close this page and retry in Connor.")
+                    resume(throwing: AppLLMOAuthError.tokenExchangeFailed(description.map { "\(oauthError): \($0)" } ?? oauthError))
+                    finish()
                     return
                 }
-                let code = components.queryItems?.first(where: { $0.name == "code" })?.value
-                let state = components.queryItems?.first(where: { $0.name == "state" })?.value
-                self.sendHTTP(connection: connection, status: "200 OK", body: "Authentication complete. You can return to Connor.")
-                self.resume(returning: Callback(code: code, state: state))
+                guard let code = queryItems.first(where: { $0.name == "code" })?.value, !code.isEmpty else {
+                    sendHTTP(connection: connection, status: "400 Bad Request", body: "Missing authorization code.")
+                    return
+                }
+                let state = queryItems.first(where: { $0.name == "state" })?.value
+                sendHTTP(connection: connection, status: "200 OK", body: "Authentication complete. You can return to Connor.")
+                resume(returning: Callback(code: code, state: state))
+                finish()
             }
         }
 
         private func sendHTTP(connection: NWConnection, status: String, body: String) {
             let response = "HTTP/1.1 \(status)\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: \(Data(body.utf8).count)\r\nConnection: close\r\n\r\n\(body)"
-            connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in })
+            connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in
+                connection.cancel()
+            })
         }
 
         func resume(returning value: Callback) {
