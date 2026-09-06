@@ -624,11 +624,18 @@ public struct AppChatSessionRepository: Sendable {
         return try JSONDecoder().decode([AgentEventPresentation].self, from: data)
     }
 
+    /// Keep only the most recent entries so the fully-rewritten cache file
+    /// stays bounded; the store keeps the full history.
+    private static let activityTimelineCacheMaximumEntries = 500
+
     public func saveActivityTimelineCache(sessionID: String, timeline: [AgentEventPresentation]) throws {
         guard let directories = try storagePaths?.ensureSessionArtifactDirectories(sessionID: sessionID) else { return }
         try FileManager.default.createDirectory(at: directories.logs, withIntermediateDirectories: true)
         let url = directories.logs.appendingPathComponent("activity-timeline.json")
-        let data = try JSONEncoder().encode(timeline)
+        let trimmed = timeline.count > Self.activityTimelineCacheMaximumEntries
+            ? Array(timeline.suffix(Self.activityTimelineCacheMaximumEntries))
+            : timeline
+        let data = try JSONEncoder().encode(trimmed)
         try data.write(to: url, options: [.atomic])
     }
 
