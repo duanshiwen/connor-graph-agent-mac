@@ -670,10 +670,11 @@ struct LLMConnectionSetupTests {
         #expect(queryItems["client_id"] == "app_EMoamEEZ73f0CkXaXp7hrann")
         #expect(queryItems["response_type"] == "code")
         #expect(queryItems["redirect_uri"] == "http://localhost:1455/auth/callback")
-        #expect(queryItems["scope"] == "openid profile email offline_access")
+        #expect(queryItems["scope"] == "openid profile email offline_access api.connectors.read api.connectors.invoke")
         #expect(queryItems["code_challenge_method"] == "S256")
         #expect(queryItems["codex_cli_simplified_flow"] == "true")
         #expect(queryItems["id_token_add_organizations"] == "true")
+        #expect(queryItems["originator"] == "codex_cli_rs")
         #expect(queryItems["state"]?.isEmpty == false)
         #expect(queryItems["code_challenge"]?.isEmpty == false)
     }
