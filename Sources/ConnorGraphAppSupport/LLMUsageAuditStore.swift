@@ -22,6 +22,8 @@ public struct LLMUsageAuditPersistenceHealth: Sendable, Equatable {
 
 public final class FileLLMUsageAuditStore: LLMUsageAuditRecording, @unchecked Sendable {
     public let fileURL: URL
+    public let maximumFileSizeBytes: Int
+    public let maximumArchivedFiles: Int
     private let fileManager: FileManager
     private let queue = DispatchQueue(label: "com.connor.llm-usage-audit", qos: .utility)
     private let encoder: JSONEncoder
@@ -30,9 +32,22 @@ public final class FileLLMUsageAuditStore: LLMUsageAuditRecording, @unchecked Se
     private var failedWrites = 0
     private var lastPersistenceError: String?
 
-    public init(fileURL: URL, fileManager: FileManager = .default) {
+    /// Appends audit records to a size-capped rolling JSONL file. Once
+    /// `fileURL` reaches `maximumFileSizeBytes` it is shifted to
+    /// `fileURL.1`, `.1` to `.2`, and so on, keeping at most
+    /// `maximumArchivedFiles` backups — so total disk usage is bounded at
+    /// roughly `(1 + maximumArchivedFiles) * maximumFileSizeBytes` instead of
+    /// growing forever. Pass `maximumFileSizeBytes: 0` to disable rotation.
+    public init(
+        fileURL: URL,
+        fileManager: FileManager = .default,
+        maximumFileSizeBytes: Int = 5 * 1_024 * 1_024,
+        maximumArchivedFiles: Int = 2
+    ) {
         self.fileURL = fileURL
         self.fileManager = fileManager
+        self.maximumFileSizeBytes = max(0, maximumFileSizeBytes)
+        self.maximumArchivedFiles = max(0, maximumArchivedFiles)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
@@ -50,6 +65,7 @@ public final class FileLLMUsageAuditStore: LLMUsageAuditRecording, @unchecked Se
         queue.sync {
             do {
                 try fileManager.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                rotateIfNeeded()
                 if !fileManager.fileExists(atPath: fileURL.path) {
                     _ = fileManager.createFile(atPath: fileURL.path, contents: nil)
                 }
@@ -70,6 +86,34 @@ public final class FileLLMUsageAuditStore: LLMUsageAuditRecording, @unchecked Se
         }
     }
 
+    /// Shifts `llm-usage.jsonl` → `.1` → `.2` … once the current file reaches
+    /// the size cap, dropping the oldest backup. Runs on `queue`, so rotation
+    /// never interleaves with an append.
+    private func rotateIfNeeded() {
+        guard maximumFileSizeBytes > 0, maximumArchivedFiles > 0 else { return }
+        let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path)
+        let size = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+        guard size >= maximumFileSizeBytes else { return }
+        if maximumArchivedFiles > 1 {
+            let oldest = archivedURL(maximumArchivedFiles)
+            if fileManager.fileExists(atPath: oldest.path) {
+                try? fileManager.removeItem(at: oldest)
+            }
+            for index in stride(from: maximumArchivedFiles - 1, through: 1, by: -1) {
+                let source = archivedURL(index)
+                guard fileManager.fileExists(atPath: source.path) else { continue }
+                try? fileManager.removeItem(at: archivedURL(index + 1))
+                try? fileManager.moveItem(at: source, to: archivedURL(index + 1))
+            }
+        }
+        try? fileManager.removeItem(at: archivedURL(1))
+        try? fileManager.moveItem(at: fileURL, to: archivedURL(1))
+    }
+
+    private func archivedURL(_ index: Int) -> URL {
+        fileURL.appendingPathExtension(String(index))
+    }
+
     public func persistenceHealth() -> LLMUsageAuditPersistenceHealth {
         queue.sync {
             LLMUsageAuditPersistenceHealth(
@@ -80,13 +124,28 @@ public final class FileLLMUsageAuditStore: LLMUsageAuditRecording, @unchecked Se
         }
     }
 
+    /// Reads the current file plus every retained backup, oldest first, so
+    /// summaries and filters keep covering the full retained window.
     public func records() -> [LLMUsageAuditRecord] {
         queue.sync {
-            guard let data = fileManager.contents(atPath: fileURL.path), !data.isEmpty else { return [] }
-            return data.split(separator: UInt8(ascii: "\n")).compactMap { line in
+            var lines: [Data.SubSequence] = []
+            for url in archiveReadOrder() {
+                guard let data = fileManager.contents(atPath: url.path), !data.isEmpty else { continue }
+                lines.append(contentsOf: data.split(separator: UInt8(ascii: "\n")))
+            }
+            return lines.compactMap { line in
                 try? decoder.decode(LLMUsageAuditRecord.self, from: Data(line))
             }
         }
+    }
+
+    private func archiveReadOrder() -> [URL] {
+        var urls: [URL] = []
+        for index in stride(from: maximumArchivedFiles, through: 1, by: -1) {
+            urls.append(archivedURL(index))
+        }
+        urls.append(fileURL)
+        return urls
     }
 }
 
