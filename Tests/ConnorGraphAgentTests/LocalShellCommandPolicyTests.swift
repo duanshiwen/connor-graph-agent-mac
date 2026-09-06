@@ -89,6 +89,55 @@ import ConnorGraphAgent
     }
 }
 
+@Test func bashToolHardKillsProcessThatIgnoresSIGTERM() async throws {
+    let workspace = try makeShellTempWorkspace()
+    let tool = LocalShellTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    let start = ContinuousClock.now
+
+    // SIGTERM 被 trap 忽略的进程：声明超时必须是硬期限——
+    // SIGTERM 宽限期内未退出则 SIGKILL 强杀，工具不能永久卡死。
+    await #expect(throws: LocalWorkspacePolicyError.self) {
+        _ = try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"command":"trap '' TERM; connorHardKillMarker=1; while :; do :; done","timeoutSeconds":1}"#),
+            context: .shellToolTestContext(toolCallID: "bash-hard-timeout")
+        )
+    }
+    let elapsed = ContinuousClock.now - start
+    // 上限放宽以容忍满载 CI/并行全量测试下协作线程池的调度延迟；
+    // 真正的无限卡死仍会被该上界捕获。核心断言是「抛超时错误 + 进程被强杀不残留」。
+    #expect(elapsed < .seconds(30), "忽略 SIGTERM 的进程应在 SIGKILL 宽限期内返回，实际耗时 \(elapsed)")
+    let survivor = try pgrep("connorHardKillMarker")
+    #expect(!survivor, "超时后进程应已被强杀，不应残留")
+}
+
+@Test func bashToolStopsProcessAndThrowsCancellationWhenTaskIsCancelled() async throws {
+    let workspace = try makeShellTempWorkspace()
+    let tool = LocalShellTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+    let start = ContinuousClock.now
+    let task = Task {
+        try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"command":"trap '' TERM; connorCancelMarker=1; while :; do :; done","timeoutSeconds":30}"#),
+            context: .shellToolTestContext(toolCallID: "bash-cancel")
+        )
+    }
+    try await Task.sleep(nanoseconds: 300_000_000)
+    task.cancel()
+    do {
+        _ = try await task.value
+        Issue.record("任务取消后 Shell 工具应抛出 CancellationError，而不是正常返回")
+    } catch is CancellationError {
+        // 期望行为：立即终止进程并把取消传播给上层
+    } catch {
+        Issue.record("期望 CancellationError，实际得到 \(error)")
+    }
+    let elapsed = ContinuousClock.now - start
+    // 上限放宽以容忍满载 CI/并行全量测试下协作线程池的调度延迟；
+    // 核心断言是「取消后抛 CancellationError + 进程被终止」。
+    #expect(elapsed < .seconds(30), "取消后应快速返回，实际耗时 \(elapsed)")
+    let survivor = try pgrep("connorCancelMarker")
+    #expect(!survivor, "取消后进程应已被终止，不应残留")
+}
+
 @Test func bashToolDrainsLargeOutputWithoutDeadlockingAndPreservesTheTail() async throws {
     let workspace = try makeShellTempWorkspace()
     let tool = LocalShellTool(policy: LocalWorkspacePolicy(workingDirectory: workspace, maxToolOutputBytes: 4_096))
@@ -110,6 +159,18 @@ private func makeShellTempWorkspace(_ name: String = UUID().uuidString) throws -
         .appendingPathComponent(name, isDirectory: true)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     return root
+}
+
+/// 用 pgrep -f 检查指定命令行特征是否仍有存活进程。
+private func pgrep(_ pattern: String) throws -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+    process.arguments = ["-f", pattern]
+    process.standardOutput = Pipe()
+    process.standardError = Pipe()
+    try process.run()
+    process.waitUntilExit()
+    return process.terminationStatus == 0
 }
 
 private extension AgentToolExecutionContext {

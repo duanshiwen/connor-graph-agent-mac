@@ -1,0 +1,1311 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "contractId": "base.sdk.v1",
+  "contractVersion": "1.0.0",
+  "sdkVersion": "1",
+  "title": "Connor Base · 平台 SDK 契约 v1",
+  "description": "Connor Base 小应用平台三端共用的机器可读契约事实源：25 个工具目录（含 inputSchema/outputSchema）、结构化查询规范、错误码 taxonomy、统一返回信封、配额常量、能力点清单（v0.11 跨库单路径口径）、应用取舍决策段（v0.9/v0.12 口径）、交互富集规范段（v0.10）。三端从此文件加载，禁止各端手抄工具名/参数/错误码。",
+  "source": {
+    "spec": "《Connor Base · 通用小应用平台方案细化（v0.12 · 全量合订版）》§4/§6",
+    "implementation": "CONNOR-BASE-ENGINEERING-PLAN.md v1.5 附录 A（25 工具编号与权限点以此为准）",
+    "note": "v0.12 正本 §4.2 表格列出 23 个工具名但合计误标 25；本契约采用施工图 v1.5 附录 A 的完整 25 工具编号表（发布族为 publish/share/unpublish/acl.set，无 app.install）。"
+  },
+  "platform": {
+    "id": "connor-base",
+    "uniqueUser": "Agent 是唯一用户，也是唯一界面：小应用无任何给人直接看/直接操作的界面（v0.7）。",
+    "route": "能力搜索命中 → 读取 App Card + 使用指南 → 按指南调用；创建/修改 App 前必须先读本契约（base.guide 现取即得）。",
+    "toolSetFrozenAt": 25
+  },
+  "tools": [
+    {
+      "name": "base.guide",
+      "group": "contract",
+      "milestone": "M1",
+      "permission": "none",
+      "description": "平台契约工具：一次取回本契约全文（能力清单、工具目录、信封/错误码、结构化查询规范、方法 DAG 语义、权限四步、应用取舍决策段、交互富集规范段、同步语义、配额、能力搜索协议）。创建/修改小应用前必须先读。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string",
+            "description": "可选：只返回指定段（tools/query/errorCodes/envelope/quotas/capabilities/appDecision/enrichment），缺省返回全文。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.app.create",
+      "group": "app-lifecycle",
+      "milestone": "M1",
+      "permission": "baseManageApps",
+      "description": "创建小应用：四件套同批（manifest + schema + methods + guide），指南必随，私有态起步（三态 private/shared/public 可后续切换）。创建前必读本契约「应用取舍决策段」（三问路由 + 用/改/装/建四动作）。不设任何中间态：一次性信息走非结构化记忆，需要表就直接建正式 App。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "manifest",
+          "schema",
+          "guide"
+        ],
+        "properties": {
+          "manifest": {
+            "$ref": "#/$defs/manifest"
+          },
+          "schema": {
+            "type": "object",
+            "description": "表/字段/迁移定义（见 app-package.schema.json）。"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "声明式方法 DAG 定义，可空。"
+          },
+          "guide": {
+            "type": "object",
+            "description": "App Guide 十一段，创建时同步写。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.app.delete",
+      "group": "app-lifecycle",
+      "milestone": "M1",
+      "permission": "baseManageApps",
+      "description": "删除小应用：包 + 版本 + 数据 + 安装注册一起墓碑传播，对端删库文件、移出能力搜索。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]{1,48}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.app.list",
+      "group": "app-lifecycle",
+      "milestone": "M1",
+      "permission": "baseRead",
+      "description": "列出当前用户可用的小应用（私有 + 共享 + 已安装公开），返回 App Card 摘要，供能力搜索使用。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "private",
+              "shared",
+              "public"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "description": "可选关键词过滤（领域/名称/用途）。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.app.get",
+      "group": "app-lifecycle",
+      "milestone": "M1",
+      "permission": "baseRead",
+      "description": "取指定 App 的 Card + 指南全文（搜索命中后读取）。返回 App Card（含 compatible 标志，无 views 字段）与 guide。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]{1,48}$"
+          },
+          "includeGuide": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.table.create",
+      "group": "structure",
+      "milestone": "M1",
+      "permission": "baseManageSchema",
+      "description": "建表：签名级变更，触发确定性迁移与指南漂移校验（GUIDE_OUT_OF_SYNC）。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "table"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "table": {
+            "type": "object",
+            "description": "表定义：name + fields[]（见 app-package.schema.json）。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.table.alter",
+      "group": "structure",
+      "milestone": "M1",
+      "permission": "baseManageSchema",
+      "description": "改表结构：签名级变更，随包版本产生新迁移；失败返 MIGRATION_FAILED 停留旧版。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "tableName",
+          "changes"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "tableName": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "object",
+            "description": "addField/alterField/removeField 等结构化变更描述。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.record.get",
+      "group": "data-read",
+      "milestone": "M1",
+      "permission": "baseRead",
+      "description": "按主键取单条记录。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "table",
+          "id"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "table": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.query.select",
+      "group": "data-read",
+      "milestone": "M1",
+      "permission": "baseRead",
+      "description": "结构化查询：filter 树 + sort/groupBy/分页/lookup，返回记录列表。编译为参数化 SQL，永不字符串拼接。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "table"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "table": {
+            "type": "string"
+          },
+          "filter": {
+            "$ref": "#/$defs/filter"
+          },
+          "sort": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "direction": {
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ]
+                }
+              }
+            }
+          },
+          "page": {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": "integer",
+                "maximum": 5000
+              },
+              "offset": {
+                "type": "integer"
+              }
+            }
+          },
+          "lookup": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "relation/link 字段展开。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.query.aggregate",
+      "group": "data-read",
+      "milestone": "M1",
+      "permission": "baseRead",
+      "description": "确定性聚合：sum/avg/count/min/max/分组/时间序列。数字永远出自内核。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "table",
+          "aggregations"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "table": {
+            "type": "string"
+          },
+          "filter": {
+            "$ref": "#/$defs/filter"
+          },
+          "aggregations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "enum": [
+                    "sum",
+                    "avg",
+                    "count",
+                    "min",
+                    "max"
+                  ]
+                },
+                "field": {
+                  "type": "string"
+                },
+                "alias": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "groupBy": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timeSeries": {
+            "type": "object",
+            "description": "时间序列分组：field + granularity(day/week/month) + range。",
+            "properties": {
+              "field": {
+                "type": "string"
+              },
+              "granularity": {
+                "enum": [
+                  "day",
+                  "week",
+                  "month"
+                ]
+              },
+              "start": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.record.mutate",
+      "group": "data-write",
+      "milestone": "M1",
+      "permission": "baseWrite",
+      "description": "数据写唯一入口：ops 有序原子批（insert/update/delete）单事务；支持 dryRun 回显前后值 diff 与 idempotencyKey 幂等。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "table",
+          "ops"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "table": {
+            "type": "string"
+          },
+          "ops": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "op"
+              ],
+              "properties": {
+                "op": {
+                  "enum": [
+                    "insert",
+                    "update",
+                    "delete"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "record": {
+                  "type": "object"
+                },
+                "expectedVersion": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": false
+          },
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.import.csv",
+      "group": "data-exchange",
+      "milestone": "M1",
+      "permission": "baseWrite",
+      "description": "外部 CSV 文件导入本 App（与跨库只读导入无关；不承载任何散表转正语义）。导入走 mutate 同一条校验/审计路径。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "table",
+          "rows"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "table": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.export.csv",
+      "group": "data-exchange",
+      "milestone": "M1",
+      "permission": "baseRead",
+      "description": "把查询结果序列化为 CSV（外部文件通道）。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "table"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "table": {
+            "type": "string"
+          },
+          "filter": {
+            "$ref": "#/$defs/filter"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.app.update",
+      "group": "app-lifecycle",
+      "milestone": "M2",
+      "permission": "baseManageApps",
+      "description": "修改应用（同域扩展优先于新建）：走包版本，签名级变更触发迁移与指南漂移校验；过期提交返 VERSION_MISMATCH 后 rebase。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "basePackageVersion"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "basePackageVersion": {
+            "type": "integer",
+            "description": "乐观并发：当前 latest 版本。"
+          },
+          "manifest": {
+            "type": "object"
+          },
+          "schema": {
+            "type": "object"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "guide": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.method.define",
+      "group": "method",
+      "milestone": "M2",
+      "permission": "baseManageMethods",
+      "description": "定义声明式方法 DAG（无循环、无任意代码、无外部网络）；签名级变更随包版本与指南同步。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "method"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/$defs/methodDef"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.method.invoke",
+      "group": "method",
+      "milestone": "M2",
+      "permission": "baseExecute",
+      "description": "调用方法：位置透明（本地/服务端按 App 驻留态路由，envelope 的 site 字段回告执行点）。跨 App 调用只能命中属主 exported 方法。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "method",
+          "input"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.method.remove",
+      "group": "method",
+      "milestone": "M2",
+      "permission": "baseManageMethods",
+      "description": "移除方法（签名级变更，随包版本与指南同步）。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "methodName"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "methodName": {
+            "type": "string"
+          },
+          "basePackageVersion": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.audit.read",
+      "group": "audit",
+      "milestone": "M2",
+      "permission": "baseRead",
+      "description": "只读审计：本端记录的所有工具/方法调用轨迹（端侧审计日志不同步）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "filter": {
+            "type": "object"
+          },
+          "page": {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": "integer"
+              },
+              "offset": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.sync.status",
+      "group": "sync",
+      "milestone": "M3",
+      "permission": "baseRead",
+      "description": "查询同步状态：pending/pendingPkgVersion/lastSync/冲突/迁移告警。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "appID": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.app.grant",
+      "group": "sharing",
+      "milestone": "M4",
+      "permission": "baseManageApps",
+      "description": "shared 态授权/回收：服务端 ACL 权威；授权/信任状态随包状态 E2EE 同步，新设备免重新授权。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "peer",
+          "grant"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "peer": {
+            "type": "string",
+            "description": "被授权好友标识。"
+          },
+          "grant": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.asset.upload",
+      "group": "asset",
+      "milestone": "M4",
+      "permission": "baseWrite",
+      "description": "私有附件上传：走独立 E2EE 通道，行内只存密文引用 + 密钥版本。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "fileName",
+          "data"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "data": {
+            "type": "string",
+            "description": "Base64 或密文信封载荷。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.publish",
+      "group": "publish",
+      "milestone": "M4",
+      "permission": "basePublish",
+      "description": "发布小应用（三态：private/shared/public）：安装即信任 + 能力门禁；硬审批（NEEDS_APPROVAL 信封）。发布前全量校验（指南↔Card 漂移、能力并集）。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "visibility"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "private",
+              "shared",
+              "public"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.share",
+      "group": "publish",
+      "milestone": "M4",
+      "permission": "basePublish",
+      "description": "设置 shared 可见性并指定可访问好友（配合 base.app.grant）。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.unpublish",
+      "group": "publish",
+      "milestone": "M4",
+      "permission": "basePublish",
+      "description": "撤销发布/退回私有。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    },
+    {
+      "name": "base.acl.set",
+      "group": "publish",
+      "milestone": "M4",
+      "permission": "basePublish",
+      "description": "设置公开 App 的方法级 ACL（服务端强制注入 appID/ownerID 行级过滤）。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "appID",
+          "methodACL"
+        ],
+        "properties": {
+          "appID": {
+            "type": "string"
+          },
+          "methodACL": {
+            "type": "object",
+            "description": "方法级可见性映射。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$ref": "#/$defs/envelope"
+      }
+    }
+  ],
+  "query": {
+    "description": "结构化查询对象：filter 树 + sort/groupBy/分页/lookup + 聚合。编译器生成参数化 SQL，永不字符串拼接。",
+    "filter": {
+      "$ref": "#/$defs/filter",
+      "operatorsByType": {
+        "text": [
+          "eq",
+          "contains",
+          "startsWith",
+          "in"
+        ],
+        "number": [
+          "eq",
+          "gt",
+          "gte",
+          "lt",
+          "lte",
+          "between"
+        ],
+        "date": [
+          "on",
+          "before",
+          "after",
+          "range"
+        ],
+        "enum": [
+          "in"
+        ],
+        "relation": [
+          "has",
+          "lookup"
+        ]
+      }
+    },
+    "aggregateOps": [
+      "sum",
+      "avg",
+      "count",
+      "min",
+      "max"
+    ],
+    "groupBy": true,
+    "timeSeries": [
+      "day",
+      "week",
+      "month"
+    ]
+  },
+  "errorCodes": {
+    "taxonomyRows": 10,
+    "note": "文档称 10 个错误码；第 10 行含 RATE_LIMITED 与 INTERNAL 两个 code，故枚举共 11 个 code。",
+    "codes": [
+      {
+        "code": "VALIDATION_FAILED",
+        "retryable": false,
+        "message": "入参不符合 schema",
+        "hint": "核对入参与工具/方法 inputSchema"
+      },
+      {
+        "code": "NOT_FOUND",
+        "retryable": false,
+        "message": "App/表/记录/方法不存在",
+        "hint": "核对 appID/表名/主键/方法名"
+      },
+      {
+        "code": "PERMISSION_DENIED",
+        "retryable": false,
+        "message": "四步判定未过",
+        "hint": "子库归属/能力点门禁/三态 ACL/方法级可见性/行级过滤"
+      },
+      {
+        "code": "CAPABILITY_REQUIRED",
+        "retryable": false,
+        "message": "缺能力点/未授权",
+        "hint": "manifest 声明的 requiredCapabilities 未被授予，或声明了 deferred 能力点（如 import 跨库只读导入，v1 不发放、声明即拒）"
+      },
+      {
+        "code": "GUIDE_OUT_OF_SYNC",
+        "retryable": false,
+        "message": "签名级变更未同批改指南",
+        "hint": "更新 App 时若签名级变更，必须同批更新 App Guide"
+      },
+      {
+        "code": "VERSION_MISMATCH",
+        "retryable": true,
+        "message": "包版本过期（乐观并发）",
+        "hint": "拉最新包在其上 rebase 变更后重提"
+      },
+      {
+        "code": "MIGRATION_FAILED",
+        "retryable": true,
+        "message": "包迁移重放失败，停留旧版",
+        "hint": "修复迁移后重试；旧数据可用，禁止半迁移"
+      },
+      {
+        "code": "CONFLICT",
+        "retryable": true,
+        "message": "数据写冲突（字段级 LWW 无法自动消解）",
+        "hint": "读取最新后重试"
+      },
+      {
+        "code": "QUOTA_EXCEEDED",
+        "retryable": false,
+        "message": "行数/存储/步骤/深度超限",
+        "hint": "查看配额常量"
+      },
+      {
+        "code": "RATE_LIMITED",
+        "retryable": true,
+        "message": "限流",
+        "hint": "稍后重试"
+      },
+      {
+        "code": "INTERNAL",
+        "retryable": true,
+        "message": "内部错误",
+        "hint": "重试或反馈"
+      }
+    ]
+  },
+  "envelope": {
+    "description": "所有工具/方法统一返回信封。",
+    "shape": {
+      "ok": "boolean",
+      "data": "any|null",
+      "error": "{ code, message, hint, retryable }|null",
+      "traceId": "string",
+      "site": "local|remote",
+      "sync": "{ pending:number, pendingPkgVersion:number|null, lastSync:string|null }"
+    },
+    "site": "local（私有端侧）/ remote（服务端 RPC），位置透明路由回告执行点",
+    "sync": "同步状态：pending 待同步变更数、pendingPkgVersion 待同步包版本、lastSync 最近同步时间"
+  },
+  "quotas": {
+    "maxRowsPerQuery": 5000,
+    "maxMethodSteps": 20,
+    "maxCrossAppCallDepth": 5,
+    "storageBytesPerApp": 104857600,
+    "maxRecordBytes": 1048576,
+    "maxAppIDLength": 48,
+    "appIDPattern": "^[a-z0-9_-]{1,48}$"
+  },
+  "capabilities": {
+    "description": "manifest requiredCapabilities 能力点清单（v0.11 跨库单路径口径）。",
+    "v1Granted": [
+      {
+        "name": "imports",
+        "label": "跨 App 调用",
+        "description": "调用其他 App 的 exported 方法（v1 唯一跨库/跨 App 通路：属主上下文执行、全限定名、深度上限 maxCrossAppCallDepth=5）。manifest 的 imports 字段只表达跨 App 方法依赖，不表达表/视图导入。"
+      },
+      {
+        "name": "network",
+        "label": "网络",
+        "description": "发起网络请求（服务端沙箱内执行）。"
+      },
+      {
+        "name": "asset",
+        "label": "附件",
+        "description": "私有附件上传（独立 E2EE 通道）。"
+      }
+    ],
+    "deferred": [
+      {
+        "name": "import",
+        "label": "跨库只读导入",
+        "deferred": true,
+        "reason": "v1 不发放：跨库只读导入（import 别的 App 导出的表/视图数据）v1 不做（v0.11 暂缓）。manifest 声明该能力点即被契约校验拒绝（CAPABILITY_REQUIRED）。列入 M6 backlog，市集生态成形（M5）后按需评估恢复；恢复时仍走能力点门禁 + 指南声明。",
+        "crossAppPolicy": "v1 跨库交互仅保留一条路：调用属主 App 的 exported 方法；不存在跨库数据导入通路。需要他 App 数据时，由属主在该 App 内提供 exported 只读方法（方法体仅 query/aggregate + reply）。"
+      }
+    ]
+  },
+  "routing": {
+    "description": "位置透明路由：一套 base.* 调用面，执行点由内核按 App 驻留态路由。",
+    "private": "端侧本地执行",
+    "public": "服务端 RPC（单一 POST /api/v1/base/rpc）",
+    "shared": "属主授权下端侧/服务端按驻留态",
+    "reportedBy": "envelope.site 字段"
+  },
+  "appDecision": {
+    "description": "应用取舍决策段（创建/修改前必读，v0.9；v0.12 口径）。",
+    "threeQuestions": [
+      "会重复写入吗？（一次性的，还是会反复发生的同类事件？）",
+      "未来要按数值/时间计算统计吗？（会被问「多少、趋势、超没超、到哪一步」吗？）",
+      "数字错了有实际代价吗？（算错会导致误判预算/进度/库存吗？）"
+    ],
+    "routing": "任一为「是」→ 走小应用（结构化记忆）；全「否」→ 走记忆/知识/检索（非结构化）。模糊时追问用户一句，不猜域。",
+    "fourActions": [
+      "用（先能力搜索探索 → 命中按指南用）",
+      "改（差一点 → 同域扩展修改，修改优先于新建）",
+      "装（市集有模板 → 安装解锁）",
+      "建（都没有且长期重复 → 新建，四件套同批、指南必随）"
+    ],
+    "noIntermediateState": "v0.12：不设任何中间态——无个人工作台、无散表、无「先临时散记、日后转正」机制。三问全否的一次性/探索性信息走非结构化记忆/对话，不建表；需要表（会重复写入、要统计、数字错了有代价）经用户确认后直接 base.app.create 正式私有小应用（四件套同批、私有态起步、结构可 app.update 演进、日后可切 shared/public）。",
+    "crystallization": "同类数值事实在对话/记忆中重复 2–3 次，或用户开始追问统计（如「最近咖啡花了多少」），Agent 主动提议建 App（提议，不擅自建）；提议的标的就是直接创建正式小应用，无工作台/转正中间步骤。",
+    "antiPatterns": [
+      "数字不进散文记忆",
+      "一次性事实不建 App",
+      "不搜就建",
+      "同域重复建",
+      "边界模糊时猜域（应追问）",
+      "为「怕建错」先建草稿/临时表（应直接建正式 App，正式 App 本身可 app.update 演进）"
+    ]
+  },
+  "enrichment": {
+    "description": "交互富集规范段（v0.10）：点操作带面上下文。",
+    "when": "写操作/状态更新完成后，Agent 默认伴随只读方法取该域即时状态快照再回复，不只回执操作。",
+    "replyShape": [
+      "操作回执（一句话）",
+      "域状态快照（2–4 个默认指标）",
+      "趋势/对比",
+      "一句立场建议"
+    ],
+    "accompanyingRead": "每个写方法/状态更新方法必须在 App Guide 第 5 段声明「伴随读取」：完成后调哪个只读方法、取哪几个默认快照指标；没有配套只读方法的写方法，创建时即应补只读方法。",
+    "restraint": "默认快照 2–4 个指标，不堆砌；同域连续操作只报增量；用户明说「不用汇报/别啰嗦」则不附快照。",
+    "factBeforeStance": "事实先行、立场随后：操作回执/快照指标/趋势数字/异常信号（超预算/超节奏/滞后/临期/异常波动）全部出自内核返回（只读方法/aggregate），Agent 不心算；跨人格一致、每个数字可 trace 回 envelope。",
+    "stanceLayer": "立场层（评价/建议/鼓励/提醒措辞）由人格/关系设置与用户既有偏好决定，不进 golden。",
+    "warnMandatory": "内核/方法返回的 level: warn（如 budget assert onFail: warn、滞后/临期阈值信号）在事实层必须如实呈现，任何人格不得压下、弱化或改写信号。"
+  },
+  "$defs": {
+    "envelope": {
+      "type": "object",
+      "required": [
+        "ok",
+        "data",
+        "error",
+        "traceId",
+        "site",
+        "sync"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "data": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "hint": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          }
+        },
+        "traceId": {
+          "type": "string"
+        },
+        "site": {
+          "enum": [
+            "local",
+            "remote"
+          ]
+        },
+        "sync": {
+          "type": "object",
+          "properties": {
+            "pending": {
+              "type": "integer"
+            },
+            "pendingPkgVersion": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "lastSync": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "required": [
+        "appID",
+        "name",
+        "domain",
+        "visibility"
+      ],
+      "properties": {
+        "appID": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]{1,48}$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "domain": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string",
+          "description": "一句话用途（能力搜索 catalog 检索字段，v0.12 §6.1 App Card 字段）：例如「记录个人收支、按月给预算」"
+        },
+        "visibility": {
+          "enum": [
+            "private",
+            "shared",
+            "public"
+          ]
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "v1 可声明 imports/network/asset；声明 import（跨库只读导入）即被拒绝（deferred）。"
+        },
+        "imports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "appID": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "v1 只表达跨 App exported 方法依赖。"
+        },
+        "riskLevel": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "sdkVersion": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "filter": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "and"
+          ],
+          "properties": {
+            "and": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/filter"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "or"
+          ],
+          "properties": {
+            "or": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/filter"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "field",
+            "op",
+            "value"
+          ],
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "type": "string"
+            },
+            "value": {}
+          }
+        }
+      ]
+    },
+    "methodDef": {
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "inputSchema",
+        "steps"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "inputSchema": {
+          "type": "object"
+        },
+        "steps": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object"
+          },
+          "description": "步骤类型：query/aggregate/mutate/assert(onFail: reject|warn)/call(跨 App exported 方法，深度上限 5)/reply(模板引用上游输出 JSONPath)。无循环、无任意代码、无外部网络。"
+        },
+        "exports": {
+          "type": "boolean",
+          "default": false,
+          "description": "跨 App 调用只能命中 exported 方法。"
+        },
+        "readOnly": {
+          "type": "boolean",
+          "default": false,
+          "description": "只读方法：方法体仅 query/aggregate + reply。"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

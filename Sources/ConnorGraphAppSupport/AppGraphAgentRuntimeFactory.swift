@@ -338,6 +338,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 accountID: groupID,
                 api: interactiveWebAPIClient
             ))
+            if let baseToolRuntime = try? BaseToolRuntime(storagePaths: storagePaths) {
+                registry.registerBaseTools(runtime: baseToolRuntime)
+            }
         }
         registry.registerCurrentTimeTool()
         if let environmentProvider, let environmentStore {

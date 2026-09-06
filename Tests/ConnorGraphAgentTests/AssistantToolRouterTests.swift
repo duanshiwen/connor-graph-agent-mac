@@ -403,3 +403,21 @@ import Testing
         #expect(matches.first?.name == "load_attachment_context", "内容加载查询应命中 load_attachment_context: \(query)")
     }
 }
+
+@Test func toolSearchDiscoversBaseFamilyUsingChineseCapabilityNames() {
+    let definitions = [
+        AgentToolDefinition(name: "base_record_mutate", description: "Write records via the single mutate entry", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "base_query_aggregate", description: "Aggregate records deterministically", inputSchema: .object(properties: [:], required: [])),
+        AgentToolDefinition(name: "base_app_create", description: "Create a small app with its four artifacts", inputSchema: .object(properties: [:], required: []))
+    ]
+
+    let result = AssistantToolRouter().discovery(
+        query: "记一笔账，按月看预算",
+        definitions: definitions,
+        maximumResults: 8
+    )
+
+    #expect(Set(result.tools.map(\.name)) == Set(definitions.map(\.name)))
+    #expect(result.matchedNamespaces == ["base"])
+    #expect(result.availableNamespaces.contains("base"))
+}

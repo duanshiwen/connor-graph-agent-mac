@@ -32,7 +32,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         maxToolIterations: Int = 256,
         maxToolCallsPerIteration: Int = 8,
         maxToolIterationsPerPhase: Int = 60,
-        maxRunDurationSeconds: Int = 1800,
+        maxRunDurationSeconds: Int = 3600,
         toolExecutionTimeoutSeconds: Int = 300,
         maxToolResultBytes: Int = 32 * 1_024,
         maxConsecutiveToolResultErrors: Int = 3,
@@ -118,7 +118,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.maxToolIterations = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 256)
         self.maxToolCallsPerIteration = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 8)
         self.maxToolIterationsPerPhase = max(1, try container.decodeIfPresent(Int.self, forKey: .maxToolIterationsPerPhase) ?? 60)
-        self.maxRunDurationSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800)
+        self.maxRunDurationSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 3600)
         self.toolExecutionTimeoutSeconds = max(1, try container.decodeIfPresent(Int.self, forKey: .toolExecutionTimeoutSeconds) ?? 300)
         self.maxToolResultBytes = max(0, try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1_024)
         self.maxConsecutiveToolResultErrors = max(0, try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 3)
@@ -2995,7 +2995,7 @@ private actor AgentLoopPolicyBox {
 private extension AgentPermissionCapability {
     var isSafeForParallelNativeToolExecution: Bool {
         switch self {
-        case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .readMail, .readMailBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML:
+        case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .readMail, .readMailBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML, .baseRead:
             return true
         case .mutateSessionStatus, .deleteSession, .mutatePersonality, .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject,
              .externalNetwork, .readBrowserPage, .navigateBrowser, .interactBrowser, .commitBrowserAction, .transferBrowserFile,
@@ -3005,7 +3005,8 @@ private extension AgentPermissionCapability {
              .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .importMailAttachment,
              .mutateContacts, .mutateCalendar,
              .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML,
-             .createInteractiveWebDraft, .largeWorkspaceWrite:
+             .createInteractiveWebDraft, .largeWorkspaceWrite,
+             .baseWrite, .baseManageSchema, .baseManageMethods, .baseManageApps, .baseExecute, .basePublish:
             return false
         case .publishInteractiveWeb:
             return false

@@ -1,0 +1,16 @@
+{
+  "name": "02-schema-invalid-table-name",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [ { "name": "amount", "type": "number" } ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.table.create",
+      "args": { "appID": "acct", "table": { "name": "Bad-Table!", "fields": [ { "name": "amount", "type": "number" } ] } }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": false, "data": null, "error": { "code": "VALIDATION_FAILED", "message": "表名不合法", "hint": "表名须匹配 ^[a-z][a-z0-9_]{0,47}$", "retryable": false }, "site": "local" },
+    "errorCode": "VALIDATION_FAILED"
+  }
+}

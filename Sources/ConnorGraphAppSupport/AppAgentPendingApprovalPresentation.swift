@@ -131,6 +131,13 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         case .exportRSSOPML: "导出 RSS 订阅"
         case .createInteractiveWebDraft: "创建互动网页草稿"
         case .publishInteractiveWeb: "发布或管理互动网页"
+        case .baseRead: "读取小应用数据"
+        case .baseWrite: "写入小应用数据"
+        case .baseManageSchema: "修改小应用结构"
+        case .baseManageMethods: "修改小应用方法"
+        case .baseManageApps: "管理小应用"
+        case .baseExecute: "调用小应用方法"
+        case .basePublish: "发布或公开小应用"
         }
     }
 
@@ -151,6 +158,12 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         case .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand,
              .runNetworkShellCommand, .runDestructiveShellCommand:
             "允许在本机执行可能修改文件、访问网络或产生其他副作用的操作。"
+        case .baseRead:
+            "允许读取小应用子库中的数据（查询/聚合/CSV 导出），不会修改内容。"
+        case .baseWrite, .baseManageSchema, .baseManageMethods, .baseManageApps, .baseExecute:
+            "允许在小应用中写入数据或修改结构/方法，受子库隔离与契约约束。"
+        case .basePublish:
+            "允许发布/分享/公开小应用，将对他人可见；任何执行模式下都需人工确认。"
         case .largeWorkspaceWrite:
             "文件超过工作区写入上限（默认 10MB），询问模式下需人工确认；执行模式自动放行。"
         case .interactBrowser, .commitBrowserAction, .transferBrowserFile:
