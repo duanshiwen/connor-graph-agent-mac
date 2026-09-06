@@ -293,6 +293,24 @@ public struct AgentToolArguments: Sendable, Equatable {
         self.values = try dictionary.mapValues { try SendableJSONValue(any: $0) }
     }
 
+    /// 审计摘要（M1-M7）：仅含顶层标量（appID/table/operation 等），数组/对象只记长度。
+    public func compactSummary(maxKeys: Int = 8) -> String {
+        var parts: [String] = []
+        for (key, value) in values.sorted(by: { $0.key < $1.key }) {
+            switch value {
+            case .string(let s): parts.append("\(key)=\(s)")
+            case .int(let i): parts.append("\(key)=\(i)")
+            case .double(let d): parts.append("\(key)=\(d)")
+            case .bool(let b): parts.append("\(key)=\(b)")
+            case .null: parts.append("\(key)=null")
+            case .array(let a): parts.append("\(key)=[\(a.count)]")
+            case .object(let o): parts.append("\(key)={\(o.count)}")
+            }
+            if parts.count >= maxKeys { parts.append("..."); break }
+        }
+        return parts.joined(separator: ",")
+    }
+
     public func string(_ key: String) -> String? {
         if case .string(let value) = values[key] { return value }
         return nil

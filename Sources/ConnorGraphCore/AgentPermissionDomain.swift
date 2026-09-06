@@ -50,6 +50,13 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     case exportRSSOPML
     case createInteractiveWebDraft
     case publishInteractiveWeb
+    case baseRead
+    case baseWrite
+    case baseManageSchema
+    case baseManageMethods
+    case baseManageApps
+    case baseExecute
+    case basePublish
 }
 
 public enum AgentPermissionMode: String, Codable, Sendable, Equatable, CaseIterable, Hashable {

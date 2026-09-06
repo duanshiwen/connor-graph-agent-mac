@@ -292,6 +292,46 @@ private func makeLargeReadableFile(_ name: String = "large.txt") throws -> (URL,
     #expect(result.contentText.contains("hello"))
 }
 
+@Test func readToolReportsClearDiagnosticForNonUTF8File() async throws {
+    let workspace = try makeToolTempWorkspace()
+    let file = workspace.appendingPathComponent("binary.bin")
+    try Data([0x00, 0xFF, 0xFE, 0x80, 0x01]).write(to: file)
+    let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    do {
+        _ = try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"filePath":"binary.bin"}"#),
+            context: .localToolTestContext(toolCallID: "read-binary")
+        )
+        Issue.record("非 UTF-8 文件应抛错")
+    } catch let error as LocalWorkspacePolicyError {
+        guard case .nonUTF8EncodedFile = error else {
+            Issue.record("期望 .nonUTF8EncodedFile 诊断，实际得到 \(error)")
+            return
+        }
+        #expect(error.description.contains("binary.bin"))
+    } catch {
+        Issue.record("期望 LocalWorkspacePolicyError，实际得到 \(error)")
+    }
+}
+
+@Test func readManyToolReportsNonUTF8AsPerFileErrorWithoutFailingBatch() async throws {
+    let workspace = try makeToolTempWorkspace()
+    try "ok\n".write(to: workspace.appendingPathComponent("ok.txt"), atomically: true, encoding: .utf8)
+    try Data([0x00, 0xFF, 0xFE]).write(to: workspace.appendingPathComponent("binary.bin"))
+    let tool = LocalReadManyTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"requests":[{"filePath":"ok.txt"},{"filePath":"binary.bin"}]}"#),
+        context: .localToolTestContext(toolCallID: "readmany-binary")
+    )
+
+    #expect(result.error == nil)
+    #expect(result.contentJSON?.contains(#""filePath":"binary.bin""#) == true)
+    #expect(result.contentJSON?.contains("not valid UTF-8") == true)
+    #expect(result.contentJSON?.contains("ok.txt") == true)
+}
+
 @Test func applyPatchToolAcceptsLegacyAliasesInOperations() async throws {
     let workspace = try makeToolTempWorkspace()
     let file = workspace.appendingPathComponent("App.swift")

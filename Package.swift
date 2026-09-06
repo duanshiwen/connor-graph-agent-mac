@@ -14,6 +14,7 @@ let package = Package(
         .library(name: "ConnorGraphSearch", targets: ["ConnorGraphSearch"]),
         .library(name: "ConnorGraphAgent", targets: ["ConnorGraphAgent"]),
         .library(name: "ConnorGraphAppSupport", targets: ["ConnorGraphAppSupport"]),
+        .library(name: "ConnorGraphBase", targets: ["ConnorGraphBase"]),
         .executable(name: "connor-graph-agent-mac", targets: ["ConnorGraphAgentMac"]),
         .executable(name: "connor", targets: ["ConnorCLI"])
     ],
@@ -39,6 +40,7 @@ let package = Package(
                 "ConnorGraphStore",
                 "ConnorGraphSearch",
                 "ConnorGraphAgent",
+                "ConnorGraphBase",
                 .product(name: "MailCore", package: "MailCoreSPM")
             ],
             resources: [
@@ -80,12 +82,24 @@ let package = Package(
             name: "ConnorCLI",
             dependencies: ["ConnorGraphAppSupport", "ConnorGraphCore"]
         ),
+        .target(
+            name: "ConnorGraphBase",
+            resources: [
+                .copy("Resources/Contracts")
+            ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
+        ),
         .testTarget(name: "ConnorGraphCoreTests", dependencies: ["ConnorGraphCore"]),
         .testTarget(name: "ConnorGraphMemoryTests", dependencies: ["ConnorGraphMemory", "ConnorGraphStore"]),
         .testTarget(name: "ConnorGraphStoreTests", dependencies: ["ConnorGraphStore", "ConnorGraphCore"]),
         .testTarget(name: "ConnorGraphSearchTests", dependencies: ["ConnorGraphSearch"]),
         .testTarget(name: "ConnorGraphAgentTests", dependencies: ["ConnorGraphAgent"]),
         .testTarget(name: "ConnorGraphAgentMacTests", dependencies: ["ConnorGraphAgentMac"]),
-        .testTarget(name: "ConnorGraphAppSupportTests", dependencies: ["ConnorGraphAppSupport"])
+        .testTarget(name: "ConnorGraphAppSupportTests", dependencies: ["ConnorGraphAppSupport"]),
+        .testTarget(name: "ConnorGraphBaseTests",
+                    dependencies: ["ConnorGraphBase"],
+                    resources: [.copy("Golden"), .copy("GoldenSync")])
     ]
 )

@@ -1,0 +1,20 @@
+{
+  "name": "20-method-call-depth-limit",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [ { "name": "amount", "type": "number" } ] } ] },
+    "methods": [
+      { "name": "chain.deep", "description": "跨 App 递归调用直到超出深度", "inputSchema": { "type": "object" }, "exports": true, "readOnly": true, "steps": [
+        { "type": "call", "appID": "acct", "method": "chain.deep", "input": {} }
+      ] }
+    ],
+    "input": {
+      "tool": "base.method.invoke",
+      "args": { "appID": "acct", "method": "chain.deep", "input": {} }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": false, "data": null, "error": { "code": "QUOTA_EXCEEDED", "message": "跨 App 调用深度超过 maxCrossAppCallDepth=5", "hint": "检查方法 DAG 的 call 步骤链路", "retryable": false }, "site": "local" },
+    "errorCode": "QUOTA_EXCEEDED"
+  }
+}

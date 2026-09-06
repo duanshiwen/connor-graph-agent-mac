@@ -1,0 +1,16 @@
+{
+  "name": "19-method-readonly-with-mutate",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [ { "name": "amount", "type": "number" } ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.method.define",
+      "args": { "appID": "acct", "method": { "name": "monthly.report", "description": "只读报表", "readOnly": true, "inputSchema": { "type": "object" }, "steps": [ { "type": "aggregate", "table": "expenses", "aggregations": [ { "op": "sum", "field": "amount", "alias": "total" } ] }, { "type": "mutate", "table": "expenses", "ops": [ { "op": "insert", "record": { "amount": 1 } } ] } ] } }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": false, "data": null, "error": { "code": "VALIDATION_FAILED", "message": "只读方法禁止包含 mutate 步骤", "hint": "readOnly 方法体仅允许 query/aggregate + reply", "retryable": false }, "site": "local" },
+    "errorCode": "VALIDATION_FAILED"
+  }
+}

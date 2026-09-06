@@ -46,6 +46,28 @@ private func requireLargeWriteApprovalIfNeeded(
     }
 }
 
+/// 在工作区外的全局队列上执行阻塞读盘，避免占用 Swift 协作线程池。
+/// 长会话/并发工具调用下协作池饥饿是工具间歇性卡顿的常见原因；
+/// 非 UTF-8 文件给出明确诊断（.nonUTF8EncodedFile）而非模糊的 CocoaError。
+enum LocalFileReader {
+    static func readUTF8(from path: URL) async throws -> String {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let data = try Data(contentsOf: path)
+                    guard let text = String(data: data, encoding: .utf8) else {
+                        continuation.resume(throwing: LocalWorkspacePolicyError.nonUTF8EncodedFile(path.path))
+                        return
+                    }
+                    continuation.resume(returning: text)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+}
+
 public struct LocalReadFileTool: AgentTool {
     public let name = "Read"
     public let description = "Read a text file from the configured local workspace. Without an explicit window, a small file is returned completely in one call, and a larger file is read from the start, truncated to the output budget, returning nextOffset so you can continue with Read(filePath, offset: nextOffset). Pass optional 1-based offset and/or limit to read an explicit line window on any file: reading then always starts at the requested offset, never from the top. Output lines carry a presentation-only 'N: ' line-number prefix; the exact file text excludes that prefix, so ApplyPatch oldText/newText must be built from the raw file text. Paths must stay inside allowed workspace roots."
@@ -69,7 +91,7 @@ public struct LocalReadFileTool: AgentTool {
         let path = try policy.resolvePath(rawPath)
         try policy.validateReadablePath(path)
         try policy.validateReadableSize(path: path)
-        let text = try String(contentsOf: path, encoding: .utf8)
+        let text = try await LocalFileReader.readUTF8(from: path)
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let maxBytes = max(policy.maxToolOutputBytes, 1)
         let allFormatted = lines.enumerated().map { "\($0.offset + 1): \($0.element)" }
@@ -451,7 +473,7 @@ public struct LocalReadManyTool: AgentTool {
                 let path = try policy.resolvePath(request.filePath)
                 try policy.validateReadablePath(path)
                 try policy.validateReadableSize(path: path)
-                let text = try String(contentsOf: path, encoding: .utf8)
+                let text = try await LocalFileReader.readUTF8(from: path)
                 let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
                 let limit = max(request.limit ?? min(lines.count, 2000), 0)
                 let start = min(request.offset - 1, lines.count)
@@ -995,33 +1017,36 @@ enum LocalShellExecutor {
         process.standardOutput = stdoutHandle
         process.standardError = stderrHandle
 
+        // 回收与退出码统一交给 Foundation 的 terminationHandler：
+        // - 不能在协作线程上裸读 process.terminationStatus——若 Foundation 尚未感知终止，
+        //   会抛 NSInternalInconsistencyException，协作线程上无人捕获 → std::terminate →
+        //   abort（Task 105666 的崩溃根因）；
+        // - 也不能用 DispatchSourceProcess(.exit) 后再 waitUntilExit——kevent 抢先消费退出
+        //   事件时 waitUntilExit 可能永久挂起（实测）。terminationHandler 触发即代表已回收、
+        //   退出码可用，轮询侧只看 state 快照。
+        let waitState = LocalShellWaitState()
+        process.terminationHandler = { finishedProcess in
+            waitState.markExited(exitCode: finishedProcess.terminationStatus)
+        }
+
         try process.run()
 
-        let timeoutState = LocalShellTimeoutState()
-        let timeoutTimer = DispatchSource.makeTimerSource(
-            queue: DispatchQueue(label: "com.connor.local-shell-timeout.(UUID().uuidString)")
-        )
-        timeoutTimer.schedule(deadline: .now() + .seconds(timeoutSeconds))
-        timeoutTimer.setEventHandler {
-            timeoutState.terminateIfRunning(process)
-        }
-        timeoutTimer.resume()
-        defer {
-            timeoutTimer.setEventHandler {}
-            timeoutTimer.cancel()
+        // 超时 SIGTERM→SIGKILL 两步击杀在专用 GCD 队列上执行，协作线程池只轮询状态并响应
+        // 任务取消——满载/长会话下协作池饥饿既会导致工具间歇性卡顿，也会让完成/超时误判。
+        let outcome = await LocalShellExecutor.waitForExit(process, state: waitState, timeoutSeconds: timeoutSeconds)
+        switch outcome {
+        case .cancelled:
+            throw CancellationError()
+        case .timedOut:
+            throw LocalWorkspacePolicyError.commandTimedOut(command)
+        case .exited:
+            break
         }
 
-        while process.isRunning {
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-        if timeoutState.didTimeout {
-            process.waitUntilExit()
-            throw LocalWorkspacePolicyError.commandTimedOut(command)
-        }
         try stdoutHandle.close()
         try stderrHandle.close()
-        let stdoutData = try Data(contentsOf: stdoutURL)
-        let stderrData = try Data(contentsOf: stderrURL)
+        let stdoutData = try await LocalShellExecutor.readCaptureFile(at: stdoutURL)
+        let stderrData = try await LocalShellExecutor.readCaptureFile(at: stderrURL)
         let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
         let stderr = String(data: stderrData, encoding: .utf8) ?? ""
         let truncatedStdout = truncate(stdout, maxBytes: maxOutputBytes)
@@ -1029,10 +1054,97 @@ enum LocalShellExecutor {
         return LocalShellExecution(
             stdout: truncatedStdout.text,
             stderr: truncatedStderr.text,
-            exitCode: process.terminationStatus,
+            exitCode: waitState.exitCode(),
             timedOut: false,
             truncated: truncatedStdout.truncated || truncatedStderr.truncated
         )
+    }
+
+    private enum ShellWaitOutcome: Sendable {
+        case exited
+        case timedOut
+        case cancelled
+    }
+
+    /// 轮询进程状态并响应任务取消；超时击杀在专用 GCD 队列上执行，协作线程池只负责轮询。
+    ///
+    /// - 退出检测依赖 Foundation 的 terminationHandler（见 run() 内注释）：触发即已回收、
+    ///   退出码已记入 state，协作线程池最多滞后一个轮询周期；
+    /// - 超时用 GCD 定时器：到期限先 SIGTERM，宽限 2 秒仍未退出再 SIGKILL 强杀，
+    ///   保证声明超时硬生效、忽略 SIGTERM 的进程也不会让工具永久卡死；
+    /// - 任务取消时同样执行两步击杀并返回 .cancelled。
+    private static func waitForExit(_ process: Process, state: LocalShellWaitState, timeoutSeconds: Int) async -> ShellWaitOutcome {
+        let waitQueue = DispatchQueue(label: "com.connor.local-shell-wait.\(UUID().uuidString)")
+
+        let timer = DispatchSource.makeTimerSource(queue: waitQueue)
+        timer.schedule(deadline: .now() + .seconds(timeoutSeconds))
+        timer.setEventHandler {
+            // 关键：只有进程在期限到来时仍然存活，超时才算有效。
+            // Process.isRunning 对僵尸进程返回 true（kill(pid,0) 对僵尸也成功），
+            // 而 Foundation 终止回调的投递存在亚毫秒~数十毫秒延迟——
+            // 若命令恰好在期限附近自然完成，直接按 isRunning 判断会把完成在期限内的
+            // 长命令误判为超时，表现为「命令跑很久后 Shell 结果返回为空/报超时」。
+            // 用 waitid(WNOHANG | WNOWAIT) 精确探测：返回 si_pid != 0 说明进程已退出
+            // （僵尸未回收），不回收地放行给 terminationHandler，判为正常完成；
+            // 只有确认进程仍在运行时才发起超时击杀。
+            if state.snapshot().exited { return }
+            var info = siginfo_t()
+            let waitResult = waitid(P_PID, id_t(process.processIdentifier), &info, WEXITED | WNOHANG | WNOWAIT)
+            let alreadyExited = (waitResult == 0 && info.si_pid != 0) || (waitResult != 0 && errno == ECHILD)
+            guard !alreadyExited else { return }
+            guard state.markTimedOutIfNeeded() else { return }
+            process.terminate()
+            waitQueue.asyncAfter(deadline: .now() + .seconds(2)) {
+                if !state.snapshot().exited, process.isRunning {
+                    kill(process.processIdentifier, SIGKILL)
+                    // 回收由 terminationHandler 完成，不在此处 waitUntilExit。
+                }
+            }
+        }
+        timer.resume()
+        defer { timer.cancel() }
+
+        while true {
+            if Task.isCancelled {
+                // 取消时同步完成两步击杀（有界等待，最长约 3s），确保进程被终止、不残留；
+                // 回收本身仍由 terminationHandler 负责。
+                if !state.snapshot().exited {
+                    if process.isRunning {
+                        process.terminate()
+                    }
+                    let termDeadline = ContinuousClock.now + .seconds(2)
+                    while !state.snapshot().exited, ContinuousClock.now < termDeadline {
+                        try? await Task.sleep(nanoseconds: 20_000_000)
+                    }
+                    if !state.snapshot().exited, process.isRunning {
+                        kill(process.processIdentifier, SIGKILL)
+                        let killDeadline = ContinuousClock.now + .seconds(1)
+                        while !state.snapshot().exited, ContinuousClock.now < killDeadline {
+                            try? await Task.sleep(nanoseconds: 20_000_000)
+                        }
+                    }
+                }
+                return .cancelled
+            }
+            let (exited, timedOut) = state.snapshot()
+            if exited {
+                return timedOut ? .timedOut : .exited
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
+    /// 在专用全局队列上执行阻塞读盘，避免占用 Swift 协作线程池（间歇性工具卡顿的常见原因）。
+    private static func readCaptureFile(at url: URL) async throws -> Data {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    continuation.resume(returning: try Data(contentsOf: url))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 
     private static func truncate(_ text: String, maxBytes: Int) -> (text: String, truncated: Bool) {
@@ -1046,19 +1158,35 @@ enum LocalShellExecutor {
     }
 }
 
-private final class LocalShellTimeoutState: @unchecked Sendable {
+private final class LocalShellWaitState: @unchecked Sendable {
     private let lock = NSLock()
-    private var timedOut = false
+    private var isExited = false
+    private var isTimedOut = false
+    private var storedExitCode: Int32?
 
-    var didTimeout: Bool {
-        lock.withLock { timedOut }
+    func snapshot() -> (exited: Bool, timedOut: Bool) {
+        lock.withLock { (isExited, isTimedOut) }
     }
 
-    func terminateIfRunning(_ process: Process) {
+    /// 记录退出码并标记已退出；调用方为 terminationHandler，触发时进程已被 Foundation 回收，
+    /// 退出码稳定可读——这是协作线程池侧唯一允许感知"已退出"的途径。
+    func markExited(exitCode: Int32) {
         lock.withLock {
-            guard process.isRunning else { return }
-            timedOut = true
-            process.terminate()
+            if storedExitCode == nil { storedExitCode = exitCode }
+            isExited = true
+        }
+    }
+
+    func exitCode() -> Int32 {
+        lock.withLock { storedExitCode ?? -1 }
+    }
+
+    /// 标记超时；已退出或已标记过则返回 false。
+    func markTimedOutIfNeeded() -> Bool {
+        lock.withLock {
+            guard !isExited, !isTimedOut else { return false }
+            isTimedOut = true
+            return true
         }
     }
 }
