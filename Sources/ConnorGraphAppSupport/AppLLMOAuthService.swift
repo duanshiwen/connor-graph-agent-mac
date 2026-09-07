@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import Network
+import os
 
 public enum AppLLMOAuthProvider: Sendable, Equatable {
     case chatGPT
@@ -76,6 +77,14 @@ public final class AppLLMOAuthService: @unchecked Sendable {
 
     private let session: URLSession
     private var currentChatGPTFlow: ChatGPTPreparedFlow?
+    private static let logger = Logger(subsystem: "com.shiwen.connor-graph-agent-mac", category: "LLMOAuth")
+
+    /// The single in-flight local callback server. Keeping one reference and
+    /// cancelling the previous instance before every new attempt guarantees the
+    /// callback port is released on retry, so a failed or abandoned attempt can
+    /// never leave port 1455 bound and silently break every later login.
+    private let callbackLock = NSLock()
+    private var activeCallbackServer: AppOAuthCallbackServer?
 
     public init(session: URLSession = .shared) {
         self.session = session
@@ -85,16 +94,55 @@ public final class AppLLMOAuthService: @unchecked Sendable {
 
     public func authenticateChatGPT(openURL: @escaping @Sendable (URL) -> Void) async throws -> ChatGPTAuthenticationResult {
         let flow = try prepareChatGPTOAuth()
-        let callbackServer = AppOAuthCallbackServer(port: 1455, callbackPath: "/auth/callback")
-        async let callbackTask = callbackServer.waitForCallback()
+        let callbackServer = beginCallbackServerSession()
+        defer { endCallbackServerSession(callbackServer) }
+        Self.logger.info("ChatGPT OAuth: opening browser, waiting for localhost:1455 callback (state=\(flow.state.prefix(8)))")
         openURL(flow.authURL)
-        let callback = try await callbackTask
-        guard callback.state == flow.state else { throw AppLLMOAuthError.stateMismatch }
-        guard let code = callback.code, !code.isEmpty else { throw AppLLMOAuthError.missingAuthorizationCode }
+        let callback: AppOAuthCallbackServer.Callback
+        do {
+            callback = try await callbackServer.waitForCallback(timeout: 5 * 60)
+        } catch {
+            Self.logger.error("ChatGPT OAuth: callback phase failed: \(error.localizedDescription)")
+            throw error
+        }
+        guard callback.state == flow.state else {
+            let expectedPrefix = flow.state.prefix(8)
+            let receivedPrefix = callback.state.map { String($0.prefix(8)) } ?? "nil"
+            Self.logger.error("ChatGPT OAuth: state mismatch (expected \(expectedPrefix), got \(receivedPrefix))")
+            throw AppLLMOAuthError.stateMismatch
+        }
+        guard let code = callback.code, !code.isEmpty else {
+            Self.logger.error("ChatGPT OAuth: callback arrived without an authorization code")
+            throw AppLLMOAuthError.missingAuthorizationCode
+        }
+        Self.logger.info("ChatGPT OAuth: received authorization code, exchanging for tokens…")
         let tokens = try await exchangeChatGPTCode(code, codeVerifier: flow.codeVerifier)
         guard let idToken = tokens.idToken, !idToken.isEmpty else { throw AppLLMOAuthError.missingToken("id_token") }
+        Self.logger.info("ChatGPT OAuth: tokens exchanged, exchanging id_token for API key…")
         let apiKey = try await exchangeChatGPTIDTokenForAPIKey(idToken)
+        Self.logger.info("ChatGPT OAuth: login completed successfully")
         return ChatGPTAuthenticationResult(tokens: tokens, apiKey: apiKey)
+    }
+
+    /// Cancels any callback listener a previous attempt may have left running
+    /// (abandoned sheet, closed tab, timed-out wait) and hands back the fresh
+    /// server for this attempt. Retrying login must never hit "address already in use".
+    private func beginCallbackServerSession() -> AppOAuthCallbackServer {
+        callbackLock.lock()
+        defer { callbackLock.unlock() }
+        activeCallbackServer?.cancel()
+        let server = AppOAuthCallbackServer(port: 1455, callbackPath: "/auth/callback")
+        activeCallbackServer = server
+        return server
+    }
+
+    private func endCallbackServerSession(_ server: AppOAuthCallbackServer) {
+        callbackLock.lock()
+        defer { callbackLock.unlock() }
+        if activeCallbackServer === server {
+            activeCallbackServer = nil
+        }
+        server.cancel()
     }
 
     public func prepareChatGPTOAuth() throws -> ChatGPTPreparedFlow {
@@ -304,43 +352,143 @@ private final class AppOAuthCallbackServer: @unchecked Sendable {
 
     private let port: UInt16
     private let callbackPath: String
+    private let lock = NSLock()
+    private var listeners: [NWListener] = []
 
     init(port: UInt16, callbackPath: String) {
         self.port = port
         self.callbackPath = callbackPath
     }
 
-    func waitForCallback() async throws -> Callback {
-        let listener: NWListener
-        do {
-            listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: port)!)
-        } catch {
-            throw AppLLMOAuthError.callbackServerFailed(error.localizedDescription)
+    func waitForCallback(timeout: TimeInterval) async throws -> Callback {
+        // Race the callback wait against a deadline so a lost callback (closed
+        // tab, browser hiccup, localhost swallowed by a proxy) can never leave
+        // the UI hanging in "等待浏览器回调…" forever.
+        try await withThrowingTaskGroup(of: Callback.self) { group in
+            group.addTask { try await self.waitForCallbackCore() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                throw AppLLMOAuthError.oauthStateExpired
+            }
+            do {
+                let callback = try await group.next()!
+                group.cancelAll()
+                return callback
+            } catch {
+                group.cancelAll()
+                throw error
+            }
+        }
+    }
+
+    /// Cancels every active listener and releases the callback port. Safe to
+    /// call from any thread; used to clean up abandoned or retried attempts.
+    func cancel() {
+        lock.lock()
+        let toCancel = listeners
+        listeners.removeAll()
+        lock.unlock()
+        for listener in toCancel {
+            listener.cancel()
+        }
+    }
+
+    private func installListeners(_ newListeners: [NWListener]) {
+        lock.lock()
+        listeners = newListeners
+        lock.unlock()
+    }
+
+    private func waitForCallbackCore() async throws -> Callback {
+        let listeners = makeLoopbackListeners()
+        guard !listeners.isEmpty else {
+            throw AppLLMOAuthError.callbackServerFailed("无法创建本地回调服务器（端口 \(port)）。")
         }
         return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Callback, Error>) in
                 let state = CallbackState(continuation: continuation, callbackPath: callbackPath)
-                listener.stateUpdateHandler = { newState in
-                    switch newState {
-                    case .failed(let error):
-                        state.resume(throwing: AppLLMOAuthError.callbackServerFailed(error.localizedDescription))
-                        listener.cancel()
-                    case .cancelled:
-                        state.resume(throwing: AppLLMOAuthError.callbackServerFailed("Callback server was cancelled."))
-                    default:
-                        break
-                    }
+                installListeners(listeners)
+                let status = ListenerStatus(total: listeners.count) { error in
+                    state.resume(throwing: AppLLMOAuthError.callbackServerFailed(Self.describeBindError(error, port: self.port)))
                 }
-                listener.newConnectionHandler = { connection in
-                    connection.start(queue: .main)
-                    state.handle(connection: connection) {
-                        listener.cancel()
+                for listener in listeners {
+                    listener.stateUpdateHandler = { newState in
+                        switch newState {
+                        case .ready:
+                            status.becameReady()
+                        case .failed(let error):
+                            status.failedWith(error)
+                        case .cancelled:
+                            state.resume(throwing: AppLLMOAuthError.callbackServerFailed("Callback server was cancelled."))
+                        default:
+                            break
+                        }
                     }
+                    listener.newConnectionHandler = { connection in
+                        connection.start(queue: .main)
+                        state.handle(connection: connection) {
+                            self.cancel()
+                        }
+                    }
+                    listener.start(queue: .main)
                 }
-                listener.start(queue: .main)
             }
         } onCancel: {
-            listener.cancel()
+            cancel()
+        }
+    }
+
+    /// Listens on the loopback interfaces only (127.0.0.1 and ::1), exactly like
+    /// the Codex CLI, instead of the wildcard address. Binding both families is
+    /// tolerated: on some macOS versions the second bind reports EADDRINUSE, and
+    /// either family alone still serves "localhost" callbacks.
+    private func makeLoopbackListeners() -> [NWListener] {
+        var result: [NWListener] = []
+        let loopbackHosts: [NWEndpoint.Host] = [
+            .ipv4(IPv4Address("127.0.0.1")!),
+            .ipv6(IPv6Address("::1")!)
+        ]
+        for host in loopbackHosts {
+            let parameters = NWParameters.tcp
+            parameters.requiredLocalEndpoint = .hostPort(host: host, port: NWEndpoint.Port(rawValue: port)!)
+            if let listener = try? NWListener(using: parameters) {
+                result.append(listener)
+            }
+        }
+        return result
+    }
+
+    private static func describeBindError(_ error: Error, port: UInt16) -> String {
+        let detail = error.localizedDescription
+        if detail.localizedCaseInsensitiveContains("address already in use") || detail.localizedCaseInsensitiveContains("占用") {
+            return "本地回调端口 \(port) 被其他程序占用（\(detail)）。请关闭占用 \(port) 端口的程序（例如 Codex CLI）后重试。"
+        }
+        return "本地回调服务器启动失败：\(detail)"
+    }
+
+    /// Tracks per-listener startup status. Only fails the login when every
+    /// loopback family failed to bind and none became ready; a single family is
+    /// enough because "localhost" resolves to either 127.0.0.1 or ::1.
+    private final class ListenerStatus: @unchecked Sendable {
+        private let total: Int
+        private var readyCount = 0
+        private var failedCount = 0
+        private let onAllFailed: @Sendable (Error) -> Void
+
+        init(total: Int, onAllFailed: @escaping @Sendable (Error) -> Void) {
+            self.total = total
+            self.onAllFailed = onAllFailed
+        }
+
+        func becameReady() {
+            readyCount += 1
+        }
+
+        func failedWith(_ error: Error) {
+            failedCount += 1
+            if readyCount == 0, failedCount >= total {
+                onAllFailed(error)
+            }
         }
     }
 
