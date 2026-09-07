@@ -89,10 +89,19 @@ public final class BaseLibraryStore: @unchecked Sendable {
                 updated_at TEXT NOT NULL
             );
             """)
-        // 迁移：旧库补 purpose 列（M2-M3 catalog 检索字段，dev 演进）。
+        // 迁移：旧库按 canonical schema 幂等补列（CREATE TABLE IF NOT EXISTS 不改已存在的表，
+        // 缺列必须显式 ALTER，否则 INSERT/SELECT 引用新列直接 SQL 编译失败）。
+        // - purpose（M2-M3 catalog 检索字段）
+        // - guide_version（M2-M2 指南漂移检测；历史遗漏：只补了 purpose，旧库创建 App 即报
+        //   "table base_apps has no column named guide_version"——2026-09 记账 App 创建失败根因）
         let columns = try execute("PRAGMA table_info(base_apps)")
-        if !columns.contains(where: { ($0["name"] as? String) == "purpose" }) {
-            try executeVoid("ALTER TABLE base_apps ADD COLUMN purpose TEXT NOT NULL DEFAULT ''", parameters: [])
+        let existing = Set(columns.compactMap { $0["name"] as? String })
+        let migrations: [(name: String, ddl: String)] = [
+            ("purpose", "ALTER TABLE base_apps ADD COLUMN purpose TEXT NOT NULL DEFAULT ''"),
+            ("guide_version", "ALTER TABLE base_apps ADD COLUMN guide_version INTEGER NOT NULL DEFAULT 0"),
+        ]
+        for migration in migrations where !existing.contains(migration.name) {
+            try executeVoid(migration.ddl, parameters: [])
         }
     }
 
