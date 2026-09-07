@@ -68,6 +68,24 @@ final class InteractiveWebFeatureModel {
         detailState = .loaded
     }
 
+    /// 聚合搜索入口：按关键词返回互动网页结果（补齐全局搜索）。
+    func searchMatches(query: String) async -> [GlobalSearchInteractiveWebResult] {
+        await loadProjectsIfNeeded()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return projects.compactMap { project in
+            guard trimmed.isEmpty
+                || project.name.lowercased().contains(trimmed)
+                || project.id.lowercased().contains(trimmed)
+            else { return nil }
+            return GlobalSearchInteractiveWebResult(
+                projectID: project.id,
+                title: project.name,
+                subtitle: project.accessMode == "public" ? "公开访问" : (project.accessMode == "password" ? "密码访问" : "私密"),
+                status: project.status == "active" ? "已发布" : "草稿"
+            )
+        }
+    }
+
     private func loadDetail() async {
         guard let id = selectedProjectID else { return }
         detailState = .loading

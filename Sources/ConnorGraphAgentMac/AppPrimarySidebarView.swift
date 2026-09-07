@@ -132,6 +132,8 @@ struct CraftPrimarySidebarView: View {
 
                     SidebarRow(title: "互动网页", systemImage: "globe", isSelected: selection == .interactiveWeb) { select(.interactiveWeb) }
 
+                    SidebarRow(title: "小程序", systemImage: "square.grid.2x2.fill", count: graph.miniApps.entries.count, isSelected: selection == .miniApps) { select(.miniApps) }
+
                     SidebarDisclosure(title: "自动化", systemImage: "wand.and.stars", isExpanded: $automationExpanded) {
                         SidebarRow(title: "定时任务", systemImage: "clock", count: graph.tasks.presentation.summary.scheduledTaskCount, isSelected: selection == .scheduledTasks) { select(.scheduledTasks) }
                         SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: graph.tasks.presentation.summary.eventTriggeredTaskCount, isSelected: selection == .eventTriggeredTasks) { select(.eventTriggeredTasks) }

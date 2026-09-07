@@ -11,6 +11,7 @@ import ConnorGraphSearch
 import ConnorGraphAgent
 import ConnorGraphStore
 import ConnorGraphAppSupport
+import ConnorGraphBase
 
 struct AgentChatToast: Identifiable, Equatable {
     var id: String = UUID().uuidString
@@ -158,6 +159,7 @@ final class AppRuntimeLifecycle {
     let interactiveWebAPIClient: InteractiveWebAPIClient
     let rssFeatureModel: RSSFeatureModel
     let interactiveWebFeatureModel: InteractiveWebFeatureModel
+    let miniAppFeatureModel: MiniAppFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let chatWorkspaceCoordinator = ChatWorkspaceCoordinator()
     let appSettingsModel: AppSettingsFeatureModel
@@ -720,7 +722,7 @@ final class AppRuntimeLifecycle {
             bookmarkStore: storagePaths.map { BrowserBookmarkStore(bookmarksURL: $0.browserBookmarksURL) },
             nativeSourceSearchBackend: nativeSourceSearchBackend
         )
-        let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "https://connor-agent.apecho.com/")!
+        let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://127.0.0.1:8080/")!
         AppBackendConnectivity.shared.configure(baseURL: backendBaseURL)
         let backendTransport = BackendConnectivityTrackingTransport()
         let accountCredentials = AppConnorAccountCredentialStore()
@@ -760,6 +762,18 @@ final class AppRuntimeLifecycle {
         )
         self.interactiveWebAPIClient = resolvedInteractiveWebAPIClient
         self.interactiveWebFeatureModel = InteractiveWebFeatureModel(client: resolvedInteractiveWebAPIClient)
+        let resolvedBaseCloudAPIClient = BaseCloudAPIClient(
+            baseURL: backendBaseURL,
+            transport: backendTransport,
+            credentials: cloudCredentials
+        )
+        let resolvedBaseLibrary: BaseLibraryStore?
+        if let storagePaths {
+            resolvedBaseLibrary = try? BaseLibraryStore(directory: storagePaths.artifactsDirectory.appendingPathComponent("base", isDirectory: true))
+        } else {
+            resolvedBaseLibrary = nil
+        }
+        self.miniAppFeatureModel = MiniAppFeatureModel(library: resolvedBaseLibrary, cloudClient: resolvedBaseCloudAPIClient)
         self.knowledgeCreatorStore = CloudKnowledgeCreatorStore(
             creatorAPI: CloudKnowledgeCreatorAPIClient(
                 baseURL: backendBaseURL,
@@ -1106,6 +1120,8 @@ final class AppRuntimeLifecycle {
             rss: rssFeatureModel,
             mail: mailFeatureModel,
             knowledgeMarketplace: knowledgeMarketplaceStore,
+            miniApps: miniAppFeatureModel,
+            interactiveWeb: interactiveWebFeatureModel,
             appSettings: appSettingsModel,
             imProvider: { [weak self] in self?.graph.im },
             openWebSearch: { [weak self] query, url in
@@ -4070,6 +4086,7 @@ extension AppRuntimeLifecycle {
             knowledgeCreator: model.knowledgeCreatorStore,
             rss: model.rssFeatureModel,
             interactiveWeb: model.interactiveWebFeatureModel,
+            miniApps: model.miniAppFeatureModel,
             skills: model.skillRuntimeModel,
             appSettings: model.appSettingsModel,
             inputSettings: model.inputSettingsModel,

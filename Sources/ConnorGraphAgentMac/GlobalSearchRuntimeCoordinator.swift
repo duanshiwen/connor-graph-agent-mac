@@ -23,6 +23,8 @@ final class GlobalSearchRuntimeCoordinator {
     private let mail: MailFeatureModel
     private let appSettings: AppSettingsFeatureModel
     private let knowledgeMarketplace: CloudKnowledgeMarketplaceStore
+    private let miniApps: MiniAppFeatureModel
+    private let interactiveWeb: InteractiveWebFeatureModel
     private let imProvider: () -> ImFeatureModel?
     private let openWebSearch: (String, URL) -> Void
 
@@ -37,6 +39,8 @@ final class GlobalSearchRuntimeCoordinator {
         rss: RSSFeatureModel,
         mail: MailFeatureModel,
         knowledgeMarketplace: CloudKnowledgeMarketplaceStore,
+        miniApps: MiniAppFeatureModel,
+        interactiveWeb: InteractiveWebFeatureModel,
         appSettings: AppSettingsFeatureModel,
         imProvider: @escaping () -> ImFeatureModel?,
         openWebSearch: @escaping (String, URL) -> Void
@@ -51,6 +55,8 @@ final class GlobalSearchRuntimeCoordinator {
         self.rss = rss
         self.mail = mail
         self.knowledgeMarketplace = knowledgeMarketplace
+        self.miniApps = miniApps
+        self.interactiveWeb = interactiveWeb
         self.appSettings = appSettings
         self.imProvider = imProvider
         self.openWebSearch = openWebSearch
@@ -75,6 +81,12 @@ final class GlobalSearchRuntimeCoordinator {
         }
         search.knowledgeMarketplaceSearchProvider = { [weak knowledgeMarketplace] query in
             await knowledgeMarketplace?.resultsForGlobalSearch(query: query) ?? []
+        }
+        search.miniAppSearchProvider = { [weak miniApps] query in
+            await miniApps?.searchMatches(query: query) ?? []
+        }
+        search.interactiveWebSearchProvider = { [weak interactiveWeb] query in
+            await interactiveWeb?.searchMatches(query: query) ?? []
         }
         search.onDestination = { [weak self] destination in
             self?.handle(destination)
@@ -175,6 +187,20 @@ final class GlobalSearchRuntimeCoordinator {
         case .knowledgeBase(let id):
             shell.selection = .knowledgeMarketplace
             Task { await knowledgeMarketplace.loadDetail(id: id) }
+        case .miniApp(let appID):
+            shell.selection = .miniApps
+            Task { @MainActor [weak miniApps] in
+                miniApps?.select(appID: appID)
+            }
+        case .interactiveWebProject(let projectID):
+            shell.selection = .interactiveWeb
+            Task { @MainActor [weak interactiveWeb] in
+                if let project = interactiveWeb?.projects.first(where: { $0.id == projectID }) {
+                    interactiveWeb?.select(project)
+                } else {
+                    await interactiveWeb?.loadProjectsIfNeeded()
+                }
+            }
         case .showAll(let kind, let query):
             switch kind {
             case .sessions:
@@ -197,6 +223,13 @@ final class GlobalSearchRuntimeCoordinator {
             case .knowledgeMarketplace:
                 shell.selection = .knowledgeMarketplace
                 Task { await knowledgeMarketplace.search(query: query) }
+            case .miniApps:
+                browser.isVisible = false
+                shell.selection = .miniApps
+                Task { @MainActor [weak self] in self?.miniApps.searchText = query }
+            case .interactiveWeb:
+                browser.isVisible = false
+                shell.selection = .interactiveWeb
             }
         }
     }

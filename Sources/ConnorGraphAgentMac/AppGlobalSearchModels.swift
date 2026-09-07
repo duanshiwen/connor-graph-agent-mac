@@ -73,6 +73,8 @@ struct GlobalSearchPreviewState: Equatable {
     var mailResults: [NativeSearchResult] = []
     var browserHistoryResults: [NativeSearchResult] = []
     var knowledgeBaseResults: [CloudMarketplaceKnowledgeBase] = []
+    var miniAppResults: [GlobalSearchMiniAppResult] = []
+    var interactiveWebResults: [GlobalSearchInteractiveWebResult] = []
     var searchTokens: [String] = []
     var sectionStatusMessages: [GlobalSearchSectionKind: String] = [:]
     var errorMessage: String?
@@ -87,6 +89,8 @@ struct GlobalSearchPreviewState: Equatable {
         mailResults: [NativeSearchResult] = [],
         browserHistoryResults: [NativeSearchResult] = [],
         knowledgeBaseResults: [CloudMarketplaceKnowledgeBase] = [],
+        miniAppResults: [GlobalSearchMiniAppResult] = [],
+        interactiveWebResults: [GlobalSearchInteractiveWebResult] = [],
         searchTokens: [String] = [],
         sectionStatusMessages: [GlobalSearchSectionKind: String] = [:],
         errorMessage: String? = nil
@@ -99,6 +103,8 @@ struct GlobalSearchPreviewState: Equatable {
         self.mailResults = mailResults
         self.browserHistoryResults = browserHistoryResults
         self.knowledgeBaseResults = knowledgeBaseResults
+        self.miniAppResults = miniAppResults
+        self.interactiveWebResults = interactiveWebResults
         self.searchTokens = searchTokens
         self.sectionStatusMessages = sectionStatusMessages
         self.errorMessage = errorMessage
@@ -117,7 +123,7 @@ struct GlobalSearchPreviewState: Equatable {
     }
 
     var hasAnySourceResults: Bool {
-        !sessionResults.isEmpty || !knowledgeBaseResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !mailResults.isEmpty || !browserHistoryResults.isEmpty
+        !sessionResults.isEmpty || !knowledgeBaseResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !mailResults.isEmpty || !browserHistoryResults.isEmpty || !miniAppResults.isEmpty || !interactiveWebResults.isEmpty
     }
 }
 
@@ -147,6 +153,8 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
     case mail
     case browserHistory
     case knowledgeMarketplace
+    case miniApps
+    case interactiveWeb
 
     init(nativeSourceKind: NativeSearchSourceKind) {
         switch nativeSourceKind {
@@ -167,6 +175,8 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
         case .mail: "邮件"
         case .browserHistory: "浏览历史"
         case .knowledgeMarketplace: "知识库"
+        case .miniApps: "小程序"
+        case .interactiveWeb: "互动网页"
         }
     }
 
@@ -178,6 +188,8 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
         case .mail: "envelope"
         case .browserHistory: "clock.arrow.circlepath"
         case .knowledgeMarketplace: "books.vertical"
+        case .miniApps: "square.grid.2x2.fill"
+        case .interactiveWeb: "globe"
         }
     }
 
@@ -189,8 +201,30 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
         case .mail: "没有匹配的邮件"
         case .browserHistory: "没有匹配的浏览历史"
         case .knowledgeMarketplace: "没有匹配的知识库"
+        case .miniApps: "没有匹配的小程序"
+        case .interactiveWeb: "没有匹配的互动网页"
         }
     }
+}
+
+/// 聚合搜索中的小程序结果。
+struct GlobalSearchMiniAppResult: Equatable, Sendable, Identifiable {
+    var appID: String
+    var name: String
+    var purpose: String
+    var sourceBadge: String      // 本机 / 云端
+    var scopeBadge: String       // 仅自己 / 好友共享 / 公开共享
+    var relationBadge: String    // 我创建 / 我可用
+    var id: String { appID }
+}
+
+/// 聚合搜索中的互动网页结果。
+struct GlobalSearchInteractiveWebResult: Equatable, Sendable, Identifiable {
+    var projectID: String
+    var title: String
+    var subtitle: String
+    var status: String           // 草稿 / 已发布
+    var id: String { projectID }
 }
 
 enum GlobalSearchSelectableItem: Equatable {
@@ -199,6 +233,8 @@ enum GlobalSearchSelectableItem: Equatable {
     case session(GlobalSearchConversationResult)
     case nativeResult(String)
     case knowledgeBase(String)
+    case miniApp(String)
+    case interactiveWebProject(String)
 }
 
 enum GlobalSearchActionKind: String, CaseIterable, Identifiable {

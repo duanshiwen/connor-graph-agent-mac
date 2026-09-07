@@ -289,6 +289,7 @@ struct AppRouteViewDependencyTests {
         case .mail: "mail"
         case .rss: "rss"
         case .interactiveWeb: "interactiveWeb"
+        case .miniApps: "miniApps"
         case .sources: "sources"
         case .skills: "skills"
         case .knowledgeMarketplace: "knowledgeMarketplace"
