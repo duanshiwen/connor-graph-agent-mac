@@ -94,6 +94,7 @@ private struct InteractiveWebListRow: View {
                     HStack(spacing: 6) {
                         Text(project.name)
                             .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                            .foregroundStyle(.primary)
                             .lineLimit(AppListCardLayout.titleLineLimit)
                         if project.status == "active" {
                             Text("已上架")
@@ -114,7 +115,7 @@ private struct InteractiveWebListRow: View {
                         .lineLimit(1)
                 }
             }
-            .padding(.vertical, 2)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -229,8 +230,9 @@ private struct InteractiveWebDetailContent: View {
                 actionCard
                 infoCard
             }
-            .padding(20)
-            .frame(maxWidth: 600, alignment: .leading)
+            .padding(.horizontal, AgentChatLayout.spaceXL)
+            .padding(.vertical, AgentChatLayout.spaceL)
+            .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .top)
         }
     }
