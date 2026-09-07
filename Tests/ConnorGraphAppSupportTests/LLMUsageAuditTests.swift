@@ -193,6 +193,30 @@ private func auditTestStore() -> (FileLLMUsageAuditStore, URL) {
     #expect(large.lowerBound < small.lowerBound)
 }
 
+@Test func auditStoreRotatesRollingFilesAtSizeCapAndKeepsBackupsReadable() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("connor-llm-audit-rotate-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fileURL = root.appendingPathComponent("llm-usage.jsonl")
+    let store = FileLLMUsageAuditStore(fileURL: fileURL, maximumFileSizeBytes: 1, maximumArchivedFiles: 2)
+    let base = AnyAgentModelProvider(modelID: "rotating-model") { _ in
+        AgentModelResponse(text: String(repeating: "x", count: 400), usage: AgentModelUsage(promptTokens: 1, completionTokens: 1))
+    }
+    let provider = AuditedAgentModelProvider(provider: base, recorder: store)
+    for index in 0..<6 {
+        _ = try await provider.complete(AgentModelRequest(
+            messages: [.init(role: .user, content: "run-\(index)")],
+            auditContext: .init(requestKind: .memoryBackgroundProcessing, initiator: .background)
+        ))
+    }
+
+    // Every record exceeds the 1-byte cap, so each append rotated the file:
+    // the current file plus at most two backups survive, older ones are gone.
+    #expect(store.records().count == 3)
+    #expect(FileManager.default.fileExists(atPath: fileURL.appendingPathExtension("1").path))
+    #expect(FileManager.default.fileExists(atPath: fileURL.appendingPathExtension("2").path))
+    #expect(!FileManager.default.fileExists(atPath: fileURL.appendingPathExtension("3").path))
+}
+
 private extension Array {
     var only: Element? { count == 1 ? first : nil }
 }

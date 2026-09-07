@@ -367,7 +367,39 @@ public struct AppChatSessionRepository: Sendable {
         let deletedAt = Date()
         try store.deleteSession(id: sessionID, deletedAt: deletedAt)
         try? noteProjection?.remove(sessionID: sessionID, deletedAt: deletedAt)
+        removeSessionArtifacts(sessionID: sessionID)
         AppAccountSyncSignal.postLocalDataDidChange()
+    }
+
+    /// Removes the session-owned artifact directory (attachments, logs, state)
+    /// after a soft delete. The conversation text survives in the store; the
+    /// files do not, so restoring a deleted session loses its attachments.
+    /// Without this every deleted session leaked its directory on disk forever.
+    private func removeSessionArtifacts(sessionID: String, fileManager: FileManager = .default) {
+        guard let sessionsDirectory = storagePaths?.sessionsDirectory else { return }
+        let directory = sessionsDirectory.appendingPathComponent(sessionID, isDirectory: true)
+        guard fileManager.fileExists(atPath: directory.path) else { return }
+        Task.detached(priority: .utility) {
+            try? FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    /// Deletes every `sessions/<id>` directory whose id no longer belongs to a
+    /// live (non-deleted) session. Reclaims space leaked by sessions deleted
+    /// before `deleteSession` started removing artifact directories. Best run
+    /// off the main thread, e.g. once during app startup.
+    @discardableResult
+    public func sweepOrphanSessionDirectories(fileManager: FileManager = .default) throws -> [String] {
+        guard let sessionsDirectory = storagePaths?.sessionsDirectory,
+              fileManager.fileExists(atPath: sessionsDirectory.path) else { return [] }
+        let liveSessionIDs = Set(try store.sessions(includeDeleted: false, limit: Int.max).map(\.id))
+        var removed: [String] = []
+        for item in try fileManager.contentsOfDirectory(at: sessionsDirectory, includingPropertiesForKeys: nil, options: []) {
+            guard liveSessionIDs.contains(item.lastPathComponent) == false else { continue }
+            try fileManager.removeItem(at: item)
+            removed.append(item.lastPathComponent)
+        }
+        return removed
     }
 
     @discardableResult
@@ -592,11 +624,18 @@ public struct AppChatSessionRepository: Sendable {
         return try JSONDecoder().decode([AgentEventPresentation].self, from: data)
     }
 
+    /// Keep only the most recent entries so the fully-rewritten cache file
+    /// stays bounded; the store keeps the full history.
+    private static let activityTimelineCacheMaximumEntries = 500
+
     public func saveActivityTimelineCache(sessionID: String, timeline: [AgentEventPresentation]) throws {
         guard let directories = try storagePaths?.ensureSessionArtifactDirectories(sessionID: sessionID) else { return }
         try FileManager.default.createDirectory(at: directories.logs, withIntermediateDirectories: true)
         let url = directories.logs.appendingPathComponent("activity-timeline.json")
-        let data = try JSONEncoder().encode(timeline)
+        let trimmed = timeline.count > Self.activityTimelineCacheMaximumEntries
+            ? Array(timeline.suffix(Self.activityTimelineCacheMaximumEntries))
+            : timeline
+        let data = try JSONEncoder().encode(trimmed)
         try data.write(to: url, options: [.atomic])
     }
 

@@ -168,6 +168,16 @@ public enum AppMemoryOSSearchKernelFactory {
         return object
     }
 
+    /// When the index was last fully rebuilt, parsed from `connor-meta.json`.
+    /// Returns nil when the meta file is missing, unreadable, or predates the
+    /// builtAt field, so callers can fall back to treating the index as fresh.
+    public static func lastFullRebuildDate(indexDirectory: URL, fileManager: FileManager = .default) -> Date? {
+        guard let object = readMetaObject(indexDirectory: indexDirectory, fileManager: fileManager),
+              let builtAt = object["builtAt"] as? String
+        else { return nil }
+        return ISO8601DateFormatter().date(from: builtAt)
+    }
+
     private static func comparableFingerprint(_ object: [String: Any]) -> [String: String] {
         var result: [String: String] = [:]
         for key in ["databaseFileSize", "walFileSize"] {
