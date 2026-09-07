@@ -1042,7 +1042,7 @@ enum LocalShellExecutor {
         case .exited:
             break
         }
-
+        
         try stdoutHandle.close()
         try stderrHandle.close()
         let stdoutData = try await LocalShellExecutor.readCaptureFile(at: stdoutURL)

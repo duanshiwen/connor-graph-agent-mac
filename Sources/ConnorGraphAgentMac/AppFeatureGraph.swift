@@ -97,6 +97,7 @@ final class AppFeatureGraph {
     let knowledgeCreator: CloudKnowledgeCreatorStore
     let rss: RSSFeatureModel
     let interactiveWeb: InteractiveWebFeatureModel
+    let miniApps: MiniAppFeatureModel
     let skills: SkillRuntimeFeatureModel
     let appSettings: AppSettingsFeatureModel
     let inputSettings: InputSettingsFeatureModel
@@ -132,6 +133,7 @@ final class AppFeatureGraph {
         knowledgeCreator: CloudKnowledgeCreatorStore,
         rss: RSSFeatureModel,
         interactiveWeb: InteractiveWebFeatureModel,
+        miniApps: MiniAppFeatureModel,
         skills: SkillRuntimeFeatureModel,
         appSettings: AppSettingsFeatureModel,
         inputSettings: InputSettingsFeatureModel,
@@ -162,6 +164,7 @@ final class AppFeatureGraph {
         self.knowledgeCreator = knowledgeCreator
         self.rss = rss
         self.interactiveWeb = interactiveWeb
+        self.miniApps = miniApps
         self.skills = skills
         self.appSettings = appSettings
         self.inputSettings = inputSettings

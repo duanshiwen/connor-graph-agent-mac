@@ -20,5 +20,10 @@
 	<string>康纳同学需要访问麦克风，用于录制聊天语音消息和把当前会话中的语音转换为文字。</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>康纳同学需要使用系统语音识别，用于把你在当前会话中的语音实时转换为输入框文字。</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
 </dict>
 </plist>

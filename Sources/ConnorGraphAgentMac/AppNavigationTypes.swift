@@ -17,6 +17,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case mail = "Mail"
     case rss = "RSS"
     case interactiveWeb = "互动网页"
+    case miniApps = "小程序"
     case sources = "Sources"
     case skills = "Skills"
     case knowledgeMarketplace = "知识市场"

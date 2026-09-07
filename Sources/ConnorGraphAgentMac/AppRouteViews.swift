@@ -90,3 +90,19 @@ struct InteractiveWebDetailRouteView: View {
         InteractiveWebDetailPane(model: model, forwarding: forwarding)
     }
 }
+
+struct MiniAppListRouteView: View {
+    @Bindable var model: MiniAppFeatureModel
+
+    var body: some View {
+        MiniAppListPane(model: model)
+    }
+}
+
+struct MiniAppDetailRouteView: View {
+    @Bindable var model: MiniAppFeatureModel
+
+    var body: some View {
+        MiniAppDetailPane(model: model)
+    }
+}

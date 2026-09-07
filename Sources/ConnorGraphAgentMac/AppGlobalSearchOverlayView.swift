@@ -110,6 +110,8 @@ struct AppGlobalSearchOverlayView: View {
 
                 sessionsSection(results: state.sessionResults)
                 knowledgeMarketplaceSection(results: state.knowledgeBaseResults)
+                miniAppsSection(results: state.miniAppResults)
+                interactiveWebSection(results: state.interactiveWebResults)
                 resultSection(kind: .calendar, results: state.calendarResults)
                 resultSection(kind: .rss, results: state.rssResults)
                 resultSection(kind: .mail, results: state.mailResults)
@@ -356,6 +358,84 @@ struct AppGlobalSearchOverlayView: View {
                             }
                             .padding(.horizontal, AppShellLayout.spaceS).padding(.vertical, 7)
                             .background(stateSelected(.knowledgeBase(result.id)) ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .frame(minHeight: 58, alignment: .top)
+        .padding(.bottom, 2)
+    }
+
+    private func miniAppsSection(results: [GlobalSearchMiniAppResult]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: AppShellLayout.spaceXS) {
+                Image(systemName: GlobalSearchSectionKind.miniApps.systemImage)
+                    .font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary).frame(width: 16)
+                Text(GlobalSearchSectionKind.miniApps.title)
+                    .font(AppListTypography.rowCaptionEmphasized).foregroundStyle(.secondary)
+                if !results.isEmpty {
+                    Text("\(results.count) 个")
+                        .font(AppListTypography.rowCaption).foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+                Button("查看全部 ›") { model.showAllResults(kind: .miniApps) }
+                    .buttonStyle(.plain)
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(results.isEmpty ? Color.secondary.opacity(0.45) : Color.accentColor)
+                    .disabled(query.isEmpty || results.isEmpty)
+            }
+            .padding(.horizontal, AppShellLayout.spaceS).padding(.top, AppShellLayout.spaceXS)
+
+            if state.isSectionLoading(.miniApps), results.isEmpty {
+                GlobalSearchLoadingSourceRow()
+            } else if results.isEmpty {
+                GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.miniApps.emptyTitle)
+            } else {
+                VStack(spacing: 1) {
+                    ForEach(results.prefix(4)) { result in
+                        Button { model.openMiniApp(result.appID) } label: {
+                            GlobalSearchMiniAppRow(result: result, isSelected: stateSelected(.miniApp(result.appID)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .frame(minHeight: 58, alignment: .top)
+        .padding(.bottom, 2)
+    }
+
+    private func interactiveWebSection(results: [GlobalSearchInteractiveWebResult]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: AppShellLayout.spaceXS) {
+                Image(systemName: GlobalSearchSectionKind.interactiveWeb.systemImage)
+                    .font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary).frame(width: 16)
+                Text(GlobalSearchSectionKind.interactiveWeb.title)
+                    .font(AppListTypography.rowCaptionEmphasized).foregroundStyle(.secondary)
+                if !results.isEmpty {
+                    Text("\(results.count) 个")
+                        .font(AppListTypography.rowCaption).foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+                Button("查看全部 ›") { model.showAllResults(kind: .interactiveWeb) }
+                    .buttonStyle(.plain)
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(results.isEmpty ? Color.secondary.opacity(0.45) : Color.accentColor)
+                    .disabled(query.isEmpty || results.isEmpty)
+            }
+            .padding(.horizontal, AppShellLayout.spaceS).padding(.top, AppShellLayout.spaceXS)
+
+            if state.isSectionLoading(.interactiveWeb), results.isEmpty {
+                GlobalSearchLoadingSourceRow()
+            } else if results.isEmpty {
+                GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.interactiveWeb.emptyTitle)
+            } else {
+                VStack(spacing: 1) {
+                    ForEach(results.prefix(4)) { result in
+                        Button { model.openInteractiveWebProject(result.projectID) } label: {
+                            GlobalSearchInteractiveWebRow(result: result, isSelected: stateSelected(.interactiveWebProject(result.projectID)))
                         }
                         .buttonStyle(.plain)
                     }
@@ -697,6 +777,98 @@ private struct GlobalSearchBrowserHistoryRow: View {
 
     private var rowBackground: Color {
         isHovering ? Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.hoverAccentOpacity) : Color.clear
+    }
+}
+
+private struct GlobalSearchMiniAppRow: View {
+    var result: GlobalSearchMiniAppResult
+    var isSelected: Bool = false
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
+            Image(systemName: "square.grid.2x2.fill")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(.indigo)
+                .frame(width: 18)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: AppShellLayout.spaceXS) {
+                    Text(result.name.isEmpty ? "未命名" : result.name)
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text([result.sourceBadge, result.scopeBadge, result.relationBadge].joined(separator: " · "))
+                        .font(AppListTypography.rowCaptionEmphasized)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if !result.purpose.isEmpty {
+                    Text(result.purpose)
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .padding(.vertical, 6)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .onHover { isHovering = $0 }
+    }
+
+    private var rowBackground: Color {
+        if isSelected { return Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.selectedAccentOpacity) }
+        return isHovering ? Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.hoverAccentOpacity) : Color.clear
+    }
+}
+
+private struct GlobalSearchInteractiveWebRow: View {
+    var result: GlobalSearchInteractiveWebResult
+    var isSelected: Bool = false
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
+            Image(systemName: "globe")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(.teal)
+                .frame(width: 18)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: AppShellLayout.spaceXS) {
+                    Text(result.title.isEmpty ? "未命名" : result.title)
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(result.status)
+                        .font(AppListTypography.rowCaptionEmphasized)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if !result.subtitle.isEmpty {
+                    Text(result.subtitle)
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .padding(.vertical, 6)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .onHover { isHovering = $0 }
+    }
+
+    private var rowBackground: Color {
+        if isSelected { return Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.selectedAccentOpacity) }
+        return isHovering ? Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.hoverAccentOpacity) : Color.clear
     }
 }
 

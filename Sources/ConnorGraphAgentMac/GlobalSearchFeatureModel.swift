@@ -14,6 +14,8 @@ final class GlobalSearchFeatureModel {
         case nativeResult(NativeSearchResult)
         case browserHistoryRecord(BrowserHistoryRecord)
         case knowledgeBase(String)
+        case miniApp(String)
+        case interactiveWebProject(String)
         case showAll(GlobalSearchSectionKind, query: String)
     }
 
@@ -44,6 +46,8 @@ final class GlobalSearchFeatureModel {
     @ObservationIgnored var prepareNativeSearchProvider: @MainActor @Sendable (NativeSearchSourceKind) async -> Void = { _ in }
     @ObservationIgnored var defaultSearchURLProvider: (String) -> URL? = { _ in nil }
     @ObservationIgnored var knowledgeMarketplaceSearchProvider: (String) async -> [CloudMarketplaceKnowledgeBase] = { _ in [] }
+    @ObservationIgnored var miniAppSearchProvider: (String) async -> [GlobalSearchMiniAppResult] = { _ in [] }
+    @ObservationIgnored var interactiveWebSearchProvider: (String) async -> [GlobalSearchInteractiveWebResult] = { _ in [] }
     @ObservationIgnored var onDestination: ((Destination) -> Void)?
 
     init(
@@ -71,6 +75,8 @@ final class GlobalSearchFeatureModel {
         items.append(contentsOf: previewState.rssResults.map { .nativeResult($0.id) })
         items.append(contentsOf: previewState.mailResults.map { .nativeResult($0.id) })
         items.append(contentsOf: previewState.browserHistoryResults.prefix(3).map { .nativeResult($0.id) })
+        items.append(contentsOf: previewState.miniAppResults.prefix(8).map { .miniApp($0.appID) })
+        items.append(contentsOf: previewState.interactiveWebResults.prefix(8).map { .interactiveWebProject($0.projectID) })
         return items
     }
 
@@ -130,6 +136,8 @@ final class GlobalSearchFeatureModel {
             guard let result = results.first(where: { $0.id == resultID }) else { return }
             openResult(result)
         case .knowledgeBase(let id): openKnowledgeBase(id)
+        case .miniApp(let appID): openMiniApp(appID)
+        case .interactiveWebProject(let projectID): openInteractiveWebProject(projectID)
         }
     }
 
@@ -195,6 +203,18 @@ final class GlobalSearchFeatureModel {
         onDestination?(.knowledgeBase(id))
     }
 
+    func openMiniApp(_ appID: String) {
+        recordHistoryIfNeeded(query)
+        dismissOverlay()
+        onDestination?(.miniApp(appID))
+    }
+
+    func openInteractiveWebProject(_ projectID: String) {
+        recordHistoryIfNeeded(query)
+        dismissOverlay()
+        onDestination?(.interactiveWebProject(projectID))
+    }
+
     func showAllResults(kind: GlobalSearchSectionKind) {
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
         dismissOverlay()
@@ -219,7 +239,7 @@ final class GlobalSearchFeatureModel {
         guard canApply(query: trimmed, generation: generation) else { return }
         previewState = GlobalSearchPreviewState(
             query: trimmed,
-            loadingSections: [.knowledgeMarketplace, .calendar, .rss, .mail, .browserHistory],
+            loadingSections: [.knowledgeMarketplace, .calendar, .rss, .mail, .browserHistory, .miniApps, .interactiveWeb],
             sessionResults: sessionResults,
             searchTokens: tokens,
             errorMessage: nil
@@ -227,7 +247,9 @@ final class GlobalSearchFeatureModel {
         normalizeSelection()
         async let marketplace: Void = refreshKnowledgeMarketplace(query: trimmed, tokens: tokens, generation: generation)
         async let native: Void = refreshNativeSections(query: trimmed, tokens: tokens, generation: generation)
-        _ = await (marketplace, native)
+        async let miniApps: Void = refreshMiniApps(query: trimmed, tokens: tokens, generation: generation)
+        async let webProjects: Void = refreshInteractiveWeb(query: trimmed, tokens: tokens, generation: generation)
+        _ = await (marketplace, native, miniApps, webProjects)
     }
 
     private func refreshKnowledgeMarketplace(query: String, tokens: [String], generation: UInt64) async {
@@ -238,6 +260,30 @@ final class GlobalSearchFeatureModel {
         state.searchTokens = tokens
         state.knowledgeBaseResults = results
         state.loadingSections.remove(.knowledgeMarketplace)
+        previewState = state
+        normalizeSelection()
+    }
+
+    private func refreshMiniApps(query: String, tokens: [String], generation: UInt64) async {
+        let results = await miniAppSearchProvider(query)
+        guard canApply(query: query, generation: generation) else { return }
+        var state = previewState
+        state.query = query
+        state.searchTokens = tokens
+        state.miniAppResults = results
+        state.loadingSections.remove(.miniApps)
+        previewState = state
+        normalizeSelection()
+    }
+
+    private func refreshInteractiveWeb(query: String, tokens: [String], generation: UInt64) async {
+        let results = await interactiveWebSearchProvider(query)
+        guard canApply(query: query, generation: generation) else { return }
+        var state = previewState
+        state.query = query
+        state.searchTokens = tokens
+        state.interactiveWebResults = results
+        state.loadingSections.remove(.interactiveWeb)
         previewState = state
         normalizeSelection()
     }
@@ -484,6 +530,8 @@ final class GlobalSearchFeatureModel {
         case .mail: state.mailResults = result.results
         case .browserHistory: state.browserHistoryResults = result.results
         case .knowledgeMarketplace: break
+        case .miniApps: break
+        case .interactiveWeb: break
         }
         previewState = state; normalizeSelection()
     }
