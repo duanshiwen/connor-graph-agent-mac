@@ -25,7 +25,7 @@ impl MemorySearchIndexer {
         writer.commit().map_err(|err| KernelError::new(err.to_string()))?;
         // Block until background merges finish so no stale segment files are
         // left behind when the writer is dropped.
-        writer.wait_merging_threads();
+        writer.wait_merging_threads().map_err(|err| KernelError::new(err.to_string()))?;
         Ok(documents.len())
     }
 
@@ -54,7 +54,7 @@ impl MemorySearchIndexer {
         writer.delete_term(Term::from_field_text(fields.id, &item.id));
         writer.add_document(document_from_item(&fields, item)).map_err(|err| KernelError::new(err.to_string()))?;
         writer.commit().map_err(|err| KernelError::new(err.to_string()))?;
-        writer.wait_merging_threads();
+        writer.wait_merging_threads().map_err(|err| KernelError::new(err.to_string()))?;
         Ok(1)
     }
 
@@ -69,7 +69,7 @@ impl MemorySearchIndexer {
             writer.delete_term(Term::from_field_text(fields.id, &id));
         }
         writer.commit().map_err(|err| KernelError::new(err.to_string()))?;
-        writer.wait_merging_threads();
+        writer.wait_merging_threads().map_err(|err| KernelError::new(err.to_string()))?;
         Ok(0)
     }
 
@@ -93,7 +93,7 @@ impl MemorySearchIndexer {
             }
         }
         writer.commit().map_err(|err| KernelError::new(err.to_string()))?;
-        writer.wait_merging_threads();
+        writer.wait_merging_threads().map_err(|err| KernelError::new(err.to_string()))?;
         Ok(upserts.len())
     }
 
