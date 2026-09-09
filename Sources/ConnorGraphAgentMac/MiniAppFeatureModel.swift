@@ -421,7 +421,7 @@ public final class MiniAppFeatureModel {
     func searchMatches(query: String) async -> [GlobalSearchMiniAppResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         var results: [GlobalSearchMiniAppResult] = []
-        if let library {
+        if library != nil {
             for entry in loadLocalEntries(query: trimmed) {
                 results.append(GlobalSearchMiniAppResult(
                     appID: entry.appID, name: entry.name, purpose: entry.purpose,
