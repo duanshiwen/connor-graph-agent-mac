@@ -1,6 +1,6 @@
 # Connor Base · M3-K9 同步 golden fixtures（三端 SHA-256 对账）
 
-本目录为**同步对象对账**类 golden fixture（独立于 `../golden/` 的工具执行类，避免污染 20 条计数断言）。
+本目录为**同步对象对账**类 golden fixture（独立于 `../golden/` 的工具执行类，避免污染 22 条计数断言）。M7 起 `01-sync-budget-app.json` 为方法优先范本：recordExpense（写：assert amount>0 → mutate 流水表 → reply）/ monthlySummary（读：按类别汇总）/ totalAmount（读：总额），guide 为双态（authoring + usage，各十一段）。
 
 ## 语义
 给定同一 AppPackage（四件套 + 版本）与种子数据，三端（Mac/Android/后端）各自在真实内核上产出**字节一致**的确定性结果：

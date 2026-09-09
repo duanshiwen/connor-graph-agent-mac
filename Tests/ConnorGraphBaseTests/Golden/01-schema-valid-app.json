@@ -3,42 +3,170 @@
   "given": {
     "schema": {
       "tables": [
-        { "name": "expenses", "fields": [
-          { "name": "amount", "type": "number", "required": true, "range": { "min": 0 } },
-          { "name": "category", "type": "enum", "enum": ["food", "transport", "home", "other"] },
-          { "name": "date", "type": "date", "required": true },
-          { "name": "note", "type": "text" },
-          { "name": "owner", "type": "relation", "relation": { "table": "members", "on": "id" } }
-        ] },
-        { "name": "members", "fields": [
-          { "name": "name", "type": "text", "required": true }
-        ] }
+        {
+          "name": "expenses",
+          "fields": [
+            {
+              "name": "amount",
+              "type": "number",
+              "required": true,
+              "range": {
+                "min": 0
+              }
+            },
+            {
+              "name": "category",
+              "type": "enum",
+              "enum": [
+                "food",
+                "transport",
+                "home",
+                "other"
+              ]
+            },
+            {
+              "name": "date",
+              "type": "date",
+              "required": true
+            },
+            {
+              "name": "note",
+              "type": "text"
+            },
+            {
+              "name": "owner",
+              "type": "relation",
+              "relation": {
+                "table": "members",
+                "on": "id"
+              }
+            }
+          ]
+        },
+        {
+          "name": "members",
+          "fields": [
+            {
+              "name": "name",
+              "type": "text",
+              "required": true
+            }
+          ]
+        }
       ]
     },
     "methods": [],
     "input": {
       "tool": "base.app.create",
       "args": {
-        "manifest": { "appID": "acct", "name": "记账", "domain": "finance", "visibility": "private", "sdkVersion": 1, "requiredCapabilities": [] },
-        "schema": { "tables": [
-          { "name": "expenses", "fields": [
-            { "name": "amount", "type": "number", "required": true, "range": { "min": 0 } },
-            { "name": "category", "type": "enum", "enum": ["food", "transport", "home", "other"] },
-            { "name": "date", "type": "date", "required": true },
-            { "name": "note", "type": "text" },
-            { "name": "owner", "type": "relation", "relation": { "table": "members", "on": "id" } }
-          ] },
-          { "name": "members", "fields": [
-            { "name": "name", "type": "text", "required": true }
-          ] }
-        ] },
-        "guide": { "frontmatter": { "appID": "acct", "name": "记账", "domain": "finance", "visibility": "private", "sdkVersion": 1, "whenToUse": "当用户说记一笔且是个人收支时用", "whenNotToUse": "当只是闲聊消费观时不用" }, "sections": [] }
+        "manifest": {
+          "appID": "acct",
+          "name": "记账",
+          "domain": "finance",
+          "visibility": "private",
+          "sdkVersion": 1,
+          "requiredCapabilities": []
+        },
+        "schema": {
+          "tables": [
+            {
+              "name": "expenses",
+              "fields": [
+                {
+                  "name": "amount",
+                  "type": "number",
+                  "required": true,
+                  "range": {
+                    "min": 0
+                  }
+                },
+                {
+                  "name": "category",
+                  "type": "enum",
+                  "enum": [
+                    "food",
+                    "transport",
+                    "home",
+                    "other"
+                  ]
+                },
+                {
+                  "name": "date",
+                  "type": "date",
+                  "required": true
+                },
+                {
+                  "name": "note",
+                  "type": "text"
+                },
+                {
+                  "name": "owner",
+                  "type": "relation",
+                  "relation": {
+                    "table": "members",
+                    "on": "id"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "members",
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "text",
+                  "required": true
+                }
+              ]
+            }
+          ]
+        },
+        "guide": {
+          "authoring": {
+            "frontmatter": {
+              "appID": "acct",
+              "name": "记账",
+              "domain": "finance",
+              "visibility": "private",
+              "sdkVersion": 1,
+              "whenToUse": "属主需要建/改个人收支 App 时用",
+              "whenNotToUse": "与记账无关的维护不用"
+            },
+            "sections": []
+          },
+          "usage": {
+            "frontmatter": {
+              "appID": "acct",
+              "name": "记账",
+              "domain": "finance",
+              "visibility": "private",
+              "sdkVersion": 1,
+              "whenToUse": "当用户说记一笔且是个人收支时用",
+              "whenNotToUse": "当只是闲聊消费观时不用"
+            },
+            "sections": []
+          }
+        }
       }
     },
-    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 0 }
+    "appContext": {
+      "appID": "acct",
+      "visibility": "private",
+      "packageVersion": 0
+    }
   },
   "then": {
-    "envelope": { "ok": true, "data": { "appID": "acct", "packageVersion": 1 }, "error": null, "site": "local" },
+    "envelope": {
+      "ok": true,
+      "data": {
+        "appID": "acct",
+        "packageVersion": 1,
+        "methodsEmpty": true
+      },
+      "error": null,
+      "site": "local"
+    },
     "errorCode": null
-  }
+  },
+  "notes": "M7：guide 双态（authoring + usage）；methods 为空 → 仍建包成功但 methodsEmpty=true（属主先在制作面完善方法后才可从运行面调用）。"
 }

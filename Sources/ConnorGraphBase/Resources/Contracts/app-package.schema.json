@@ -3,7 +3,7 @@
   "$id": "base.app-package.schema.v1",
   "contractVersion": "1.0.0",
   "title": "Connor Base · AppPackage 结构与校验 Schema v1",
-  "description": "小应用包（AppPackage）四件套的结构定义与校验 Schema：manifest（清单）+ schema（结构 DDL + 确定性迁移）+ methods（声明式方法 DAG）+ guide（使用指南十一段）。另含 App Card（内核确定性编译，含 compatible 标志，无 views 字段）与同步记录布局（base_apps/base_pkg_/base_records_/base_keys/墓碑/grant/install）的规范化描述。四件套同批、指南必随，签名级变更触发迁移与指南漂移校验（GUIDE_OUT_OF_SYNC）。",
+  "description": "小应用包（AppPackage）四件套的结构定义与校验 Schema：manifest（清单）+ schema（结构 DDL + 确定性迁移）+ methods（声明式方法 DAG）+ guide（双态指南 guide.authoring + guide.usage，每态十一段，M7 硬切）。另含 App Card（内核确定性编译，含 compatible 标志，无 views 字段）与同步记录布局（base_apps/base_pkg_/base_records_/base_keys/墓碑/grant/install）的规范化描述。四件套同批、指南必随，签名级变更触发迁移与指南漂移校验（GUIDE_OUT_OF_SYNC）。",
   "source": {
     "spec": "《Connor Base · 通用小应用平台方案细化（v0.12 · 全量合订版）》§2.1/§3.4/§6.4",
     "implementation": "CONNOR-BASE-ENGINEERING-PLAN.md v1.5"
@@ -315,12 +315,34 @@
             "mutate",
             "assert",
             "call",
-            "reply"
+            "reply",
+            "export.csv"
           ]
         },
         "table": {
           "type": "string",
-          "description": "query/aggregate/mutate 步骤目标表。"
+          "description": "query/aggregate/mutate/export.csv 步骤目标表。"
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "export.csv 步骤允许导出的列名白名单（CSV 表头按此顺序输出）。"
+        },
+        "maxRows": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "export.csv 步骤行数上限；查询结果超限即 VALIDATION_FAILED。"
+        },
+        "as": {
+          "type": "string",
+          "description": "export.csv 步骤产出的 CSV 内容写入的变量名。"
+        },
+        "filter": {
+          "type": "object",
+          "description": "export.csv 步骤的可选结构化过滤（见 base.sdk.v1.json query.filter）。"
         },
         "query": {
           "type": "object",
@@ -373,7 +395,26 @@
     },
     "guideDef": {
       "type": "object",
-      "description": "App Guide 十一段：创建时同步写、签名级变更时同步改，漂移即拒（GUIDE_OUT_OF_SYNC）。",
+      "description": "App Guide 双态（M7 硬切）：guide.authoring（属主制作面指南）+ guide.usage（使用面指南），两态都是 REQUIRED——缺任一态即校验失败（VALIDATION_FAILED）。每态保持十一段结构（frontmatter + 11 sections）；创建时同步写、签名级变更时同步改，漂移即拒（GUIDE_OUT_OF_SYNC）。新包 guide 形如 {authoring: {...}, usage: {...}}。",
+      "required": [
+        "authoring",
+        "usage"
+      ],
+      "properties": {
+        "authoring": {
+          "$ref": "#/$defs/guideStateDef",
+          "description": "属主制作面态：frontmatter 的 whenToUse/whenNotToUse 取属主口径（何时该建/改/扩展该 App）。"
+        },
+        "usage": {
+          "$ref": "#/$defs/guideStateDef",
+          "description": "使用面态：frontmatter 保持用户触达口径（何时调用该 App 的方法）。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "guideStateDef": {
+      "type": "object",
+      "description": "指南单态：frontmatter + 十一段 sections（每态独立成段，索引 1–11）。",
       "required": [
         "frontmatter",
         "sections"
@@ -412,7 +453,7 @@
             },
             "whenToUse": {
               "type": "string",
-              "description": "路由判据（v0.9）：用用户真实触发语气写场景句，如「当用户说『记一笔』且是个人收支时用」。"
+              "description": "路由判据（v0.9）：用真实触发语气写场景句。authoring 态取属主口径（何时建/改/扩展）；usage 态取用户口径（如「当用户说『记一笔』且是个人收支时用」）。"
             },
             "whenNotToUse": {
               "type": "string",

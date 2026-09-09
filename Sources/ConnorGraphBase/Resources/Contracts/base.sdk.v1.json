@@ -19,6 +19,7 @@
   "tools": [
     {
       "name": "base.guide",
+      "surface": "always",
       "group": "contract",
       "milestone": "M1",
       "permission": "none",
@@ -39,6 +40,7 @@
     },
     {
       "name": "base.app.create",
+      "surface": "authoring",
       "group": "app-lifecycle",
       "milestone": "M1",
       "permission": "baseManageApps",
@@ -78,6 +80,7 @@
     },
     {
       "name": "base.app.delete",
+      "surface": "authoring",
       "group": "app-lifecycle",
       "milestone": "M1",
       "permission": "baseManageApps",
@@ -101,6 +104,7 @@
     },
     {
       "name": "base.app.list",
+      "surface": "always",
       "group": "app-lifecycle",
       "milestone": "M1",
       "permission": "baseRead",
@@ -130,6 +134,7 @@
     },
     {
       "name": "base.app.get",
+      "surface": "always",
       "group": "app-lifecycle",
       "milestone": "M1",
       "permission": "baseRead",
@@ -157,6 +162,7 @@
     },
     {
       "name": "base.table.create",
+      "surface": "authoring",
       "group": "structure",
       "milestone": "M1",
       "permission": "baseManageSchema",
@@ -184,6 +190,7 @@
     },
     {
       "name": "base.table.alter",
+      "surface": "authoring",
       "group": "structure",
       "milestone": "M1",
       "permission": "baseManageSchema",
@@ -215,6 +222,7 @@
     },
     {
       "name": "base.record.get",
+      "surface": "authoring",
       "group": "data-read",
       "milestone": "M1",
       "permission": "baseRead",
@@ -245,6 +253,7 @@
     },
     {
       "name": "base.query.select",
+      "surface": "authoring",
       "group": "data-read",
       "milestone": "M1",
       "permission": "baseRead",
@@ -310,6 +319,7 @@
     },
     {
       "name": "base.query.aggregate",
+      "surface": "authoring",
       "group": "data-read",
       "milestone": "M1",
       "permission": "baseRead",
@@ -391,6 +401,7 @@
     },
     {
       "name": "base.record.mutate",
+      "surface": "authoring",
       "group": "data-write",
       "milestone": "M1",
       "permission": "baseWrite",
@@ -453,6 +464,7 @@
     },
     {
       "name": "base.import.csv",
+      "surface": "authoring",
       "group": "data-exchange",
       "milestone": "M1",
       "permission": "baseWrite",
@@ -490,6 +502,7 @@
     },
     {
       "name": "base.export.csv",
+      "surface": "authoring",
       "group": "data-exchange",
       "milestone": "M1",
       "permission": "baseRead",
@@ -519,6 +532,7 @@
     },
     {
       "name": "base.app.update",
+      "surface": "authoring",
       "group": "app-lifecycle",
       "milestone": "M2",
       "permission": "baseManageApps",
@@ -561,6 +575,7 @@
     },
     {
       "name": "base.method.define",
+      "surface": "authoring",
       "group": "method",
       "milestone": "M2",
       "permission": "baseManageMethods",
@@ -587,6 +602,7 @@
     },
     {
       "name": "base.method.invoke",
+      "surface": "runtime",
       "group": "method",
       "milestone": "M2",
       "permission": "baseExecute",
@@ -617,6 +633,7 @@
     },
     {
       "name": "base.method.remove",
+      "surface": "authoring",
       "group": "method",
       "milestone": "M2",
       "permission": "baseManageMethods",
@@ -646,6 +663,7 @@
     },
     {
       "name": "base.audit.read",
+      "surface": "authoring",
       "group": "audit",
       "milestone": "M2",
       "permission": "baseRead",
@@ -679,6 +697,7 @@
     },
     {
       "name": "base.sync.status",
+      "surface": "always",
       "group": "sync",
       "milestone": "M3",
       "permission": "baseRead",
@@ -698,6 +717,7 @@
     },
     {
       "name": "base.app.grant",
+      "surface": "always",
       "group": "sharing",
       "milestone": "M4",
       "permission": "baseManageApps",
@@ -729,6 +749,7 @@
     },
     {
       "name": "base.asset.upload",
+      "surface": "authoring",
       "group": "asset",
       "milestone": "M4",
       "permission": "baseWrite",
@@ -760,6 +781,7 @@
     },
     {
       "name": "base.publish",
+      "surface": "authoring",
       "group": "publish",
       "milestone": "M4",
       "permission": "basePublish",
@@ -790,6 +812,7 @@
     },
     {
       "name": "base.share",
+      "surface": "authoring",
       "group": "publish",
       "milestone": "M4",
       "permission": "basePublish",
@@ -812,6 +835,7 @@
     },
     {
       "name": "base.unpublish",
+      "surface": "authoring",
       "group": "publish",
       "milestone": "M4",
       "permission": "basePublish",
@@ -834,6 +858,7 @@
     },
     {
       "name": "base.acl.set",
+      "surface": "authoring",
       "group": "publish",
       "milestone": "M4",
       "permission": "basePublish",
@@ -906,6 +931,14 @@
       "day",
       "week",
       "month"
+    ]
+  },
+  "surfaces": {
+    "description": "M7 三面硬切口径：每个工具必属且仅属一面。authoring=制作面（属主建/改 App 用）；runtime=运行面（方法执行面）；always=常驻面（制作/运行两侧都可得）。base.method.invoke 是唯一 runtime 工具，运行面不得出现任何 authoring 工具。",
+    "values": [
+      "authoring",
+      "runtime",
+      "always"
     ]
   },
   "errorCodes": {
@@ -1292,7 +1325,7 @@
           "items": {
             "type": "object"
           },
-          "description": "步骤类型：query/aggregate/mutate/assert(onFail: reject|warn)/call(跨 App exported 方法，深度上限 5)/reply(模板引用上游输出 JSONPath)。无循环、无任意代码、无外部网络。"
+          "description": "步骤类型：query/aggregate/mutate/assert(onFail: reject|warn)/call(跨 App exported 方法，深度上限 5)/reply(模板引用上游输出 JSONPath)/export.csv(列白名单+行数上限导出 CSV，含 export.csv 步骤的方法非只读)。无循环、无任意代码、无外部网络。"
         },
         "exports": {
           "type": "boolean",

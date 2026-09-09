@@ -17,40 +17,271 @@
       "tables": [
         {
           "name": "expenses",
-          "description": "支出记录",
+          "description": "支出流水",
           "fields": [
-            {"name": "amount", "type": "number", "required": true},
-            {"name": "category", "type": "enum", "enum": ["food", "transport", "other"], "required": true}
+            {
+              "name": "amount",
+              "type": "number",
+              "required": true
+            },
+            {
+              "name": "category",
+              "type": "enum",
+              "enum": [
+                "food",
+                "transport",
+                "other"
+              ],
+              "required": true
+            },
+            {
+              "name": "date",
+              "type": "text"
+            }
           ]
         }
       ]
     },
     "methods": [
       {
+        "name": "recordExpense",
+        "description": "记一笔支出（断言 amount>0 后写入流水表，并回执）",
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "amount",
+            "category"
+          ]
+        },
+        "steps": [
+          {
+            "type": "assert",
+            "path": "$input.amount",
+            "op": "gt",
+            "value": 0
+          },
+          {
+            "type": "mutate",
+            "table": "expenses",
+            "ops": [
+              {
+                "op": "insert",
+                "record": {
+                  "amount": "$input.amount",
+                  "category": "$input.category"
+                }
+              }
+            ]
+          },
+          {
+            "type": "reply",
+            "template": "已记录"
+          }
+        ]
+      },
+      {
+        "name": "monthlySummary",
+        "description": "本月按类别支出汇总",
+        "readOnly": true,
+        "inputSchema": {
+          "type": "object"
+        },
+        "steps": [
+          {
+            "type": "aggregate",
+            "table": "expenses",
+            "aggregations": [
+              {
+                "op": "sum",
+                "field": "amount",
+                "alias": "total"
+              }
+            ],
+            "groupBy": [
+              "category"
+            ]
+          },
+          {
+            "type": "reply",
+            "template": "$lastData"
+          }
+        ]
+      },
+      {
         "name": "totalAmount",
         "description": "支出总额",
         "readOnly": true,
         "steps": [
-          {"type": "aggregate", "table": "expenses", "aggregations": [{"op": "sum", "field": "amount", "as": "total"}]}
+          {
+            "type": "aggregate",
+            "table": "expenses",
+            "aggregations": [
+              {
+                "op": "sum",
+                "field": "amount",
+                "as": "total"
+              }
+            ]
+          }
         ]
       }
     ],
     "guide": {
-      "appID": "budget",
-      "title": "记账",
-      "whenToUse": "需要记录支出或查询支出汇总时",
-      "whenNotToUse": "与记账无关的对话",
-      "sections": [
-        {"title": "记录支出", "body": "使用 record.mutate 写入 expenses 表"},
-        {"title": "汇总查询", "body": "调用 totalAmount 方法查看支出总额"}
-      ]
+      "authoring": {
+        "frontmatter": {
+          "appID": "budget",
+          "name": "记账",
+          "domain": "finance",
+          "visibility": "private",
+          "sdkVersion": 1,
+          "whenToUse": "属主需要建/改个人收支结构或方法时用",
+          "whenNotToUse": "与记账维护无关时不用"
+        },
+        "sections": [
+          {
+            "index": 1,
+            "title": "是什么",
+            "body": "个人记账 App：记录支出流水（expenses 表）并以方法（recordExpense/monthlySummary/totalAmount）暴露能力。"
+          },
+          {
+            "index": 2,
+            "title": "什么时候用（whenToUse/whenNotToUse，路由判据）",
+            "body": "属主需要建/改个人收支结构或方法时用；属主口径：何时该扩展表字段、加写/读方法。"
+          },
+          {
+            "index": 3,
+            "title": "边界与反模式",
+            "body": "不建散表、不做草稿态；一次性事实走非结构化记忆；同域不重复建 App。"
+          },
+          {
+            "index": 4,
+            "title": "数据结构",
+            "body": "expenses(amount number 必填>0, category enum food/transport/other, date text)；members 预留。"
+          },
+          {
+            "index": 5,
+            "title": "方法工作流（写方法声明伴随读取）",
+            "body": "recordExpense（写）：断言 amount>0 → mutate 写 expenses → reply；伴随读取 monthlySummary（本月各类别支出小计）。monthlySummary（读）：aggregate 按类别 sum。totalAmount（读）：全量 sum。"
+          },
+          {
+            "index": 6,
+            "title": "权限与风险",
+            "body": "私有态起步，riskLevel=low；requiredCapabilities 为空，无网络/附件。"
+          },
+          {
+            "index": 7,
+            "title": "禁令（数字必出内核、warn 必呈现、不凭记忆假设）",
+            "body": "数字必出内核、warn 信号必呈现、不凭记忆假设数据。"
+          },
+          {
+            "index": 8,
+            "title": "跨 App 依赖（v1 只有 exported 方法调用一条路）",
+            "body": "无跨 App 依赖（imports 为空）；如需共享数据走 exported 只读方法。"
+          },
+          {
+            "index": 9,
+            "title": "常见错误与重试",
+            "body": "常见错误：amount<=0 → VALIDATION_FAILED；表/方法不存在 → NOT_FOUND。"
+          },
+          {
+            "index": 10,
+            "title": "结果呈现规范（富集模板）",
+            "body": "制作面口径：改表/改方法后必须同批更新 guide 两态并 bump 包版本（GUIDE_OUT_OF_SYNC）。"
+          },
+          {
+            "index": 11,
+            "title": "维护与版本",
+            "body": "包版本随签名级变更单调递增；本指南双态（authoring + usage）随包同步。"
+          }
+        ]
+      },
+      "usage": {
+        "frontmatter": {
+          "appID": "budget",
+          "name": "记账",
+          "domain": "finance",
+          "visibility": "private",
+          "sdkVersion": 1,
+          "whenToUse": "当用户说记一笔或问支出汇总且是个人收支时用",
+          "whenNotToUse": "当只是闲聊消费观时不用"
+        },
+        "sections": [
+          {
+            "index": 1,
+            "title": "是什么",
+            "body": "记账：记一笔支出、按类别看本月汇总、看支出总额。"
+          },
+          {
+            "index": 2,
+            "title": "什么时候用（whenToUse/whenNotToUse，路由判据）",
+            "body": "当用户说『记一笔』『这个月花了多少』且是个人收支时用；当只是闲聊消费观时不用。"
+          },
+          {
+            "index": 3,
+            "title": "边界与反模式",
+            "body": "数字不进散文记忆；一次性事实不建记录；不算不清的统计不猜。"
+          },
+          {
+            "index": 4,
+            "title": "数据结构",
+            "body": "expenses(amount, category, date)；流水按 id 追加。"
+          },
+          {
+            "index": 5,
+            "title": "方法工作流（写方法声明伴随读取）",
+            "body": "记一笔 → recordExpense(amount, category, date)；完成后自动伴随 monthlySummary 快照（2–4 个类别小计）。"
+          },
+          {
+            "index": 6,
+            "title": "权限与风险",
+            "body": "私有 App，仅本人可写可读；无外部能力。"
+          },
+          {
+            "index": 7,
+            "title": "禁令（数字必出内核、warn 必呈现、不凭记忆假设）",
+            "body": "所有数字出自内核方法返回，Agent 不心算；warn 信号必如实呈现。"
+          },
+          {
+            "index": 8,
+            "title": "跨 App 依赖（v1 只有 exported 方法调用一条路）",
+            "body": "无跨 App 依赖。"
+          },
+          {
+            "index": 9,
+            "title": "常见错误与重试",
+            "body": "amount 缺失或 <=0 → VALIDATION_FAILED，修正后重试；方法不存在 → NOT_FOUND。"
+          },
+          {
+            "index": 10,
+            "title": "结果呈现规范（富集模板）",
+            "body": "回复模板：操作回执一句 + 类别小计快照 + 与上月对比 + 一句立场建议。"
+          },
+          {
+            "index": 11,
+            "title": "维护与版本",
+            "body": "指南由属主维护，版本随包演进。"
+          }
+        ]
+      }
     }
   },
   "seed": {
     "expenses": [
-      {"id": "e1", "amount": 12.5, "category": "food"},
-      {"id": "e2", "amount": 8.0, "category": "transport"},
-      {"id": "e3", "amount": 20.0, "category": "food"}
+      {
+        "id": "e1",
+        "amount": 12.5,
+        "category": "food"
+      },
+      {
+        "id": "e2",
+        "amount": 8.0,
+        "category": "transport"
+      },
+      {
+        "id": "e3",
+        "amount": 20.0,
+        "category": "food"
+      }
     ]
   },
   "invoke": {
@@ -58,9 +289,14 @@
     "args": {}
   },
   "then": {
-    "packageFingerprint": "4191b4048e26c2298e9b4f0533a423f59c207729b82d1fb2ba5bae0211f13e6f",
-    "cardFingerprint": "db109159c890ba794fe486d72c924b1dd57331f181b3c17fdea87b6fddfac7af",
-    "guideFingerprint": "f61e73b20c2dae638e8a6f4387c8212528b33359d2f59de5968f56a2ed075da5",
-    "methodResult": [{"sum_amount": 40.5}]
+    "packageFingerprint": "ca53a1a278b7aa1a41edccd2cad78883f95341c45fd6d7374fb05606e7b3169e",
+    "cardFingerprint": "59a732325addf97d8854656917781a4c9ca939246a8246e09839846951fb3089",
+    "guideFingerprint": "34748a9542ee0e629e0b04385fbf2a70f65c7a5dd6e73ec018f520c28876b2b2",
+    "methodResult": [
+      {
+        "sum_amount": 40.5
+      }
+    ],
+    "notes": "M7 方法优先范本：recordExpense（写，断言+mutate+reply）/ monthlySummary（读，按类别汇总）/ totalAmount（读）；guide 双态（authoring + usage），各十一段。"
   }
 }

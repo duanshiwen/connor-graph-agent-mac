@@ -33,14 +33,15 @@
 - `then.envelope`：期望信封。**动态字段规则**：`traceId` 仅断言存在且为字符串；`site` 若在期望中出现则断言一致；`sync` 若出现则断言 `pending>=0` 且类型正确。`ok/data/error` 逐字段严格比较。
 - `then.errorCode`：期望的顶层错误码（非 null 时与 `envelope.error.code` 一致）。
 
-## M0 首批 20 条覆盖
+## 覆盖（M0 首批 20 条 + M7 追加 2 条 = 22 条）
 
 | 区间 | 覆盖 | fixture |
 |---|---|---|
-| 01–05 | schema 校验正/负（app/table create） | 01 valid · 02 表名非法 · 03 字段类型非法 · 04 缺必需字段 · 05 字段重名 |
+| 01–05 | schema 校验正/负（app/table create） | 01 valid（M7：guide 双态 + methodsEmpty 信封）· 02 表名非法 · 03 字段类型非法 · 04 缺必需字段 · 05 字段重名 |
 | 06–12 | filter 编译各操作符 + 非法操作符 | text eq/contains · number gte/between · date range · enum in · relation has · 非法 op |
 | 13–18 | mutate 原子批/dryRun/幂等/越界/版本冲突 | insert · 原子批 · dryRun · 幂等 · TABLE_NOT_IN_SCOPE · CONFLICT |
 | 19–20 | 方法 DAG 校验 | 只读方法含 mutate 拒 · 跨 App 调用深度超限拒 |
+| 21–22 | M7 硬切负例 | 21 guide 缺 usage 态拒（双态硬切）· 22 方法未知步骤 type 拒 |
 
 ## 维护纪律
 
