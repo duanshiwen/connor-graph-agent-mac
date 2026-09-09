@@ -226,7 +226,7 @@ final class GlobalSearchRuntimeCoordinator {
             case .miniApps:
                 browser.isVisible = false
                 shell.selection = .miniApps
-                Task { @MainActor [weak self] in self?.miniApps.searchText = query }
+                Task { @MainActor [weak self] in self?.miniApps.applySearchQuery(query) }
             case .interactiveWeb:
                 browser.isVisible = false
                 shell.selection = .interactiveWeb
