@@ -1,0 +1,23 @@
+{
+  "name": "21-guide-missing-usage-state",
+  "notes": "M7 指南双态硬切：guide 只有 authoring 态、缺 usage 态 → VALIDATION_FAILED（服务端 Upsert 校验，本地 golden 固化同一口径）。",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [ { "name": "amount", "type": "number" } ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.app.create",
+      "args": {
+        "manifest": { "appID": "acct", "name": "记账", "domain": "finance", "visibility": "private", "sdkVersion": 1, "requiredCapabilities": [] },
+        "schema": { "tables": [ { "name": "expenses", "fields": [ { "name": "amount", "type": "number" } ] } ] },
+        "guide": {
+          "authoring": { "frontmatter": { "appID": "acct", "name": "记账", "domain": "finance", "visibility": "private", "sdkVersion": 1, "whenToUse": "属主需要建/改个人收支 App 时", "whenNotToUse": "与记账无关的维护不用" }, "sections": [] }
+        }
+      }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 0 }
+  },
+  "then": {
+    "envelope": { "ok": false, "data": null, "error": { "code": "VALIDATION_FAILED", "message": "guide 缺 guide.usage 态", "hint": "guide 必须为双态：authoring + usage", "retryable": false }, "site": "local" },
+    "errorCode": "VALIDATION_FAILED"
+  }
+}

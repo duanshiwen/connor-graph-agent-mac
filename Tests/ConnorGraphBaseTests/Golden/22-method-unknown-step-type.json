@@ -1,0 +1,17 @@
+{
+  "name": "22-method-unknown-step-type",
+  "notes": "M7：方法步骤 type 必须在枚举内（query/aggregate/mutate/assert/call/reply/export.csv），未知类型 → VALIDATION_FAILED。",
+  "given": {
+    "schema": { "tables": [ { "name": "expenses", "fields": [ { "name": "amount", "type": "number" } ] } ] },
+    "methods": [],
+    "input": {
+      "tool": "base.method.define",
+      "args": { "appID": "acct", "method": { "name": "bad.step", "description": "未知步骤类型", "inputSchema": { "type": "object" }, "steps": [ { "type": "frobnicate", "table": "expenses" } ] } }
+    },
+    "appContext": { "appID": "acct", "visibility": "private", "packageVersion": 1 }
+  },
+  "then": {
+    "envelope": { "ok": false, "data": null, "error": { "code": "VALIDATION_FAILED", "message": "步骤 type 不合法", "hint": "须为 query/aggregate/mutate/assert/call/reply/export.csv", "retryable": false }, "site": "local" },
+    "errorCode": "VALIDATION_FAILED"
+  }
+}
