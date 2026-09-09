@@ -175,7 +175,7 @@ private struct MiniAppRowView: View {
 
 // MARK: - 小程序详情（右列）
 
-/// 「小程序」详情：功能说明 + 汇总提示。
+/// 「小程序」详情：Hero 卡片 + 分节卡片，宽度/样式/分割方式对齐 RSS、邮件详情页。
 struct MiniAppDetailPane: View {
     @Bindable var model: MiniAppFeatureModel
 
@@ -183,13 +183,22 @@ struct MiniAppDetailPane: View {
         Group {
             if let detail = model.selectedDetail {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        overviewSection(detail)
-                        functionSection(detail)
-                        summarySection(detail)
-                        guideSection(detail)
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                        MiniAppHeroCard(detail: detail)
+                        MiniAppDetailSection(title: "功能说明", systemImage: "text.alignleft") {
+                            functionContent(detail)
+                        }
+                        MiniAppDetailSection(title: "汇总提示", systemImage: "list.bullet.rectangle") {
+                            summaryContent(detail)
+                        }
+                        MiniAppDetailSection(title: "使用提示", systemImage: "lightbulb") {
+                            guideContent(detail)
+                        }
                     }
-                    .padding(20)
+                    .padding(.horizontal, AgentChatLayout.spaceXL)
+                    .padding(.vertical, AgentChatLayout.spaceL)
+                    .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
             } else if model.detailIsLoading {
                 VStack(spacing: 10) {
@@ -216,58 +225,28 @@ struct MiniAppDetailPane: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(AppShellColors.detailBackground)
     }
 
-    private func overviewSection(_ detail: MiniAppDetail) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(detail.name)
-                    .font(.title2.weight(.semibold))
-                MiniAppBadge(text: detail.sourceBadge, color: detail.source == .local ? .teal : .indigo)
-                MiniAppBadge(text: detail.scopeBadge, color: detail.scope == .privateOnly ? .gray : .blue)
-                MiniAppBadge(text: detail.relationBadge, color: detail.isOwned ? .green : .purple)
-            }
-            if !detail.ownerName.isEmpty {
-                Label("创建者：\(detail.ownerName)", systemImage: "person.crop.circle")
-                    .font(.caption)
+    private func functionContent(_ detail: MiniAppDetail) -> some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            if !detail.domain.isEmpty {
+                Text("领域：\(detail.domain)")
+                    .font(AgentChatTypography.body)
                     .foregroundStyle(.secondary)
             }
-            HStack(spacing: 16) {
-                Label("更新于 \(detail.updatedAt.isEmpty ? "—" : detail.updatedAt)", systemImage: "clock")
-                Label("风险等级：\(detail.riskLevel)", systemImage: "shield.lefthalf.filled")
-                Label("SDK v\(detail.sdkVersion)", systemImage: "chevron.left.forwardslash.chevron.right")
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+            Text(detail.purpose.isEmpty ? "（暂无功能说明）" : detail.purpose)
+                .font(AgentChatTypography.body)
+                .foregroundStyle(detail.purpose.isEmpty ? .tertiary : .primary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func functionSection(_ detail: MiniAppDetail) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("功能说明", systemImage: "text.alignleft")
-                .font(.headline)
-            VStack(alignment: .leading, spacing: 4) {
-                if !detail.domain.isEmpty {
-                    Text("领域：\(detail.domain)")
-                        .font(.callout)
-                }
-                Text(detail.purpose.isEmpty ? "（暂无功能说明）" : detail.purpose)
-                    .font(.callout)
-                    .foregroundStyle(detail.purpose.isEmpty ? .tertiary : .primary)
-                    .textSelection(.enabled)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-        }
-    }
-
-    private func summarySection(_ detail: MiniAppDetail) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("汇总提示", systemImage: "list.bullet.rectangle")
-                .font(.headline)
-            HStack(spacing: 12) {
+    private func summaryContent(_ detail: MiniAppDetail) -> some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+            HStack(spacing: AgentChatLayout.spaceS) {
                 MiniAppStatCard(value: "\(detail.methodCount)", title: "方法")
                 MiniAppStatCard(value: "\(detail.tableCount)", title: "数据表")
                 MiniAppStatCard(value: "\(detail.dataTableCount)", title: "已有数据表")
@@ -275,42 +254,133 @@ struct MiniAppDetailPane: View {
             }
             if !detail.methods.isEmpty {
                 Text("方法：\(detail.methods.joined(separator: "、"))")
-                    .font(.callout)
+                    .font(AgentChatTypography.meta)
                     .textSelection(.enabled)
             }
             if !detail.tableNames.isEmpty {
                 Text("数据表：\(detail.tableNames.joined(separator: "、"))")
-                    .font(.callout)
+                    .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func guideSection(_ detail: MiniAppDetail) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("使用提示", systemImage: "lightbulb")
-                .font(.headline)
-            VStack(alignment: .leading, spacing: 8) {
+    private func guideContent(_ detail: MiniAppDetail) -> some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            if !detail.guideSummary.isEmpty {
                 Text(detail.guideSummary)
-                    .font(.callout)
+                    .font(AgentChatTypography.body)
                     .textSelection(.enabled)
-                ForEach(detail.guideNotes, id: \.self) { note in
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "circle.fill")
-                            .font(.system(size: 5))
-                            .padding(.top, 5)
-                        Text(note)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
+            }
+            ForEach(detail.guideNotes, id: \.self) { note in
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 5))
+                        .padding(.top, 5)
+                    Text(note)
+                        .font(AgentChatTypography.body)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - 小程序详情卡片
+
+private struct MiniAppHeroCard: View {
+    var detail: MiniAppDetail
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.14))
+                Image(systemName: "square.grid.2x2.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .frame(width: 56, height: 56)
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                HStack(alignment: .firstTextBaseline, spacing: AgentChatLayout.spaceS) {
+                    Text(detail.name)
+                        .font(AgentChatTypography.title)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                    MiniAppBadge(text: detail.sourceBadge, color: detail.source == .local ? .teal : .indigo)
+                    MiniAppBadge(text: detail.scopeBadge, color: detail.scope == .privateOnly ? .gray : .blue)
+                    MiniAppBadge(text: detail.relationBadge, color: detail.isOwned ? .green : .purple)
+                }
+                if !detail.ownerName.isEmpty {
+                    Label("创建者：\(detail.ownerName)", systemImage: "person.crop.circle")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                HStack(spacing: AgentChatLayout.spaceS) {
+                    MiniAppMetaPill(status: "更新于 \(detail.updatedAt.isEmpty ? "—" : detail.updatedAt)", color: .secondary, systemImage: "clock")
+                    MiniAppMetaPill(status: "风险等级：\(detail.riskLevel)", color: .secondary, systemImage: "shield.lefthalf.filled")
+                    MiniAppMetaPill(status: "SDK v\(detail.sdkVersion)", color: .secondary, systemImage: "chevron.left.forwardslash.chevron.right")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
         }
+        .padding(AppShellLayout.spaceL)
+        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
+        )
+    }
+}
+
+private struct MiniAppDetailSection<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+            Label(title, systemImage: systemImage)
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.primary)
+            content
+        }
+        .padding(AppShellLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
+        )
+    }
+}
+
+private struct MiniAppMetaPill: View {
+    var status: String
+    var color: Color
+    var systemImage: String? = nil
+
+    var body: some View {
+        Label {
+            Text(status)
+                .lineLimit(1)
+        } icon: {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10.5, weight: .semibold))
+            }
+        }
+        .font(AgentChatTypography.micro)
+        .foregroundStyle(color)
+        .padding(.horizontal, AgentChatLayout.spaceS)
+        .frame(height: 23)
+        .background(color.opacity(0.12), in: Capsule())
     }
 }
 
@@ -342,8 +412,9 @@ private struct MiniAppStatCard: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
-        .frame(minWidth: 64)
+        .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppShellColors.hairline, lineWidth: 1))
     }
 }
