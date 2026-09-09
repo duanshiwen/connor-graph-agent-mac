@@ -96,6 +96,8 @@ public final class MiniAppFeatureModel {
     public private(set) var localCount = 0
     public private(set) var errorMessage: String?
     public private(set) var cloudUnavailable = false
+    /// 当前筛选关键词（由统一搜索注入，列表内不展示搜索框）。
+    /// 非空时本机本地过滤、云端服务端过滤，仅展示携带该关键词的小程序。
     public var searchText = ""
     public var selectedAppID: String?
     public private(set) var selectedDetail: MiniAppDetail?
@@ -106,7 +108,6 @@ public final class MiniAppFeatureModel {
     private let cloudClient: BaseCloudAPIClient?
     private var allLocal: [MiniAppEntry] = []
     private var allCloud: [MiniAppEntry] = []
-    private var searchTask: Task<Void, Never>?
     private var detailTasks: [String: Task<Void, Never>] = [:]
 
     public init(library: BaseLibraryStore?, cloudClient: BaseCloudAPIClient?) {
@@ -157,14 +158,17 @@ public final class MiniAppFeatureModel {
         }
     }
 
-    /// 搜索框变化：去抖后带关键词重拉（本机本地过滤，云端服务端过滤）。
-    public func searchTextDidChange() {
-        searchTask?.cancel()
-        searchTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            guard !Task.isCancelled, let self else { return }
-            self.reload()
-        }
+    /// 统一搜索入口：设置筛选关键词并立即重拉（本机本地过滤，云端服务端过滤）。
+    public func applySearchQuery(_ query: String) {
+        searchText = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        reload()
+    }
+
+    /// 清除筛选关键词并恢复完整列表（列表页 banner 的清除按钮）。
+    public func clearSearch() {
+        guard !trimmedQuery.isEmpty else { return }
+        searchText = ""
+        reload()
     }
 
     // MARK: 选中 + 详情

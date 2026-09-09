@@ -8,7 +8,7 @@ import ConnorGraphAgent
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
-private struct ListSearchFilterBanner: View {
+struct ListSearchFilterBanner: View {
     var query: String
     var sourceTitle: String
     var onClear: () -> Void

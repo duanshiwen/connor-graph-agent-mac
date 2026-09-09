@@ -4,16 +4,28 @@ import ConnorGraphAppSupport
 
 // MARK: - 小程序列表（左列）
 
-/// 「小程序」列表：本机 + 云端汇总、分页加载、可搜索。
+/// 「小程序」列表：本机 + 云端汇总、分页加载；筛选关键词由统一搜索注入。
 struct MiniAppListPane: View {
     @Bindable var model: MiniAppFeatureModel
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
-            searchBar
-            Divider()
+            AppListPaneHeader(title: "小程序") {
+                Button {
+                    model.reload()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.appIcon)
+                .disabled(model.isLoading)
+                .help("刷新小程序列表")
+                .accessibilityLabel("刷新小程序列表")
+            }
+
+            ListSearchFilterBanner(query: model.searchText, sourceTitle: "小程序") {
+                model.clearSearch()
+            }
+
             if model.isLoading && model.entries.isEmpty {
                 VStack(spacing: 10) {
                     ProgressView()
@@ -32,71 +44,25 @@ struct MiniAppListPane: View {
                 }
             }
         }
-        .background(Color(nsColor: .textBackgroundColor))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear { model.loadIfNeeded() }
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "square.grid.2x2.fill")
-                .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("小程序")
-                    .font(.headline)
-                Text(summaryText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button {
-                model.reload()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .help("刷新小程序列表")
-            .disabled(model.isLoading)
-        }
-        .padding(12)
-    }
-
-    private var summaryText: String {
-        if model.entries.isEmpty { return "本机 + 云端汇总" }
-        let total = model.localCount + model.cloudTotal
-        return "共 \(total) 个 · 本机 \(model.localCount) · 云端 \(model.cloudTotal)"
-    }
-
-    private var searchBar: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("搜索名称 / 功能 / 领域…", text: $model.searchText)
-                .textFieldStyle(.plain)
-                .onChange(of: model.searchText) { _, _ in
-                    model.searchTextDidChange()
-                }
-            if !model.searchText.isEmpty {
-                Button {
-                    model.searchText = ""
-                    model.searchTextDidChange()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-    }
-
     private var list: some View {
-        List(selection: $model.selectedAppID) {
-            ForEach(model.entries) { entry in
-                MiniAppRowView(entry: entry)
-                    .tag(entry.appID)
+        ScrollView {
+            LazyVStack(spacing: AppListCardLayout.spacing) {
+                ForEach(model.entries) { entry in
+                    MiniAppRowView(
+                        entry: entry,
+                        isSelected: entry.appID == model.selectedAppID,
+                        onSelect: { model.select(appID: entry.appID) }
+                    )
+                }
             }
+            .padding(.horizontal, AppListCardLayout.horizontalInset)
+            .padding(.top, AppShellLayout.spaceS)
+            .padding(.bottom, AppShellLayout.spaceM)
         }
-        .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
     }
 
@@ -123,14 +89,18 @@ struct MiniAppListPane: View {
         .padding(.vertical, 8)
     }
 
+    private var isFiltering: Bool {
+        !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "square.grid.2x2")
                 .font(.system(size: 34))
                 .foregroundStyle(.tertiary)
-            Text("还没有小程序")
+            Text(isFiltering ? "没有匹配的小程序" : "还没有小程序")
                 .font(.headline)
-            Text("在对话里让康纳用 base.app.create 创建一个，\n或稍后刷新查看云端共享的小程序。")
+            Text(isFiltering ? "清除筛选后可查看全部小程序。" : "在对话里让康纳用 base.app.create 创建一个，\n或稍后刷新查看云端共享的小程序。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -151,42 +121,55 @@ struct MiniAppListPane: View {
 
 private struct MiniAppRowView: View {
     let entry: MiniAppEntry
+    let isSelected: Bool
+    let onSelect: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text(entry.name)
-                    .font(.body.weight(.medium))
-                    .lineLimit(1)
-                MiniAppBadge(text: entry.sourceBadge, color: entry.source == .local ? .teal : .indigo)
-                MiniAppBadge(text: entry.scopeBadge, color: entry.scope == .privateOnly ? .gray : .blue)
-                MiniAppBadge(text: entry.relationBadge, color: entry.isOwned ? .green : .purple)
-                Spacer()
-            }
-            if !entry.purpose.isEmpty {
-                Text(entry.purpose)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            HStack(spacing: 12) {
-                if !entry.domain.isEmpty {
-                    Label(entry.domain, systemImage: "scope")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+        Button(action: onSelect) {
+            HStack(alignment: .top, spacing: AppListCardLayout.contentPadding) {
+                Image(systemName: "square.grid.2x2.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .frame(width: 18, height: 18)
+                    .padding(.top, 3)
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
+                    HStack(spacing: 6) {
+                        Text(entry.name)
+                            .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                            .foregroundStyle(.primary)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
+                        MiniAppBadge(text: entry.sourceBadge, color: entry.source == .local ? .teal : .indigo)
+                        MiniAppBadge(text: entry.scopeBadge, color: entry.scope == .privateOnly ? .gray : .blue)
+                        MiniAppBadge(text: entry.relationBadge, color: entry.isOwned ? .green : .purple)
+                        Spacer(minLength: 4)
+                    }
+                    if !entry.purpose.isEmpty {
+                        Text(entry.purpose)
+                            .font(AppListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    HStack(spacing: 12) {
+                        if !entry.domain.isEmpty {
+                            Label(entry.domain, systemImage: "scope")
+                                .font(AppListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("\(entry.methodCount) 个方法 · \(entry.tableCount) 张表")
+                            .font(AppListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 4)
+                        if !entry.ownerName.isEmpty {
+                            Text("by \(entry.ownerName)")
+                                .font(AppListTypography.rowCaption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
                 }
-                Text("\(entry.methodCount) 个方法 · \(entry.tableCount) 张表")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if !entry.ownerName.isEmpty {
-                    Text("by \(entry.ownerName)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
             }
+            .appListRowSurface(isSelected: isSelected)
         }
-        .padding(.vertical, 4)
+        .buttonStyle(.plain)
     }
 }
 
