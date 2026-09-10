@@ -9,20 +9,48 @@ import ConnorGraphAppSupport
 
     // MARK: - 工具注册
 
-    @Test func registerBaseToolsRegistersAll13Tools() async throws {
+    /// M7 双面投影：默认（运行面）目录恰为 4 个 base.* 工具——method.invoke / app.list /
+    /// app.get / guide；authoring 面工具不进默认目录。
+    @Test func registerBaseToolsProjectsRuntimeCatalogOf4Tools() async throws {
         let runtime = try makeRuntime()
         var registry = AgentToolRegistry()
         registry.registerBaseTools(runtime: runtime)
 
         let names = [
-            "base.guide", "base.app.create", "base.app.delete", "base.app.list", "base.app.get",
-            "base.table.create", "base.table.alter", "base.record.get", "base.query.select",
-            "base.query.aggregate", "base.record.mutate", "base.import.csv", "base.export.csv"
+            "base.method.invoke", "base.app.list", "base.app.get", "base.guide"
         ]
         for name in names {
-            #expect(registry.definition(named: name) != nil, "缺少工具 \(name)")
+            #expect(registry.definition(named: name) != nil, "缺少运行面工具 \(name)")
         }
-        #expect(registry.definitions.count >= names.count)
+        #expect(registry.definitions.count == names.count, "运行面目录应恰为 4 个 base 工具")
+        // authoring 面工具不得出现在运行面目录。
+        for operation in BaseAgentTool.Operation.allCases where operation.surface == .authoring {
+            #expect(registry.definition(named: operation.rawValue) == nil,
+                    "authoring 工具 \(operation.rawValue) 不得进运行面目录")
+        }
+    }
+
+    /// M7 制作面投影：registerBaseAuthoringTools 补挂全部 authoring 工具；
+    /// unregisterBaseAuthoringTools 收回后目录回到运行面 4 工具。
+    @Test func authoringToolsProjectAndUnproject() async throws {
+        let runtime = try makeRuntime()
+        var registry = AgentToolRegistry()
+        registry.registerBaseTools(runtime: runtime)
+        registry.registerBaseAuthoringTools(runtime: runtime)
+
+        let authoringOps = BaseAgentTool.Operation.allCases.filter { $0.surface == .authoring }
+        #expect(authoringOps.count == 14)
+        for operation in authoringOps {
+            #expect(registry.definition(named: operation.rawValue) != nil,
+                    "制作面工具 \(operation.rawValue) 应已补挂")
+        }
+
+        #expect(registry.unregisterBaseAuthoringTools() == true)
+        for operation in authoringOps {
+            #expect(registry.definition(named: operation.rawValue) == nil,
+                    "收回后 \(operation.rawValue) 不应残留")
+        }
+        #expect(registry.definitions.count == 4, "收回后目录应回到运行面 4 工具")
     }
 
     // MARK: - 记账端到端

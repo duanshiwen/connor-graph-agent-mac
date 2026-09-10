@@ -772,6 +772,12 @@ public struct AgentToolRegistry: Sendable {
         tools[tool.name] = tool
     }
 
+    /// 撤下已注册工具（M7 双面投影：制作面会话结束/切换目标 App 时收回制作面工具）。
+    @discardableResult
+    public mutating func unregister(toolNamed name: String) -> Bool {
+        tools.removeValue(forKey: name) != nil
+    }
+
     private func registeredTool(named name: String) -> (any AgentTool)? {
         if let exact = tools[name] { return exact }
         let canonicalName = switch name.lowercased().replacingOccurrences(of: "_", with: "") {
