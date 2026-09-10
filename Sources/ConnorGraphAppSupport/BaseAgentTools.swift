@@ -30,6 +30,31 @@ public actor BaseToolRuntime {
         library.close()
     }
 
+    // MARK: - M7 制作面模式状态机（surface 硬门禁的唯一状态源）
+
+    /// 当前制作面会话的目标 appID（nil = 使用面）。制作面硬门禁据此判定。
+    private var authoringAppID: String?
+
+    /// 进入制作面（base.guide(appID, mode:"authoring") 属主校验通过后调用）。
+    public func enterAuthoring(appID: String) {
+        authoringAppID = appID
+    }
+
+    /// 退回使用面（base.guide(appID, mode:"usage") / base.app.get 触发）。
+    public func exitAuthoring() {
+        authoringAppID = nil
+    }
+
+    /// 制作面硬门禁查询：runtime 是否正为该 appID 处于制作面（切换目标 App 需重新进入）。
+    public func isAuthoringMode(appID: String) -> Bool {
+        authoringAppID == appID
+    }
+
+    /// 属主判据：本机注册表存在该 App（子库可开）即视为本机属主。
+    public func hasLocalApp(_ appID: String) -> Bool {
+        ((try? library.appExists(appID)) ?? false)
+    }
+
     // MARK: - 审计（M1-M7）
 
     /// 写入一条审计记录到目标 App 子库（best-effort：子库不存在或失败即忽略；端侧、不同步）。
@@ -51,9 +76,48 @@ public actor BaseToolRuntime {
 
     // MARK: - 契约
 
-    /// base.guide：返回平台契约全文或指定章节。
-    public func guideEnvelope(section: String?) -> BaseEnvelope {
+    /// base.guide（M7 双态口径）：
+    /// - 带 appID + mode:"authoring" → 属主校验（本机存在该 App 子库）后进入制作面，
+    ///   返回 guide.authoring 态 + 平台制作面前言（契约派生）；
+    /// - 带 appID（mode:"usage" 或缺省）→ 退回使用面，返回 guide.usage 态；
+    /// - 不带 appID → legacy 平台契约全文或指定章节（保持不变）。
+    public func guideEnvelope(appID: String?, mode: String?, section: String?) -> BaseEnvelope {
         do {
+            if let appID, !appID.isEmpty {
+                if mode == "authoring" {
+                    // 属主硬校验：本机无该 App 子库即非属主，制作面不可开（属主身份以本机注册表为准）。
+                    guard hasLocalApp(appID) else {
+                        throw BaseError(
+                            code: .permissionDenied,
+                            message: "仅属主可在本机制作",
+                            hint: "本机不存在 App \(appID)；制作面只对在本机创建/安装该 App 的属主开放"
+                        )
+                    }
+                    guard let card = try library.appCard(appID: appID, includeGuide: true) else {
+                        throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+                    }
+                    enterAuthoring(appID: appID)
+                    let authoringGuide = (card["guide"] as? [String: Any])?["authoring"] as? [String: Any] ?? [:]
+                    let preamble = try SDKContractLoader.authoringPreambleText()
+                    return .success(data: [
+                        "mode": "authoring",
+                        "appID": appID,
+                        "guide": authoringGuide,
+                        "preamble": preamble
+                    ])
+                }
+                // usage（或带 appID 未指明 mode）：退回使用面，返回该 App 的 usage 态指南。
+                exitAuthoring()
+                guard let card = try library.appCard(appID: appID, includeGuide: true) else {
+                    throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
+                }
+                let usageGuide = (card["guide"] as? [String: Any])?["usage"] as? [String: Any] ?? [:]
+                return .success(data: [
+                    "mode": "usage",
+                    "appID": appID,
+                    "guide": usageGuide
+                ])
+            }
             if let section, !section.isEmpty {
                 let contract = try SDKContractLoader.load(.sdk)
                 guard let value = contract[section] else {
@@ -598,7 +662,7 @@ public struct BaseAgentTool: AgentTool {
     public var description: String {
         switch operation {
         case .guide:
-            "base.guide：返回 Connor Base 平台契约（工具目录 25 个、统一返回信封与错误码、结构化查询对象、方法 DAG 语义、权限四步、应用取舍决策段、交互富集规范段、同步语义、配额、能力搜索入口）。创建或修改小应用之前必须先调用本工具读取契约。"
+            "base.guide：双态口径。不带 appID → 返回 Connor Base 平台契约全文（或指定章节）；带 appID + mode:\"authoring\" → 属主校验（本机存在该 App）后进入制作面，返回 guide.authoring + 制作面前言（制作面底层工具解锁）；带 appID（mode:\"usage\" 或缺省）→ 退回使用面，返回该 App 的 guide.usage。创建或修改小应用之前必须先读契约。"
         case .appCreate:
             "base.app.create：创建正式小应用（AppPackage 四件套同批：manifest + schema + guide + methods）。不设工作台/散表/转正中间态——需要表（会重复写入、要按数值时间统计、数字错了有代价）就经用户确认后直接建正式私有小应用（私有态起步、结构可 app.update 演进、日后可切 shared/public）。创建前先读 base.guide 契约。"
         case .appDelete:
@@ -658,7 +722,12 @@ public struct BaseAgentTool: AgentTool {
         switch operation {
         case .guide:
             return .closedObject(properties: [
-                "section": .string(description: "可选：只返回契约的指定章节（如 tools/query/errorCodes/quotas/appDecision/enrichment）")
+                "mode": .stringEnumeration(
+                    values: ["usage", "authoring"],
+                    description: "指南态：usage=使用面指南（缺省）/ authoring=制作面（属主专用，须带 appID；进入后制作面底层工具解锁）"
+                ),
+                "appID": .string(description: "目标 appID（提供时返回该 App 双态指南的对应态，并切换使用/制作面；缺省返回平台契约全文）"),
+                "section": .string(description: "可选：只返回平台契约的指定章节（如 tools/query/errorCodes/quotas/appDecision/enrichment；仅无 appID 时生效）")
             ], required: [])
         case .appCreate:
             return .object(properties: [
@@ -854,10 +923,35 @@ public struct BaseAgentTool: AgentTool {
                 Task { await runtime.recordAudit(appID: appID, operation: auditOperation, detail: auditDetail) }
             }
         }
+        // M7 制作面硬门禁（第二道闸，与注册无关）：authoring 面工具只有在 runtime 处于
+        // 该 appID 的制作会话时才可执行，属主也不例外——使用面无底层工具，唯一边界是工具面。
+        // 使用面请走 base.method.invoke；属主经 base.guide(appID, mode:"authoring") 进入制作面。
+        if operation.surface == .authoring {
+            let gateAppID = auditAppID
+            let open = await runtime.isAuthoringMode(appID: gateAppID ?? "")
+            if !open {
+                return makeResult(
+                    .failure(BaseError(
+                        code: .permissionDenied,
+                        message: "制作面未开放",
+                        hint: "请走 base.method.invoke(appID, method)（使用面无底层工具）；属主请先经 base.guide(appID, mode:\"authoring\") 进入制作面"
+                    )),
+                    text: "制作面未开放：该工具属制作面（authoring），当前会话不在该 App 的制作会话中。",
+                    context: context
+                )
+            }
+        }
         switch operation {
         case .guide:
-            let envelope = await runtime.guideEnvelope(section: arguments.string("section"))
-            return makeResult(envelope, text: "Connor Base 平台契约已返回。", context: context)
+            let envelope = await runtime.guideEnvelope(
+                appID: arguments.string("appID"),
+                mode: arguments.string("mode"),
+                section: arguments.string("section")
+            )
+            let text = arguments.string("appID") != nil
+                ? "App 指南（双态）已返回。"
+                : "Connor Base 平台契约已返回。"
+            return makeResult(envelope, text: text, context: context)
         case .appCreate:
             let envelope = await runtime.createAppEnvelope(
                 manifest: try object("manifest", arguments),
@@ -883,6 +977,8 @@ public struct BaseAgentTool: AgentTool {
             let envelope = await runtime.listAppsEnvelope(scope: arguments.string("scope"), query: arguments.string("query"))
             return makeResult(envelope, text: "App 列表已返回。", context: context)
         case .appGet:
+            // M7：读 App Card 即回到使用面（制作面会话结束，硬门禁重新关上）。
+            await runtime.exitAuthoring()
             let envelope = await runtime.appCardEnvelope(appID: try requiredString("appID", arguments), includeGuide: arguments.bool("includeGuide") ?? true)
             return makeResult(envelope, text: "App Card 已返回。", context: context)
         case .tableCreate:
