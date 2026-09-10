@@ -23,8 +23,11 @@ final class BaseRegistryMigrationTests: XCTestCase {
         try? FileManager.default.removeItem(at: tmpDir)
     }
 
+    /// M7 双态硬切：guide 须为 {authoring, usage}（测试夹具与内核同一口径）。
     private func guide(_ appID: String) -> [String: Any] {
-        ["appID": appID, "title": "记账", "whenToUse": "记一笔时", "whenNotToUse": "闲聊时", "sections": []]
+        let state: [String: Any] = ["appID": appID, "whenToUse": "记一笔时用",
+                                    "whenNotToUse": "闲聊时不用", "sections": []]
+        return ["authoring": state, "usage": state]
     }
 
     private func manifest(_ appID: String) -> [String: Any] {

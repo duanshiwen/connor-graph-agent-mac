@@ -42,12 +42,18 @@ final class BasePackageCommitTests: XCTestCase {
         return ["tables": tables]
     }
 
+    /// M7 双态硬切：guide 须为 {authoring, usage}（测试夹具与内核同一口径）。
     private func guide(_ appID: String) -> [String: Any] {
-        ["appID": appID, "title": "记账", "whenToUse": "记一笔时用", "whenNotToUse": "闲聊时不用", "sections": []]
+        let state: [String: Any] = ["appID": appID, "whenToUse": "记一笔时用",
+                                    "whenNotToUse": "闲聊时不用", "sections": []]
+        return ["authoring": state, "usage": state]
     }
 
+    /// M7 双态：v2 指南同为 {authoring, usage}。
     private func guideV2(_ appID: String) -> [String: Any] {
-        ["appID": appID, "title": "记账 v2", "whenToUse": "记一笔时用", "whenNotToUse": "闲聊时不用", "sections": []]
+        let state: [String: Any] = ["appID": appID, "whenToUse": "记一笔时用 v2",
+                                    "whenNotToUse": "闲聊时不用", "sections": []]
+        return ["authoring": state, "usage": state]
     }
 
     /// 乐观并发：base 落后最新 → VERSION_MISMATCH，不建版本记录、latest 不变（零副作用）。
@@ -141,7 +147,9 @@ final class BasePackageCommitTests: XCTestCase {
         let snaps = try library.allPackageVersionFingerprints(appID: "ledger")
         XCTAssertEqual(Array(snaps.keys).sorted(), [1, 2])
         let rec = try XCTUnwrap(try library.readPackageVersion(appID: "ledger", version: 2))
-        XCTAssertEqual((rec["guide"] as? [String: Any])?["title"] as? String, "记账 v2")
+        let guideV2Rec = try XCTUnwrap(rec["guide"] as? [String: Any])
+        XCTAssertNotNil(guideV2Rec["authoring"], "v2 指南须含 authoring 态")
+        XCTAssertNotNil(guideV2Rec["usage"], "v2 指南须含 usage 态")
         XCTAssertEqual((rec["manifest"] as? [String: Any])?["purpose"] as? String, "记录个人收支、按月给预算")
     }
 

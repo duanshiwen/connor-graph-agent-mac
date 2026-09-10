@@ -35,9 +35,11 @@ final class BaseLibraryStoreTests: XCTestCase {
         ]]
     }
 
+    /// M7 双态硬切：guide 须为 {authoring, usage}（测试夹具与内核同一口径）。
     private func guide(_ appID: String) -> [String: Any] {
-        ["appID": appID, "title": "记账", "whenToUse": "当用户说记一笔且是个人收支时用",
-         "whenNotToUse": "当只是闲聊消费观时不用", "sections": []]
+        let state: [String: Any] = ["appID": appID, "whenToUse": "记一笔时用",
+                                    "whenNotToUse": "闲聊时不用", "sections": []]
+        return ["authoring": state, "usage": state]
     }
 
     /// v0.12：不设个人工作台/散表/转正中间态——初始化不创建任何固定 appID（无 personal_workbench）。
@@ -63,7 +65,8 @@ final class BaseLibraryStoreTests: XCTestCase {
         XCTAssertEqual(pkg["packageVersion"] as? Int64, 1)
         let pkgSchema = pkg["schema"] as? [String: Any]
         XCTAssertNotNil((pkgSchema?["tables"] as? [[String: Any]])?.first)
-        XCTAssertEqual((pkg["guide"] as? [String: Any])?["title"] as? String, "记账")
+        XCTAssertNotNil((pkg["guide"] as? [String: Any])?["authoring"])
+        XCTAssertNotNil((pkg["guide"] as? [String: Any])?["usage"])
         XCTAssertEqual((pkg["methods"] as? [[String: Any]])?.first?["name"] as? String, "addExpense")
     }
 

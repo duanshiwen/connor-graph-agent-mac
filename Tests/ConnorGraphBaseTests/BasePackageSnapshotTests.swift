@@ -41,9 +41,11 @@ final class BasePackageSnapshotTests: XCTestCase {
         ]]
     }
 
+    /// M7 双态硬切：guide 须为 {authoring, usage}（测试夹具与内核同一口径）。
     private func guide(_ appID: String) -> [String: Any] {
-        ["appID": appID, "title": "记账", "whenToUse": "当用户说记一笔且是个人收支时用",
-         "whenNotToUse": "当只是闲聊消费观时不用", "sections": []]
+        let state: [String: Any] = ["appID": appID, "whenToUse": "记一笔时用",
+                                    "whenNotToUse": "闲聊时不用", "sections": []]
+        return ["authoring": state, "usage": state]
     }
 
     private func methods() -> [[String: Any]] {
@@ -123,7 +125,7 @@ final class BasePackageSnapshotTests: XCTestCase {
         let pkg = try XCTUnwrap(try dst.packageDictionary(appID: "ledger"))
         XCTAssertEqual((pkg["manifest"] as? [String: Any])?["name"] as? String, "记账")
         XCTAssertEqual((pkg["manifest"] as? [String: Any])?["purpose"] as? String, "个人收支记录与统计")
-        XCTAssertEqual((pkg["guide"] as? [String: Any])?["title"] as? String, "记账")
+        XCTAssertNotNil((pkg["guide"] as? [String: Any])?["authoring"])
         XCTAssertEqual((pkg["methods"] as? [[String: Any]])?.count, 1)
 
         // 同包同 Card：源端与恢复端 appCard 的包身份字段完全一致（含 purpose/guideOutOfSync 状态）。

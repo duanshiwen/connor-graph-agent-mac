@@ -109,13 +109,19 @@ public enum BaseGoldenRunner {
         guard let schemaJSON = args["schema"] as? [String: Any] else {
             throw BaseError(code: .validationFailed, message: "schema 缺失", hint: "app.create 必须携带 schema")
         }
+        // M7 双态硬切（golden 21）：guide 须为 {authoring, usage}，与 BaseLibraryStore 同一口径。
+        if let guide = args["guide"] as? [String: Any], !guide.isEmpty {
+            try BaseLibraryStore.validateDualStateGuide(guide)
+        }
         let schema = try BaseSchemaValidator.parseSchema(schemaJSON)
         for table in schema.tables {
             try store.createTable(table)
         }
         let next = (try store.latestPackageVersion()) + 1
         try store.advancePackageVersion(to: next)
-        return ["appID": appID, "packageVersion": next]
+        // M7（golden 01）：零方法 App 仍建包成功，但 methodsEmpty=true（属主先在制作面完善方法）。
+        let methods = (args["methods"] as? [[String: Any]]) ?? []
+        return ["appID": appID, "packageVersion": next, "methodsEmpty": methods.isEmpty]
     }
 
     private static func tableCreate(_ args: [String: Any], store: BaseSubLibraryStore) throws -> Any {
@@ -175,12 +181,15 @@ public enum BaseGoldenRunner {
         )
     }
 
-    /// 方法定义校验（golden 19）：readOnly 方法禁止 mutate 步骤。
-    /// M2-K1 起由完整方法 DAG 模型接管定义与解释。
+    /// 方法定义校验（golden 19/22）：readOnly 方法禁止 mutate 步骤；步骤 type 须在枚举内
+    /// （query/aggregate/mutate/assert/call/reply/export.csv）。M2-K1 起由完整方法 DAG 模型
+    /// 接管定义与解释——这里走 BaseMethodDef 解析（与内核同一校验路径）。
     private static func methodDefine(_ args: [String: Any]) throws -> Any {
         guard let method = args["method"] as? [String: Any] else {
             throw BaseError(code: .validationFailed, message: "method 缺失", hint: "method.define 必须携带 method")
         }
+        // BaseMethodDef 解析：步骤 type 枚举/配额/只读推导统一校验（golden 22 未知 type 即拒）。
+        _ = try BaseMethodDef(json: method)
         let readOnly = (method["readOnly"] as? Bool) ?? false
         if readOnly {
             let steps = method["steps"] as? [[String: Any]] ?? []

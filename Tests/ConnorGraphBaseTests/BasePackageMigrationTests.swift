@@ -26,8 +26,11 @@ final class BasePackageMigrationTests: XCTestCase {
          "riskLevel": "low", "sdkVersion": 1]
     }
 
+    /// M7 双态硬切：guide 须为 {authoring, usage}（测试夹具与内核同一口径）。
     private func guide(_ appID: String) -> [String: Any] {
-        ["appID": appID, "title": "记账", "whenToUse": "记一笔时用", "whenNotToUse": "闲聊时不用", "sections": []]
+        let state: [String: Any] = ["appID": appID, "whenToUse": "记一笔时用",
+                                    "whenNotToUse": "闲聊时不用", "sections": []]
+        return ["authoring": state, "usage": state]
     }
 
     /// v1：expenses。
@@ -106,7 +109,8 @@ final class BasePackageMigrationTests: XCTestCase {
         XCTAssertEqual(rec["fingerprint"] as? String, try s3.digest())
         let tables = (rec["schema"] as? [String: Any])?["tables"] as? [[String: Any]]
         XCTAssertEqual(tables?.count, 2)
-        XCTAssertEqual((rec["guide"] as? [String: Any])?["title"] as? String, "记账")
+        XCTAssertNotNil((rec["guide"] as? [String: Any])?["authoring"])
+        XCTAssertNotNil((rec["guide"] as? [String: Any])?["usage"])
 
         // 幂等：已是最新再 apply → 无变化。
         _ = try receiver.applyPackageSnapshot(s3)
