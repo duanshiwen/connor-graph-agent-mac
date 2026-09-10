@@ -411,13 +411,23 @@ import Testing
         AgentToolDefinition(name: "base_app_create", description: "Create a small app with its four artifacts", inputSchema: .object(properties: [:], required: []))
     ]
 
-    let result = AssistantToolRouter().discovery(
-        query: "记一笔账，按月看预算",
+    // M7：base 路由纯能力化——只按平台能力词（小应用/表格/方法/结构化数据）命中，
+    // 业务词（记账/预算/记一笔等）不再携带于路由描述，业务语义由各 App 的 guide.usage 承担。
+    let capabilityResult = AssistantToolRouter().discovery(
+        query: "用小应用表格和方法结构化记录数据",
         definitions: definitions,
         maximumResults: 8
     )
 
-    #expect(Set(result.tools.map(\.name)) == Set(definitions.map(\.name)))
-    #expect(result.matchedNamespaces == ["base"])
-    #expect(result.availableNamespaces.contains("base"))
+    #expect(Set(capabilityResult.tools.map(\.name)) == Set(definitions.map(\.name)))
+    #expect(capabilityResult.matchedNamespaces == ["base"])
+    #expect(capabilityResult.availableNamespaces.contains("base"))
+
+    // 业务词不再触发 base 命名空间（零业务特判）。
+    let businessResult = AssistantToolRouter().discovery(
+        query: "记一笔账，按月看预算",
+        definitions: definitions,
+        maximumResults: 8
+    )
+    #expect(!businessResult.matchedNamespaces.contains("base"), "业务词不应命中 base 命名空间")
 }
