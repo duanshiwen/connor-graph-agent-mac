@@ -24,9 +24,25 @@ public struct CalendarSourceAgentRuntimeBridge: AgentCalendarRuntime {
     public func searchEvents(query: String, startDate: Date?, endDate: Date?, timePreset: String?, timeFilterMode: String?, timeSort: String?, limit: Int, runID: String?, sessionID: String?) async throws -> [CalendarEvent] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let events = try await store.loadSnapshot().events
+        var temporalFilter: NativeSearchTemporalFilter?
+        if let timePreset, let preset = NativeSearchTimePreset(rawValue: timePreset) {
+            temporalFilter = NativeSearchTimePresetResolver.resolve(preset)
+            temporalFilter?.mode = NativeSearchTemporalFilterMode(rawValue: timeFilterMode ?? "") ?? .intervalOverlapsRange
+        } else if startDate != nil || endDate != nil {
+            temporalFilter = NativeSearchTemporalFilter(start: startDate, end: endDate, mode: .intervalOverlapsRange, timeFieldPreference: [.eventStartAt])
+            if let mode = timeFilterMode.flatMap(NativeSearchTemporalFilterMode.init(rawValue:)) { temporalFilter?.mode = mode }
+        }
         let filtered = events.filter { event in
-            if let startDate, event.end.date < startDate { return false }
-            if let endDate, event.start.date > endDate { return false }
+            let temporal = NativeSearchTemporalMetadata(
+                primaryTime: event.start.date,
+                primaryTimeKind: .eventStartAt,
+                updatedAt: event.updatedAt,
+                eventStartAt: event.start.date,
+                eventEndAt: event.end.date,
+                timezoneIdentifier: event.start.timeZoneIdentifier,
+                isAllDay: event.isAllDay
+            )
+            if let temporalFilter, !temporalFilter.contains(temporal, sourceKind: .calendar) { return false }
             guard !normalized.isEmpty else { return true }
             return event.title.lowercased().contains(normalized)
                 || (event.notes?.lowercased().contains(normalized) ?? false)
