@@ -2,7 +2,7 @@ import XCTest
 import Foundation
 @testable import ConnorGraphBase
 
-/// M1-K8：golden 全量执行器——跑 M0-3 首批 20 条 fixture，逐条比对契约 envelope。
+/// M1-K8：golden 全量执行器——跑 M0-3 首批 20 条 + M7 追加 2 条 fixture，逐条比对契约 envelope。
 final class GoldenRunnerTests: XCTestCase {
 
     func testAllGoldenFixtures() throws {
@@ -15,7 +15,7 @@ final class GoldenRunnerTests: XCTestCase {
         .filter { $0.pathExtension == "json" }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
-        XCTAssertEqual(files.count, 20, "golden fixture 数量应为 20（M0 首批）")
+        XCTAssertEqual(files.count, 22, "golden fixture 数量应为 22（M0 首批 20 + M7 追加 2）")
 
         var failures: [String] = []
         var passed: [String] = []

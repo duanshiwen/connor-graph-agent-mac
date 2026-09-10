@@ -462,6 +462,14 @@ public actor BaseToolRuntime {
         // M7：每次 invoke 铸造一个 traceId——贯穿全部 method.step 审计行，并随信封返回。
         let traceId = BaseEnvelope.newTraceID()
         do {
+            // M7：零方法 App 运行面兜底——没有可调用方法，直接给制作面指引（Card hint 同句）。
+            if try library.methods(appID: appID).isEmpty {
+                throw BaseError(
+                    code: .validationFailed,
+                    message: "App 尚未声明方法，无法调用",
+                    hint: BaseLibraryStore.zeroMethodHint
+                )
+            }
             guard let target = try library.methodTarget(callingAppID: appID, reference: method) else {
                 throw BaseError(code: .notFound, message: "方法不存在", hint: "App \(appID) 中找不到方法 \(method)")
             }

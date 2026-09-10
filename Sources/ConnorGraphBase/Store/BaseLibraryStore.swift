@@ -134,10 +134,11 @@ public final class BaseLibraryStore: @unchecked Sendable {
         }
         // 结构期严格校验（relation 目标表必须在 schema 内）。
         _ = try BaseSchemaValidator.parseSchema(schemaObject, validateRelations: true)
-        // 指南创建时同步写（v0.6 契约）。
+        // 指南创建时同步写（v0.6 契约）；M7 双态硬切：guide 须为 {authoring, usage}。
         guard !guide.isEmpty else {
             throw BaseError(code: .validationFailed, message: "指南缺失", hint: "App 创建时须同步写使用指南（App Guide 十一段），不允许空指南")
         }
+        try Self.validateDualStateGuide(guide)
         let name = manifest["name"] as? String ?? appID
         let domain = manifest["domain"] as? String ?? ""
         let purpose = manifest["purpose"] as? String ?? ""
@@ -291,9 +292,30 @@ public final class BaseLibraryStore: @unchecked Sendable {
         }
     }
 
-    // MARK: 指南同步与漂移检测（M2-M2）
+    // MARK: 指南同步与漂移检测（M2-M2 / M7 双态硬切）
+
+    /// M7 双态硬切：guide 提供时必须为 {authoring, usage} 双态，否则 VALIDATION_FAILED
+    /// （create/update/syncGuide 统一口径，与 golden 21 逐字对齐）。
+    static func validateDualStateGuide(_ guide: [String: Any]) throws {
+        guard let authoring = guide["authoring"] as? [String: Any], !authoring.isEmpty else {
+            throw BaseError(
+                code: .validationFailed,
+                message: "guide 缺 guide.authoring 态",
+                hint: "guide 必须为双态：authoring + usage"
+            )
+        }
+        guard let usage = guide["usage"] as? [String: Any], !usage.isEmpty else {
+            throw BaseError(
+                code: .validationFailed,
+                message: "guide 缺 guide.usage 态",
+                hint: "guide 必须为双态：authoring + usage"
+            )
+        }
+    }
 
     /// 指南是否漂移：签名级变更（schema/methods）后未同批改指南 → guide_version < package_version。
+    /// M7 口径：漂移检测作用于 usage 态——运行面指南（usage）与签名不一致即拒调用
+    /// （invoke 前置 GUIDE_OUT_OF_SYNC），保证使用面按最新签名理解方法。
     public func isGuideOutOfSync(appID: String) throws -> Bool {
         let rows = try execute("SELECT package_version, guide_version FROM base_apps WHERE app_id = ?1", parameters: [appID])
         guard let row = rows.first else {
@@ -305,6 +327,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
     }
 
     /// 显式同步指南：写入新版 guide 并把 guide_version 对齐当前 package_version（消除漂移）。
+    /// M7 双态硬切：guide 提供时须为 {authoring, usage} 双态。
     public func syncGuide(appID: String, guide: [String: Any]) throws {
         guard try appExists(appID) else {
             throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
@@ -312,6 +335,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
         guard !guide.isEmpty else {
             throw BaseError(code: .validationFailed, message: "指南不能为空", hint: "App Guide 为十一段结构化对象")
         }
+        try Self.validateDualStateGuide(guide)
         let updated = try executeVoid("""
             UPDATE base_apps
             SET guide_json = ?1, guide_version = package_version, updated_at = ?2
@@ -520,9 +544,10 @@ public final class BaseLibraryStore: @unchecked Sendable {
         if let imports = manifest["imports"] as? [[String: Any]] {
             row["imports_json"] = Self.jsonString(imports)
         }
-        // 指南显式提供则同步更新（防止漂移）。
+        // 指南显式提供则同步更新（防止漂移）；M7 双态硬切：guide 提供时须为 {authoring, usage}。
         var guideJSON: String = row["guide_json"] as? String ?? ""
         if let guide, !guide.isEmpty {
+            try Self.validateDualStateGuide(guide)
             guideJSON = Self.jsonString(guide)
         }
         let updated = try executeVoid("""
@@ -568,7 +593,9 @@ public final class BaseLibraryStore: @unchecked Sendable {
                 "exported": method["exports"] ?? false
             ]
         }
-        return [
+        // M7：零方法 App 在 Card/detail 上给出制作面指引（flag 自然携带，不打扰非空 App）。
+        let methodsEmpty = methods.isEmpty
+        var card: [String: Any] = [
             "appID": appID,
             "name": row["name"] ?? "",
             "domain": row["domain"] ?? "",
@@ -583,10 +610,18 @@ public final class BaseLibraryStore: @unchecked Sendable {
             "requiredCapabilities": (try? Self.decodeArray(row["capabilities_json"] as? String)) ?? [],
             "imports": (try? Self.decodeArray(row["imports_json"] as? String)) ?? [],
             "methods": methodSummaries,
+            "methodsEmpty": methodsEmpty,
             "createdAt": row["created_at"] ?? "",
             "updatedAt": row["updated_at"] ?? ""
         ]
+        if methodsEmpty {
+            card["hint"] = Self.zeroMethodHint
+        }
+        return card
     }
+
+    /// M7 零方法 App 统一指引文案（Card hint 与 invoke 失败 hint 同一句）。
+    public static let zeroMethodHint = "该 App 尚未声明方法，请属主先在制作面完善"
 
     // MARK: 同步集合 SQL 访问（M3-K2）
 
