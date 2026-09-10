@@ -19,6 +19,15 @@ public actor AgentPolicyEngine: Sendable {
     public private(set) var permissionMode: AgentPermissionMode
     private let auditLog: any AgentAuditLog
 
+    /// M7 base 小程序能力面：这六个能力覆盖全部 base.* 工具执行（permission 映射见
+    /// ConnorGraphAppSupport.BaseAgentTool.permission），任何权限模式下一律静默放行——
+    /// 「所有 base 小程序操作免用户审批」，权限面不再是 base 的边界，
+    /// 唯一边界是工具面（authoring/runtime 硬门禁在 BaseAgentTool.execute() 内）。
+    /// basePublish（发布/公开动作，R7 硬门禁）不在此列：仍需人工确认。
+    public static let baseSurfaceCapabilities: Set<AgentPermissionCapability> = [
+        .baseRead, .baseWrite, .baseManageSchema, .baseManageMethods, .baseManageApps, .baseExecute
+    ]
+
     public init(permissionMode: AgentPermissionMode, auditLog: any AgentAuditLog = InMemoryAgentAuditLog()) {
         self.permissionMode = permissionMode
         self.auditLog = auditLog
@@ -69,6 +78,12 @@ public actor AgentPolicyEngine: Sendable {
     }
 
     private func outcome(for capability: AgentPermissionCapability) -> AgentPermissionOutcome {
+        // M7 硬切：base.* 小程序操作免用户审批——六个 base 能力任何权限模式下都静默放行
+        // （不进审批队列、不弹人工确认）。边界在工具面（surface 硬门禁），不在权限面。
+        // basePublish 是硬门禁例外：发布/公开动作任何执行模式下都需人工确认（R7）。
+        if Self.baseSurfaceCapabilities.contains(capability) {
+            return .approved
+        }
         // 执行模式（trustedWrite/allowAll）下自动批准（含发送邮件与发布互动网页），
         // 不显示人工审批；但 basePublish 是硬门禁：发布/公开动作任何执行模式下都需人工确认（R7）。
         // 询问/只读模式按下方细分规则逐项判定。
@@ -90,6 +105,7 @@ public actor AgentPolicyEngine: Sendable {
         case .allowAll:
             return capability == .basePublish ? .needsApproval : .approved
         case .readOnly:
+            // 下方 .baseRead 之外的 base.* 列举仅为穷举：六个 base 能力已在上方 M7 硬切提前放行。
             switch capability {
             case .readGraph, .readSession, .modelCall, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML, .readBrowserPage, .baseRead:
                 return .approved
@@ -98,6 +114,7 @@ public actor AgentPolicyEngine: Sendable {
                 return .denied
             }
         case .askToWrite:
+            // 下方 .baseRead 之外的 base.* 列举仅为穷举：六个 base 能力已在上方 M7 硬切提前放行。
             switch capability {
             case .readGraph, .readSession, .mutatePersonality, .modelCall, .proposeGraphWrite, .externalNetwork, .readBrowserPage, .navigateBrowser, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .createMailDraft, .readContacts, .readCalendar, .readRSS, .readRSSContent, .syncRSSSources, .exportRSSOPML, .createInteractiveWebDraft, .baseRead:
                 return .approved

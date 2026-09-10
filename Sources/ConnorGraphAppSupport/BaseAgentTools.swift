@@ -506,6 +506,15 @@ public actor BaseToolRuntime {
 /// 每个工具返回统一返回信封（envelope 的 JSON 形态），错误码 taxonomy 见契约。
 public struct BaseAgentTool: AgentTool {
 
+    /// M7 三面口径（与契约 base.sdk.v1.json `surfaces` 一致，逐工具必属且仅属一面）：
+    /// authoring=制作面（属主建/改 App）；runtime=运行面（方法执行面，仅 method.invoke）；
+    /// always=常驻面。运行面工具目录不得出现任何 authoring 工具。
+    public enum Surface: String, Sendable, CaseIterable {
+        case authoring
+        case runtime
+        case always
+    }
+
     public enum Operation: String, Sendable, CaseIterable {
         case guide = "base.guide"
         case appCreate = "base.app.create"
@@ -526,6 +535,28 @@ public struct BaseAgentTool: AgentTool {
         case methodInvoke = "base.method.invoke"
         case methodRemove = "base.method.remove"
         case auditRead = "base.audit.read"
+
+        /// 工具所属面（与契约 base.sdk.v1.json 每工具的 `surface` 字段一致，禁止两端口径漂移）。
+        public var surface: Surface {
+            switch self {
+            case .guide, .appList, .appGet, .appGrant:
+                .always
+            case .methodInvoke:
+                .runtime
+            case .appCreate, .appDelete, .tableCreate, .tableAlter, .recordGet,
+                 .querySelect, .queryAggregate, .recordMutate, .importCSV, .exportCSV,
+                 .appUpdate, .methodDefine, .methodRemove, .auditRead:
+                .authoring
+            }
+        }
+
+        /// M7 运行面工具目录：Agent 默认可见的 base.* 工具恰为 4 个
+        /// （method.invoke / app.list / app.get / guide）。sync.status 与 grant 虽在契约标
+        /// `always`，但属平台管道件，不进 Agent 调用面。
+        public static let runtimeCatalog: [Operation] = [.methodInvoke, .appList, .appGet, .guide]
+
+        /// 是否属于运行面 Agent 工具目录（4 工具集）。
+        public var isInRuntimeCatalog: Bool { Self.runtimeCatalog.contains(self) }
     }
 
     public let operation: Operation
@@ -537,6 +568,9 @@ public struct BaseAgentTool: AgentTool {
     }
 
     public var name: String { operation.rawValue }
+
+    /// 工具所属面（委托 Operation.surface，与契约一致）。
+    public var surface: Surface { operation.surface }
 
     public var permission: AgentPermissionCapability {
         switch operation {
@@ -1015,10 +1049,34 @@ public struct BaseAgentTool: AgentTool {
 }
 
 public extension AgentToolRegistry {
+    /// M7 运行面投影（默认）：只注册运行面 4 工具——base.method.invoke / base.app.list /
+    /// base.app.get / base.guide。制作面（authoring）工具不进默认目录；进入制作面由
+    /// `registerBaseAuthoringTools(runtime:)` 补挂（base.guide(appID, mode:"authoring") 进入
+    /// 制作面后），会话结束/切换目标 App 用 `unregisterBaseAuthoringTools()` 收回。
+    /// 硬门禁在 BaseAgentTool.execute() 内独立生效，与注册无关。
     mutating func registerBaseTools(runtime: BaseToolRuntime) {
-        for operation in BaseAgentTool.Operation.allCases {
+        for operation in BaseAgentTool.Operation.runtimeCatalog {
             register(BaseAgentTool(operation: operation, runtime: runtime))
         }
+    }
+
+    /// M7 制作面投影：注册全部 authoring 面工具（进入制作面会话时调用）。
+    /// 执行仍受 execute() 硬门禁约束（须处于该 appID 的 authoring 会话）。
+    mutating func registerBaseAuthoringTools(runtime: BaseToolRuntime) {
+        for operation in BaseAgentTool.Operation.allCases where operation.surface == .authoring {
+            register(BaseAgentTool(operation: operation, runtime: runtime))
+        }
+    }
+
+    /// M7 制作面收回：制作面会话结束（guide usage / app.get 退回使用面）或切换目标 App 时，
+    /// 撤下全部 authoring 面工具，目录回到运行面 4 工具。
+    @discardableResult
+    mutating func unregisterBaseAuthoringTools() -> Bool {
+        var removed = false
+        for operation in BaseAgentTool.Operation.allCases where operation.surface == .authoring {
+            removed = unregister(toolNamed: operation.rawValue) || removed
+        }
+        return removed
     }
 }
 
