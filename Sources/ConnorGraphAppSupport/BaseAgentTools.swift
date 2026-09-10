@@ -459,6 +459,8 @@ public actor BaseToolRuntime {
     }
 
     public func methodInvokeEnvelope(appID: String, method: String, input: [String: Any]) -> BaseEnvelope {
+        // M7：每次 invoke 铸造一个 traceId——贯穿全部 method.step 审计行，并随信封返回。
+        let traceId = BaseEnvelope.newTraceID()
         do {
             guard let target = try library.methodTarget(callingAppID: appID, reference: method) else {
                 throw BaseError(code: .notFound, message: "方法不存在", hint: "App \(appID) 中找不到方法 \(method)")
@@ -480,19 +482,21 @@ public actor BaseToolRuntime {
                 resolver: { reference in
                     try library.methodTarget(callingAppID: ownerAppID, reference: reference)
                 },
-                appID: ownerAppID
+                appID: ownerAppID,
+                trace: BaseMethodTraceContext(traceId: traceId, methodName: target.method.name)
             )
             target.store.close()
             return .success(data: [
                 "appID": ownerAppID,
                 "method": target.method.name,
                 "data": result.data.jsonObject,
-                "signals": result.signals.map { ["level": $0.level, "message": $0.message] }
-            ])
+                "signals": result.signals.map { ["level": $0.level, "message": $0.message] },
+                "traceId": traceId
+            ], traceId: traceId)
         } catch let error as BaseError {
-            return .failure(error)
+            return .failure(error, traceId: traceId)
         } catch {
-            return .failure(BaseError(code: .internal, message: "方法调用失败", hint: "\(error)"))
+            return .failure(BaseError(code: .internal, message: "方法调用失败", hint: "\(error)"), traceId: traceId)
         }
     }
 
@@ -692,9 +696,9 @@ public struct BaseAgentTool: AgentTool {
         case .appUpdate:
             "base.app.update：更新小应用（乐观并发：携带 basePackageVersion，过期返 VERSION_MISMATCH 需 rebase）。可更新 manifest/guide，可选整包替换 schema/methods；结构可演进、无需中间态。"
         case .methodDefine:
-            "base.method.define：定义/更新声明式方法（方法 DAG：query/aggregate/mutate/assert/call/reply，六类步骤，无循环、无任意代码）。readOnly 方法体仅 query/aggregate + reply。"
+            "base.method.define：定义/更新声明式方法（方法 DAG：query/aggregate/mutate/assert/call/reply/export.csv，七类步骤，无循环、无任意代码）。readOnly 方法体仅 query/aggregate + reply；含 export.csv 步骤的方法非只读（列白名单 + maxRows 行数上限导出 CSV）。"
         case .methodInvoke:
-            "base.method.invoke：调用 App 的方法（入参按 inputSchema 校验；call 步骤可跨 App 调 exported 方法，深度上限 5）。返回方法结果 + warn 信号（level:warn 必呈现、不可压）。"
+            "base.method.invoke：调用 App 的方法（入参按 inputSchema 校验；call 步骤可跨 App 调 exported 方法，深度上限 5）。返回方法结果 + warn 信号（level:warn 必呈现、不可压）+ traceId（贯穿本次调用的全部 method.step 审计行）。"
         case .methodRemove:
             "base.method.remove：移除 App 的声明式方法（签名级变更，packageVersion 前移）。"
         case .auditRead:
@@ -757,7 +761,7 @@ public struct BaseAgentTool: AgentTool {
                     "description": .string(description: "方法说明"),
                     "readOnly": .boolean(description: "是否只读方法"),
                     "steps": .array(items: .object(properties: [
-                        "type": .stringEnumeration(values: ["query", "aggregate", "mutate", "assert", "call", "reply"], description: "步骤类型"),
+                        "type": .stringEnumeration(values: ["query", "aggregate", "mutate", "assert", "call", "reply", "export.csv"], description: "步骤类型（含 export.csv 的方法非只读）"),
                         "label": .string(description: "步骤标签"),
                         "tool": .string(description: "调用的工具名"),
                         "args": .object(properties: [:], required: [])
@@ -877,7 +881,7 @@ public struct BaseAgentTool: AgentTool {
                     "description": .string(description: "方法说明"),
                     "inputSchema": .object(properties: [:], required: []),
                     "steps": .array(items: .object(properties: [
-                        "type": .stringEnumeration(values: ["query", "aggregate", "mutate", "assert", "call", "reply"], description: "步骤类型"),
+                        "type": .stringEnumeration(values: ["query", "aggregate", "mutate", "assert", "call", "reply", "export.csv"], description: "步骤类型（含 export.csv 的方法非只读）"),
                         "as": .string(description: "步骤输出变量名")
                     ], required: ["type"]), description: "步骤 DAG"),
                     "exports": .boolean(description: "是否 exported（可被跨 App 调用）"),

@@ -4,13 +4,15 @@ import Foundation
 ///
 /// 契约语义（v0.12 §4.4 / base.sdk.v1.json）：
 /// - 方法 = { name, description, inputSchema, steps[], exports?, readOnly? }
-/// - 步骤类型：query / aggregate / mutate / assert（onFail: reject|warn）/ call / reply
+/// - 步骤类型：query / aggregate / mutate / assert（onFail: reject|warn）/ call / reply /
+///   export.csv（列白名单 + 行数上限导出 CSV；含 export.csv 步骤的方法非只读）
 /// - 无循环、无任意代码、无外部网络
-/// - 配额：maxMethodSteps = 20、maxCrossAppCallDepth = 5
+/// - 配额：maxMethodSteps = 20、maxCrossAppCallDepth = 5、maxRowsPerQuery = 5000
 /// - 只读判定：方法体仅 query/aggregate + reply；显式 readOnly 或推导只读均禁写
 ///
 /// 步骤输出以 `as` 命名存入变量上下文；reply 模板用 `$path` 引用上游输出（JSONPath 子集）。
 /// M2-K2 起 call 步骤由宿主注入跨 App registry，本解释器仅承担深度计数与递归。
+/// M7：每步执行后写一条 method.step 审计（traceId 贯穿整次 invoke，跨 App call 子调用继承）。
 
 public enum BaseMethodStepType: String, Equatable {
     case query
@@ -19,6 +21,21 @@ public enum BaseMethodStepType: String, Equatable {
     case assert
     case call
     case reply
+    case exportCSV = "export.csv"
+}
+
+/// M7：方法执行的追踪上下文（invoke 全链路贯穿；跨 App call 子调用继承同一 traceId）。
+public struct BaseMethodTraceContext {
+    public let traceId: String
+    public let methodName: String
+    /// 固定 "runtime"（方法执行只发生在运行面）。
+    public let surface: String
+
+    public init(traceId: String, methodName: String, surface: String = "runtime") {
+        self.traceId = traceId
+        self.methodName = methodName
+        self.surface = surface
+    }
 }
 
 /// 方法步骤模型（保留原始 JSON 供各步骤执行器使用）。
@@ -66,7 +83,7 @@ public struct BaseMethodDef {
                 throw BaseError(
                     code: .validationFailed,
                     message: "步骤 type 不合法",
-                    hint: "须为 query/aggregate/mutate/assert/call/reply"
+                    hint: "须为 query/aggregate/mutate/assert/call/reply/export.csv"
                 )
             }
             steps.append(BaseMethodStep(type: type, raw: s))
@@ -74,7 +91,8 @@ public struct BaseMethodDef {
         self.steps = steps
         self.exports = (json["exports"] as? Bool) ?? false
         self.readOnly = (json["readOnly"] as? Bool) ?? false
-        // 只读推导：方法体仅 query/aggregate + reply（assert/call/mutate 不计入只读）。
+        // 只读推导：方法体仅 query/aggregate + reply（assert/call/mutate/export.csv 不计入只读；
+        // 含 export.csv 步骤的方法一律非只读——契约口径）。
         self.derivedReadOnly = steps.allSatisfy {
             $0.type == .query || $0.type == .aggregate || $0.type == .reply
         }
@@ -150,20 +168,26 @@ public struct BaseMethodInterpreter {
     ///     全限定名 `appID.method` 由宿主解析为属主子库上下文（并完成 imports 校验）。
     ///   - appID: 当前 App（write 归属、跨 App exported 判定与错误上下文）。
     ///   - callDepth: 当前 call 深度（递归调用时 +1）。
+    ///   - trace: M7 追踪上下文（traceId/methodName/surface）；每步执行后写一条
+    ///     method.step 审计到当前上下文子库。跨 App call 子调用继承同一 traceId。
+    ///     缺省时内部铸造新 traceId（历史调用面兼容）。
     public func invoke(
         method: BaseMethodDef,
         args: [String: Any],
         resolver: (String) throws -> BaseMethodTarget?,
         appID: String,
-        callDepth: Int = 0
+        callDepth: Int = 0,
+        trace: BaseMethodTraceContext? = nil
     ) throws -> BaseMethodResult {
         try validateArgs(method: method, args: args)
 
+        let context = trace ?? BaseMethodTraceContext(traceId: BaseEnvelope.newTraceID(), methodName: method.name)
         var vars: [String: JSONValue] = [:]
         var signals: [BaseMethodSignal] = []
         var lastData: JSONValue = .object([:])
 
         for step in method.steps {
+            let stepStartData = lastData
             switch step.type {
             case .query:
                 lastData = try runQuery(step)
@@ -181,17 +205,99 @@ public struct BaseMethodInterpreter {
             case .assert:
                 try runAssert(step, vars: vars, signals: &signals)
             case .call:
-                lastData = try runCall(step, appID: appID, method: method, args: args, vars: vars, resolver: resolver, callDepth: callDepth)
+                lastData = try runCall(step, appID: appID, method: method, args: args, vars: vars, resolver: resolver, callDepth: callDepth, trace: context)
             case .reply:
                 lastData = try runReply(step, vars: vars)
+                auditStep(method: method, step: step, table: step.raw["table"] as? String, result: lastData, previous: stepStartData, trace: context)
                 // reply 为终止步骤。
                 return BaseMethodResult(data: lastData, signals: signals, variables: vars)
+            case .exportCSV:
+                guard !method.isReadOnly else {
+                    throw BaseError(
+                        code: .validationFailed,
+                        message: "只读方法禁止包含 export.csv 步骤",
+                        hint: "readOnly 方法体仅允许 query/aggregate + reply；含 export.csv 的方法非只读"
+                    )
+                }
+                lastData = try runExportCSV(step)
             }
             if let name = step.raw["as"] as? String, !name.isEmpty {
                 vars[name] = lastData
             }
+            auditStep(method: method, step: step, table: step.raw["table"] as? String, result: lastData, previous: stepStartData, trace: context)
         }
         return BaseMethodResult(data: lastData, signals: signals, variables: vars)
+    }
+
+    // MARK: - 步骤审计（M7）
+
+    /// 每步一条 method.step 审计（best-effort；不改审计表 schema，detail 为 JSON 文本）。
+    /// 子库即当前执行上下文（跨 App call 的子调用审计落在目标 App 子库，traceId 继承）。
+    private func auditStep(
+        method: BaseMethodDef,
+        step: BaseMethodStep,
+        table: String?,
+        result: JSONValue,
+        previous: JSONValue,
+        trace: BaseMethodTraceContext
+    ) {
+        let rows = Self.auditRowCount(for: step, result: result, previous: previous)
+        let detail = Self.stepAuditDetail(
+            traceId: trace.traceId,
+            methodName: trace.methodName,
+            surface: trace.surface,
+            stepType: step.type.rawValue,
+            table: table ?? "",
+            rows: rows
+        )
+        store.recordAudit(operation: "method.step", detail: detail)
+    }
+
+    /// 步骤涉及的行数（审计观测字段）：数组=行数；mutate=applied；export.csv=rowCount；其余 0。
+    private static func auditRowCount(for step: BaseMethodStep, result: JSONValue, previous: JSONValue) -> Int {
+        switch step.type {
+        case .query, .aggregate:
+            if case let .array(items) = result { return items.count }
+            return 0
+        case .mutate:
+            if case let .object(dict) = result, let applied = dict["applied"]?.numberValue {
+                return Int(applied)
+            }
+            return 0
+        case .exportCSV:
+            if case let .object(dict) = result, let rowCount = dict["rowCount"]?.numberValue {
+                return Int(rowCount)
+            }
+            return 0
+        case .assert:
+            return 0
+        case .call:
+            // 子调用各步在目标上下文自记审计；此处只记调用发起本身。
+            return 0
+        case .reply:
+            if case let .object(dict) = result, !dict.isEmpty { return 1 }
+            return 0
+        }
+    }
+
+    static func stepAuditDetail(
+        traceId: String,
+        methodName: String,
+        surface: String,
+        stepType: String,
+        table: String,
+        rows: Int
+    ) -> String {
+        let payload: [String: Any] = [
+            "traceId": traceId,
+            "methodName": methodName,
+            "surface": surface,
+            "stepType": stepType,
+            "table": table,
+            "rows": rows
+        ]
+        let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        return String(data: data ?? Data(), encoding: .utf8) ?? "{}"
     }
 
     // MARK: - 入参校验
@@ -279,7 +385,8 @@ public struct BaseMethodInterpreter {
         args: [String: Any],
         vars: [String: JSONValue],
         resolver: (String) throws -> BaseMethodTarget?,
-        callDepth: Int
+        callDepth: Int,
+        trace: BaseMethodTraceContext
     ) throws -> JSONValue {
         if callDepth >= Self.maxCrossAppCallDepth {
             throw BaseError(
@@ -309,15 +416,69 @@ public struct BaseMethodInterpreter {
             )
         }
         // 切换执行上下文：在属主子库/schema 中解释目标方法。
+        // M7：子调用继承同一 traceId（跨 App 全链路一次追踪），methodName 换为目标方法。
         let targetInterpreter = BaseMethodInterpreter(store: t.store, schema: t.schema)
+        let childTrace = BaseMethodTraceContext(traceId: trace.traceId, methodName: t.method.name, surface: trace.surface)
         let result = try targetInterpreter.invoke(
             method: t.method,
             args: callArgs,
             resolver: resolver,
             appID: t.appID,
-            callDepth: callDepth + 1
+            callDepth: callDepth + 1,
+            trace: childTrace
         )
         return result.data
+    }
+
+    /// export.csv 步骤：列白名单（声明顺序即 CSV 表头）+ 可选 filter + 行数上限（maxRows，
+    /// 缺省契约 maxRowsPerQuery=5000），超限/未知列 → VALIDATION_FAILED。
+    /// 输出 {csv, rowCount, table}，可经 `as` 存入变量上下文（含此步骤的方法非只读）。
+    private func runExportCSV(_ step: BaseMethodStep) throws -> JSONValue {
+        guard let table = step.raw["table"] as? String else {
+            throw BaseError(code: .validationFailed, message: "export.csv 步骤缺 table", hint: "export.csv 步骤必须指定表")
+        }
+        guard let tableDef = schema.table(named: table) else {
+            throw BaseError(code: .notFound, message: "表不存在于 schema", hint: "schema 无表 \(table)")
+        }
+        let declaredColumns = (step.raw["columns"] as? [String]) ?? []
+        guard !declaredColumns.isEmpty else {
+            throw BaseError(
+                code: .validationFailed,
+                message: "export.csv 步骤缺 columns",
+                hint: "export.csv 须声明列白名单（按导出顺序）；表 \(table) 允许列：\(tableDef.fields.map { $0.name }.joined(separator: "/"))"
+            )
+        }
+        // 列白名单校验：声明列必须都在 schema 内（缺列/未知列拒绝）。
+        let fieldNames = tableDef.fields.map { $0.name }
+        for column in declaredColumns {
+            guard fieldNames.contains(column) else {
+                throw BaseError(
+                    code: .validationFailed,
+                    message: "export.csv 列未声明于 schema",
+                    hint: "未知列 \(column)；表 \(table) 允许列：\(fieldNames.joined(separator: "/"))"
+                )
+            }
+        }
+        let executor = BaseQueryExecutor(store: store, table: table, schema: schema)
+        let rows = try executor.select(
+            filter: step.raw["filter"] as? [String: Any],
+            sort: step.raw["sort"] as? [[String: Any]],
+            page: step.raw["page"] as? [String: Any]
+        )
+        let maxRows = (step.raw["maxRows"] as? Int) ?? BaseQueryCompiler.maxRowsPerQuery
+        guard rows.count <= maxRows else {
+            throw BaseError(
+                code: .validationFailed,
+                message: "导出行数超过 maxRows=\(maxRows)",
+                hint: "当前命中 \(rows.count) 行；请收紧 filter 或下调 maxRows"
+            )
+        }
+        let csv = BaseCSV.exportCSV(records: rows, fieldOrder: declaredColumns)
+        return .object([
+            "table": .string(table),
+            "rowCount": .number(Double(rows.count)),
+            "csv": .string(csv)
+        ])
     }
 
     private func runReply(_ step: BaseMethodStep, vars: [String: JSONValue]) throws -> JSONValue {
