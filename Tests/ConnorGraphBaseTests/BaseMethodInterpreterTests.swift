@@ -525,4 +525,173 @@ final class BaseMethodInterpreterTests: XCTestCase {
         }
         XCTAssertEqual(grand, 143)
     }
+
+    // MARK: M7 export.csv 步骤
+
+    /// export.csv：表头 = 声明列顺序；输出 {table, rowCount, csv} 可经 `as` 入变量上下文。
+    func testExportCSVStepProducesDeclaredColumnsInOrder() throws {
+        let json: [String: Any] = [
+            "name": "expenses.export",
+            "steps": [
+                ["type": "export.csv", "table": "expenses", "columns": ["category", "amount"], "as": "csv"],
+                ["type": "reply", "template": ["csv": "$csv.csv", "rows": "$csv.rowCount"]]
+            ]
+        ]
+        let def = try BaseMethodDef(json: json)
+        // 契约口径：含 export.csv 步骤的方法非只读。
+        XCTAssertFalse(def.isReadOnly, "含 export.csv 步骤的方法应非只读")
+        let result = try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")
+        guard case let .object(reply) = result.data,
+              case let .string(csv)? = reply["csv"],
+              case let .number(rows)? = reply["rows"] else {
+            return XCTFail("reply 应含 csv 与 rows")
+        }
+        // 表头 = 声明列顺序（category 在前，非 schema 字段序）。
+        XCTAssertTrue(csv.hasPrefix("category,amount\r\n"), "表头应为声明列顺序，实际: \(csv.prefix(40))")
+        XCTAssertEqual(rows, 2, "rowCount 应为命中行数")
+        XCTAssertTrue(csv.contains("93"))
+    }
+
+    /// export.csv：缺 columns / 未知列 → VALIDATION_FAILED。
+    func testExportCSVStepRejectsUndeclaredColumn() throws {
+        let missing: [String: Any] = [
+            "name": "bad.export",
+            "steps": [["type": "export.csv", "table": "expenses"]]
+        ]
+        XCTAssertThrowsError(try makeInterpreter().invoke(method: try BaseMethodDef(json: missing), args: [:], resolver: { _ in nil }, appID: "acct")) { error in
+            let e = error as! BaseError
+            XCTAssertEqual(e.code, "VALIDATION_FAILED")
+            XCTAssertTrue(e.message.contains("缺 columns"))
+        }
+        let unknown: [String: Any] = [
+            "name": "bad.export2",
+            "steps": [["type": "export.csv", "table": "expenses", "columns": ["amount", "nonsense"]]]
+        ]
+        XCTAssertThrowsError(try makeInterpreter().invoke(method: try BaseMethodDef(json: unknown), args: [:], resolver: { _ in nil }, appID: "acct")) { error in
+            let e = error as! BaseError
+            XCTAssertEqual(e.code, "VALIDATION_FAILED")
+            XCTAssertTrue(e.hint.contains("nonsense"))
+        }
+    }
+
+    /// export.csv：行数超 maxRows → VALIDATION_FAILED（缺省上限为契约 maxRowsPerQuery）。
+    func testExportCSVStepEnforcesMaxRows() throws {
+        let json: [String: Any] = [
+            "name": "capped.export",
+            "steps": [["type": "export.csv", "table": "expenses", "columns": ["amount"], "maxRows": 1]]
+        ]
+        let def = try BaseMethodDef(json: json)
+        XCTAssertThrowsError(try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")) { error in
+            let e = error as! BaseError
+            XCTAssertEqual(e.code, "VALIDATION_FAILED")
+            XCTAssertTrue(e.message.contains("maxRows=1"), "应报告上限，实际: \(e.message)")
+        }
+    }
+
+    /// readOnly 方法含 export.csv → 执行即拒（export.csv 非只读步骤）。
+    func testReadOnlyMethodForbidsExportCSVStep() throws {
+        let json: [String: Any] = [
+            "name": "readonly.export",
+            "readOnly": true,
+            "steps": [["type": "export.csv", "table": "expenses", "columns": ["amount"]]]
+        ]
+        let def = try BaseMethodDef(json: json)
+        XCTAssertTrue(def.readOnly, "显式 readOnly 声明应保留")
+        XCTAssertFalse(def.derivedReadOnly)
+        XCTAssertFalse(def.isReadOnly == false && def.readOnly == false, "isReadOnly 应为 true")
+        XCTAssertThrowsError(try makeInterpreter().invoke(method: def, args: [:], resolver: { _ in nil }, appID: "acct")) { error in
+            let e = error as! BaseError
+            XCTAssertEqual(e.code, "VALIDATION_FAILED")
+            XCTAssertTrue(e.message.contains("只读方法禁止包含 export.csv 步骤"))
+        }
+    }
+
+    /// 步骤 type 枚举校验 hint 与契约/golden 22 逐字对齐（含 export.csv）。
+    func testRejectsUnknownStepTypeHintMentionsExportCSV() {
+        let json: [String: Any] = ["name": "bad", "steps": [["type": "frobnicate"]]]
+        XCTAssertThrowsError(try BaseMethodDef(json: json)) { error in
+            let e = error as! BaseError
+            XCTAssertEqual(e.code, "VALIDATION_FAILED")
+            XCTAssertEqual(e.message, "步骤 type 不合法")
+            XCTAssertEqual(e.hint, "须为 query/aggregate/mutate/assert/call/reply/export.csv")
+        }
+    }
+
+    // MARK: M7 步骤审计 + traceId 贯穿
+
+    /// 每步一条 method.step 审计：detail JSON {traceId, methodName, surface, stepType, table, rows}；
+    /// 同一次 invoke 的全部步骤共享同一 traceId。
+    func testStepAuditRowsShareSingleTraceId() throws {
+        let json: [String: Any] = [
+            "name": "audit.report",
+            "steps": [
+                ["type": "aggregate", "table": "expenses", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
+                ["type": "assert", "on": ["path": "$agg.0.total", "op": "lte", "value": 100], "onFail": "warn", "message": "超 100"],
+                ["type": "reply", "template": ["total": "$agg.0.total"]]
+            ]
+        ]
+        let def = try BaseMethodDef(json: json)
+        let result = try makeInterpreter().invoke(
+            method: def, args: [:], resolver: { _ in nil }, appID: "acct",
+            trace: BaseMethodTraceContext(traceId: "trace-xyz", methodName: "audit.report")
+        )
+        XCTAssertEqual(result.warnings, ["超 100"])
+
+        let stepRows = store.readAudit(limit: 100).filter { ($0["operation"] as? String) == "method.step" }
+        XCTAssertEqual(stepRows.count, 3, "三个步骤应各有一条 method.step 审计")
+        var stepTypes: [String] = []
+        for row in stepRows {
+            let detail = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data((row["detail"] as? String ?? "").utf8)) as? [String: Any])
+            XCTAssertEqual(detail["traceId"] as? String, "trace-xyz", "同一 invoke 的步骤审计应共享 traceId")
+            XCTAssertEqual(detail["methodName"] as? String, "audit.report")
+            XCTAssertEqual(detail["surface"] as? String, "runtime")
+            stepTypes.append(detail["stepType"] as? String ?? "")
+        }
+        XCTAssertEqual(Set(stepTypes), ["aggregate", "assert", "reply"])
+    }
+
+    /// call 子调用继承父 traceId，methodName 换为子方法名；审计落在子方法执行上下文子库。
+    func testCallChildInheritsTraceIdAndAuditsInTargetContext() throws {
+        let subs = try makeSubsContext()
+        defer { subs.store.close() }
+        let subsMonthly = try BaseMethodDef(json: [
+            "name": "subs.monthly",
+            "exports": true,
+            "steps": [
+                ["type": "aggregate", "table": "subs", "aggregations": [["op": "sum", "field": "amount", "alias": "total"]], "as": "agg"],
+                ["type": "reply", "template": ["total": "$agg.0.total"]]
+            ]
+        ])
+        let caller = try BaseMethodDef(json: [
+            "name": "acct.summary",
+            "steps": [
+                ["type": "call", "method": "subs.monthly", "as": "subsTotal"],
+                ["type": "reply", "template": ["total": "$subsTotal.total"]]
+            ]
+        ])
+        let resolver: (String) throws -> BaseMethodTarget? = { ref in
+            ref == "subs.monthly" ? BaseMethodTarget(appID: "subs", store: subs.store, schema: subs.schema, method: subsMonthly) : nil
+        }
+        _ = try makeInterpreter().invoke(
+            method: caller, args: [:], resolver: resolver, appID: "acct",
+            trace: BaseMethodTraceContext(traceId: "trace-parent", methodName: "acct.summary")
+        )
+
+        // 父方法步骤：审计在 acct 子库，methodName=acct.summary。
+        let parentRows = store.readAudit(limit: 100).filter { ($0["operation"] as? String) == "method.step" }
+        XCTAssertFalse(parentRows.isEmpty)
+        for row in parentRows {
+            let detail = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data((row["detail"] as? String ?? "").utf8)) as? [String: Any])
+            XCTAssertEqual(detail["traceId"] as? String, "trace-parent")
+            XCTAssertEqual(detail["methodName"] as? String, "acct.summary")
+        }
+        // 子方法步骤：审计落在 subs 子库，traceId 继承，methodName 换为 subs.monthly。
+        let childRows = subs.store.readAudit(limit: 100).filter { ($0["operation"] as? String) == "method.step" }
+        XCTAssertEqual(childRows.count, 2, "子方法两步应各有一条审计")
+        for row in childRows {
+            let detail = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data((row["detail"] as? String ?? "").utf8)) as? [String: Any])
+            XCTAssertEqual(detail["traceId"] as? String, "trace-parent", "跨 App 子调用应继承父 traceId")
+            XCTAssertEqual(detail["methodName"] as? String, "subs.monthly")
+        }
+    }
 }

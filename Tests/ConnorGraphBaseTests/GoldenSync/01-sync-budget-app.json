@@ -289,9 +289,9 @@
     "args": {}
   },
   "then": {
-    "packageFingerprint": "ca53a1a278b7aa1a41edccd2cad78883f95341c45fd6d7374fb05606e7b3169e",
-    "cardFingerprint": "59a732325addf97d8854656917781a4c9ca939246a8246e09839846951fb3089",
-    "guideFingerprint": "34748a9542ee0e629e0b04385fbf2a70f65c7a5dd6e73ec018f520c28876b2b2",
+    "packageFingerprint": "b6c5a6418ca2ca1f870cfef4e8c2f98a6dd6823b795cc995ed9f6742526dc799",
+    "cardFingerprint": "e64650ded41ac9a3717c83dd0b94a8c633458e7210da6decc862c5264e73af40",
+    "guideFingerprint": "6737d7b0423579f497f083c1dc975d8b8e5657870d39e94aac62c010c01cb2e2",
     "methodResult": [
       {
         "sum_amount": 40.5

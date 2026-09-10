@@ -462,15 +462,20 @@ public actor BaseToolRuntime {
         // M7：每次 invoke 铸造一个 traceId——贯穿全部 method.step 审计行，并随信封返回。
         let traceId = BaseEnvelope.newTraceID()
         do {
-            // M7：零方法 App 运行面兜底——没有可调用方法，直接给制作面指引（Card hint 同句）。
-            if try library.methods(appID: appID).isEmpty {
-                throw BaseError(
-                    code: .validationFailed,
-                    message: "App 尚未声明方法，无法调用",
-                    hint: BaseLibraryStore.zeroMethodHint
-                )
-            }
             guard let target = try library.methodTarget(callingAppID: appID, reference: method) else {
+                // M7 零方法兜底：被引用的 App 一个方法都没有时，给制作面指引而非笼统 NOT_FOUND
+                // （跨 App 全限定名引用时先看目标 App；有方法可寻址则维持 NOT_FOUND 口径）。
+                let referencedAppID = method.contains(".")
+                    ? String(method.split(separator: ".").first ?? Substring(appID))
+                    : appID
+                if (try? library.appExists(referencedAppID)) == true,
+                   (try? library.methods(appID: referencedAppID))?.isEmpty == true {
+                    throw BaseError(
+                        code: .validationFailed,
+                        message: "App 尚未声明方法，无法调用",
+                        hint: BaseLibraryStore.zeroMethodHint
+                    )
+                }
                 throw BaseError(code: .notFound, message: "方法不存在", hint: "App \(appID) 中找不到方法 \(method)")
             }
             // 漂移即拒：目标 App 指南与签名不一致时，禁止按过期指南调用方法（v0.12 §6.4）。
@@ -758,12 +763,19 @@ public struct BaseAgentTool: AgentTool {
                     "tables": .array(items: tableDefSchema, description: "表定义数组")
                 ], required: ["tables"]),
                 "guide": .object(properties: [
-                    "whenToUse": .string(description: "什么时候用（用户真实触发语气场景句）"),
-                    "whenNotToUse": .string(description: "什么时候不用（路由判据）"),
-                    "sections": .array(items: .object(properties: ["title": .string(description: "章节标题"), "body": .string(description: "章节正文")], required: ["title", "body"]), description: "App Guide 十一段正文"),
-                    "writeMethods": .array(items: .string(description: "写方法名"), description: "写方法列表（含伴随读取声明）"),
-                    "readMethods": .array(items: .string(description: "只读方法名"), description: "只读方法列表")
-                ], required: ["whenToUse", "whenNotToUse"]),
+                    "authoring": .object(properties: [
+                        "whenToUse": .string(description: "什么时候用（属主视角，制作面路由判据）"),
+                        "whenNotToUse": .string(description: "什么时候不用（属主路由判据）"),
+                        "sections": .array(items: .object(properties: ["title": .string(description: "章节标题"), "body": .string(description: "章节正文")], required: ["title", "body"]), description: "App Guide 十一段正文（authoring 态）"),
+                        "writeMethods": .array(items: .string(description: "写方法名"), description: "写方法列表（含伴随读取声明）"),
+                        "readMethods": .array(items: .string(description: "只读方法名"), description: "只读方法列表")
+                    ], required: ["whenToUse", "whenNotToUse"]),
+                    "usage": .object(properties: [
+                        "whenToUse": .string(description: "什么时候用（用户真实触发语气场景句）"),
+                        "whenNotToUse": .string(description: "什么时候不用（路由判据）"),
+                        "sections": .array(items: .object(properties: ["title": .string(description: "章节标题"), "body": .string(description: "章节正文")], required: ["title", "body"]), description: "App Guide 十一段正文（usage 态）")
+                    ], required: ["whenToUse", "whenNotToUse"])
+                ], required: ["authoring", "usage"]),
                 "methods": .array(items: .object(properties: [
                     "name": .string(description: "方法名"),
                     "description": .string(description: "方法说明"),
