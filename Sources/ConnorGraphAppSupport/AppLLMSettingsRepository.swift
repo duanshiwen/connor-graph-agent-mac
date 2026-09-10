@@ -315,6 +315,16 @@ public enum AppLLMSettingsError: Error, LocalizedError, Equatable, Sendable {
     }
 }
 
+/// AI 连接变更信号：账号同步应用远端 ai_connections 记录后广播，
+/// AI 连接设置界面与运行时据此刷新，使跨端同步的连接立即生效。
+public enum AppLLMSettingsSignal {
+    public static let connectionsDidChange = Notification.Name("ConnorLLMConnectionsDidChange")
+
+    public static func postConnectionsDidChange() {
+        NotificationCenter.default.post(name: connectionsDidChange, object: nil)
+    }
+}
+
 public struct AppLLMSettings: Sendable, Equatable {
     public var connections: [AppLLMConnectionConfig]
     public var defaultConnectionID: String
@@ -429,6 +439,8 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     public static let apiKeyAccount = "openai-compatible-api-key"
     public static let anthropicAuthHeaderKindMetadataKey = "x-connor-anthropic-auth-header-kind"
     public static let openAIAPIKeyHeaderKindMetadataKey = "x-connor-openai-api-key-header-kind"
+    /// 本地模型占位 API Key（本地端点写入）：账号同步时视为空凭据，不外传也不覆盖本地值。
+    public static let localModelAPIKeySentinel = "connor-local-model"
 
     private enum Keys {
         static let connections = "llm.connections"
@@ -438,6 +450,9 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         static let model = "llm.model"
         static let selectedModel = "llm.selectedModel"
         static let defaultThinkingLevel = "llm.defaultThinkingLevel"
+        /// 连接记录级同步时间戳（epoch 毫秒）：持久化 connections 时统一盖戳，
+        /// 作为 ai_connections 同步记录的 updatedAt 参与跨端“后写者胜”仲裁。
+        static let connectionsSyncedAt = "llm.connectionsSyncedAt"
     }
 
     public var settingsStore: LLMSettingsStore
@@ -570,6 +585,8 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         settingsStore.set(sanitized.defaultThinkingLevel.rawValue, forKey: Keys.defaultThinkingLevel)
         let data = try JSONEncoder().encode(sanitized.connections)
         settingsStore.set(String(decoding: data, as: UTF8.self), forKey: Keys.connections)
+        // 记录级同步时间戳：所有连接持久化路径（save/updateConnection/saveConnection）统一在此盖戳。
+        settingsStore.set(String(Self.nowMillis()), forKey: Keys.connectionsSyncedAt)
         settingsStore.set(sanitized.defaultConnectionID, forKey: Keys.defaultConnectionID)
 
         if let defaultConnection = sanitized.defaultConnection {
@@ -625,6 +642,105 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         settings.connections[index] = sanitized
         try save(settings: settings, apiKey: nil)
     }
+
+    /// 本地连接同步时间戳（epoch 毫秒），对应 Keys.connectionsSyncedAt；从未保存过连接时为 0。
+    public func connectionsSyncedAtMillis() -> Int64 {
+        guard let raw = settingsStore.string(forKey: Keys.connectionsSyncedAt),
+              let millis = Int64(raw) else { return 0 }
+        return millis
+    }
+
+    public func recordConnectionsSyncedAt(millis: Int64) {
+        settingsStore.set(String(millis), forKey: Keys.connectionsSyncedAt)
+    }
+
+    /// 生成 ai_connections 账号同步投影（recordId 「ai_connections」，整条记录“后写者胜”）。
+    /// 从未保存过连接（同步时间戳为 0）或连接列表为空时不投影，避免一台空设备把其它端已配置的连接清空。
+    public func accountSyncProjection() throws -> SyncAIConnections? {
+        let syncedAtMillis = connectionsSyncedAtMillis()
+        guard syncedAtMillis > 0 else { return nil }
+        let settings = try loadSettings()
+        guard !settings.connections.isEmpty else { return nil }
+        let wireConnections = try settings.connections.map { connection -> SyncAIConnection in
+            // Codex/Copilot 订阅连接的 OAuth 凭据设备特定不同步，只投影连接定义。
+            let apiKey: String?
+            switch connection.connectionKind {
+            case .chatGPTCodex, .githubCopilot:
+                apiKey = nil
+            case .openAIResponses, .openAICompatible, .anthropicCompatible:
+                apiKey = try self.apiKey(for: connection.id)
+            }
+            return SyncAIConnection(connection, apiKey: apiKey, updatedAtMillis: syncedAtMillis)
+        }
+        return SyncAIConnections(
+            connections: wireConnections,
+            defaultConnectionId: settings.defaultConnectionID,
+            updatedAt: syncedAtMillis
+        )
+    }
+
+    /// 应用远端 ai_connections 记录：远端 updatedAt 不晚于本地同步时间戳则忽略（后写者胜）。
+    /// 应用语义=按远端连接列表对齐本地——远端各连接 upsert（连接配置写 UserDefaults，
+    /// api_key 模式且携带非空明文 Key 时写入凭据库，none/空 Key 不写库），本地有而远端无的
+    /// 连接删除（本机 Codex/Copilot 订阅连接保留不动、凭据不动）；默认连接随远端，但本地
+    /// 保留的订阅连接原是默认时保持本地默认。应用成功后广播 connectionsDidChange 让
+    /// UI 与运行时刷新。返回是否实际应用。
+    @discardableResult
+    public func applyAccountSyncRecord(_ wire: SyncAIConnections) throws -> Bool {
+        // 空连接列表不应用：更可能是异常载荷而非“删光了全部”，避免清空本机连接。
+        guard !wire.connections.isEmpty, wire.updatedAt > connectionsSyncedAtMillis() else { return false }
+        let current = try loadSettings()
+        let remoteIDs = Set(wire.connections.map(\.id))
+        // 本地有而远端无：非订阅连接删除（含凭据），Codex/Copilot 订阅连接保留不动。
+        let removedLocalConnections = current.connections.filter {
+            !remoteIDs.contains($0.id) && !Self.isSubscriptionConnectionKind($0.connectionKind)
+        }
+        for connection in removedLocalConnections {
+            try clearAPIKey(connectionID: connection.id)
+        }
+        let retainedSubscriptionConnections = current.connections.filter {
+            !remoteIDs.contains($0.id) && Self.isSubscriptionConnectionKind($0.connectionKind)
+        }
+        // 远端各连接 upsert；本机独有元数据（extraHTTPHeaders 等）由 makeConnection 优先保留。
+        var syncedConnections = try wire.connections.map { wireConnection in
+            SyncAIConnection.makeConnection(wireConnection, local: current.connections.first(where: { $0.id == wireConnection.id }))
+        }
+        syncedConnections.append(contentsOf: retainedSubscriptionConnections)
+        // 默认连接随远端；本地保留的订阅连接原是默认时保持本地默认。
+        let defaultConnectionID: String
+        if retainedSubscriptionConnections.contains(where: { $0.id == current.defaultConnectionID }) {
+            defaultConnectionID = current.defaultConnectionID
+        } else if syncedConnections.contains(where: { $0.id == wire.defaultConnectionId }) {
+            defaultConnectionID = wire.defaultConnectionId
+        } else {
+            defaultConnectionID = syncedConnections.first?.id ?? ""
+        }
+        try save(
+            settings: AppLLMSettings(
+                connections: syncedConnections,
+                defaultConnectionID: defaultConnectionID,
+                defaultThinkingLevel: current.defaultThinkingLevel
+            ),
+            apiKey: nil
+        )
+        // api_key 模式且携带非空明文 Key 才写凭据库；none/空 Key 与 OAuth 订阅连接不动本地凭据。
+        for wireConnection in wire.connections {
+            if let apiKey = wireConnection.syncableAPIKey {
+                try saveAPIKey(apiKey, connectionID: wireConnection.id)
+            }
+        }
+        // 应用后采用远端记录时间戳，避免本轮 reconcile 把刚收到的记录原样推回去。
+        recordConnectionsSyncedAt(millis: wire.updatedAt)
+        AppLLMSettingsSignal.postConnectionsDidChange()
+        return true
+    }
+
+    /// 订阅连接（Codex/Copilot）走设备特定 OAuth 凭据，不随账号同步删除或覆盖。
+    public static func isSubscriptionConnectionKind(_ kind: AppLLMConnectionKind) -> Bool {
+        kind == .chatGPTCodex || kind == .githubCopilot
+    }
+
+    static func nowMillis() -> Int64 { Int64(Date().timeIntervalSince1970 * 1_000) }
 
     public func oauthTokens(for connectionID: String) throws -> AppLLMOAuthTokens? {
         guard let raw = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.oauthAccount(for: connectionID)),

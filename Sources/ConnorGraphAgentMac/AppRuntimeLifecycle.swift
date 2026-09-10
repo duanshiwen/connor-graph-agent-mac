@@ -4120,6 +4120,7 @@ extension AppRuntimeLifecycle {
             skillStore: SkillSyncStore(storagePaths: storagePaths),
             rss: rssFeatureModel.agentRuntime.repository,
             mail: mailFeatureModel.sourceRepository,
+            llm: llmSettingsRepository,
             identity: identityStore
         )
         // 消费本机「好友并入/解绑」动作：写入或清除 L4 实体的 connor_friend_* 元数据，

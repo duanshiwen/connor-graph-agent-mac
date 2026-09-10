@@ -36,6 +36,7 @@ final class AIConnectionsFeatureModel {
     @ObservationIgnored var onRuntimeSettingsChanged: (_ rebuildRuntime: Bool) -> Void = { _ in }
     @ObservationIgnored var onDefaultConnectionChanged: () -> Void = {}
     @ObservationIgnored var onConnectionSetup: (AppLLMConnectionConfig) -> Void = { _ in }
+    @ObservationIgnored private var connectionsDidChangeObserver: ConnectionsDidChangeObserverToken?
 
     init(
         settingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
@@ -59,6 +60,17 @@ final class AIConnectionsFeatureModel {
                 )
             )
         }
+        self.connectionsDidChangeObserver = nil
+        // 账号同步应用远端 AI 连接后广播：重载设置并让 UI 与运行时立即生效。
+        self.connectionsDidChangeObserver = ConnectionsDidChangeObserverToken(
+            NotificationCenter.default.addObserver(
+                forName: AppLLMSettingsSignal.connectionsDidChange,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.handleRemoteConnectionsChange() }
+            }
+        )
     }
 
     func apply(_ settings: AppLLMSettings) {
@@ -100,6 +112,15 @@ final class AIConnectionsFeatureModel {
     func handleSuccessfulSetup() {
         loadSettings()
         showsWelcome = false
+    }
+
+    /// 账号同步应用远端 AI 连接后刷新：重载设置、同步欢迎态，并让运行时与模型目录立即生效。
+    func handleRemoteConnectionsChange() {
+        loadSettings()
+        updateWelcomeState()
+        onDefaultConnectionChanged()
+        onRuntimeSettingsChanged(true)
+        Task { await reloadModelConnections() }
     }
 
     func reloadModelConnections() async {
@@ -335,6 +356,20 @@ final class AIConnectionsFeatureModel {
         defaultConnectionID = connection.id
         selectDefaultConnection(connection.id)
         return connection
+    }
+}
+
+/// NotificationCenter 块观察者令牌：随令牌释放自动注销观察者，
+/// 让 @MainActor 模型无需在非隔离 deinit 中触碰非 Sendable 的观察者对象。
+private final class ConnectionsDidChangeObserverToken: @unchecked Sendable {
+    let token: any NSObjectProtocol
+
+    init(_ token: any NSObjectProtocol) {
+        self.token = token
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(token)
     }
 }
 
