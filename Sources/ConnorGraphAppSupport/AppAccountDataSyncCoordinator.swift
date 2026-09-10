@@ -235,6 +235,141 @@ public struct SyncMailAccount: Codable, Sendable, Equatable {
     }
 }
 
+/// AI 连接跨端共享线格式：camelCase JSON，updatedAt 为 epoch 毫秒。
+/// apiKey 明文随 E2EE 信封同步（信封本身已 AES-256-GCM）；Codex/Copilot 订阅连接的
+/// OAuth 凭据设备特定不同步，只共享连接定义、authMode 固定 oauth；本地模型占位哨兵
+/// 「connor-local-model」视为空凭据不外传。
+public struct SyncAIConnection: Codable, Sendable, Equatable {
+    public var id: String
+    public var name: String
+    public var `protocol`: String
+    public var baseURL: String
+    public var models: [String]
+    public var defaultModel: String
+    public var apiKey: String
+    public var authMode: String
+    public var updatedAt: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, `protocol`
+        case baseURL = "baseUrl"
+        case models, defaultModel, apiKey, authMode, updatedAt
+    }
+
+    public init(
+        id: String,
+        name: String,
+        protocol: String,
+        baseURL: String,
+        models: [String],
+        defaultModel: String,
+        apiKey: String,
+        authMode: String,
+        updatedAt: Int64
+    ) {
+        self.id = id
+        self.name = name
+        self.`protocol` = `protocol`
+        self.baseURL = baseURL
+        self.models = models
+        self.defaultModel = defaultModel
+        self.apiKey = apiKey
+        self.authMode = authMode
+        self.updatedAt = updatedAt
+    }
+
+    /// 从本端连接配置投影：connectionKind 决定规范 protocol（订阅连接固定 oauth 且不带凭据），
+    /// 其余按 providerMode 映射（anthropic_compatible 同样映射 anthropic_messages）。
+    public init(_ connection: AppLLMConnectionConfig, apiKey: String?, updatedAtMillis: Int64) {
+        let trimmedKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let isSyncableKey = !trimmedKey.isEmpty && trimmedKey != AppLLMSettingsRepository.localModelAPIKeySentinel
+        self.init(
+            id: connection.id,
+            name: connection.name,
+            protocol: Self.protocolName(for: connection),
+            baseURL: connection.baseURLString,
+            models: connection.modelOptions,
+            defaultModel: connection.effectiveModel,
+            apiKey: isSyncableKey ? trimmedKey : "",
+            authMode: Self.wireAuthMode(for: connection, hasAPIKey: isSyncableKey),
+            updatedAt: updatedAtMillis
+        )
+    }
+
+    /// 恢复本端连接配置：反向映射 providerMode/connectionKind（openai_chat→openai_compatible）；
+    /// 本机独有元数据（extraHTTPHeaders 等）优先保留本地值，只覆盖跨端共享字段。
+    public static func makeConnection(_ wire: SyncAIConnection, local: AppLLMConnectionConfig?) -> AppLLMConnectionConfig {
+        let resolvedKind = Self.connectionKind(for: wire.protocol)
+        return AppLLMConnectionConfig(
+            id: wire.id,
+            name: wire.name,
+            providerMode: resolvedKind.providerMode,
+            connectionKind: resolvedKind.connectionKind,
+            baseURLString: wire.baseURL,
+            model: wire.models.joined(separator: ","),
+            selectedModel: wire.defaultModel,
+            hasAPIKey: wire.authMode == Self.apiKeyAuthMode && !wire.apiKey.isEmpty,
+            shouldFetchModelsList: local?.shouldFetchModelsList ?? true,
+            extraHTTPHeaders: local?.extraHTTPHeaders ?? [:],
+            explicitVisionSupport: local?.explicitVisionSupport,
+            contextWindowTokens: local?.contextWindowTokens
+        )
+    }
+
+    /// api_key 模式且携带非哨兵明文 Key 时返回可落库的 Key，否则返回 nil（不写凭据库）。
+    var syncableAPIKey: String? {
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard authMode == Self.apiKeyAuthMode,
+              !trimmedKey.isEmpty,
+              trimmedKey != AppLLMSettingsRepository.localModelAPIKeySentinel else { return nil }
+        return trimmedKey
+    }
+
+    static let apiKeyAuthMode = "api_key"
+
+    private static func protocolName(for connection: AppLLMConnectionConfig) -> String {
+        switch connection.connectionKind {
+        case .chatGPTCodex: return "chatgpt_codex"
+        case .githubCopilot: return "github_copilot"
+        case .anthropicCompatible: return "anthropic_messages"
+        case .openAIResponses: return "openai_responses"
+        case .openAICompatible: return "openai_chat"
+        }
+    }
+
+    private static func wireAuthMode(for connection: AppLLMConnectionConfig, hasAPIKey: Bool) -> String {
+        switch connection.connectionKind {
+        case .chatGPTCodex, .githubCopilot:
+            return "oauth"
+        case .openAIResponses, .openAICompatible, .anthropicCompatible:
+            return hasAPIKey ? apiKeyAuthMode : "none"
+        }
+    }
+
+    private static func connectionKind(for wireProtocol: String) -> (providerMode: AppLLMProviderMode, connectionKind: AppLLMConnectionKind) {
+        switch wireProtocol {
+        case "openai_responses": return (.openAIResponses, .openAIResponses)
+        case "anthropic_messages": return (.anthropicMessages, .anthropicCompatible)
+        case "chatgpt_codex": return (.openAICompatible, .chatGPTCodex)
+        case "github_copilot": return (.openAICompatible, .githubCopilot)
+        default: return (.openAICompatible, .openAICompatible)
+        }
+    }
+}
+
+/// AI 连接记录线格式：settings 集合、recordId 「ai_connections」，整条记录按“后写者胜”合并。
+public struct SyncAIConnections: Codable, Sendable, Equatable {
+    public var connections: [SyncAIConnection]
+    public var defaultConnectionId: String
+    public var updatedAt: Int64
+
+    public init(connections: [SyncAIConnection], defaultConnectionId: String, updatedAt: Int64) {
+        self.connections = connections
+        self.defaultConnectionId = defaultConnectionId
+        self.updatedAt = updatedAt
+    }
+}
+
 public struct AppAccountDataSyncResult: Sendable, Equatable {
     public var appliedSessionChangeCount: Int
     public var appliedSettingsChangeCount: Int
@@ -281,7 +416,8 @@ public actor AppAccountDataSyncCoordinator {
         static let mailAccounts = "mail_accounts"
     }
 
-    /// 记录级同步边界：sessions 全量同步；settings 同步运行时设置、人格与用户偏好；
+    /// 记录级同步边界：sessions 全量同步；settings 同步运行时设置、人格、用户偏好与
+    /// AI 连接（recordId ai_connections，连接定义 + API Key，OAuth 订阅连接只共享定义）；
     /// governance_labels 同步会话标签定义（名称/颜色/图标）；Memory OS L2/L3/L4 全量同步，L1 会话工作记忆只留本机。
     /// rss_subscriptions 同步 RSS 订阅源（id/feedURL/displayName/createdAt/updatedAt），删除同样传播。
     /// 个人资料 settings|profile 不进同步状态机，拉取时不记录、不应用，
@@ -289,7 +425,7 @@ public actor AppAccountDataSyncCoordinator {
     private func isSyncableRecord(_ collection: String, _ recordId: String) -> Bool {
         switch collection {
         case SyncCollection.sessions: return true
-        case SyncCollection.settings: return recordId == "macos_runtime" || recordId == "personality" || recordId == "user_preferences"
+        case SyncCollection.settings: return recordId == "macos_runtime" || recordId == "personality" || recordId == "user_preferences" || recordId == "ai_connections"
         case SyncCollection.governanceLabels: return true
         case SyncCollection.rssSubscriptions: return true
         case SyncCollection.mailAccounts: return true
@@ -311,13 +447,14 @@ public actor AppAccountDataSyncCoordinator {
     private let skillStore: SkillSyncStore?
     private let rss: (any RSSSourceRepository)?
     private let mail: (any MailSourceRepository)?
+    private let llm: AppLLMSettingsRepository?
     private let identity: AppUserIdentityStore
     private let defaults: UserDefaults
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, governance: AppSessionGovernanceConfigRepository? = nil, memory: SQLiteMemoryOSStore?, skillStore: SkillSyncStore? = nil, rss: (any RSSSourceRepository)? = nil, mail: (any MailSourceRepository)? = nil, identity: AppUserIdentityStore, defaults: UserDefaults = .standard) {
-        self.sessions = sessions; self.settings = settings; self.governance = governance; self.memory = memory; self.skillStore = skillStore; self.rss = rss; self.mail = mail; self.identity = identity; self.defaults = defaults
+    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, governance: AppSessionGovernanceConfigRepository? = nil, memory: SQLiteMemoryOSStore?, skillStore: SkillSyncStore? = nil, rss: (any RSSSourceRepository)? = nil, mail: (any MailSourceRepository)? = nil, llm: AppLLMSettingsRepository? = nil, identity: AppUserIdentityStore, defaults: UserDefaults = .standard) {
+        self.sessions = sessions; self.settings = settings; self.governance = governance; self.memory = memory; self.skillStore = skillStore; self.rss = rss; self.mail = mail; self.llm = llm; self.identity = identity; self.defaults = defaults
         encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
         decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
     }
@@ -531,6 +668,12 @@ public actor AppAccountDataSyncCoordinator {
                 values[recordKey(SyncCollection.mailAccounts, account.id.rawValue)] = try jsonValue(SyncMailAccount(account))
             }
         }
+        // AI 连接：连接定义与 API Key（明文随 E2EE 信封传输）随账号同步；Codex/Copilot
+        // 订阅连接只共享定义、OAuth 凭据设备特定不同步。从未保存过连接（同步时间戳为 0）
+        // 或列表为空时不投影，避免一台空设备把其它端已配置的连接清空。
+        if let llm, let wire = try llm.accountSyncProjection() {
+            values[recordKey(SyncCollection.settings, "ai_connections")] = try jsonValue(wire)
+        }
         return values
     }
 
@@ -575,6 +718,16 @@ public actor AppAccountDataSyncCoordinator {
                 try settings.saveSynced(synced)
             }
             return .settings
+        case ("settings", "ai_connections") where !change.deleted:
+            // AI 连接按整条记录“后写者胜”：远端 updatedAt 比本地同步时间戳新才应用；
+            // 应用语义=按远端连接列表对齐本地（upsert/删除/默认连接，见
+            // AppLLMSettingsRepository.applyAccountSyncRecord），成功后广播连接变更通知。
+            guard let llm else { return nil }
+            let wire: SyncAIConnections = try decode(change.payload)
+            if try llm.applyAccountSyncRecord(wire) {
+                return .settings
+            }
+            return nil
         case ("memory_l0", let id):
             guard let memory else { return nil }
             try memory.withForeignKeysDisabled {
