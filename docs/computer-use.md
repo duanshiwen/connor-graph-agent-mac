@@ -35,6 +35,7 @@
 
 ## 已知边界
 
+- **合成事件节奏约束（重要）**：mouseDown/mouseUp 之间必须留间隔（macOS 菜单在 down 时进入跟踪模式，瞬时事件对会被吞掉，系统会卡在"菜单跟踪/拖拽"状态，表现为所有菜单打不开、滚动被劫持）；滚轮事件必须带 begin/continue/end 相位，否则 SwiftUI/AppKit 滚动视图会忽略。两端实现均已按此约束发出（见 `SystemControlSupport` / `ComputerControlNative` 顶部注释）。若历史上出现过卡死，物理点击一次鼠标即可解除残留的按住状态。
 - 多显示器/混合 DPI 下，Windows 的 PowerShell 截图兜底通道与虚拟屏坐标可能存在缩放偏差（原生通道一致）；Mac 截图目前取主显示器。
 - UAC/管理员权限窗口、安全桌面（锁屏/登录）无法被注入。
 - Windows 键入 `KEYEVENTF_UNICODE` 与 Mac `keyboardSetUnicodeString` 对少数接收方（如远程桌面、某些游戏）无效。
