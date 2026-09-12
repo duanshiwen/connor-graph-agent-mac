@@ -182,7 +182,7 @@ public extension AgentToolInputSchema {
         if let canonical = Self.legacyArgumentAliases[legacyKey.lowercased()], properties.contains(canonical) {
             return canonical
         }
-        guard legacyKey.contains("_") else { return nil }
+        // 大小写/下划线变体（AltText / alt_text / altText）统一按去下划线小写形式匹配属性名
         let normalizedLegacy = legacyKey.replacingOccurrences(of: "_", with: "").lowercased()
         let matches = properties.filter { $0.lowercased() == normalizedLegacy }
         return matches.count == 1 ? matches[0] : nil
@@ -345,8 +345,13 @@ public struct AgentToolArguments: Sendable, Equatable {
         var normalized = values
         for canonicalKey in aliases.keys.sorted() {
             let aliasKeys = aliases[canonicalKey] ?? []
+            // 与 canonical 完全同名的键是 canonical 本身，不能因「与某个别名归一化形式相同」
+            // 被误判为别名而删除（如 altText 与 alt_text 都归一为 "alttext"，曾导致正确传参
+            // 被 removeValue 吞掉，报 "$.altText is required"）。
+            // 大小写/下划线变体仍按别名映射：canonical 缺失时拷贝取值，随后删除变体键。
             let matchingKeys = normalized.keys.filter { key in
-                aliasKeys.contains { Self.normalizedParameterKey($0) == Self.normalizedParameterKey(key) }
+                key != canonicalKey
+                    && aliasKeys.contains { Self.normalizedParameterKey($0) == Self.normalizedParameterKey(key) }
             }.sorted()
             if normalized[canonicalKey] == nil, let alias = matchingKeys.first {
                 normalized[canonicalKey] = normalized[alias]
