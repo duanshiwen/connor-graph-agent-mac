@@ -52,7 +52,13 @@ public actor AgentPolicyEngine: Sendable {
             toolName: toolName,
             payloadJSON: payloadJSON
         )
-        let outcome = outcome(for: capability)
+        // 控制电脑会话级授权：controlSystemInput 在非只读模式下，同会话批准过一次即自动放行
+        // （授权存续见 ComputerControlConsent；readOnly 下仍一律拒绝）。
+        var outcome = self.outcome(for: capability)
+        if capability == .controlSystemInput, outcome == .needsApproval, permissionMode != .readOnly,
+           await ComputerControlConsent.shared.isGranted(sessionID: sessionID) {
+            outcome = .approved
+        }
         let decision = AgentPermissionDecision(
             requestID: request.id,
             runID: runID,
@@ -107,19 +113,19 @@ public actor AgentPolicyEngine: Sendable {
         case .readOnly:
             // 下方 .baseRead 之外的 base.* 列举仅为穷举：六个 base 能力已在上方 M7 硬切提前放行。
             switch capability {
-            case .readGraph, .readSession, .modelCall, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML, .readBrowserPage, .baseRead:
+            case .readGraph, .readSession, .modelCall, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML, .readBrowserPage, .readSystemScreen, .readSystemAccessibility, .baseRead:
                 return .approved
             case .mutateSessionStatus, .deleteSession, .mutatePersonality, .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .externalNetwork, .navigateBrowser, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML, .createInteractiveWebDraft, .publishInteractiveWeb, .largeWorkspaceWrite,
-             .baseWrite, .baseManageSchema, .baseManageMethods, .baseManageApps, .baseExecute, .basePublish:
+             .controlSystemInput, .baseWrite, .baseManageSchema, .baseManageMethods, .baseManageApps, .baseExecute, .basePublish:
                 return .denied
             }
         case .askToWrite:
             // 下方 .baseRead 之外的 base.* 列举仅为穷举：六个 base 能力已在上方 M7 硬切提前放行。
             switch capability {
-            case .readGraph, .readSession, .mutatePersonality, .modelCall, .proposeGraphWrite, .externalNetwork, .readBrowserPage, .navigateBrowser, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .createMailDraft, .readContacts, .readCalendar, .readRSS, .readRSSContent, .syncRSSSources, .exportRSSOPML, .createInteractiveWebDraft, .baseRead:
+            case .readGraph, .readSession, .mutatePersonality, .modelCall, .proposeGraphWrite, .externalNetwork, .readBrowserPage, .navigateBrowser, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .createMailDraft, .readContacts, .readCalendar, .readRSS, .readRSSContent, .syncRSSSources, .exportRSSOPML, .createInteractiveWebDraft, .readSystemScreen, .readSystemAccessibility, .baseRead:
                 return .approved
             case .mutateSessionStatus, .deleteSession, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .importRSSOPML, .publishInteractiveWeb, .largeWorkspaceWrite,
-             .baseWrite, .baseManageSchema, .baseManageMethods, .baseManageApps, .baseExecute, .basePublish:
+             .controlSystemInput, .baseWrite, .baseManageSchema, .baseManageMethods, .baseManageApps, .baseExecute, .basePublish:
                 return .needsApproval
             }
         case .trustedWrite:

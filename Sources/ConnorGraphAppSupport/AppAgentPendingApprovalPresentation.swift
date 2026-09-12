@@ -138,6 +138,10 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         case .baseManageApps: "管理小应用"
         case .baseExecute: "调用小应用方法"
         case .basePublish: "发布或公开小应用"
+        // 控制电脑
+        case .readSystemScreen: "截取屏幕画面"
+        case .readSystemAccessibility: "读取应用界面结构（无障碍树）"
+        case .controlSystemInput: "控制键鼠与应用界面"
         }
     }
 
@@ -168,6 +172,10 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
             "文件超过工作区写入上限（默认 10MB），询问模式下需人工确认；执行模式自动放行。"
         case .interactBrowser, .commitBrowserAction, .transferBrowserFile:
             "允许操作网页、提交页面动作或传输文件，可能对外部服务产生影响。"
+        case .readSystemScreen, .readSystemAccessibility:
+            "允许康纳同学读取屏幕画面或应用界面结构（仅观察，不会操作）。"
+        case .controlSystemInput:
+            "允许康纳同学模拟鼠标、键盘操作你的电脑（批准一次后本会话内自动执行）。"
         default:
             "允许工具执行可能更改数据或外部状态的操作，请确认目标和参数。"
         }

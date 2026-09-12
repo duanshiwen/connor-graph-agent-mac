@@ -57,6 +57,10 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     case baseManageApps
     case baseExecute
     case basePublish
+    // 控制电脑（Computer Use）：屏幕观察与键鼠/AX 操作
+    case readSystemScreen
+    case readSystemAccessibility
+    case controlSystemInput
 }
 
 public enum AgentPermissionMode: String, Codable, Sendable, Equatable, CaseIterable, Hashable {
