@@ -3010,6 +3010,9 @@ private extension AgentPermissionCapability {
             return false
         case .publishInteractiveWeb:
             return false
+        // 控制电脑：屏幕观察/键鼠操作都依赖全局屏幕状态，并行执行会互相踩踏，串行处理
+        case .readSystemScreen, .readSystemAccessibility, .controlSystemInput:
+            return false
         }
     }
 }
