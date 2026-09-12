@@ -267,23 +267,35 @@ enum SystemControlSupport {
     }
 
     // ---- CGEvent 键鼠注入 ----
+    // 合成事件的节奏约束（违反会导致系统卡在菜单跟踪/拖拽模式，表现为所有菜单打不开、
+    // 滚动被劫持）：
+    // 1. mouseDown 与 mouseUp 之间必须留间隔（菜单在 down 时进入跟踪模式，瞬时事件对会被吞掉）；
+    // 2. mouseMoved 不得携带 clickState（带点击态的移动会打断菜单跟踪）；
+    // 3. 滚轮事件必须带 begin/continue/end 滚动相位，否则 SwiftUI/AppKit 滚动视图忽略事件，
+    //    模型会因"没滚成功"反复重试形成事件风暴。
 
     static func click(x: Double, y: Double, button: CGMouseButton, doubleClick: Bool) {
         let position = CGPoint(x: x, y: y)
-        func post(_ type: CGEventType, clickState: Int64 = 1) {
-            if let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: position, mouseButton: button) {
-                event.setIntegerValueField(.mouseEventClickState, value: clickState)
-                event.post(tap: .cghidEventTap)
-            }
+        func post(_ type: CGEventType, clickState: Int64? = nil) {
+            guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: position, mouseButton: button) else { return }
+            if let clickState { event.setIntegerValueField(.mouseEventClickState, value: clickState) }
+            event.post(tap: .cghidEventTap)
+        }
+        let downType: CGEventType = button == .left ? .leftMouseDown : (button == .right ? .rightMouseDown : .otherMouseDown)
+        let upType: CGEventType = button == .left ? .leftMouseUp : (button == .right ? .rightMouseUp : .otherMouseUp)
+        // 一次完整的按下-抬起（间隔让接收方完成点击/菜单跟踪状态机）
+        func pressPair(clickState: Int64) {
+            post(downType, clickState: clickState)
+            usleep(50_000)
+            post(upType, clickState: clickState)
         }
         post(.mouseMoved)
         if doubleClick {
-            post(.leftMouseDown, clickState: 1); post(.leftMouseUp, clickState: 1)
-            post(.leftMouseDown, clickState: 2); post(.leftMouseUp, clickState: 2)
+            pressPair(clickState: 1)
+            usleep(120_000) // 第二击落在双击间隔（≤500ms）内
+            pressPair(clickState: 2)
         } else {
-            let downType: CGEventType = button == .left ? .leftMouseDown : (button == .right ? .rightMouseDown : .otherMouseDown)
-            let upType: CGEventType = button == .left ? .leftMouseUp : (button == .right ? .rightMouseUp : .otherMouseUp)
-            post(downType); post(upType)
+            pressPair(clickState: 1)
         }
     }
 
@@ -292,35 +304,51 @@ enum SystemControlSupport {
         if let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: position, mouseButton: .left) {
             move.post(tap: .cghidEventTap)
         }
-        // wheel 单位为"行"，一格滚轮约 10 行；纵向走 wheel1，横向走 wheel2；正值向上/向右
-        let lines = Int32(clamping: Int(Double(delta) / 10.0))
-        let event = CGEvent(
-            scrollWheelEvent2Source: nil, units: .line,
-            wheelCount: horizontal ? 2 : 1,
-            wheel1: horizontal ? 0 : lines,
-            wheel2: horizontal ? lines : 0,
-            wheel3: 0)
-        event?.post(tap: .cghidEventTap)
+        // 拆成多个带相位的事件（begin → continue×n → end），行单位，正值向上/向右；
+        // 一格滚轮约 10 行
+        let totalLines = Double(delta) / 10.0
+        let steps = 5
+        let linesPerStep = totalLines / Double(steps)
+        for step in 0..<steps {
+            guard let event = CGEvent(
+                scrollWheelEvent2Source: nil, units: .line,
+                wheelCount: horizontal ? 2 : 1,
+                wheel1: horizontal ? 0 : Int32(clamping: Int(linesPerStep.rounded())),
+                wheel2: horizontal ? Int32(clamping: Int(linesPerStep.rounded())) : 0,
+                wheel3: 0)
+            else { return }
+            let phase: Int64
+            if step == 0 { phase = 1 }                     // kCGScrollWheelEventScrollPhaseBegin
+            else if step == steps - 1 { phase = 4 }        // kCGScrollWheelEventScrollPhaseEnd
+            else { phase = 2 }                             // kCGScrollWheelEventScrollPhaseContinue
+            event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+            event.post(tap: .cghidEventTap)
+            usleep(15_000)
+        }
     }
 
     static func drag(fromX: Double, fromY: Double, toX: Double, toY: Double) {
         let from = CGPoint(x: fromX, y: fromY)
-        if let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left) {
-            down.post(tap: .cghidEventTap)
+        func post(_ type: CGEventType, at position: CGPoint) {
+            if let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: position, mouseButton: .left) {
+                event.post(tap: .cghidEventTap)
+            }
+        }
+        post(.leftMouseDown, at: from)
+        // 无论中途发生什么都必须抬起，否则系统卡在拖拽模式（按钮被视为一直按住）
+        var released = false
+        defer {
+            if !released { post(.leftMouseUp, at: CGPoint(x: toX, y: toY)) }
         }
         usleep(60_000)
         let steps = 20
         for step in 1...steps {
             let t = Double(step) / Double(steps)
-            let position = CGPoint(x: fromX + (toX - fromX) * t, y: fromY + (toY - fromY) * t)
-            if let dragged = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: position, mouseButton: .left) {
-                dragged.post(tap: .cghidEventTap)
-            }
+            post(.leftMouseDragged, at: CGPoint(x: fromX + (toX - fromX) * t, y: fromY + (toY - fromY) * t))
             usleep(10_000)
         }
-        if let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: CGPoint(x: toX, y: toY), mouseButton: .left) {
-            up.post(tap: .cghidEventTap)
-        }
+        post(.leftMouseUp, at: CGPoint(x: toX, y: toY))
+        released = true
     }
 
     static func typeText(_ text: String) {
