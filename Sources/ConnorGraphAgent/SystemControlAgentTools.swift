@@ -109,12 +109,28 @@ enum SystemControlSupport {
         var count = 0
     }
 
+    /// 对自身进程的 AX 属性读写会在调用线程（后台协程）同步进入本应用 MainActor 隔离的
+    /// 视图 getter，Swift 6 执行器断言失败会直接 EXC_BREAKPOINT 崩溃（2026-09-12 崩溃报告：
+    /// SubmitAwareTextView.string getter）。因此读写自身界面树一律拒绝，引导改用截图。
+    static func ensureNotSelf(_ application: AXUIElement) throws {
+        var pid: pid_t = 0
+        AXUIElementGetPid(application, &pid)
+        guard pid != 0, pid != ProcessInfo.processInfo.processIdentifier else {
+            throw AgentToolError.invalidArguments(
+                "目标应用是康纳同学自己，读取/操作自身界面树不受支持（会触发主线程隔离断言导致本应用崩溃）。" +
+                "观察本应用窗口请改用 macos_screenshot；操作其他应用请通过 targetApp 指定目标。")
+        }
+        // 对 AX 响应慢的应用（如微信）限制单条消息超时，避免逐属性等待拖垮整棵树遍历
+        AXUIElementSetMessagingTimeout(application, 2.0)
+    }
+
     /// 目标应用：按 bundleID/名称匹配运行中的应用；都缺省时取系统聚焦的应用。
     static func targetApplication(bundleID: String?, name: String?) throws -> AXUIElement {
         let wantedBundleID = bundleID.flatMap { $0.isEmpty ? nil : $0 }
         let wantedName = name.flatMap { $0.isEmpty ? nil : $0 }
         if wantedBundleID != nil || wantedName != nil {
             for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+                if app.processIdentifier == ProcessInfo.processInfo.processIdentifier { continue }
                 if let wantedBundleID, app.bundleIdentifier == wantedBundleID {
                     return AXUIElementCreateApplication(app.processIdentifier)
                 }
@@ -509,6 +525,7 @@ public struct MacosAXTreeTool: AgentTool {
         let app = try SystemControlSupport.targetApplication(
             bundleID: arguments.string("targetApp"),
             name: arguments.string("targetApp"))
+        try SystemControlSupport.ensureNotSelf(app)
         var output = SystemControlSupport.AXNodeText()
         SystemControlSupport.walkTree(
             app,
@@ -545,6 +562,7 @@ public struct MacosAXActionTool: AgentTool {
         let app = try SystemControlSupport.targetApplication(
             bundleID: arguments.string("targetApp"),
             name: arguments.string("targetApp"))
+        try SystemControlSupport.ensureNotSelf(app)
         guard let element = SystemControlSupport.findElement(in: app, matching: label, maxDepth: 30, maxNodes: 3000) else {
             return AgentToolResult(
                 toolCallID: context.toolCallID, toolName: name,

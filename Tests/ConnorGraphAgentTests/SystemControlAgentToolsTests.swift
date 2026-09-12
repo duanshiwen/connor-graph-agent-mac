@@ -43,6 +43,21 @@ final class SystemControlAgentToolsTests: XCTestCase {
         }
     }
 
+    /// 2026-09-12 崩溃回归：对自己进程的 AX 树读写会在后台线程进入 MainActor 隔离的
+    /// 视图 getter，触发 dispatch_assert_queue 崩溃。ensureNotSelf 必须拒绝自身目标。
+    func testEnsureNotSelfRejectsOwnProcessAndAllowsOthers() throws {
+        let selfElement = AXUIElementCreateApplication(ProcessInfo.processInfo.processIdentifier)
+        XCTAssertThrowsError(try SystemControlSupport.ensureNotSelf(selfElement)) { error in
+            guard case AgentToolError.invalidArguments(let message) = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertTrue(message.contains("康纳同学自己"))
+        }
+        // 其他进程（这里用 launchd 的 pid 1 造元素，仅验证不抛错，不做真实 AX 通信）
+        let otherElement = AXUIElementCreateApplication(1)
+        XCTAssertNoThrow(try SystemControlSupport.ensureNotSelf(otherElement))
+    }
+
     func testControlInputToolsRequireControlSystemInputCapability() {
         let tools: [any AgentTool] = [
             MacosAXActionTool(),
