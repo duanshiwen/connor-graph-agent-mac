@@ -6,12 +6,20 @@
 
 | 工具 | 权限能力 | 说明 |
 |---|---|---|
-| `*_screenshot` | `readSystemScreen` | 截取屏幕（可指定区域），返回路径 + 图片尺寸 + 屏幕偏移；Mac 端同时以图片部件回传模型 |
-| `*_ax_tree` | `readSystemAccessibility` | 读取前台/指定应用的无障碍树，输出 类型/标题/值/坐标/ID 的缩进文本树 |
+| `*_observe` | `readSystemScreen` | **提速组合**：一次调用返回截图 + 交互元素列表，替代 screenshot + ax_tree 两次往返 |
+| `*_screenshot` | `readSystemScreen` | 截取屏幕（可指定区域），长边自动降采样到 1568px，返回路径 + 尺寸 + 缩放系数 + 屏幕偏移；Mac 端同时以图片部件回传模型 |
+| `*_ax_tree` | `readSystemAccessibility` | 读取前台/指定应用的无障碍树；每节点 1 次 IPC 批量读属性（Mac），支持 `interactiveOnly` 剪枝 |
 | `*_ax_action` | `controlSystemInput` | 对树中元素执行语义动作（invoke/press/setValue/focus 等），免坐标 |
 | `*_input_click` / `*_input_type` / `*_input_key` / `*_input_scroll` / `*_input_drag` | `controlSystemInput` | 模拟鼠标点击/键入/组合键/滚轮/拖拽 |
+| `*_input_batch` | `controlSystemInput` | **提速组合**：一次调用按序执行最多 10 个动作（点击→键入→回车），遇错即停 |
 
-**推荐顺序**：`screenshot`（看）→ `ax_tree`（精确定位）→ `ax_action`（语义操作，最可靠）→ `input_*`（兜底坐标点击）。坐标统一为屏幕绝对坐标；截图结果中给出的换算规则是「屏幕坐标 = 图内像素 + 偏移」。
+**推荐顺序**：`observe`（一次拿到截图和可点元素）→ `ax_action`（语义操作，最可靠）→ `input_batch`（批量已知步骤）→ `input_click`（单步兜底）。坐标换算：截图降采样时「屏幕坐标 = 图内坐标 × scale + 偏移」，AX 树坐标直接是屏幕绝对坐标。
+
+## 提速设计（2026-09 优化轮）
+
+- **减少模型往返**：observe 把「看屏 + 定位元素」合成一次调用；input_batch 把已知步骤序列合成一次调用（填表单从 3-5 轮降到 1 轮）。
+- **降低单步延迟**：截图长边降采样到 1568px（Anthropic 官方建议 1024-1366，超过会二次缩放、慢且损精度）；Mac AX 遍历用 `AXUIElementCopyMultipleAttributeValues` 每节点一次 IPC（原约 9 次），并对目标应用设 2 秒消息超时；`interactiveOnly` 模式剪掉非交互节点，输出更省 token。
+- **授权与节奏**：会话级一次性授权（首次审批即本会话授权，托盘可撤销）；合成事件按「down/up 间隔、滚轮相位」约束发出，详见下文边界。
 
 ## 授权模型（会话级一次性授权）
 
@@ -30,14 +38,14 @@
 
 ### Windows
 - Core 层：`Connor.Core/Agent/WindowsComputerUseTools.cs`（工具定义与授权门）+ `WindowsUiAPowerShell.cs`（UIA 默认通道：临时 .ps1 + 系统自带 UIAutomationClient，零依赖）。
-- 宿主层：`Connor.Windows/Services/ComputerControlNative.cs`（SendInput 键鼠注入 + GDI BitBlt 截图，DPI 与坐标空间一致；`AppState` 注入）。
-- UIA 通道约 1–2 秒/次；如需更低延迟，可后续在宿主注入原生 UIA 实现覆盖（delegate 已预留）。
+- 宿主层：`Connor.Windows/Services/ComputerControlNative.cs`（进程内 SendInput 键鼠注入 + GDI BitBlt 截图，DPI 与坐标空间一致；`AppState` 注入）。
+- UIA 通道约 1-2 秒/次；如需更低延迟，可后续在宿主注入原生 UIA 实现覆盖（delegate 已预留），或改为常驻 PowerShell 进程摊薄启动成本。
 
 ## 已知边界
 
-- **自身界面树不可读写**：`macos_ax_tree` / `macos_ax_action` 对康纳同学自己进程的 AX 读写会在后台线程进入 MainActor 隔离的视图 getter，触发 Swift 执行器断言直接崩溃（2026-09-12 已修复为显式拒绝并引导改用 `macos_screenshot`）。观察本应用窗口一律用截图。
-- **合成事件节奏约束（重要）**：mouseDown/mouseUp 之间必须留间隔（macOS 菜单在 down 时进入跟踪模式，瞬时事件对会被吞掉，系统会卡在"菜单跟踪/拖拽"状态，表现为所有菜单打不开、滚动被劫持）；滚轮事件必须带 begin/continue/end 相位，否则 SwiftUI/AppKit 滚动视图会忽略。两端实现均已按此约束发出（见 `SystemControlSupport` / `ComputerControlNative` 顶部注释）。若历史上出现过卡死，物理点击一次鼠标即可解除残留的按住状态。
-- AX 查询单条消息超时为 2 秒（`AXUIElementSetMessagingTimeout`），AX 支持差的应用（如微信）会快速跳过不响应的节点，不会拖垮整棵树遍历。
+- **自身界面树不可读写**（Mac）：`macos_ax_tree` / `macos_ax_action` 对康纳同学自己进程的 AX 读写会触发 MainActor 隔离断言崩溃，已改为显式拒绝并引导改用 `macos_screenshot`。
+- **合成事件节奏约束（重要）**：mouseDown/mouseUp 之间必须留间隔（瞬时事件对会被吞掉，系统会卡在"菜单跟踪/拖拽"状态）；滚轮事件必须带 begin/continue/end 相位。两端实现均已按此约束发出。若出现过卡死，物理点击一次鼠标即可解除残留按住状态。
+- AX 查询单条消息超时 2 秒（Mac）；AX 支持差的应用（如微信）会快速跳过不响应节点。
 - 多显示器/混合 DPI 下，Windows 的 PowerShell 截图兜底通道与虚拟屏坐标可能存在缩放偏差（原生通道一致）；Mac 截图目前取主显示器。
 - UAC/管理员权限窗口、安全桌面（锁屏/登录）无法被注入。
 - Windows 键入 `KEYEVENTF_UNICODE` 与 Mac `keyboardSetUnicodeString` 对少数接收方（如远程桌面、某些游戏）无效。

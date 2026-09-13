@@ -54,14 +54,26 @@ enum SystemControlSupport {
 
     struct ScreenshotOutput {
         let pngData: Data
+        /// 编码后图片尺寸（长边超过 maxDimension 时已降采样）
         let width: Int
         let height: Int
         let offsetX: Int
         let offsetY: Int
+        /// 屏幕点 / 图内像素 的换算系数：屏幕坐标 = 图内坐标 × scale + 偏移
+        let scale: Double
     }
 
-    /// 截取主显示器（可指定区域，坐标为主显示器全局坐标，原点为主显示器左上角）。
-    static func captureMainDisplay(region: CGRect?) throws -> ScreenshotOutput {
+    /// 降采样系数（纯函数）：长边超过 maxDimension 时缩放。Anthropic 官方建议喂给模型的
+    /// 截图宽度控制在 1024-1366（内部极限 1568），更大的图会被模型端二次缩放，慢且损精度。
+    static func downscaleFactor(width: Int, height: Int, maxDimension: Int) -> Double {
+        let longest = max(width, height)
+        guard maxDimension > 0, longest > maxDimension, longest > 0 else { return 1 }
+        return Double(maxDimension) / Double(longest)
+    }
+
+    /// 截取主显示器（可指定区域，坐标为主显示器全局坐标，原点为主显示器左上角），
+    /// 长边超过 maxDimension 时降采样。
+    static func captureMainDisplay(region: CGRect?, maxDimension: Int = 1568) throws -> ScreenshotOutput {
         let displayID = CGMainDisplayID()
         let bounds = CGDisplayBounds(displayID)
         let captureRect: CGRect
@@ -76,8 +88,25 @@ enum SystemControlSupport {
             offsetX = Int(bounds.minX)
             offsetY = Int(bounds.minY)
         }
-        guard let image = CGDisplayCreateImage(displayID, rect: captureRect) else {
+        guard var image = CGDisplayCreateImage(displayID, rect: captureRect) else {
             throw AgentToolError.invalidArguments("屏幕截图失败：可能缺少屏幕录制权限或区域超出屏幕。")
+        }
+        let scale = downscaleFactor(
+            width: Int(captureRect.width),
+            height: Int(captureRect.height),
+            maxDimension: maxDimension)
+        if scale < 1 {
+            let scaledWidth = max(1, Int((Double(captureRect.width) * scale).rounded()))
+            let scaledHeight = max(1, Int((Double(captureRect.height) * scale).rounded()))
+            if let context = CGContext(
+                data: nil, width: scaledWidth, height: scaledHeight,
+                bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                context.interpolationQuality = .medium
+                context.draw(image, in: CGRect(x: 0, y: 0, width: scaledWidth, height: scaledHeight))
+                if let scaled = context.makeImage() { image = scaled }
+            }
         }
         let rep = NSBitmapImageRep(cgImage: image)
         guard let png = rep.representation(using: .png, properties: [:]) else {
@@ -85,10 +114,11 @@ enum SystemControlSupport {
         }
         return ScreenshotOutput(
             pngData: png,
-            width: Int(captureRect.width),
-            height: Int(captureRect.height),
+            width: image.width,
+            height: image.height,
             offsetX: offsetX,
-            offsetY: offsetY)
+            offsetY: offsetY,
+            scale: Double(captureRect.width) / Double(max(1, image.width)))
     }
 
     static func savePNG(_ output: ScreenshotOutput) throws -> URL {
@@ -159,37 +189,94 @@ enum SystemControlSupport {
         return NSRunningApplication(processIdentifier: pid)?.localizedName ?? "未知应用"
     }
 
+    /// 每节点一次 IPC 批量读取的属性集：AXUIElementCopyMultipleAttributeValues 把
+    /// 原先约 9 次 Mach 往返合并为 1 次（角色/标题/描述/值/标识/坐标/尺寸/可用/子节点）。
+    private static let walkedAttributes: [String] = [
+        kAXRoleAttribute as String,
+        kAXTitleAttribute as String,
+        kAXDescriptionAttribute as String,
+        kAXValueAttribute as String,
+        kAXIdentifierAttribute as String,
+        kAXPositionAttribute as String,
+        kAXSizeAttribute as String,
+        kAXEnabledAttribute as String,
+        kAXChildrenAttribute as String,
+    ]
+
+    /// interactiveOnly 模式输出的可交互角色；AXStaticText 作为标签上下文保留（截断）。
+    static let interactiveRoles: Set<String> = [
+        "AXButton", "AXTextField", "AXTextArea", "AXSecureTextField", "AXSearchField",
+        "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton", "AXComboBox",
+        "AXSlider", "AXMenuItem", "AXMenu", "AXLink", "AXTabGroup", "AXTab",
+        "AXTable", "AXList", "AXOutline", "AXRow", "AXProgressIndicator", "AXPicker",
+    ]
+
+    /// 交互模式行长度上限（静态文本上下文截断，省 token）
+    private static let interactiveLabelLimit = 60
+
     /// 深度优先遍历 AX 树，输出缩进文本（含类型/标题/值/坐标/子元素计数）；节点超限即停。
+    /// interactiveOnly=true 时只输出可交互角色（静态文本作为标签上下文保留），大幅减少输出与模型推理成本。
     static func walkTree(
         _ element: AXUIElement,
         depth: Int,
         maxDepth: Int,
         maxNodes: Int,
+        interactiveOnly: Bool = false,
         output: inout AXNodeText
     ) {
         guard depth <= maxDepth, output.count < maxNodes else { return }
-        let role = stringAttribute(of: element, attribute: kAXRoleAttribute) ?? "Unknown"
-        let title = stringAttribute(of: element, attribute: kAXTitleAttribute) ?? ""
-        let description = stringAttribute(of: element, attribute: kAXDescriptionAttribute) ?? ""
-        let value = stringAttribute(of: element, attribute: kAXValueAttribute) ?? ""
-        let identifier = stringAttribute(of: element, attribute: kAXIdentifierAttribute) ?? ""
+        var rawValues: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(
+            element, walkedAttributes as CFArray, [], &rawValues) == .success,
+            let values = rawValues as? [CFTypeRef?],
+            values.count == walkedAttributes.count
+        else { return }
+        let role = stringValue(values[0]) ?? "Unknown"
+        let title = stringValue(values[1]) ?? ""
+        let description = stringValue(values[2]) ?? ""
+        let nodeValue = stringValue(values[3]) ?? ""
+        let identifier = stringValue(values[4]) ?? ""
+        let frame = axFrame(position: values[5], size: values[6])
+        let enabled = boolValue(values[7])
+
+        if interactiveOnly,
+           !interactiveRoles.contains(role), role != "AXStaticText" {
+            // 容器角色不输出但继续下钻（交互控件藏在里面）
+            recurseIntoChildren(values[8], depth: depth, maxDepth: maxDepth, maxNodes: maxNodes, interactiveOnly: interactiveOnly, output: &output)
+            return
+        }
 
         var line = String(repeating: "  ", count: depth) + "[\(role)]"
-        let label = description.isEmpty ? title : description
+        var label = description.isEmpty ? title : description
+        if interactiveOnly, role == "AXStaticText", label.count > interactiveLabelLimit {
+            label = String(label.prefix(interactiveLabelLimit)) + "…"
+        }
         if !label.isEmpty { line += " " + label.replacingOccurrences(of: "\n", with: " ") }
-        if !value.isEmpty { line += " =\(value.replacingOccurrences(of: "\n", with: " "))" }
+        if !nodeValue.isEmpty { line += " =\(nodeValue.replacingOccurrences(of: "\n", with: " "))" }
         if !identifier.isEmpty { line += " #\(identifier)" }
-        if let frame = frame(of: element) {
+        if let frame {
             line += String(format: " (%.0f,%.0f %.0fx%.0f)", frame.minX, frame.minY, frame.width, frame.height)
         }
-        if let enabled = boolAttribute(of: element, attribute: kAXEnabledAttribute), !enabled { line += " [disabled]" }
+        if enabled == false { line += " [disabled]" }
         output.lines.append(line)
         output.count += 1
 
-        guard let children = arrayAttribute(of: element, attribute: kAXChildrenAttribute) else { return }
-        for child in children.prefix(200) where output.count < maxNodes {
-            guard CFGetTypeID(child) == AXUIElementGetTypeID() else { continue }
-            walkTree(child as! AXUIElement, depth: depth + 1, maxDepth: maxDepth, maxNodes: maxNodes, output: &output)
+        recurseIntoChildren(values[8], depth: depth, maxDepth: maxDepth, maxNodes: maxNodes, interactiveOnly: interactiveOnly, output: &output)
+    }
+
+    /// 遍历批量读取结果中的子节点数组（对应 kAXChildrenAttribute 位）。
+    private static func recurseIntoChildren(
+        _ childrenRaw: CFTypeRef?,
+        depth: Int, maxDepth: Int, maxNodes: Int,
+        interactiveOnly: Bool, output: inout AXNodeText
+    ) {
+        guard output.count < maxNodes,
+              let children = childrenRaw as? [CFTypeRef] else { return }
+        for child in children.prefix(200) {
+            guard output.count < maxNodes, CFGetTypeID(child) == AXUIElementGetTypeID() else { continue }
+            walkTree(
+                child as! AXUIElement, depth: depth + 1, maxDepth: maxDepth, maxNodes: maxNodes,
+                interactiveOnly: interactiveOnly, output: &output)
         }
     }
 
@@ -256,30 +343,42 @@ enum SystemControlSupport {
         return nil
     }
 
-    private static func boolAttribute(of element: AXUIElement, attribute: String) -> Bool? {
-        guard let raw = value(of: element, attribute: attribute) else { return nil }
+    /// 批量读取（CopyMultipleAttributeValues 未设 StopOnError）中缺失属性以 kCFNull 占位
+    private static func isMissing(_ raw: CFTypeRef?) -> Bool {
+        guard let raw else { return true }
+        return CFGetTypeID(raw) == CFNullGetTypeID()
+    }
+
+    private static func stringValue(_ raw: CFTypeRef?) -> String? {
+        guard let raw, !isMissing(raw) else { return nil }
+        if let string = raw as? String { return string }
+        if let number = raw as? NSNumber { return number.stringValue }
+        if let url = raw as? URL { return url.absoluteString }
+        return nil
+    }
+
+    private static func boolValue(_ raw: CFTypeRef?) -> Bool? {
+        guard let raw, !isMissing(raw) else { return nil }
         return raw as? Bool
+    }
+
+    private static func axFrame(position rawPosition: CFTypeRef?, size rawSize: CFTypeRef?) -> CGRect? {
+        guard let rawPosition, let rawSize, !isMissing(rawPosition), !isMissing(rawSize),
+              CFGetTypeID(rawPosition) == AXValueGetTypeID(),
+              CFGetTypeID(rawSize) == AXValueGetTypeID()
+        else { return nil }
+        var point = CGPoint.zero
+        var size = CGSize.zero
+        guard
+            AXValueGetValue(rawPosition as! AXValue, .cgPoint, &point),
+            AXValueGetValue(rawSize as! AXValue, .cgSize, &size)
+        else { return nil }
+        return CGRect(origin: point, size: size)
     }
 
     private static func arrayAttribute(of element: AXUIElement, attribute: String) -> [CFTypeRef]? {
         guard let raw = value(of: element, attribute: attribute), let array = raw as? [CFTypeRef] else { return nil }
         return array
-    }
-
-    private static func frame(of element: AXUIElement) -> CGRect? {
-        guard
-            let positionRaw = value(of: element, attribute: kAXPositionAttribute),
-            let sizeRaw = value(of: element, attribute: kAXSizeAttribute),
-            CFGetTypeID(positionRaw) == AXValueGetTypeID(),
-            CFGetTypeID(sizeRaw) == AXValueGetTypeID()
-        else { return nil }
-        var point = CGPoint.zero
-        var size = CGSize.zero
-        guard
-            AXValueGetValue(positionRaw as! AXValue, .cgPoint, &point),
-            AXValueGetValue(sizeRaw as! AXValue, .cgSize, &size)
-        else { return nil }
-        return CGRect(origin: point, size: size)
     }
 
     // ---- CGEvent 键鼠注入 ----
@@ -474,7 +573,7 @@ public struct MacosScreenshotTool: AgentTool {
     public init() {}
 
     public let name = "macos_screenshot"
-    public let description = "Capture the screen (main display by default, or an explicit region) to a PNG. Returns the file path, image size, and the on-screen origin offset so pixel coordinates can be converted to screen coordinates for macos_input_click. Use it to see what is on screen or to confirm the result of a control action."
+    public let description = "Capture the screen (main display by default, or an explicit region) to a PNG, downscaled to at most 1568px on the long edge. Returns the file path, image size, the downscale factor, and the on-screen origin offset. Screen coordinate = image coordinate × scale + offset. For a combined screenshot plus interactive-element list in one call, prefer macos_observe."
     public let permission: AgentPermissionCapability = .readSystemScreen
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "x": .number(description: "Region origin X in screen coordinates. Omit x/width to capture the whole main display."),
@@ -498,7 +597,10 @@ public struct MacosScreenshotTool: AgentTool {
         let output = try SystemControlSupport.captureMainDisplay(region: region)
         let url = try SystemControlSupport.savePNG(output)
         let dataURL = "data:image/png;base64,\(output.pngData.base64EncodedString())"
-        let summary = "截图已保存：\(url.path)（\(output.width)x\(output.height)，左上角屏幕偏移 \(output.offsetX),\(output.offsetY)）。屏幕坐标 = 图内坐标 + 偏移，可直接传给 macos_input_click / macos_ax_tree 的坐标。"
+        let scaleNote = output.scale < 1
+            ? String(format: "图片已降采样，scale=%.3f（屏幕坐标 = 图内坐标 × scale + 偏移）", output.scale)
+            : "scale=1（屏幕坐标 = 图内坐标 + 偏移）"
+        let summary = "截图已保存：\(url.path)（\(output.width)x\(output.height)，左上角屏幕偏移 \(output.offsetX),\(output.offsetY)）。\(scaleNote)。"
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
@@ -512,12 +614,13 @@ public struct MacosAXTreeTool: AgentTool {
     public init() {}
 
     public let name = "macos_ax_tree"
-    public let description = "Read the accessibility tree (AX) of the frontmost application, or a named application, as an indented text tree with role, label, value, screen coordinates, and identifier for each element. Use it to locate the exact control to act on via macos_ax_action, or to get precise coordinates for macos_input_click. Coordinates are screen points (macOS top-left origin)."
+    public let description = "Read the accessibility tree (AX) of the frontmost application, or a named application, as an indented text tree with role, label, value, screen coordinates, and identifier for each element. Use it to locate the exact control to act on via macos_ax_action, or to get precise coordinates for macos_input_click. Coordinates are screen points (macOS top-left origin). Interactive-only mode keeps buttons/fields/menus and label text, which is much faster to reason about; for a screenshot + interactive list in one call prefer macos_observe."
     public let permission: AgentPermissionCapability = .readSystemAccessibility
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "targetApp": .string(description: "Application bundleID or localized name substring. Defaults to the frontmost application."),
         "maxDepth": .integer(description: "Maximum tree depth, default 10, clamped to 1-30."),
-        "maxNodes": .integer(description: "Maximum number of nodes returned, default 300, clamped to 1-2000.")
+        "maxNodes": .integer(description: "Maximum number of nodes returned, default 300, clamped to 1-2000."),
+        "interactiveOnly": .boolean(description: "Keep only interactive controls (plus label text) when true. Default false for a full tree.")
     ], required: [])
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -532,6 +635,7 @@ public struct MacosAXTreeTool: AgentTool {
             depth: 0,
             maxDepth: min(max(arguments.int("maxDepth") ?? 10, 1), 30),
             maxNodes: min(max(arguments.int("maxNodes") ?? 300, 1), 2000),
+            interactiveOnly: arguments.bool("interactiveOnly") ?? false,
             output: &output)
         let title = SystemControlSupport.applicationTitle(of: app)
         let text = ("应用: \(title)\n" + output.lines.joined(separator: "\n"))
@@ -715,5 +819,183 @@ public struct MacosInputDragTool: AgentTool {
         return AgentToolResult(
             toolCallID: context.toolCallID, toolName: name,
             contentText: "已从 (\(Int(fromX)), \(Int(fromY))) 拖拽到 (\(Int(toX)), \(Int(toY)))。")
+    }
+}
+
+/// macos_observe：一次调用同时返回截图 + 交互元素列表，替代 screenshot + ax_tree 两个往返。
+public struct MacosObserveTool: AgentTool {
+    public init() {}
+
+    public let name = "macos_observe"
+    public let description = "One-call screen observation: captures a downscaled screenshot (max 1568px long edge) AND returns the interactive-element accessibility list (buttons, fields, menus with labels and screen-point coordinates) of the frontmost or named application. Prefer this over separate macos_screenshot + macos_ax_tree calls — it saves a full model round trip per observation. Screen coordinate = image coordinate × scale + offset."
+    public let permission: AgentPermissionCapability = .readSystemScreen
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "targetApp": .string(description: "Application bundleID or localized name substring for the element list. Defaults to the frontmost application."),
+        "x": .number(description: "Region origin X. Omit x/width to capture the whole main display."),
+        "y": .number(description: "Region origin Y."),
+        "width": .number(description: "Region width in points."),
+        "height": .number(description: "Region height in points."),
+        "maxNodes": .integer(description: "Maximum interactive elements returned, default 120, clamped to 1-500.")
+    ], required: [])
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        try SystemControlSupport.ensureScreenCapturePermission()
+        let region: CGRect?
+        if arguments.double("width") != nil, arguments.double("height") != nil {
+            region = CGRect(
+                x: arguments.double("x") ?? 0,
+                y: arguments.double("y") ?? 0,
+                width: arguments.double("width")!,
+                height: arguments.double("height")!)
+        } else {
+            region = nil
+        }
+        let output = try SystemControlSupport.captureMainDisplay(region: region)
+        let url = try SystemControlSupport.savePNG(output)
+        let dataURL = "data:image/png;base64,\(output.pngData.base64EncodedString())"
+
+        var lines: [String] = []
+        lines.append(String(
+            format: "截图：%@（%dx%d，左上角屏幕偏移 %d,%d，scale=%.3f；屏幕坐标 = 图内坐标 × scale + 偏移）",
+            url.path, output.width, output.height, output.offsetX, output.offsetY, output.scale))
+
+        let axAvailable = (try? SystemControlSupport.ensureAccessibilityPermission(prompt: false)) != nil
+        if axAvailable, let app = try? SystemControlSupport.targetApplication(
+            bundleID: arguments.string("targetApp"),
+            name: arguments.string("targetApp")) {
+            if (try? SystemControlSupport.ensureNotSelf(app)) != nil {
+                var tree = SystemControlSupport.AXNodeText()
+                SystemControlSupport.walkTree(
+                    app,
+                    depth: 0,
+                    maxDepth: 20,
+                    maxNodes: min(max(arguments.int("maxNodes") ?? 120, 1), 500),
+                    interactiveOnly: true,
+                    output: &tree)
+                let title = SystemControlSupport.applicationTitle(of: app)
+                if tree.lines.isEmpty {
+                    lines.append("交互元素：目标应用「\(title)」没有暴露可交互元素（该应用 AX 支持较弱），请直接按截图坐标操作。")
+                } else {
+                    lines.append("交互元素（应用: \(title)，坐标为屏幕点，可直接传给 macos_input_click / macos_ax_action）：")
+                    lines.append(contentsOf: tree.lines)
+                }
+            } else {
+                lines.append("交互元素：目标是康纳同学自身，跳过（自身界面请直接看截图）。")
+            }
+        } else {
+            lines.append(axAvailable
+                ? "交互元素：未找到目标应用，仅返回截图。"
+                : "交互元素：尚未授予辅助功能权限，仅返回截图（授权后可用）。")
+        }
+
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: lines.joined(separator: "\n"),
+            modelContentParts: [.imageDataURL(dataURL, mimeType: "image/png")])
+    }
+}
+
+/// macos_input_batch：一次调用顺序执行多个键鼠动作，把「点击输入框 → 键入 → 回车」这类
+/// 序列从多个模型往返压缩为一个工具调用。
+public struct MacosInputBatchTool: AgentTool {
+    public init() {}
+
+    public let name = "macos_input_batch"
+    public let description = "Execute up to 10 mouse/keyboard actions in order within ONE call (click → type → key sequences, form filling, navigation). Stops at the first failure and reports per-action results. Actions: click (x,y,button,doubleClick), type (text), key (keys), scroll (x,y,delta,horizontal), drag (fromX,fromY,toX,toY). Use this instead of several macos_input_* calls whenever the steps are known in advance."
+    public let permission: AgentPermissionCapability = .controlSystemInput
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "actions": .array(
+            items: .object(properties: [
+                "type": .stringEnumeration(values: ["click", "type", "key", "scroll", "drag"], description: "Action kind."),
+                "x": .number(description: "click/scroll: screen coordinate X in points."),
+                "y": .number(description: "click/scroll: screen coordinate Y in points."),
+                "button": .stringEnumeration(values: ["left", "right"], description: "click: mouse button, default left."),
+                "doubleClick": .boolean(description: "click: double click when true."),
+                "text": .string(description: "type: text to enter."),
+                "keys": .string(description: "key: key combo, for example command+a."),
+                "delta": .integer(description: "scroll: positive up, negative down."),
+                "horizontal": .boolean(description: "scroll: horizontal when true."),
+                "fromX": .number(description: "drag: start X."),
+                "fromY": .number(description: "drag: start Y."),
+                "toX": .number(description: "drag: end X."),
+                "toY": .number(description: "drag: end Y.")
+            ], required: ["type"]),
+            description: "Ordered actions, 1-10 items."),
+    ], required: ["actions"])
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        try SystemControlSupport.ensureAccessibilityPermission(prompt: true)
+        guard let actions = arguments.array("actions"), !actions.isEmpty else {
+            throw AgentToolError.invalidArguments("缺少 actions 参数（1-10 个动作）。")
+        }
+        guard actions.count <= 10 else {
+            throw AgentToolError.invalidArguments("actions 最多 10 个，请拆分多次调用。")
+        }
+        await ComputerControlConsent.shared.grant(sessionID: context.sessionID)
+
+        var reports: [String] = []
+        for (index, action) in actions.enumerated() {
+            guard let object = action.objectValue else {
+                reports.append("\(index + 1). 非对象动作，已跳过")
+                continue
+            }
+            let args = AgentToolArguments(values: object)
+            let kind = args.string("type") ?? ""
+            do {
+                let summary = try Self.perform(kind: kind, arguments: args)
+                reports.append("\(index + 1). \(summary)")
+            } catch {
+                reports.append("\(index + 1). \(kind) 失败：\(error.localizedDescription)")
+                reports.append("后续 \(actions.count - index - 1) 个动作未执行。")
+                break
+            }
+        }
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "批量动作执行结果：\n" + reports.joined(separator: "\n"))
+    }
+
+    /// 单个动作的执行与参数校验（与对应的单个工具行为一致）。
+    private static func perform(kind: String, arguments args: AgentToolArguments) throws -> String {
+        switch kind {
+        case "click":
+            guard let x = args.double("x"), let y = args.double("y") else {
+                throw AgentToolError.invalidArguments("click 缺少 x/y")
+            }
+            let button = args.string("button") == "right" ? CGMouseButton.right : CGMouseButton.left
+            let doubleClick = args.bool("doubleClick") ?? false
+            SystemControlSupport.click(x: x, y: y, button: button, doubleClick: doubleClick)
+            return "单击 (\(Int(x)), \(Int(y)))\(doubleClick ? " 双击" : "")"
+        case "type":
+            guard let text = args.string("text"), !text.isEmpty else {
+                throw AgentToolError.invalidArguments("type 缺少 text")
+            }
+            SystemControlSupport.typeText(text)
+            return "键入 \(text.count) 字符"
+        case "key":
+            guard let keys = args.string("keys"), !keys.isEmpty else {
+                throw AgentToolError.invalidArguments("key 缺少 keys")
+            }
+            let parts = keys.split(whereSeparator: { $0 == "+" || $0 == "," }).map(String.init)
+            try SystemControlSupport.keyCombo(parts)
+            return "按键 \(parts.joined(separator: "+"))"
+        case "scroll":
+            guard let x = args.double("x"), let y = args.double("y"), let delta = args.int("delta"), delta != 0 else {
+                throw AgentToolError.invalidArguments("scroll 需要 x/y 与非零 delta")
+            }
+            SystemControlSupport.scroll(x: x, y: y, delta: delta, horizontal: args.bool("horizontal") ?? false)
+            return "滚动 \(delta)"
+        case "drag":
+            guard let fromX = args.double("fromX"), let fromY = args.double("fromY"),
+                  let toX = args.double("toX"), let toY = args.double("toY") else {
+                throw AgentToolError.invalidArguments("drag 缺少 fromX/fromY/toX/toY")
+            }
+            SystemControlSupport.drag(fromX: fromX, fromY: fromY, toX: toX, toY: toY)
+            return "拖拽 (\(Int(fromX)),\(Int(fromY))) → (\(Int(toX)),\(Int(toY)))"
+        default:
+            throw AgentToolError.invalidArguments("未知动作类型：\(kind)")
+        }
     }
 }

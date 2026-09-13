@@ -440,6 +440,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             allowedToolNames: allowedMCPToolNames
         )
         // 控制电脑工具族：AX 无障碍树 + CGEvent 键鼠 + 屏幕截图（权限面 readSystem*/controlSystemInput）
+        // observe/batch 为提速组合工具：observe 一次返回截图+交互元素，batch 一次执行多动作
         registry.register(MacosScreenshotTool())
         registry.register(MacosAXTreeTool())
         registry.register(MacosAXActionTool())
@@ -448,6 +449,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(MacosInputKeyTool())
         registry.register(MacosInputScrollTool())
         registry.register(MacosInputDragTool())
+        registry.register(MacosObserveTool())
+        registry.register(MacosInputBatchTool())
         if let storagePaths {
             let scanner = SkillPackageScanner.applicationDefault()
             let snapshot = scanner.scan(storagePaths: storagePaths)

@@ -58,6 +58,25 @@ final class SystemControlAgentToolsTests: XCTestCase {
         XCTAssertNoThrow(try SystemControlSupport.ensureNotSelf(otherElement))
     }
 
+    /// 截图降采样：长边超过上限才缩放（Anthropic 建议 ≤1568px）
+    func testDownscaleFactorScalesOnlyWhenLongerThanLimit() {
+        XCTAssertEqual(SystemControlSupport.downscaleFactor(width: 2560, height: 1664, maxDimension: 1568),
+                       1568.0 / 2560.0, accuracy: 0.0001)
+        XCTAssertEqual(SystemControlSupport.downscaleFactor(width: 1440, height: 900, maxDimension: 1568), 1)
+        XCTAssertEqual(SystemControlSupport.downscaleFactor(width: 0, height: 0, maxDimension: 1568), 1)
+        XCTAssertEqual(SystemControlSupport.downscaleFactor(width: 2560, height: 1664, maxDimension: 0), 1)
+    }
+
+    /// observe/batch 组合工具：schema 合法性（批量参数名 camelCase 等）与权限面
+    func testObserveAndBatchToolSchemasAreValid() {
+        let observe = MacosObserveTool()
+        let batch = MacosInputBatchTool()
+        XCTAssertEqual(observe.inputSchema.validationIssues(toolName: observe.name), [], observe.name)
+        XCTAssertEqual(batch.inputSchema.validationIssues(toolName: batch.name), [], batch.name)
+        XCTAssertEqual(observe.permission, .readSystemScreen)
+        XCTAssertEqual(batch.permission, .controlSystemInput)
+    }
+
     func testControlInputToolsRequireControlSystemInputCapability() {
         let tools: [any AgentTool] = [
             MacosAXActionTool(),
