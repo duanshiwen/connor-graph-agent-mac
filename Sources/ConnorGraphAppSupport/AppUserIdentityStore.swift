@@ -190,7 +190,10 @@ public struct ConnorSyncChange: Codable, Sendable, Equatable {
     }
 
     public static func isSyncable(collection: String) -> Bool {
-        let excluded: Set<String> = ["mail", "mail_accounts", "mail_messages", "calendar", "calendar_events", "rss", "rss_feeds", "rss_items", "scheduled_tasks", "event_driven_tasks"]
+        // 排除列表与后端同步白名单对齐：mail_accounts 已在后端白名单放行
+        // （Android/Mac coordinator 均已支持其投影与 tombstone），此处不再排除；
+        // 其余集合（mail/mail_messages/calendar/rss 等）不在白名单内，保持排除。
+        let excluded: Set<String> = ["mail", "mail_messages", "calendar", "calendar_events", "rss", "rss_feeds", "rss_items", "scheduled_tasks", "event_driven_tasks"]
         return collection.range(of: "^[a-z][a-z0-9_]{0,63}$", options: .regularExpression) != nil && !excluded.contains(collection)
     }
 
