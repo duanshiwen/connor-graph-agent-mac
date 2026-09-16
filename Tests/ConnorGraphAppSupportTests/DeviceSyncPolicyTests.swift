@@ -9,7 +9,7 @@ struct DeviceSyncPolicyTests {
         for collection in ["mail", "calendar_events", "rss_feeds", "scheduled_tasks", "event_driven_tasks"] {
             #expect(!ConnorSyncChange.isSyncable(collection: collection))
         }
-        for collection in ["settings", "sessions", "session_states", "session_details", "notes", "tasks", "memory_l1"] {
+        for collection in ["settings", "sessions", "session_states", "session_details", "notes", "tasks", "memory_l1", "mail_accounts", "rss_subscriptions", "memory_l4_entities"] {
             #expect(ConnorSyncChange.isSyncable(collection: collection))
         }
     }
