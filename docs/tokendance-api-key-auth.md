@@ -29,3 +29,9 @@
 此次实现主授权流程。文档中可选的 `TokenDance-Recovery-Action` 自动恢复 UI 未加入：模型请求仍使用现有错误处理，余额不足需用户充值，周期额度可等待刷新，失效 Key 可重新授权。没有自动充值、自动删除 Key 或无人值守授权。
 
 验证仅使用本地/模拟数据，未登录真实 TokenDance 账号、未创建真实 Key、未执行收费模型请求。平台完整构建受本机 SDK 条件限制；提交记录与任务结果列出实际运行的检查。
+
+## 本次验证
+
+`swift test --skip-update --filter TokenDanceAPIKeyAuthTests`：构建及 2 项新增测试通过；此前 Responses/Kimi 回归通过。
+
+没有执行真实账号端到端授权。全部步骤均保留独立本地 Git 提交，未推送。
