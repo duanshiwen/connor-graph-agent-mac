@@ -289,7 +289,8 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
         ]
         // 默认不发送 max_output_tokens（由服务端默认决定）；互动网页等长任务显式放大。
         if let maxTokens = request.maxTokens { body["max_output_tokens"] = maxTokens }
-        if request.temperature > 0 { body["temperature"] = request.temperature }
+        // GPT-5.6 and GPT-6 reject sampling parameters.
+        if request.temperature > 0 && !config.requestModel.hasPrefix("gpt-5.6") && !config.requestModel.hasPrefix("gpt-6") { body["temperature"] = request.temperature }
         if stream { body["stream"] = true }
         if let reasoningEffort = config.reasoningEffort, !reasoningEffort.isEmpty {
             body["reasoning"] = ["effort": reasoningEffort]
