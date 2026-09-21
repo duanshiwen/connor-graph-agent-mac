@@ -1192,7 +1192,7 @@ struct AIConnectionSetupView: View {
         .frame(maxWidth: .infinity)
         .frame(minHeight: 760)
         .onDisappear { tokenDanceTask?.cancel(); tokenDanceTask = nil; tokenDanceAuth = nil; tokenDanceCode = "" }
-        .onChange(of: selectedProviderPresetID) { _, _ in tokenDanceTask?.cancel(); tokenDanceTask = nil; tokenDanceAuth = nil; tokenDanceCode = "" }
+        .onChange(of: selectedProviderPresetID) { _, _ in if tokenDanceAuth != nil { isAuthenticating = false }; tokenDanceTask?.cancel(); tokenDanceTask = nil; tokenDanceAuth = nil; tokenDanceCode = "" }
         .onAppear(perform: initializeDrafts)
         .onChange(of: baseURLString) { _, _ in refreshSuggestedConnectionName() }
         .onChange(of: customProtocol) { _, _ in refreshSuggestedConnectionName() }
@@ -1502,6 +1502,7 @@ struct AIConnectionSetupView: View {
                 providerSubscriptionPlanCard
             }
 
+            tokenDanceAuthorization
             primaryAPIKeyEntryCard(placeholder: apiKeyPlaceholderForCurrentPreset)
 
             advancedConnectionDisclosure
@@ -1891,7 +1892,7 @@ struct AIConnectionSetupView: View {
                 }.disabled(isAuthenticating)
                 if let flow = tokenDanceAuth {
                     SecureField("一次性授权码", text: $tokenDanceCode)
-                    Button("交换授权码并添加") {
+                    Button("交换授权码并保存") {
                         isAuthenticating = true
                         errorMessage = nil
                         let code = tokenDanceCode
@@ -1902,10 +1903,10 @@ struct AIConnectionSetupView: View {
                                 guard !Task.isCancelled, tokenDanceAuth === flow, selectedProviderPresetID == "tokendance" else { return }
                                 apiKey = key
                                 tokenDanceCode = ""
+                                try aiModel.saveTokenDanceKey(key, name: submittedConnectionNameForSubmit(), model: healthCheckModelForSubmit)
                                 tokenDanceAuth = nil
-                                baseURLString = "https://tokendance.space/gateway/v1"
-                                customProtocol = .openAICompatible
-                                setupDirectOpenAICompatibleConnection()
+                                isAuthenticating = false
+                                complete()
                             } catch {
                                 guard !Task.isCancelled, tokenDanceAuth === flow else { return }
                                 isAuthenticating = false

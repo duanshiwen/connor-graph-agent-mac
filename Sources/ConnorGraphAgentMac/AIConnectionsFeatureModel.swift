@@ -222,6 +222,22 @@ final class AIConnectionsFeatureModel {
         return connection
     }
 
+    /// The exchange response is shown once; persist before optional network probes.
+    func saveTokenDanceKey(_ key: String, name: String, model: String) throws {
+        let connection = AppLLMConnectionConfig(
+            id: "tokendance-\(UUID().uuidString)", name: name.isEmpty ? "TokenDance · 词元跳动" : name,
+            providerMode: .openAICompatible, connectionKind: .openAICompatible,
+            baseURLString: "https://tokendance.space/gateway/v1",
+            model: model.isEmpty ? "seed-2.1-pro" : model, hasAPIKey: true)
+        try settingsRepository.saveConnection(connection, apiKey: key)
+        loadSettings()
+        onConnectionSetup(connection)
+        updateWelcomeState()
+        onRuntimeSettingsChanged(true)
+        settingsMessage = "TokenDance Key 已安全保存，可在连接列表测试。"
+        Task { await reloadModelConnections() }
+    }
+
     @discardableResult
     func setupConnection(_ input: AppLLMConnectionSetupInput) async throws -> AppLLMConnectionConfig {
         isAddingConnection = true
