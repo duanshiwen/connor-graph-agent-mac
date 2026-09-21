@@ -1153,6 +1153,9 @@ struct AIConnectionSetupView: View {
     @State private var selectedModel = ""
     @State private var selectedModelIDs: Set<String> = []
     @State private var apiKey = ""
+    @State private var tokenDanceAuth: TokenDanceAPIKeyAuth?
+    @State private var tokenDanceCode = ""
+    @State private var tokenDanceTask: Task<Void, Never>?
     @State private var showAPIKey = false
     @State private var selectedProviderPresetID = "openai"
     @State private var customProtocol: AIConnectionCustomProtocol = .openAICompatible
@@ -1188,6 +1191,8 @@ struct AIConnectionSetupView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(minHeight: 760)
+        .onDisappear { tokenDanceTask?.cancel(); tokenDanceTask = nil; tokenDanceAuth = nil; tokenDanceCode = "" }
+        .onChange(of: selectedProviderPresetID) { _, _ in tokenDanceTask?.cancel(); tokenDanceTask = nil; tokenDanceAuth = nil; tokenDanceCode = "" }
         .onAppear(perform: initializeDrafts)
         .onChange(of: baseURLString) { _, _ in refreshSuggestedConnectionName() }
         .onChange(of: customProtocol) { _, _ in refreshSuggestedConnectionName() }
@@ -1868,13 +1873,59 @@ struct AIConnectionSetupView: View {
                 }
             }
 
+            tokenDanceAuthorization
             primaryAPIKeyEntryCard(placeholder: activeProviderPreset.keyPlaceholder)
         }
     }
 
+    @ViewBuilder private var tokenDanceAuthorization: some View {
+        if selectedProviderPresetID == "tokendance" {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("在浏览器确认新 Key 的额度后，粘贴一次性授权码；10 分钟内有效。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("使用 TokenDance 授权") {
+                    tokenDanceTask?.cancel()
+                    tokenDanceAuth = TokenDanceAPIKeyAuth()
+                    tokenDanceCode = ""
+                    openURL(tokenDanceAuth!.authorizationURL)
+                }.disabled(isAuthenticating)
+                if let flow = tokenDanceAuth {
+                    SecureField("一次性授权码", text: $tokenDanceCode)
+                    Button("交换授权码并添加") {
+                        isAuthenticating = true
+                        errorMessage = nil
+                        let code = tokenDanceCode
+                        tokenDanceTask = Task { @MainActor in
+                            defer { if tokenDanceAuth === flow { isAuthenticating = false } }
+                            do {
+                                let key = try await flow.exchange(code: code)
+                                guard !Task.isCancelled, tokenDanceAuth === flow, selectedProviderPresetID == "tokendance" else { return }
+                                apiKey = key
+                                tokenDanceCode = ""
+                                tokenDanceAuth = nil
+                                baseURLString = "https://tokendance.space/gateway/v1"
+                                customProtocol = .openAICompatible
+                                setupDirectOpenAICompatibleConnection()
+                            } catch {
+                                guard !Task.isCancelled, tokenDanceAuth === flow else { return }
+                                isAuthenticating = false
+                                tokenDanceAuth = nil
+                                tokenDanceCode = ""
+                                errorMessage = "TokenDance 授权未完成，请重新授权；若已创建 Key，可在控制台撤销旧 Key。"
+                            }
+                        }
+                    }.disabled(isAuthenticating || tokenDanceCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
     private func apiKeyField(placeholder: String) -> some View {
-        aiConnectionSettingsRow(title: "API Key") {
+        VStack(alignment: .leading, spacing: 12) {
+            tokenDanceAuthorization
+            aiConnectionSettingsRow(title: "API Key") {
             apiKeyInput(placeholder: placeholder)
+            }
         }
     }
 
