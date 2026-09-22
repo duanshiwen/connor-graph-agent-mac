@@ -454,7 +454,11 @@ public struct NativeSessionManager: Sendable {
                 if case .runFailed(let failure) = event { return failure }
                 return nil
             }.last
-            if assistantMessage == nil, let runFailure {
+            if let runFailure {
+                // 失败 run 可能已经持久化多条流式草稿/工具轮回复。它们都不是可交付结果；
+                // 收敛为一条终止信息，避免失败会话不断堆积中间消息。
+                session.removeAssistantMessages(forRunID: run.id)
+                streamingMessageID = nil
                 assistantMessage = try await appendTerminationMessage(
                     Self.terminationHandoffMessage(reason: runFailure.message),
                     runID: run.id
@@ -507,8 +511,14 @@ public struct NativeSessionManager: Sendable {
             try persistSession()
             throw NativeSessionManagerError.runCancelled(reason)
         } catch {
-            runtimeState.isProcessing = false
-            runtimeState.activeRunID = nil
+            // activeRunID 保持到清理落库完成，使合并器确认这些 assistant 消息属于本 run，
+            // 不会从持久化副本中重新合并回来。
+            defer {
+                runtimeState.isProcessing = false
+                runtimeState.activeRunID = nil
+            }
+            session.removeAssistantMessages(forRunID: run.id)
+            streamingMessageID = nil
             runtimeState.lastCompletedAt = Date()
             runtimeState.lastFailureMessage = String(describing: error)
             if let existingRun = try? sessionRepository.loadRun(id: run.id), existingRun.status == .cancelled {
@@ -711,7 +721,10 @@ public struct NativeSessionManager: Sendable {
             try persistSession()
             return last
         }
-        let message = session.appendAssistantMessage(content)
+        var termination = AgentMessage(role: .assistant, content: content)
+        termination.runID = runID
+        termination.sessionID = session.id
+        let message = session.appendAssistantMessage(termination)
         try persistSession()
         try await persistMemoryOSAfterAssistantMessage(message)
         return message

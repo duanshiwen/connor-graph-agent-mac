@@ -99,7 +99,7 @@ struct TaskSchedulerServiceTests {
         #expect(scheduler.dueTasks([interval], now: now).isEmpty)
     }
 
-    @Test func onceTasksDoNotBecomeDueAgainAfterSuccessOrFailure() throws {
+    @Test func onceTasksRetryWithBackoffAfterFailureButNotAfterSuccess() throws {
         let scheduler = TaskSchedulerService()
         let startedAt = Date(timeIntervalSince1970: 100)
         let finishedAt = Date(timeIntervalSince1970: 120)
@@ -122,7 +122,9 @@ struct TaskSchedulerServiceTests {
         #expect(scheduler.dueTasks([succeeded], now: now).isEmpty)
 
         let failed = scheduler.markRunFailed(task: running, startedAt: startedAt, finishedAt: finishedAt, errorMessage: "boom")
-        #expect(scheduler.dueTasks([failed], now: now).isEmpty)
+        #expect(failed.lifecycle.nextRunAt == finishedAt.addingTimeInterval(60))
+        #expect(scheduler.dueTasks([failed], now: finishedAt.addingTimeInterval(59)).isEmpty)
+        #expect(scheduler.dueTasks([failed], now: finishedAt.addingTimeInterval(60)).map(\.id) == [failed.id])
     }
 
     @Test func dailyTaskMissedWhileAppWasClosedIsDueAndKeepsOriginalScheduleAfterRun() throws {
@@ -264,6 +266,7 @@ struct TaskSchedulerServiceTests {
         let failed = scheduler.markRunFailed(task: task, startedAt: startedAt, finishedAt: finishedAt, errorMessage: "boom")
         #expect(failed.lifecycle.status == .failed)
         #expect(failed.lifecycle.failureCount == 1)
+        #expect(failed.lifecycle.nextRunAt == finishedAt.addingTimeInterval(60))
         #expect(failed.lifecycle.lastErrorMessage == "boom")
     }
 

@@ -36,6 +36,11 @@ private struct SessionOSAnswerBackend: AgentBackend {
 private struct SessionOSFailingEventBackend: AgentBackend {
     func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
         AsyncThrowingStream { continuation in
+            continuation.yield(.textComplete(AgentTextCompleteEvent(
+                runID: request.runID,
+                sessionID: request.sessionID,
+                text: "unfinished intermediate answer"
+            )))
             continuation.yield(.runFailed(AgentRunFailure(
                 runID: request.runID,
                 sessionID: request.sessionID,
@@ -307,6 +312,8 @@ private func makeSessionOSStore(_ name: String = UUID().uuidString) throws -> SQ
 
     #expect(response.assistantMessage?.content.contains("操作已终止：backend reported failure") == true)
     #expect(run.status == .failed)
+    #expect(loaded.messages.count == 2)
+    #expect(!loaded.messages.contains { $0.content == "unfinished intermediate answer" })
     #expect(loaded.messages.last?.content.contains("操作已终止：backend reported failure") == true)
 }
 

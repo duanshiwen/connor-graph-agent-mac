@@ -77,6 +77,8 @@ final class ChatSessionListModel {
     /// 转发目标里「康纳会话」的分页加载器（由 ChatSessionCoordinator 注入，走 repository
     /// 分页加载；转发弹窗按需取回、最终取到全部会话）。
     @ObservationIgnored var makeForwardSessionPageLoader: @MainActor () -> ForwardDestinationSessionPageLoader? = { nil }
+    /// 整会话转发必须绕过当前 UI 的消息分页，直接读取仓储中的完整会话。
+    @ObservationIgnored var loadCompleteSessionForForward: @MainActor (String) async throws -> AgentSession? = { _ in nil }
     var selectedSessionID: String?
     var loadingSessionDetailID: String?
     var presentedSessionDetailID: String?

@@ -3,6 +3,7 @@ import ConnorGraphCore
 
 public struct TaskSchedulerService: Sendable {
     public var calendar: Calendar
+    public static let maximumRetryFailures = 6
 
     public init(calendar: Calendar = Calendar(identifier: .gregorian)) {
         self.calendar = calendar
@@ -66,6 +67,7 @@ public struct TaskSchedulerService: Sendable {
         updated.lifecycle.lastRunAt = startedAt
         updated.lifecycle.lastFinishedAt = finishedAt
         updated.lifecycle.nextRunAt = nextRun
+        updated.lifecycle.failureCount = 0
         updated.lifecycle.lastErrorMessage = nil
         updated.updatedAt = finishedAt
         return updated
@@ -78,7 +80,13 @@ public struct TaskSchedulerService: Sendable {
         updated.lifecycle.lastFinishedAt = finishedAt
         updated.lifecycle.failureCount += 1
         updated.lifecycle.lastErrorMessage = errorMessage
-        updated.lifecycle.nextRunAt = computeNextRunAt(task: task, after: finishedAt)
+        let failureCount = updated.lifecycle.failureCount
+        if failureCount <= Self.maximumRetryFailures {
+            updated.lifecycle.nextRunAt = finishedAt.addingTimeInterval(retryDelay(failureCount: failureCount))
+        } else {
+            // 连续失败超过上限后跳过当前触发点，回到正常周期；不为每个错过的周期补建任务。
+            updated.lifecycle.nextRunAt = computeNextRunAt(task: task, after: finishedAt)
+        }
         updated.updatedAt = finishedAt
         return updated
     }
@@ -97,14 +105,23 @@ public struct TaskSchedulerService: Sendable {
 
     private func effectiveDueDate(for task: ConnorTaskDefinition, now: Date) -> Date? {
         let scheduled = nextDueDate(for: task)
+        // 失败后的 nextRunAt 是唯一重试门槛。若再叠加“错过周期”检测，历史触发点会让
+        // 同一任务在每次扫描时立刻重跑，形成积压和重试风暴。
+        if task.lifecycle.status == .failed { return scheduled }
         guard let missed = missedRecurringDueDate(for: task, now: now) else { return scheduled }
         guard let scheduled else { return missed }
         return min(scheduled, missed)
     }
 
+    private func retryDelay(failureCount: Int) -> TimeInterval {
+        let exponent = min(max(failureCount - 1, 0), 6)
+        return min(3_600, 60 * pow(2, Double(exponent)))
+    }
+
     private func nextDueDate(for task: ConnorTaskDefinition) -> Date? {
         let recurrence = recurrence(for: task)
         if recurrence == .once {
+            if task.lifecycle.status == .failed { return task.lifecycle.nextRunAt }
             guard task.lifecycle.lastFinishedAt == nil else { return nil }
             guard task.lifecycle.lastRunAt == nil || task.lifecycle.status == .active else { return nil }
             return task.lifecycle.nextRunAt ?? task.trigger.runAt ?? task.createdAt

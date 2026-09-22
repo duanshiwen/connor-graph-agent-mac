@@ -589,6 +589,7 @@ private struct AgentChatConversationView: View {
     @State private var isForwardSelectionMode = false
     @State private var isForwardSheetPresented = false
     @State private var isSessionForwardSheetPresented = false
+    @State private var pendingSessionForwardBundle: ForwardedChatBundle?
     @State private var isForwarding = false
     @StateObject private var chatViewportController = ChatViewportController(
         configuration: ChatViewportConfiguration(
@@ -910,8 +911,7 @@ private struct AgentChatConversationView: View {
                     isForwardSelectionMode: isForwardSelectionMode,
                     isForwardSelected: selectedForwardMessageIDs.contains(message.id),
                     onEnterForwardSelection: {
-                        let selectedKind = model.sessions.allSessions.first(where: { $0.id == model.sessions.selectedSessionID })?.governance.kind
-                        guard selectedKind != .note, !model.run.isSubmitting else { return }
+                        guard !model.run.isSubmitting else { return }
                         isForwardSelectionMode = true
                         selectedForwardMessageIDs = [message.id]
                     },
@@ -993,6 +993,12 @@ private struct AgentChatConversationView: View {
             Text("发送后保存并替换原正文")
                 .font(AgentChatTypography.meta)
                 .foregroundStyle(.tertiary)
+            Button("转发会话", systemImage: "arrowshape.turn.up.right.2") {
+                prepareCompleteSessionForward()
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .disabled(model.run.isSubmitting || imModel == nil)
             Button("取消编辑", action: { cancelNoteBodyEditing() })
                 .buttonStyle(.borderless)
                 .controlSize(.small)
@@ -1062,7 +1068,7 @@ private struct AgentChatConversationView: View {
                         isForwardSelectionMode = true
                     },
                     onForwardSession: {
-                        isSessionForwardSheetPresented = true
+                        prepareCompleteSessionForward()
                     }
                 )
                     .padding(.horizontal, AgentChatLayout.spaceL)
@@ -1235,12 +1241,15 @@ private struct AgentChatConversationView: View {
             }
         }
         .sheet(isPresented: $isSessionForwardSheetPresented) {
-            if let bundle = sessionForwardBundle, let imModel {
+            if let bundle = pendingSessionForwardBundle, let imModel {
                 ForwardDestinationSheet(
                     bundle: bundle,
                     pager: imModel.makeForwardDestinationPager(),
                     isSending: isForwarding,
-                    onCancel: { isSessionForwardSheetPresented = false },
+                    onCancel: {
+                        isSessionForwardSheetPresented = false
+                        pendingSessionForwardBundle = nil
+                    },
                     onSend: { caption, destinationKeys in
                         isForwarding = true
                         var outgoing = bundle
@@ -1252,6 +1261,7 @@ private struct AgentChatConversationView: View {
                                 onBackgroundError: { chatActions.errors.errorMessage = $0 }
                             )
                             isSessionForwardSheetPresented = false
+                            pendingSessionForwardBundle = nil
                         } catch {
                             chatActions.errors.errorMessage = "转发失败：\(error.localizedDescription)"
                         }
@@ -1297,12 +1307,9 @@ private struct AgentChatConversationView: View {
         )
     }
 
-    /// 整体转发：把当前会话已加载的全部消息打包成一个转发卡片。
-    private var sessionForwardBundle: ForwardedChatBundle? {
-        guard let sessionID = model.sessions.selectedSessionID,
-              let session = model.sessions.allSessions.first(where: { $0.id == sessionID })
-        else { return nil }
-        let items = model.run.transcript.map { message in
+    /// 整体转发：从仓储读取完整会话，不能只使用 UI 当前分页加载的 transcript。
+    private func completeSessionForwardBundle(_ session: AgentSession) -> ForwardedChatBundle? {
+        let items = session.messages.map { message in
             let nested = ForwardedChatBundleCodec.decode(message.content)
             return ForwardedChatItem(
                 id: message.id,
@@ -1318,6 +1325,28 @@ private struct AgentChatConversationView: View {
             sourceTitle: session.title,
             items: items
         )
+    }
+
+    private func prepareCompleteSessionForward() {
+        guard let sessionID = model.sessions.selectedSessionID,
+              !model.run.isSubmitting,
+              imModel != nil
+        else { return }
+        Task { @MainActor in
+            do {
+                let session = try await model.sessions.loadCompleteSessionForForward(sessionID)
+                    ?? model.sessions.allSessions.first(where: { $0.id == sessionID })
+                    ?? model.sessions.sessions.first(where: { $0.id == sessionID })
+                guard let session, let bundle = completeSessionForwardBundle(session) else {
+                    chatActions.errors.errorMessage = "当前会话没有可转发的消息。"
+                    return
+                }
+                pendingSessionForwardBundle = bundle
+                isSessionForwardSheetPresented = true
+            } catch {
+                chatActions.errors.errorMessage = "读取完整会话失败：\(error.localizedDescription)"
+            }
+        }
     }
 
     @ViewBuilder
@@ -1350,11 +1379,7 @@ private struct AgentChatConversationView: View {
     }
 
     private var canBeginForwardSelection: Bool {
-        let selectedKind = model.sessions.allSessions
-            .first(where: { $0.id == model.sessions.selectedSessionID })?
-            .governance.kind
-        return selectedKind != .note
-            && !model.run.transcript.isEmpty
+        return !model.run.transcript.isEmpty
             && !model.run.isSubmitting
             && imModel != nil
     }

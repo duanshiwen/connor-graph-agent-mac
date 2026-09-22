@@ -683,19 +683,18 @@ public actor AppAccountDataSyncCoordinator {
         // 按“最新操作优先”应用删除；其它集合的远端变化一律合并落库。
         case ("sessions", let id):
             if change.deleted {
-                // 删除按“最新操作优先”：远端删除时间比本地编辑时间新才删除。
-                let tombstone: SyncTombstone = try decode(change.payload)
+                // 会话 tombstone 是终态：本机未同步编辑不得把其它端已删除的会话复活。
+                let _: SyncTombstone = try decode(change.payload)
                 let local = (try? sessions.loadSession(id: id)) ?? nil
-                if tombstone.updatedAt > Int64((local?.updatedAt ?? .distantPast).timeIntervalSince1970 * 1_000) {
+                if local != nil {
                     try sessions.deleteSession(sessionID: id)
-                    return .session(id)
                 }
+                return .session(id)
             } else {
                 let portable: ConnorPortableSession = try decode(change.payload)
                 _ = try sessions.saveSession(portable.merging(into: try sessions.loadSession(id: id)))
                 return .session(id)
             }
-            return nil
         case ("settings", "macos_runtime") where !change.deleted:
             var synced: AgentRuntimeSettings = try decode(change.payload)
             synced.preferences = try settings.loadOrCreateDefault().preferences

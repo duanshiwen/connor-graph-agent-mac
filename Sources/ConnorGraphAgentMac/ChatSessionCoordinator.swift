@@ -67,6 +67,10 @@ final class ChatSessionCoordinator {
                 return (items, nextCursor)
             }
         }
+        model.loadCompleteSessionForForward = { [weak self] sessionID in
+            guard let repository = self?.repository else { return nil }
+            return try repository.loadSession(id: sessionID)
+        }
     }
 
     var isLoadingSelectedDetail: Bool {
