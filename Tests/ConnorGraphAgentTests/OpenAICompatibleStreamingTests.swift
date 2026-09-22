@@ -229,3 +229,62 @@ private struct OpenAIStreamingFallbackHTTPClient: AgentHTTPClient {
     #expect(metadata.encryptedContent == "ARK-ENCRYPTED-BLOCK-002")
     #expect(completed.text == "北京晴")
 }
+
+private func deepSeekStreamProvider(_ frames: [String]) -> OpenAICompatibleProvider {
+    OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://api.deepseek.com")!, apiKey: "test-key", model: "deepseek-flash"),
+        httpClient: OpenAIStreamingFallbackHTTPClient(),
+        sseClient: OpenAIStreamingCapturingSSEClient(frames: frames))
+}
+
+@Test func deepSeekStreamAcceptsUsageWithoutChoices() async throws {
+    let provider = deepSeekStreamProvider([
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":\"stop\"}]}\n",
+        "data: {\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"total_tokens\":12,\"prompt_cache_hit_tokens\":4}}\n",
+        "data: [DONE]\n"
+    ])
+    var result: AgentModelResponse?
+    for try await event in provider.streamComplete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "hi")])) {
+        if case .completed(let response) = event { result = response }
+    }
+    #expect(result?.text == "Hello")
+    #expect(result?.usage?.totalTokens == 12)
+    #expect(result?.usage?.cacheReadInputTokens == 4)
+}
+
+@Test func deepSeekStreamSurfacesErrorInsteadOfMissingChoices() async throws {
+    let provider = deepSeekStreamProvider([
+        "data: {\"error\":{\"message\":\"Model Not Exist\",\"type\":\"invalid_request_error\"}}\n",
+        "data: [DONE]\n"
+    ])
+    do {
+        for try await _ in provider.streamComplete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "hi")])) { }
+        Issue.record("Expected upstream error")
+    } catch let error as OpenAICompatibleProviderError {
+        #expect(error == .streamError("Model Not Exist"))
+    }
+}
+
+@Test func deepSeekStreamRejectsTruncationAndUnknownEnvelopes() async throws {
+    for (frame, expected) in [
+        ("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n", OpenAICompatibleProviderError.incompleteStream),
+        ("data: {\"unexpected\":true}\n", OpenAICompatibleProviderError.invalidResponse),
+        ("data: {\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":0,\"total_tokens\":1}}\n", OpenAICompatibleProviderError.incompleteStream)
+    ] {
+        do {
+            for try await event in deepSeekStreamProvider([frame]).streamComplete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "hi")])) {
+                if case .completed = event { Issue.record("An unfinished response must not complete") }
+            }
+            Issue.record("Expected stream failure")
+        } catch let error as OpenAICompatibleProviderError { #expect(error == expected) }
+    }
+}
+
+@Test func deepSeekStreamAcceptsFinishReasonWithoutDone() async throws {
+    let provider = deepSeekStreamProvider(["data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n"])
+    var completed = false
+    for try await event in provider.streamComplete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "hi")])) {
+        if case .completed = event { completed = true }
+    }
+    #expect(completed)
+}
