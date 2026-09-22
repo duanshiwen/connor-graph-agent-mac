@@ -232,7 +232,7 @@ private struct OpenAIStreamingFallbackHTTPClient: AgentHTTPClient {
 
 private func deepSeekStreamProvider(_ frames: [String]) -> OpenAICompatibleProvider {
     OpenAICompatibleProvider(
-        config: OpenAICompatibleConfig(baseURL: URL(string: "https://api.deepseek.com")!, apiKey: "test-key", model: "deepseek-flash"),
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://ark.cn-beijing.volces.com/api/v3")!, apiKey: "test-key", model: "deepseek-v4-1-flash-260910"),
         httpClient: OpenAIStreamingFallbackHTTPClient(),
         sseClient: OpenAIStreamingCapturingSSEClient(frames: frames))
 }

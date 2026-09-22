@@ -71,8 +71,10 @@ extension AnthropicCompatibleProviderError: AgentModelProviderErrorClassifying {
 extension OpenAICompatibleProviderError: AgentModelProviderErrorClassifying {
     public var providerErrorClass: AgentModelProviderErrorClass {
         switch self {
-        case .invalidResponse:
+        case .invalidResponse, .incompleteStream:
             return .transient
+        case let .streamError(message):
+            return AgentProviderErrorHeuristics.isContextOverflowMessage(message) ? .contextOverflow : .permanent
         case let .httpStatus(status, message):
             return AgentProviderErrorHeuristics.classifyHTTPStatus(status, message: message)
         case .missingAPIKey, .invalidBaseURL, .missingAssistantMessage, .unsupportedVisionInput:
