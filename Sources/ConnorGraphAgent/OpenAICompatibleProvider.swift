@@ -119,6 +119,8 @@ public enum OpenAICompatibleProviderError: Error, Equatable, Sendable {
     case missingAPIKey
     case invalidBaseURL(String)
     case invalidResponse
+    case streamError(String)
+    case incompleteStream
     case httpStatus(Int, message: String?)
     case missingAssistantMessage
     case unsupportedVisionInput(model: String, reason: String)
@@ -131,6 +133,10 @@ extension OpenAICompatibleProviderError: LocalizedError {
             return "Missing OpenAI-compatible API key."
         case let .invalidBaseURL(value):
             return "Invalid OpenAI-compatible base URL: \(value)"
+        case let .streamError(message):
+            return "模型服务商返回流式错误：\(message)"
+        case .incompleteStream:
+            return "模型流式响应未收到结束标记，请重试。"
         case .invalidResponse:
             return "OpenAI-compatible provider returned an invalid response."
         case let .httpStatus(code, message):
@@ -280,15 +286,17 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                         let httpRequest = try makeToolCallingRequest(request, stream: true)
                         let frames = try await sseClient.stream(httpRequest)
                         var accumulator = OpenAIChatCompletionStreamAccumulator()
+                        var receivedDone = false
                         for try await frame in frames {
                             for payload in OpenAISSEParser.payloads(from: frame) {
-                                guard payload != "[DONE]" else { continue }
-                                let chunk = try JSONDecoder().decode(OpenAIChatCompletionStreamChunk.self, from: Data(payload.utf8))
+                                guard payload != "[DONE]" else { receivedDone = true; continue }
+                                let chunk = try Self.decodeStreamChunk(payload)
                                 for event in accumulator.append(chunk: chunk, rawJSON: payload) {
                                     continuation.yield(event)
                                 }
                             }
                         }
+                        guard receivedDone || accumulator.hasFinishReason else { throw OpenAICompatibleProviderError.incompleteStream }
                         continuation.yield(.completed(accumulator.response()))
                         continuation.finish()
                     } catch OpenAICompatibleProviderError.unsupportedVisionInput {
@@ -297,15 +305,17 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                         let httpRequest = try makeToolCallingRequest(stripped, stream: true)
                         let frames = try await sseClient.stream(httpRequest)
                         var accumulator = OpenAIChatCompletionStreamAccumulator()
+                        var receivedDone = false
                         for try await frame in frames {
                             for payload in OpenAISSEParser.payloads(from: frame) {
-                                guard payload != "[DONE]" else { continue }
-                                let chunk = try JSONDecoder().decode(OpenAIChatCompletionStreamChunk.self, from: Data(payload.utf8))
+                                guard payload != "[DONE]" else { receivedDone = true; continue }
+                                let chunk = try Self.decodeStreamChunk(payload)
                                 for event in accumulator.append(chunk: chunk, rawJSON: payload) {
                                     continuation.yield(event)
                                 }
                             }
                         }
+                        guard receivedDone || accumulator.hasFinishReason else { throw OpenAICompatibleProviderError.incompleteStream }
                         var finalResponse = accumulator.response()
                         finalResponse.warnings.append(Self.visionDegradationWarning)
                         continuation.yield(.completed(finalResponse))
@@ -316,6 +326,21 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                 }
             }
         }
+    }
+
+    private static func decodeStreamChunk(_ payload: String) throws -> OpenAIChatCompletionStreamChunk {
+        let data = Data(payload.utf8)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw OpenAICompatibleProviderError.invalidResponse
+        }
+        // HTTP 200 streams may carry an error envelope instead of a completion chunk.
+        if let error = object["error"], !(error is NSNull) {
+            throw OpenAICompatibleProviderError.streamError(Self.errorMessage(from: data) ?? "未知服务端错误")
+        }
+        if object["type"] as? String == "error" {
+            throw OpenAICompatibleProviderError.streamError(Self.errorMessage(from: data) ?? "未知服务端错误")
+        }
+        return try JSONDecoder().decode(OpenAIChatCompletionStreamChunk.self, from: data)
     }
 
     public func healthCheck() async throws -> LLMProviderHealthCheckResult {
@@ -804,6 +829,21 @@ private struct OpenAIChatCompletionStreamChunk: Decodable {
     var choices: [Choice]
     var usage: OpenAIChatCompletionResponse.Usage?
 
+    private enum CodingKeys: String, CodingKey { case choices, usage }
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        usage = try container.decodeIfPresent(OpenAIChatCompletionResponse.Usage.self, forKey: .usage)
+        if container.contains(.choices) {
+            choices = try container.decode([Choice].self, forKey: .choices)
+        } else if usage != nil {
+            // Some compatible gateways send the final usage event without choices.
+            choices = []
+        } else {
+            throw OpenAICompatibleProviderError.invalidResponse
+        }
+    }
+
+
     struct Choice: Decodable {
         var delta: Delta
         var finishReason: String?
@@ -859,6 +899,8 @@ private struct OpenAIChatCompletionStreamAccumulator {
     private var toolCalls: [Int: ToolCallState] = [:]
     private var withheldText = ""
     private var isSuppressingTextualToolMarkup = false
+
+    var hasFinishReason: Bool { finishReason != .unknown }
 
     mutating func append(chunk: OpenAIChatCompletionStreamChunk, rawJSON: String) -> [AgentModelStreamEvent] {
         rawEvents.append(rawJSON)
