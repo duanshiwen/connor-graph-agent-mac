@@ -523,6 +523,7 @@ public actor AppAccountDataSyncCoordinator {
         }
 
         let projected = try await projections()
+        let deletedSessions = try sessions.loadDeletedSessionMetadata()
         // 状态哈希回填为“本地重新编码后的投影”哈希，而不是远端载荷哈希：
         // 两端编码（键序/日期格式/可选字段）不同，若保存远端载荷哈希，下一次投影
         // 比较必然不相等，会把刚收到的记录又推回去，形成两端无限互推。
@@ -532,7 +533,10 @@ public actor AppAccountDataSyncCoordinator {
             state.records[key] = record
         }
         var mutations: [ConnorSyncChange] = []
-        for (key, payload) in projected where state.records[key]?.hash != (try payloadHash(payload)) || state.records[key]?.encrypted != true {
+        let pendingSessionDeleteKeys = Set(deletedSessions.map { recordKey(SyncCollection.sessions, $0.id) })
+        for (key, payload) in projected {
+            guard !pendingSessionDeleteKeys.contains(key) else { continue }
+            guard state.records[key]?.hash != (try payloadHash(payload)) || state.records[key]?.encrypted != true else { continue }
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
             let encrypted = try cipher.encrypt(payload, collection: parts[0], recordID: parts[1])
             // 超过 1 MiB 的记录跳过不推（后端对整批中的超限条目同样只跳过、不报错），
@@ -543,12 +547,12 @@ public actor AppAccountDataSyncCoordinator {
             }
             mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: encrypted))
         }
-        // 技能包、L0/L1/标签与会话按“最新操作优先”：本地已删除且此前同步过的记录回推 tombstone（载荷带删除时间）。
+        // 技能包、L0/L1/标签按“最新操作优先”：本地已删除且此前同步过的记录回推 tombstone（载荷带删除时间）。
         // 集合级防护：本机该集合投影完全为空时不回推 tombstone——空列表更可能是本地数据
         // 丢失/列表被清空，而不是“删光了全部”，避免一台空设备把其它端的数据也清掉。
-        // RSS 订阅源不走这里：它使用显式删除标记（pendingDeletes），见下方单独逻辑。
+        // 会话与 RSS 订阅源不走这里：它们使用显式、持久化的删除标记，见下方单独逻辑。
         let nowMillis = Int64(Date().timeIntervalSince1970 * 1_000)
-        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|", "sessions|", "mail_accounts|"]
+        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|", "mail_accounts|"]
         let projectedCollections = Set(projected.keys.map { String($0.split(separator: "|", maxSplits: 1)[0]) })
         for key in state.records.keys where tombstonePrefixes.contains(where: { key.hasPrefix($0) }) {
             guard state.records[key]?.deleted != true, projected[key] == nil else { continue }
@@ -561,6 +565,22 @@ public actor AppAccountDataSyncCoordinator {
                 recordId: parts[1],
                 baseVersion: state.records[key]?.version ?? 0,
                 payload: cipher.encrypt(jsonValue(tombstone), collection: parts[0], recordID: parts[1]),
+                deleted: true
+            ))
+        }
+        // 会话软删除行本身就是显式删除标记。它不依赖集合中仍有其它投影，因此删除
+        // 最后一个会话也会上传 tombstone；删除时间保持为用户实际操作时间。
+        for session in deletedSessions {
+            let key = recordKey(SyncCollection.sessions, session.id)
+            guard let record = state.records[key], !record.deleted,
+                  let deletedAt = session.governance.deletedAt else { continue }
+            let deletedAtMillis = Int64(deletedAt.timeIntervalSince1970 * 1_000)
+            let tombstone = SyncTombstone(updatedAt: deletedAtMillis)
+            mutations.append(try ConnorSyncChange(
+                collection: SyncCollection.sessions,
+                recordId: session.id,
+                baseVersion: record.version,
+                payload: cipher.encrypt(jsonValue(tombstone), collection: SyncCollection.sessions, recordID: session.id),
                 deleted: true
             ))
         }

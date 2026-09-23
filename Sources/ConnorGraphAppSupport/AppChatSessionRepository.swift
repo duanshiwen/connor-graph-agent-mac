@@ -89,6 +89,13 @@ public struct AppChatSessionRepository: Sendable {
         try store.recentSessionMetadata(limit: limit)
     }
 
+    /// 已软删除、等待账号同步 tombstone 确认的会话。保留删除时间，且只读元数据，
+    /// 避免同步扫描为生成删除事件加载全部历史消息。
+    public func loadDeletedSessionMetadata(limit: Int = Int.max) throws -> [AgentSession] {
+        try store.recentSessionMetadata(limit: limit, includeDeleted: true)
+            .filter { $0.governance.deletedAt != nil }
+    }
+
     public func loadSessionPage(filter: AgentSessionListFilter, query: String = "", limit: Int = 50, cursor: String? = nil) throws -> AppChatSessionPage {
         let pageSize = min(max(limit, 1), 100)
         let decodedCursor = try cursor.map(Self.decodeCursor)
