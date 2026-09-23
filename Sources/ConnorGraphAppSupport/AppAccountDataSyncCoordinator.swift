@@ -6,6 +6,7 @@ import ConnorGraphStore
 public enum AppAccountSyncSignal {
     @TaskLocal public static var suppressLocalChange = false
     public static let localDataDidChange = Notification.Name("ConnorAccountSyncLocalDataDidChange")
+    static let projectionGenerationKey = "ConnorAccountSyncProjectionGeneration"
 
     public static func postLocalDataDidChange() {
         guard !suppressLocalChange else { return }
@@ -13,6 +14,8 @@ public enum AppAccountSyncSignal {
         // 主线程繁忙/卡在布局时，同步投递会让写路径在通知处永久等待。
         // 改为异步投递，观察者仍按注册的 queue(.main) 收到通知。
         DispatchQueue.main.async {
+            let defaults = UserDefaults.standard
+            defaults.set(defaults.integer(forKey: projectionGenerationKey) + 1, forKey: projectionGenerationKey)
             NotificationCenter.default.post(name: localDataDidChange, object: nil)
         }
     }
@@ -508,6 +511,17 @@ public actor AppAccountDataSyncCoordinator {
             saveState(state, key: stateKey)
         } while hasMore
 
+        let projectionGeneration = defaults.integer(forKey: AppAccountSyncSignal.projectionGenerationKey)
+        let scannedGenerationKey = "ConnorAccountSyncScannedProjectionGeneration.\(userID)"
+        let hasScannedProjection = defaults.object(forKey: scannedGenerationKey) != nil
+        let shouldScanProjection = !hasScannedProjection
+            || defaults.integer(forKey: scannedGenerationKey) != projectionGeneration
+            || !appliedKeys.isEmpty
+        guard shouldScanProjection else {
+            saveState(state, key: stateKey)
+            return syncResult
+        }
+
         let projected = try await projections()
         // 状态哈希回填为“本地重新编码后的投影”哈希，而不是远端载荷哈希：
         // 两端编码（键序/日期格式/可选字段）不同，若保存远端载荷哈希，下一次投影
@@ -596,6 +610,9 @@ public actor AppAccountDataSyncCoordinator {
             return isSyncableRecord(parts[0], parts[1])
         }
         saveState(state, key: stateKey)
+        // 只确认本轮开始时观察到的代次；扫描期间若发生新写入，generation 已再次增加，
+        // 下一轮仍会进入投影扫描，不会吞掉并发本地变化。
+        defaults.set(projectionGeneration, forKey: scannedGenerationKey)
         return syncResult
     }
 
