@@ -100,7 +100,7 @@ public struct SessionContextBudget: Sendable, Equatable {
 // MARK: - Well-known context window sizes
 
 extension SessionContextBudget {
-    /// Common context window sizes for popular models (2026 Q2).
+    /// Common context window sizes for popular models (2026 Q4).
     /// Keep API models separate from product-hosted variants with different limits.
     public static let wellKnownContextWindows: [String: Int] = [
         // Anthropic Claude
@@ -109,6 +109,9 @@ extension SessionContextBudget {
         "claude-sonnet-4": 200_000,
         "claude-3.5-sonnet": 200_000,
         "claude-3-opus": 200_000,
+        "claude-opus-5": 1_000_000,
+        "claude-sonnet-5": 1_000_000,
+        "claude-fable-5": 1_000_000,
         // OpenAI GPT
         "gpt-4o": 128_000,
         "gpt-4-turbo": 128_000,
@@ -118,6 +121,7 @@ extension SessionContextBudget {
         "gpt-5.6-terra": 272_000,
         "gpt-5.6-luna": 272_000,
         "gpt-5.6": 272_000,
+        "gpt-6": 1_050_000,
         "o3": 200_000,
         "o4-mini": 200_000,
         // Google Gemini

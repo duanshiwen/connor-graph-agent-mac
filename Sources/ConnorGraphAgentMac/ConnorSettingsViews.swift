@@ -894,9 +894,9 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
 
     static let otherProviderPresets: [AIConnectionProviderPreset] = [
         AIConnectionProviderPreset(id: "tokendance", title: "TokenDance · 词元跳动", endpoint: "https://tokendance.space/gateway/v1", defaultModel: "seed-2.1-pro", supportedModels: ["seed-2.1-pro", "seed-2.1-turbo", "seed-2.0-pro", "seed-2.0-code", "seed-2.0-lite", "seed-2.0-mini", "seed-evolving"], keyPlaceholder: "Paste your TokenDance API Key...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "openai", title: "OpenAI", endpoint: "https://api.openai.com/v1", defaultModel: "gpt-5.6-luna", supportedModels: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"], keyPlaceholder: "sk-...", protocolKind: .openAIResponses, hidesEndpoint: true),
-        AIConnectionProviderPreset(id: "openai-eu", title: "OpenAI EU", endpoint: "https://eu.api.openai.com/v1", defaultModel: "gpt-5.6-luna", supportedModels: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"], keyPlaceholder: "sk-...", protocolKind: .openAIResponses),
-        AIConnectionProviderPreset(id: "openai-us", title: "OpenAI US", endpoint: "https://us.api.openai.com/v1", defaultModel: "gpt-5.6-luna", supportedModels: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"], keyPlaceholder: "sk-...", protocolKind: .openAIResponses),
+        AIConnectionProviderPreset(id: "openai", title: "OpenAI", endpoint: "https://api.openai.com/v1", defaultModel: "gpt-6-luna", supportedModels: ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"], keyPlaceholder: "sk-...", protocolKind: .openAIResponses, hidesEndpoint: true),
+        AIConnectionProviderPreset(id: "openai-eu", title: "OpenAI EU", endpoint: "https://eu.api.openai.com/v1", defaultModel: "gpt-6-luna", supportedModels: ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"], keyPlaceholder: "sk-...", protocolKind: .openAIResponses),
+        AIConnectionProviderPreset(id: "openai-us", title: "OpenAI US", endpoint: "https://us.api.openai.com/v1", defaultModel: "gpt-6-luna", supportedModels: ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"], keyPlaceholder: "sk-...", protocolKind: .openAIResponses),
         AIConnectionProviderPreset(id: "google", title: "Google AI Studio", endpoint: "https://generativelanguage.googleapis.com/v1beta/openai", defaultModel: "gemini-3.8-flash", keyPlaceholder: "AIza...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "openrouter", title: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", defaultModel: "openai/gpt-5.6-luna", keyPlaceholder: "sk-or-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "groq", title: "Groq", endpoint: "https://api.groq.com/openai/v1", defaultModel: "openai/gpt-oss-120b", keyPlaceholder: "gsk_...", protocolKind: .openAICompatible),
@@ -913,7 +913,7 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
         AIConnectionProviderPreset(id: "cerebras", title: "Cerebras", endpoint: "https://api.cerebras.ai/v1", defaultModel: "gpt-oss-120b", keyPlaceholder: "csk-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-5.3", supportedModels: ["glm-5.3", "glm-4.5-air", "glm-4.5-flash", "glm-4-plus", "glm-4-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible, subscriptionPlan: .init(title: "Z.AI GLM Coding Plan", subtitle: "适用于 Z.AI 国际站 Coding Plan API Key。", endpoint: "https://api.z.ai/api/coding/paas/v4", defaultModel: "glm-5.3", supportedModels: ["glm-5.3", "glm-5-turbo", "glm-4.7"], keyPlaceholder: "Paste your Coding Plan key...", purchaseURLString: "https://z.ai/subscribe", managementURLString: "https://z.ai/manage-apikey/apikey-list", restrictionNotice: "套餐仅限 Z.AI 官方支持的 AI 编程工具和产品环境使用。")),
         AIConnectionProviderPreset(id: "huggingface", title: "Hugging Face", endpoint: "https://router.huggingface.co/v1", defaultModel: "openai/gpt-oss-120b", keyPlaceholder: "hf_...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "anthropic", title: "Anthropic API", endpoint: "https://api.anthropic.com", defaultModel: "claude-sonnet-5", supportedModels: ["claude-sonnet-5", "claude-opus-5", "claude-fable-5-1", "claude-haiku-4-5-20251001"], keyPlaceholder: "sk-ant-...", protocolKind: .anthropicCompatible, authHeaderKind: .xAPIKey),
+        AIConnectionProviderPreset(id: "anthropic", title: "Anthropic API", endpoint: "https://api.anthropic.com", defaultModel: "claude-sonnet-5-5", supportedModels: ["claude-sonnet-5-5", "claude-opus-5-5", "claude-sonnet-5", "claude-opus-5", "claude-fable-5-1", "claude-haiku-4-5-20251001"], keyPlaceholder: "sk-ant-...", protocolKind: .anthropicCompatible, authHeaderKind: .xAPIKey),
         AIConnectionProviderPreset(id: "openrouter-anthropic", title: "OpenRouter · Anthropic", endpoint: "https://openrouter.ai/api/v1", defaultModel: "anthropic/claude-sonnet-5", keyPlaceholder: "sk-or-...", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .bearer),
         AIConnectionProviderPreset(id: "vercel-anthropic", title: "Vercel AI Gateway · Anthropic", endpoint: "https://ai-gateway.vercel.sh/v1", defaultModel: "anthropic/claude-sonnet-4", keyPlaceholder: "vck_...", protocolKind: .anthropicCompatible, authHeaderKind: .bearer),
         AIConnectionProviderPreset(id: "custom", title: "Custom", endpoint: "", defaultModel: "", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible)
@@ -1032,8 +1032,8 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             providerMode: .openAIResponses,
             connectionName: "OpenAI Responses",
             baseURLString: "https://api.openai.com/v1",
-            model: "gpt-5.6-terra",
-            selectedModel: "gpt-5.6-terra",
+            model: "gpt-6.1-sol",
+            selectedModel: "gpt-6.1-sol",
             setupTitle: "连接 OpenAI API",
             setupSubtitle: "使用 API Key 连接 OpenAI Responses API。",
             setupInstruction: "填写 OpenAI API Key、接口地址和模型名称。康纳同学会用这组信息连接模型服务。",
@@ -1050,8 +1050,8 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             providerMode: .anthropicMessages,
             connectionName: "Anthropic / Claude",
             baseURLString: "https://api.anthropic.com/v1",
-            model: "claude-sonnet-5",
-            selectedModel: "claude-sonnet-5",
+            model: "claude-sonnet-5-5",
+            selectedModel: "claude-sonnet-5-5",
             setupTitle: "连接 Anthropic / Claude",
             setupSubtitle: "使用 API Key 连接 Claude。",
             setupInstruction: "填写 Anthropic API Key、接口地址和模型名称。康纳同学会用这组信息连接模型服务。",
@@ -1519,10 +1519,10 @@ struct AIConnectionSetupView: View {
                     aiConnectionTextField("https://api.example.com/v1", text: $baseURLString)
                 }
                 aiConnectionSettingsRow(title: "模型") {
-                    aiConnectionTextField("claude-sonnet-5", text: $model)
+                    aiConnectionTextField("claude-sonnet-5-5", text: $model)
                 }
                 aiConnectionSettingsRow(title: "默认模型", help: "默认模型用于新会话默认选择；连接校验始终使用模型列表中的第一个有效模型。") {
-                    aiConnectionTextField("claude-sonnet-5", text: $selectedModel)
+                    aiConnectionTextField("claude-sonnet-5-5", text: $selectedModel)
                 }
                 aiConnectionSettingsRow(title: "上下文窗口", help: "填写服务商为该模型提供的真实上下文 token 上限。运行时还会预留输出空间。") {
                     aiConnectionInputContainer {
