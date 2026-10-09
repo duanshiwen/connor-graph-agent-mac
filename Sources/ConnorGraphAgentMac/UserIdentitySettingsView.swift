@@ -302,6 +302,9 @@ struct UserIdentitySettingsView: View {
             return ("已关闭，不会上传或下载设备数据。", "pause.circle", .secondary)
         }
         guard identityStore.currentUser != nil else {
+            if identityStore.hasStoredSession {
+                return ("正在恢复账号连接，将自动重试。", "network", .orange)
+            }
             return ("登录康纳账号后可以开启同步。", "person.crop.circle.badge.questionmark", .secondary)
         }
         guard connectivity.isConnected else {

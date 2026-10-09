@@ -4111,7 +4111,9 @@ extension AppRuntimeLifecycle {
     }
 
     func syncAccountData(using identityStore: AppUserIdentityStore) async throws {
-        guard let chatSessionRepository, let storagePaths else { return }
+        guard let chatSessionRepository, let storagePaths else {
+            throw NSError(domain: "ConnorAccountSync", code: 2, userInfo: [NSLocalizedDescriptionKey: "本地数据尚未准备完成，同步将自动重试。"])
+        }
         let coordinator = AppAccountDataSyncCoordinator(
             sessions: chatSessionRepository,
             settings: AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory),
@@ -4127,9 +4129,14 @@ extension AppRuntimeLifecycle {
         // 让本轮 reconcile 的投影把它上推给安卓端。动作驱动，不做全量镜像，避免与
         // 安卓端的解绑互相“打架”（Mac 每轮把本地绑定写回、覆盖安卓刚清除的解绑）。
         await projectPendingFriendBindingActions()
-        let result = try await Task.detached(priority: .utility) {
+        let syncTask = Task.detached(priority: .utility) {
             try await coordinator.reconcile()
-        }.value
+        }
+        let result = try await withTaskCancellationHandler {
+            try await syncTask.value
+        } onCancel: {
+            syncTask.cancel()
+        }
         if result.settingsChanged { loadRuntimeSettings() }
         if result.governanceLabelsChanged,
            let config = try? AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory).loadOrCreateDefault() {
@@ -4151,6 +4158,9 @@ extension AppRuntimeLifecycle {
         if let im = graph.im, let memory = memoryOSStore {
             let entities = (try? memory.listAllEntities()) ?? []
             await im.reconcileFriendBindingsFromSync(entities: entities)
+        }
+        if let message = result.failureMessage {
+            throw NSError(domain: "ConnorAccountSync", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
         }
     }
 

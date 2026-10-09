@@ -374,6 +374,7 @@ public struct SyncAIConnections: Codable, Sendable, Equatable {
 }
 
 public struct AppAccountDataSyncResult: Sendable, Equatable {
+    public var failureMessage: String?
     public var appliedSessionChangeCount: Int
     public var appliedSettingsChangeCount: Int
     public var appliedGovernanceLabelChangeCount: Int
@@ -441,7 +442,27 @@ public actor AppAccountDataSyncCoordinator {
 
     private enum AppliedChangeKind { case session(String), settings, governanceLabels, rssSubscriptions, mailAccounts }
     private struct RecordState: Codable { var version: Int64; var hash: String; var deleted: Bool; var encrypted: Bool = false }
-    private struct PersistedState: Codable { var cursor: Int64 = 0; var records: [String: RecordState] = [:] }
+    private struct PersistedState: Codable {
+        var cursor: Int64 = 0
+        var records: [String: RecordState] = [:]
+        var pending: [String: ConnorSyncChange] = [:]
+        var dirtyKeys: Set<String> = []
+        var repairVersion: Int = 0
+        var snapshotAfterID: Int64 = 0
+        var snapshotCursor: Int64?
+        init() {}
+        private enum CodingKeys: String, CodingKey { case cursor, records, pending, dirtyKeys, repairVersion, snapshotAfterID, snapshotCursor }
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            cursor = try values.decodeIfPresent(Int64.self, forKey: .cursor) ?? 0
+            records = try values.decodeIfPresent([String: RecordState].self, forKey: .records) ?? [:]
+            pending = try values.decodeIfPresent([String: ConnorSyncChange].self, forKey: .pending) ?? [:]
+            dirtyKeys = try values.decodeIfPresent(Set<String>.self, forKey: .dirtyKeys) ?? []
+            repairVersion = try values.decodeIfPresent(Int.self, forKey: .repairVersion) ?? 0
+            snapshotAfterID = try values.decodeIfPresent(Int64.self, forKey: .snapshotAfterID) ?? 0
+            snapshotCursor = try values.decodeIfPresent(Int64.self, forKey: .snapshotCursor)
+        }
+    }
 
     private let sessions: AppChatSessionRepository
     private let settings: AppRuntimeSettingsRepository
@@ -462,54 +483,103 @@ public actor AppAccountDataSyncCoordinator {
         decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
     }
 
+    private func consume(_ changes: [ConnorSyncChange], snapshot: Bool = false, cipher: AccountSyncPayloadCipher, deviceID: String, state: inout PersistedState, syncResult: inout AppAccountDataSyncResult, appliedKeys: inout [String], capturedLocalChanges: inout Bool) async throws {
+        try Task.checkCancellation()
+        // Keep local dirty records dirty across pull and process restarts.
+        if !capturedLocalChanges, !changes.isEmpty {
+            for (key, payload) in try await projections() where state.records[key]?.hash != (try payloadHash(payload)) {
+                state.dirtyKeys.insert(key)
+            }
+            capturedLocalChanges = true
+        }
+        for change in changes where isSyncableRecord(change.collection, change.recordId) {
+            try Task.checkCancellation()
+            let key = recordKey(change.collection, change.recordId)
+            if (state.pending[key]?.version ?? -1) > (change.version ?? 0) { continue }
+            if let known = state.records[key], (change.version ?? 0) < known.version {
+                state.pending.removeValue(forKey: key)
+                continue
+            }
+            let tombstoneCollections: Set<String> = ["sessions", "skills", "memory_l0", "memory_l0_spans", "memory_l1", "governance_labels", "rss_subscriptions", "mail_accounts"]
+            guard !change.deleted || tombstoneCollections.contains(change.collection) else { continue }
+            do {
+                let clear = try decrypted(change, using: cipher)
+                if snapshot || change.sourceDeviceId != deviceID {
+                    if let kind = try await AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try await apply(clear.change) }) {
+                        record(kind, in: &syncResult)
+                    }
+                }
+                var baseline = state.dirtyKeys.contains(key) ? "" : (state.records[key]?.hash ?? "")
+                if change.collection == "sessions", !change.deleted {
+                    let portable: ConnorPortableSession = try decode(clear.change.payload)
+                    guard portable.id == change.recordId else { throw ConnorBackendAPIError.invalidResponse }
+                    // Normalize only the server copy. The merged local copy may
+                    // still contain messages that have never been uploaded.
+                    baseline = try payloadHash(jsonValue(ConnorPortableSession(portable.merging(into: nil))))
+                }
+                if change.deleted { state.dirtyKeys.remove(key) }
+                state.records[key] = RecordState(version: change.version ?? 0, hash: baseline, deleted: change.deleted, encrypted: clear.encrypted)
+                state.pending.removeValue(forKey: key)
+                appliedKeys.append(key)
+            } catch {
+                try Task.checkCancellation()
+                if (state.pending[key]?.version ?? -1) <= (change.version ?? 0) { state.pending[key] = change }
+                AppPerformanceLog.chatTurnLogger.warning("account.sync.apply-deferred collection=\(change.collection, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
     public func reconcile() async throws -> AppAccountDataSyncResult {
+        try Task.checkCancellation()
         guard let userID = await identity.currentUser?.id else { return AppAccountDataSyncResult() }
         let cipher = try await AccountSyncPayloadCipher(keyData: identity.accountSyncKey(userID: String(userID)))
         let deviceID = await identity.syncDeviceID
+        try await identity.registerSyncDevice()
         var syncResult = AppAccountDataSyncResult()
         let stateKey = "ConnorAccountSyncState.\(userID)"
         var state = loadState(key: stateKey)
         var hasMore = false
         var appliedKeys: [String] = []
+        var capturedLocalChanges = false
+        var deferredUploadCount = 0
+        var snapshotUnavailable = false
+        var didRepair = false
+
+
+        // One upgrade repair reads current records, not hundreds of thousands of
+        // obsolete log entries. Persist the page position to resume after a restart.
+        if state.repairVersion < 1 {
+            do {
+                repeat {
+                    let page = try await identity.syncSnapshot(afterID: state.snapshotAfterID)
+                    if state.snapshotCursor == nil { state.snapshotCursor = page.cursor }
+                    try await consume(page.changes, snapshot: true, cipher: cipher, deviceID: deviceID, state: &state, syncResult: &syncResult, appliedKeys: &appliedKeys, capturedLocalChanges: &capturedLocalChanges)
+                    guard !page.hasMore || page.nextRecordId > state.snapshotAfterID else { throw ConnorBackendAPIError.invalidResponse }
+                    state.snapshotAfterID = page.nextRecordId
+                    hasMore = page.hasMore
+                    if !hasMore {
+                        state.cursor = max(state.cursor, state.snapshotCursor ?? 0)
+                        state.repairVersion = 1
+                        didRepair = true
+                        state.snapshotCursor = nil
+                    }
+                    saveState(state, key: stateKey)
+                } while hasMore
+            } catch ConnorBackendAPIError.server(status: 404, message: _) {
+                // New clients still exchange incremental changes with older servers.
+                snapshotUnavailable = true
+            }
+        }
+
         repeat {
             let page = try await identity.pullSyncChanges(cursor: state.cursor)
-            for change in page.changes where isSyncableRecord(change.collection, change.recordId) {
-                // 合并同步：技能包、L0/L1 记忆层、会话标签定义、RSS 订阅源与会话
-                // 按“最新操作优先”应用删除；其它记忆/设置等记录不会被同步删除。
-                let isTombstoneCollection = change.collection == SyncCollection.skills
-                    || change.collection == SyncCollection.memoryL0
-                    || change.collection == SyncCollection.memoryL0Spans
-                    || change.collection == SyncCollection.memoryL1
-                    || change.collection == SyncCollection.governanceLabels
-                    || change.collection == SyncCollection.rssSubscriptions
-                    || change.collection == SyncCollection.mailAccounts
-                    || change.collection == SyncCollection.sessions
-                guard !change.deleted || isTombstoneCollection else { continue }
-                do {
-                    let clear: (change: ConnorSyncChange, encrypted: Bool)
-                    if change.deleted && isTombstoneCollection {
-                        let decrypted = try cipher.decrypt(change.payload, collection: change.collection, recordID: change.recordId)
-                        var copy = change
-                        copy.payload = decrypted.payload
-                        clear = (copy, decrypted.encrypted)
-                    } else {
-                        clear = try decrypted(change, using: cipher)
-                    }
-                    if change.sourceDeviceId != deviceID, let kind = try await AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try await apply(clear.change) }) {
-                        record(kind, in: &syncResult)
-                    }
-                    let key = recordKey(change.collection, change.recordId)
-                    state.records[key] = RecordState(version: change.version ?? 0, hash: "", deleted: change.deleted, encrypted: clear.encrypted)
-                    appliedKeys.append(key)
-                } catch {
-                    // 单条坏载荷（解密/解码/应用失败）不拖垮整轮同步：跳过并继续，
-                    // 游标照常推进，避免一条毒记录让该设备永久卡在同一个 pull 页。
-                    AppPerformanceLog.chatTurnLogger.warning("account.sync.apply-skipped collection=\(change.collection, privacy: .public) record=\(change.recordId, privacy: .public) error=\(String(describing: error), privacy: .public)")
-                }
-            }
+            try await consume(page.changes, cipher: cipher, deviceID: deviceID, state: &state, syncResult: &syncResult, appliedKeys: &appliedKeys, capturedLocalChanges: &capturedLocalChanges)
+            guard page.nextCursor >= state.cursor, !page.hasMore || page.nextCursor > state.cursor else { throw ConnorBackendAPIError.invalidResponse }
             state.cursor = page.nextCursor; hasMore = page.hasMore
             saveState(state, key: stateKey)
         } while hasMore
+        try await consume(Array(state.pending.values), cipher: cipher, deviceID: deviceID, state: &state, syncResult: &syncResult, appliedKeys: &appliedKeys, capturedLocalChanges: &capturedLocalChanges)
+        saveState(state, key: stateKey)
 
         let projectionGeneration = defaults.integer(forKey: AppAccountSyncSignal.projectionGenerationKey)
         let scannedGenerationKey = "ConnorAccountSyncScannedProjectionGeneration.\(userID)"
@@ -517,6 +587,10 @@ public actor AppAccountDataSyncCoordinator {
         let shouldScanProjection = !hasScannedProjection
             || defaults.integer(forKey: scannedGenerationKey) != projectionGeneration
             || !appliedKeys.isEmpty
+            || !state.dirtyKeys.isEmpty
+            || !state.pending.isEmpty
+            || snapshotUnavailable
+            || didRepair
         guard shouldScanProjection else {
             saveState(state, key: stateKey)
             return syncResult
@@ -528,6 +602,7 @@ public actor AppAccountDataSyncCoordinator {
         // 两端编码（键序/日期格式/可选字段）不同，若保存远端载荷哈希，下一次投影
         // 比较必然不相等，会把刚收到的记录又推回去，形成两端无限互推。
         for key in appliedKeys {
+            guard !key.hasPrefix("sessions|"), !state.dirtyKeys.contains(key) else { continue }
             guard var record = state.records[key], let payload = projected[key] else { continue }
             record.hash = try payloadHash(payload)
             state.records[key] = record
@@ -535,14 +610,20 @@ public actor AppAccountDataSyncCoordinator {
         var mutations: [ConnorSyncChange] = []
         let pendingSessionDeleteKeys = Set(deletedSessions.map { recordKey(SyncCollection.sessions, $0.id) })
         for (key, payload) in projected {
+            guard state.pending[key] == nil else { continue }
             guard !pendingSessionDeleteKeys.contains(key) else { continue }
-            guard state.records[key]?.hash != (try payloadHash(payload)) || state.records[key]?.encrypted != true else { continue }
+            if state.records[key]?.hash == (try payloadHash(payload)), state.records[key]?.encrypted == true {
+                state.dirtyKeys.remove(key)
+                continue
+            }
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
             let encrypted = try cipher.encrypt(payload, collection: parts[0], recordID: parts[1])
             // 超过 1 MiB 的记录跳过不推（后端对整批中的超限条目同样只跳过、不报错），
             // 避免一条超大载荷永久阻塞该账号所有设备的同步。
             guard try encoder.encode(encrypted).count <= 1_048_576 else {
                 AppPerformanceLog.chatTurnLogger.warning("account.sync.payload-too-large collection=\(parts[0], privacy: .public) record=\(parts[1], privacy: .public)")
+                state.dirtyKeys.insert(key)
+                deferredUploadCount += 1
                 continue
             }
             mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: encrypted))
@@ -555,6 +636,7 @@ public actor AppAccountDataSyncCoordinator {
         let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|", "mail_accounts|"]
         let projectedCollections = Set(projected.keys.map { String($0.split(separator: "|", maxSplits: 1)[0]) })
         for key in state.records.keys where tombstonePrefixes.contains(where: { key.hasPrefix($0) }) {
+            guard state.pending[key] == nil else { continue }
             guard state.records[key]?.deleted != true, projected[key] == nil else { continue }
             let collection = String(key.split(separator: "|", maxSplits: 1)[0])
             guard projectedCollections.contains(collection) else { continue }
@@ -572,14 +654,15 @@ public actor AppAccountDataSyncCoordinator {
         // 最后一个会话也会上传 tombstone；删除时间保持为用户实际操作时间。
         for session in deletedSessions {
             let key = recordKey(SyncCollection.sessions, session.id)
-            guard let record = state.records[key], !record.deleted,
+            guard state.pending[key] == nil else { continue }
+            guard state.records[key]?.deleted != true,
                   let deletedAt = session.governance.deletedAt else { continue }
             let deletedAtMillis = Int64(deletedAt.timeIntervalSince1970 * 1_000)
             let tombstone = SyncTombstone(updatedAt: deletedAtMillis)
             mutations.append(try ConnorSyncChange(
                 collection: SyncCollection.sessions,
                 recordId: session.id,
-                baseVersion: record.version,
+                baseVersion: state.records[key]?.version ?? 0,
                 payload: cipher.encrypt(jsonValue(tombstone), collection: SyncCollection.sessions, recordID: session.id),
                 deleted: true
             ))
@@ -591,7 +674,8 @@ public actor AppAccountDataSyncCoordinator {
         if let rss {
             for (sourceID, deletedAt) in try await rss.pendingDeletes() {
                 let key = recordKey(SyncCollection.rssSubscriptions, sourceID.rawValue)
-                guard let record = state.records[key], !record.deleted else {
+                guard state.pending[key] == nil else { continue }
+                guard state.records[key]?.deleted != true else {
                     try? await rss.clearPendingDelete(id: sourceID)
                     continue
                 }
@@ -604,7 +688,7 @@ public actor AppAccountDataSyncCoordinator {
                 mutations.append(try ConnorSyncChange(
                     collection: SyncCollection.rssSubscriptions,
                     recordId: sourceID.rawValue,
-                    baseVersion: record.version,
+                    baseVersion: state.records[key]?.version ?? 0,
                     payload: cipher.encrypt(jsonValue(tombstone), collection: SyncCollection.rssSubscriptions, recordID: sourceID.rawValue),
                     deleted: true
                 ))
@@ -613,15 +697,24 @@ public actor AppAccountDataSyncCoordinator {
         }
 
         for batch in mutations.chunked(into: 200) {
+            try Task.checkCancellation()
             let results = try await identity.pushSyncChanges(batch)
-            for (pushResult, mutation) in zip(results, batch) where pushResult.applied {
+            for mutation in batch {
+                guard let pushResult = results.first(where: { $0.mutationId == mutation.mutationId }), pushResult.applied else {
+                    state.dirtyKeys.insert(recordKey(mutation.collection, mutation.recordId))
+                    deferredUploadCount += 1
+                    continue
+                }
                 let clear = try cipher.decrypt(mutation.payload, collection: mutation.collection, recordID: mutation.recordId)
-                state.records[recordKey(mutation.collection, mutation.recordId)] = RecordState(version: (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(clear.payload), deleted: mutation.deleted, encrypted: true)
+                let key = recordKey(mutation.collection, mutation.recordId)
+                state.records[key] = RecordState(version: pushResult.version ?? (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(clear.payload), deleted: mutation.deleted, encrypted: true)
+                state.dirtyKeys.remove(key)
                 syncResult.pushedChangeCount += 1
                 if let sourceID = rssTombstoneKeys[recordKey(mutation.collection, mutation.recordId)] {
                     try? await rss?.clearPendingDelete(id: sourceID)
                 }
             }
+            saveState(state, key: stateKey)
         }
         // 清理历史残留（settings|profile 等不可同步记录），避免重新进入同步状态机。
         state.records = state.records.filter { entry in
@@ -633,6 +726,11 @@ public actor AppAccountDataSyncCoordinator {
         // 只确认本轮开始时观察到的代次；扫描期间若发生新写入，generation 已再次增加，
         // 下一轮仍会进入投影扫描，不会吞掉并发本地变化。
         defaults.set(projectionGeneration, forKey: scannedGenerationKey)
+        if !state.pending.isEmpty || deferredUploadCount > 0 {
+            syncResult.failureMessage = "部分数据尚未同步：\(state.pending.count) 条接收失败，\(deferredUploadCount) 条上传未确认，将自动重试。请检查账号密钥与记录大小。"
+        } else if snapshotUnavailable {
+            syncResult.failureMessage = "增量同步已完成，历史数据修复需要更新同步服务器。"
+        }
         return syncResult
     }
 
@@ -729,12 +827,16 @@ public actor AppAccountDataSyncCoordinator {
                 return .session(id)
             } else {
                 let portable: ConnorPortableSession = try decode(change.payload)
+                guard portable.id == id else { throw ConnorBackendAPIError.invalidResponse }
+                if let local = try sessions.loadSession(id: id), local.governance.deletedAt != nil { return nil }
                 _ = try sessions.saveSession(portable.merging(into: try sessions.loadSession(id: id)))
                 return .session(id)
             }
         case ("settings", "macos_runtime") where !change.deleted:
             var synced: AgentRuntimeSettings = try decode(change.payload)
-            synced.preferences = try settings.loadOrCreateDefault().preferences
+            let local = try settings.loadOrCreateDefault()
+            guard synced.updatedAt > local.updatedAt else { return nil }
+            synced.preferences = local.preferences
             try settings.save(synced)
             return .settings
         case ("settings", "personality"):
@@ -948,9 +1050,27 @@ public actor AppAccountDataSyncCoordinator {
 
     private func jsonValue<T: Encodable>(_ value: T) throws -> ConnorJSONValue { try decoder.decode(ConnorJSONValue.self, from: encoder.encode(value)) }
     private func decode<T: Decodable>(_ payload: ConnorJSONValue) throws -> T { try decoder.decode(T.self, from: encoder.encode(payload)) }
-    private func payloadHash(_ payload: ConnorJSONValue) throws -> String { SHA256.hash(data: try encoder.encode(payload)).map { String(format: "%02x", $0) }.joined() }
+    private func payloadHash(_ payload: ConnorJSONValue) throws -> String {
+        var canonical = payload
+        if var session = try? decode(payload) as ConnorPortableSession {
+            // SQLite's ISO-8601 dates retain seconds, while other clients retain
+            // milliseconds. Compare at local storage precision without re-uploading
+            // a server-only session just because its dates or set order changed.
+            func storedMillis(_ value: Int64) -> Int64 { Int64((Double(value) / 1_000).rounded(.down)) * 1_000 }
+            session.createdAt = storedMillis(session.createdAt)
+            session.updatedAt = storedMillis(session.updatedAt)
+            session.labels = session.labels.sorted()
+            session.messages = session.messages.map { message in
+                var message = message
+                message.createdAt = storedMillis(message.createdAt)
+                message.status = "complete"
+                return message
+            }.sorted { $0.id < $1.id }
+            canonical = try jsonValue(session)
+        }
+        return SHA256.hash(data: try encoder.encode(canonical)).map { String(format: "%02x", $0) }.joined()
+    }
     private func decrypted(_ change: ConnorSyncChange, using cipher: AccountSyncPayloadCipher) throws -> (change: ConnorSyncChange, encrypted: Bool) {
-        guard !change.deleted else { return (change, true) }
         let clear = try cipher.decrypt(change.payload, collection: change.collection, recordID: change.recordId)
         var result = change
         result.payload = clear.payload

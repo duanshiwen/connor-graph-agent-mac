@@ -1,15 +1,40 @@
 import Foundation
+import Combine
 import Testing
 import ConnorGraphAppSupport
 
 @Suite("App User Identity Store Tests")
 struct AppUserIdentityStoreTests {
+    @Test @MainActor func networkRecoveryRestoresSavedSessionAutomatically() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorIdentityRecovery-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let credentials = AppConnorAccountCredentialStore(store: LocalEncryptedCredentialStore(rootDirectory: root))
+        try credentials.saveTokens(.init(accessToken: "valid-access", refreshToken: "valid-refresh"))
+        let available = CurrentValueSubject<Bool, Never>(false)
+        let suite = "ConnorIdentityRecovery-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = AppUserIdentityStore(baseURL: URL(string: "http://127.0.0.1:1/")!, credentials: credentials,
+            transport: IdentityTestTransport(currentUserFailureCount: 1),
+            networkIsAvailable: { available.value }, syncAvailability: available.eraseToAnyPublisher(), syncDefaults: defaults)
+        await store.restoreSession()
+        #expect(store.currentUser == nil)
+        #expect(store.hasStoredSession)
+        available.send(true)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(4))
+        while store.currentUser == nil && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(store.currentUser?.username == "shiwen")
+        await store.logout()
+    }
     @Test @MainActor func deviceSyncIsOptInAndWaitsForLogin() {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorIdentityPreference-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
         let suiteName = "ConnorIdentitySyncPreferenceTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = AppUserIdentityStore(
             baseURL: URL(string: "https://backend.example")!,
+            credentials: AppConnorAccountCredentialStore(store: LocalEncryptedCredentialStore(rootDirectory: root)),
             transport: IdentityTestTransport(),
             syncDefaults: defaults
         )

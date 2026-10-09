@@ -260,10 +260,16 @@ public enum ConnorSyncError: Error, LocalizedError, Equatable {
 }
 
 public struct ConnorSyncPullPage: Codable, Sendable, Equatable { public var changes: [ConnorSyncChange]; public var nextCursor: Int64; public var hasMore: Bool }
+public struct ConnorSyncSnapshotPage: Codable, Sendable, Equatable {
+    public var changes: [ConnorSyncChange]
+    public var nextRecordId: Int64
+    public var cursor: Int64
+    public var hasMore: Bool
+}
 public struct ConnorL1Lease: Codable, Sendable, Equatable { public var granted: Bool; public var token: String?; public var expiresAt: Date?; public var reason: String? }
 private struct SyncPushRequest: Encodable { var deviceId: String; var changes: [ConnorSyncChange] }
 private struct SyncPushResponse: Decodable, Sendable { var results: [SyncPushResult] }
-public struct SyncPushResult: Decodable, Sendable, Equatable { public var mutationId: String; public var applied: Bool; public var cursor: Int64? }
+public struct SyncPushResult: Decodable, Sendable, Equatable { public var mutationId: String; public var applied: Bool; public var cursor: Int64?; public var version: Int64? }
 
 public struct ConnorBackendAPIClient: Sendable {
     public var baseURL: URL
@@ -348,6 +354,10 @@ public struct ConnorBackendAPIClient: Sendable {
 
     public func pullSyncChanges(token: String, cursor: Int64, limit: Int = 200) async throws -> ConnorSyncPullPage {
         try await request("sync/pull?cursor=\(cursor)&limit=\(limit)", token: token)
+    }
+
+    public func syncSnapshot(token: String, afterID: Int64, limit: Int = 200) async throws -> ConnorSyncSnapshotPage {
+        try await request("sync/snapshot?afterId=\(afterID)&limit=\(limit)", token: token)
     }
 
     public func acquireL1Lease(token: String, deviceID: String) async throws -> ConnorL1Lease {
@@ -519,6 +529,10 @@ public actor ConnorBackendAuthenticatedSession {
 
     public func pullSyncChanges(cursor: Int64, limit: Int = 200) async throws -> ConnorSyncPullPage {
         try await authenticated { try await api.pullSyncChanges(token: $0, cursor: cursor, limit: limit) }
+    }
+
+    public func syncSnapshot(afterID: Int64) async throws -> ConnorSyncSnapshotPage {
+        try await authenticated { try await api.syncSnapshot(token: $0, afterID: afterID) }
     }
 
     public func acquireL1Lease(deviceID: String) async throws -> ConnorL1Lease {
@@ -694,6 +708,9 @@ public final class AppUserIdentityStore: ObservableObject {
     private var localChangeObserver: NSObjectProtocol?
     private var syncEventSocket: ConnorAccountSyncEventSocket?
     private var syncPassRequested = false
+    private var sessionRestoreTask: Task<Void, Never>?
+    private var isRestoringSession = false
+    private var authenticationGeneration = 0
     private let deviceID: String
     public var onDeviceSyncPass: (@MainActor () async throws -> Void)?
     /// IM frames from `/ws/device` (chat_* / group_* / friend_* and bare typeless acks).
@@ -760,6 +777,7 @@ public final class AppUserIdentityStore: ObservableObject {
         if enabled {
             guard currentUser != nil else {
                 deviceSyncStatus = .waitingForLogin
+                scheduleSessionRestore()
                 return
             }
             startDeviceSync()
@@ -779,6 +797,7 @@ public final class AppUserIdentityStore: ObservableObject {
         }
         guard currentUser != nil else {
             deviceSyncStatus = .waitingForLogin
+            scheduleSessionRestore()
             return
         }
         guard networkIsAvailable(), serverIsReachable() else {
@@ -794,15 +813,34 @@ public final class AppUserIdentityStore: ObservableObject {
     }
 
     public func pullSyncChanges(cursor: Int64, limit: Int = 200) async throws -> ConnorSyncPullPage {
-        try await authenticatedSession.pullSyncChanges(cursor: cursor, limit: limit)
+        try Task.checkCancellation()
+        return try await authenticatedSession.pullSyncChanges(cursor: cursor, limit: limit)
     }
 
     public func pushSyncChanges(_ changes: [ConnorSyncChange]) async throws -> [SyncPushResult] {
-        try await authenticatedSession.pushSyncChanges(deviceID: deviceID, changes: changes)
+        try Task.checkCancellation()
+        return try await authenticatedSession.pushSyncChanges(deviceID: deviceID, changes: changes)
+    }
+
+    public func syncSnapshot(afterID: Int64) async throws -> ConnorSyncSnapshotPage {
+        try Task.checkCancellation()
+        return try await authenticatedSession.syncSnapshot(afterID: afterID)
+    }
+
+    public func registerSyncDevice() async throws {
+        try Task.checkCancellation()
+        _ = try await authenticatedSession.syncHeartbeat(deviceID: deviceID, name: "Connor",
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+            syncEnabled: isDeviceSyncEnabled)
     }
 
     public func restoreSession() async {
-        authenticationState = .restoring
+        guard !isRestoringSession else { return }
+        isRestoringSession = true
+        defer { isRestoringSession = false }
+        let generation = authenticationGeneration
+        let previousUser = currentUser
+        if previousUser == nil { authenticationState = .restoring }
         errorMessage = nil
         do {
             guard try credentials.tokens() != nil else {
@@ -810,19 +848,42 @@ public final class AppUserIdentityStore: ObservableObject {
                 return
             }
             let user = try await authenticatedSession.currentUser()
+            guard generation == authenticationGeneration, !Task.isCancelled else { return }
             authenticationState = .signedIn(user)
             startEventSocketIfNeeded()
             startL1Coordination()
             if isDeviceSyncEnabled { startDeviceSync() }
             await refreshLibraries()
         } catch ConnorBackendAPIError.unauthorized, ConnorBackendAPIError.missingRefreshToken {
+            guard generation == authenticationGeneration, !Task.isCancelled else { return }
             clearLocalSession(state: .expired)
         } catch {
+            guard generation == authenticationGeneration, !Task.isCancelled else { return }
             // 后端不可达：无法校验会话/申请租约，按“联系不上后端”处理，本机自行提取，
             // 后端恢复后由 startL1Coordination 重新走租约流程并清除回退模式。
             L1ExtractionEligibility.shared.enableLocalFallback()
-            authenticationState = .signedOut
+            authenticationState = previousUser.map(ConnorAuthenticationState.signedIn) ?? .signedOut
             errorMessage = error.localizedDescription
+            deviceSyncStatus = isDeviceSyncEnabled ? .offline : .disabled
+            scheduleSessionRestore()
+        }
+    }
+
+    private func scheduleSessionRestore() {
+        guard sessionRestoreTask == nil, hasStoredSession else { return }
+        sessionRestoreTask = Task { [weak self] in
+            var delay = 1
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled, let self, self.hasStoredSession else { break }
+                if self.currentUser != nil { break }
+                if self.networkIsAvailable(), self.serverIsReachable() {
+                    await self.restoreSession()
+                    if self.currentUser != nil { break }
+                }
+                delay = min(delay * 2, 30)
+            }
+            self?.sessionRestoreTask = nil
         }
     }
 
@@ -851,6 +912,12 @@ public final class AppUserIdentityStore: ObservableObject {
     }
 
     private func authenticate(password: String, _ action: () async throws -> ConnorAuthenticatedIdentity) async {
+        authenticationGeneration += 1
+        let generation = authenticationGeneration
+        sessionRestoreTask?.cancel(); sessionRestoreTask = nil
+        stopDeviceSync()
+        stopL1Coordination()
+        stopEventSocket()
         errorMessage = nil
         do {
             let identity = try await action()
@@ -859,6 +926,7 @@ public final class AppUserIdentityStore: ObservableObject {
             let syncKey = await Task.detached(priority: .userInitiated) {
                 AccountSyncPayloadCipher.deriveKey(password: password, userID: userID)
             }.value
+            guard generation == authenticationGeneration, !Task.isCancelled else { return }
             try credentials.saveTokens(identity.tokens)
             try credentials.saveSyncKey(syncKey, userID: userID)
             authenticationState = .signedIn(identity.user)
@@ -867,7 +935,13 @@ public final class AppUserIdentityStore: ObservableObject {
             if isDeviceSyncEnabled { startDeviceSync() }
             await refreshLibraries()
         } catch {
+            guard generation == authenticationGeneration else { return }
             errorMessage = error.localizedDescription
+            if currentUser != nil {
+                startEventSocketIfNeeded()
+                startL1Coordination()
+                if isDeviceSyncEnabled { startDeviceSync() }
+            } else { scheduleSessionRestore() }
         }
     }
 
@@ -917,6 +991,8 @@ public final class AppUserIdentityStore: ObservableObject {
     }
 
     private func clearLocalSession(state: ConnorAuthenticationState) {
+        authenticationGeneration += 1
+        sessionRestoreTask?.cancel(); sessionRestoreTask = nil
         stopDeviceSync()
         stopL1Coordination()
         // 未登录（退出登录/会话失效/冷启动无会话）按“后端联系不上”处理：
@@ -932,7 +1008,10 @@ public final class AppUserIdentityStore: ObservableObject {
     }
 
     private func syncAvailabilityDidChange(_ available: Bool) {
-        guard currentUser != nil else { return }
+        guard currentUser != nil else {
+            if available { scheduleSessionRestore() }
+            return
+        }
         if available {
             startL1Coordination()
             if isDeviceSyncEnabled { startDeviceSync() }
@@ -976,12 +1055,13 @@ public final class AppUserIdentityStore: ObservableObject {
                         syncEnabled: isDeviceSyncEnabled
                     )
                     if isDeviceSyncEnabled {
+                        // History sync is independent of the memory extraction lease.
+                        requestDeviceSyncPass()
                         let lease = try await session.acquireL1Lease(deviceID: deviceID)
                         L1ExtractionEligibility.shared.update(granted: lease.granted, expiresAt: lease.expiresAt)
                         // 心跳周期兜底同步：WebSocket 的 sync_changed 推送在后台/弱网/掉线重连时
                         // 可能丢失，这里保证每个心跳周期都主动触发一次 push+pull，
                         // 让跨端（安卓↔Mac）人际关系等变更 ~45s 内完成同步（与安卓端行为一致）。
-                        requestDeviceSyncPass()
                     } else {
                         // 同步关闭：不申请租约，本机始终自行提取。
                         L1ExtractionEligibility.shared.enableStandalone()
@@ -1001,7 +1081,9 @@ public final class AppUserIdentityStore: ObservableObject {
     /// Stops sync passes only; the event socket stays up because IM depends on it
     /// for as long as the user remains signed in.
     private func stopDeviceSync() {
-        syncPassTask?.cancel(); syncPassTask = nil
+        // Keep the slot occupied until cancelled work has actually finished.
+        // Otherwise reconnecting can start a second writer for the same cursor.
+        syncPassTask?.cancel()
         localChangeDebounceTask?.cancel(); localChangeDebounceTask = nil
         syncPassRequested = false
     }
@@ -1021,7 +1103,7 @@ public final class AppUserIdentityStore: ObservableObject {
     /// sync frames wake sync passes (when enabled), IM frames flow to `onImFrame`,
     /// and connectivity transitions feed the IM reconnect logic.
     private func startEventSocketIfNeeded() {
-        guard syncSocketTask == nil, currentUser != nil else { return }
+        guard syncSocketTask == nil, currentUser != nil, networkIsAvailable(), serverIsReachable() else { return }
         let session = authenticatedSession
         let deviceID = deviceID
         let socket = ConnorAccountSyncEventSocket(baseURL: baseURL)
@@ -1051,11 +1133,7 @@ public final class AppUserIdentityStore: ObservableObject {
                 } catch {
                     guard !Task.isCancelled else { return }
                     await setImSocketConnected(false)
-                    if isDeviceSyncEnabled {
-                        deviceSyncStatus = networkIsAvailable() && serverIsReachable()
-                            ? .failed(error.localizedDescription)
-                            : .offline
-                    }
+                    // The socket only accelerates sync; REST polling still works.
                     try? await Task.sleep(for: .seconds(retryDelay))
                     retryDelay = min(retryDelay * 2, 30)
                 }
@@ -1106,19 +1184,26 @@ public final class AppUserIdentityStore: ObservableObject {
         guard syncPassTask == nil else { return }
         syncPassTask = Task { [weak self] in
             guard let self else { return }
+            defer {
+                syncPassTask = nil
+                if syncPassRequested { requestDeviceSyncPass() }
+            }
             var retryDelay = 1
             while syncPassRequested, !Task.isCancelled {
                 syncPassRequested = false
                 deviceSyncStatus = .syncing
                 do {
-                    try await onDeviceSyncPass?()
+                    guard let onDeviceSyncPass else { throw ConnorBackendAPIError.invalidResponse }
+                    try await onDeviceSyncPass()
                     guard !Task.isCancelled else { return }
                     deviceSyncStatus = .upToDate(Date())
                     retryDelay = 1
                 } catch ConnorBackendAPIError.unauthorized {
+                    guard !Task.isCancelled else { return }
                     clearLocalSession(state: .expired)
                     return
                 } catch ConnorBackendAPIError.missingRefreshToken {
+                    guard !Task.isCancelled else { return }
                     clearLocalSession(state: .expired)
                     return
                 } catch {
@@ -1133,7 +1218,6 @@ public final class AppUserIdentityStore: ObservableObject {
                     }
                 }
             }
-            syncPassTask = nil
         }
     }
 }
