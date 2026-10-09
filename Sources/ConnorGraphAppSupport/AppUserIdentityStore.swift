@@ -174,18 +174,20 @@ public struct ConnorSyncChange: Codable, Sendable, Equatable {
     public var baseVersion: Int64?
     public var payload: ConnorJSONValue
     public var deleted: Bool
+    public var restore: Bool = false
+    public var restored: Bool = false
     public var version: Int64?
     public var sourceDeviceId: String?
     public var changedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case cursor, mutationId, collection, recordId, baseVersion, payload, deleted, version, sourceDeviceId, changedAt
+        case cursor, mutationId, collection, recordId, baseVersion, payload, deleted, restore, restored, version, sourceDeviceId, changedAt
     }
 
-    public init(mutationId: String = UUID().uuidString, collection: String, recordId: String, baseVersion: Int64 = 0, payload: ConnorJSONValue = .object([:]), deleted: Bool = false) throws {
+    public init(mutationId: String = UUID().uuidString, collection: String, recordId: String, baseVersion: Int64 = 0, payload: ConnorJSONValue = .object([:]), deleted: Bool = false, restore: Bool = false) throws {
         guard Self.isSyncable(collection: collection) else { throw ConnorSyncError.excludedCollection(collection) }
         self.cursor = nil; self.mutationId = mutationId; self.collection = collection; self.recordId = recordId
-        self.baseVersion = baseVersion; self.payload = payload; self.deleted = deleted
+        self.baseVersion = baseVersion; self.payload = payload; self.deleted = deleted; self.restore = restore
         self.version = nil; self.sourceDeviceId = nil; self.changedAt = nil
     }
 
@@ -206,6 +208,8 @@ public struct ConnorSyncChange: Codable, Sendable, Equatable {
         baseVersion = try values.decodeIfPresent(Int64.self, forKey: .baseVersion)
         payload = try values.decodeIfPresent(ConnorJSONValue.self, forKey: .payload) ?? .object([:])
         deleted = try values.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
+        restore = try values.decodeIfPresent(Bool.self, forKey: .restore) ?? false
+        restored = try values.decodeIfPresent(Bool.self, forKey: .restored) ?? false
         version = try values.decodeIfPresent(Int64.self, forKey: .version)
         sourceDeviceId = try values.decodeIfPresent(String.self, forKey: .sourceDeviceId)
         changedAt = try values.decodeIfPresent(Date.self, forKey: .changedAt)
@@ -216,7 +220,10 @@ public struct ConnorSyncChange: Codable, Sendable, Equatable {
         try values.encodeIfPresent(cursor, forKey: .cursor); try values.encodeIfPresent(mutationId, forKey: .mutationId)
         try values.encode(collection, forKey: .collection); try values.encode(recordId, forKey: .recordId)
         try values.encodeIfPresent(baseVersion, forKey: .baseVersion); try values.encode(payload, forKey: .payload)
-        try values.encode(deleted, forKey: .deleted); try values.encodeIfPresent(version, forKey: .version)
+        try values.encode(deleted, forKey: .deleted)
+        if restore { try values.encode(restore, forKey: .restore) }
+        if restored { try values.encode(restored, forKey: .restored) }
+        try values.encodeIfPresent(version, forKey: .version)
         try values.encodeIfPresent(sourceDeviceId, forKey: .sourceDeviceId); try values.encodeIfPresent(changedAt, forKey: .changedAt)
     }
 }

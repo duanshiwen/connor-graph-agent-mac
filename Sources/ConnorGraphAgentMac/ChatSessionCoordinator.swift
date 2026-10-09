@@ -150,8 +150,14 @@ final class ChatSessionCoordinator {
                 guard let self,
                       !self.isShutdown,
                       self.selectionGeneration == generation,
-                      self.model.selectedSessionID == selectedID,
-                      let page else { return }
+                      self.model.selectedSessionID == selectedID else { return }
+                guard let page, page.session.governance.deletedAt == nil else {
+                    self.model.sessions.removeAll { $0.id == selectedID }
+                    self.model.allSessions.removeAll { $0.id == selectedID }
+                    self.clearSelection()
+                    self.onSessionsChanged(self.model.allSessions)
+                    return
+                }
                 try self.onReloadSelectedSession(
                     page.session,
                     false,

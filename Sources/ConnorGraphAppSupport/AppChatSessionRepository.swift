@@ -363,12 +363,12 @@ public struct AppChatSessionRepository: Sendable {
         return session
     }
 
-    public func deleteSession(sessionID: String) throws {
+    public func deleteSession(sessionID: String, isRemoteSync: Bool = false) throws {
         guard try loadSession(id: sessionID) != nil else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
         let activeBackgroundTaskStatuses: Set<PersistedSessionBackgroundTaskStatus> = [.queued, .running]
         let hasActiveBackgroundTasks = try loadBackgroundTasks(sessionID: sessionID)
             .contains { activeBackgroundTaskStatuses.contains($0.status) }
-        guard !hasActiveBackgroundTasks else {
+        guard isRemoteSync || !hasActiveBackgroundTasks else {
             throw AppChatSessionRepositoryError.sessionHasRunningBackgroundTasks(sessionID)
         }
         let deletedAt = Date()

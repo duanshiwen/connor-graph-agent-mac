@@ -500,12 +500,33 @@ public actor AppAccountDataSyncCoordinator {
                 state.pending.removeValue(forKey: key)
                 continue
             }
+            if change.collection == "sessions", let known = state.records[key], known.deleted {
+                // Replaying an acknowledged tombstone must not undo a user's
+                // local restore. Ordinary remote writes cannot revive it either.
+                if !change.deleted && !change.restored {
+                    state.pending.removeValue(forKey: key)
+                    if (change.version ?? 0) > known.version,
+                       let local = try sessions.loadSession(id: change.recordId), local.governance.deletedAt != nil {
+                        // Repair a tombstone already overwritten by an older server.
+                        // Keep the local deletion and publish it at the new revision.
+                        state.records[key] = RecordState(version: change.version ?? 0, hash: known.hash, deleted: false, encrypted: known.encrypted)
+                        state.dirtyKeys.insert(key)
+                        appliedKeys.append(key)
+                    }
+                    continue
+                }
+                if change.deleted && (change.version ?? 0) == known.version {
+                    state.pending.removeValue(forKey: key)
+                    continue
+                }
+            }
             let tombstoneCollections: Set<String> = ["sessions", "skills", "memory_l0", "memory_l0_spans", "memory_l1", "governance_labels", "rss_subscriptions", "mail_accounts"]
             guard !change.deleted || tombstoneCollections.contains(change.collection) else { continue }
             do {
                 let clear = try decrypted(change, using: cipher)
+                let allowRestore = change.restored && state.records[key]?.deleted == true
                 if snapshot || change.sourceDeviceId != deviceID {
-                    if let kind = try await AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try await apply(clear.change) }) {
+                    if let kind = try await AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try await apply(clear.change, allowSessionRestore: allowRestore) }) {
                         record(kind, in: &syncResult)
                     }
                 }
@@ -626,7 +647,7 @@ public actor AppAccountDataSyncCoordinator {
                 deferredUploadCount += 1
                 continue
             }
-            mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: encrypted))
+            mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: encrypted, restore: parts[0] == SyncCollection.sessions && state.records[key]?.deleted == true))
         }
         // 技能包、L0/L1/标签按“最新操作优先”：本地已删除且此前同步过的记录回推 tombstone（载荷带删除时间）。
         // 集合级防护：本机该集合投影完全为空时不回推 tombstone——空列表更可能是本地数据
@@ -703,6 +724,7 @@ public actor AppAccountDataSyncCoordinator {
                 guard let pushResult = results.first(where: { $0.mutationId == mutation.mutationId }), pushResult.applied else {
                     state.dirtyKeys.insert(recordKey(mutation.collection, mutation.recordId))
                     deferredUploadCount += 1
+                    if mutation.collection == SyncCollection.sessions, results.contains(where: { $0.mutationId == mutation.mutationId && $0.version != nil }) { state.repairVersion = 0 }
                     continue
                 }
                 let clear = try cipher.decrypt(mutation.payload, collection: mutation.collection, recordID: mutation.recordId)
@@ -812,7 +834,7 @@ public actor AppAccountDataSyncCoordinator {
         return values
     }
 
-    private func apply(_ change: ConnorSyncChange) async throws -> AppliedChangeKind? {
+    private func apply(_ change: ConnorSyncChange, allowSessionRestore: Bool = false) async throws -> AppliedChangeKind? {
         switch (change.collection, change.recordId) {
         // 合并同步：tombstone 集合（技能包、L0/L1 记忆层、标签、RSS 订阅源与会话）
         // 按“最新操作优先”应用删除；其它集合的远端变化一律合并落库。
@@ -822,13 +844,16 @@ public actor AppAccountDataSyncCoordinator {
                 let _: SyncTombstone = try decode(change.payload)
                 let local = (try? sessions.loadSession(id: id)) ?? nil
                 if local != nil {
-                    try sessions.deleteSession(sessionID: id)
+                    try sessions.deleteSession(sessionID: id, isRemoteSync: true)
                 }
                 return .session(id)
             } else {
                 let portable: ConnorPortableSession = try decode(change.payload)
                 guard portable.id == id else { throw ConnorBackendAPIError.invalidResponse }
-                if let local = try sessions.loadSession(id: id), local.governance.deletedAt != nil { return nil }
+                if let local = try sessions.loadSession(id: id), local.governance.deletedAt != nil {
+                    guard allowSessionRestore else { return nil }
+                    try sessions.store.restoreSession(id: id, restoredAt: Date(timeIntervalSince1970: Double(portable.updatedAt) / 1_000))
+                }
                 _ = try sessions.saveSession(portable.merging(into: try sessions.loadSession(id: id)))
                 return .session(id)
             }
