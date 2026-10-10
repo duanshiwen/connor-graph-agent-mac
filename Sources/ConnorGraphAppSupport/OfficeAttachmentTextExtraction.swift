@@ -4,7 +4,7 @@ import ConnorGraphCore
 /// Local OOXML extraction; reuses the bounded archive backend on both Apple platforms.
 public enum OfficeAttachmentTextExtraction {
     public static func supports(fileExtension: String) -> Bool {
-        ["docx", "xlsx", "pptx"].contains(fileExtension.lowercased())
+        ["doc", "xls", "ppt", "docx", "xlsx", "pptx"].contains(fileExtension.lowercased())
     }
 
     public static func extract(fileURL: URL, attachmentID: String = "") throws -> AttachmentExtractionResult {
@@ -13,7 +13,7 @@ public enum OfficeAttachmentTextExtraction {
             AttachmentExtractionResult(
                 report: AgentAttachmentExtractionReport(
                     attachmentID: attachmentID, engine: .builtinOfficeText, status: status,
-                    capabilitiesUsed: ["ooxml-text"], errors: error.map { [$0] } ?? [],
+                    capabilitiesUsed: [LegacyOfficeText.supports(fileURL.pathExtension) ? "ole2-text" : "ooxml-text"], errors: error.map { [$0] } ?? [],
                     startedAt: started, completedAt: Date()),
                 extractedMarkdown: text, previewText: text.map { String($0.prefix(240)) })
         }
@@ -24,6 +24,10 @@ public enum OfficeAttachmentTextExtraction {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("connor-office-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         do {
+            if LegacyOfficeText.supports(fileURL.pathExtension) {
+                let text = try LegacyOfficeText.extract(Data(contentsOf: fileURL), fileExtension: fileURL.pathExtension)
+                return text.isEmpty ? result(.unsupported) : result(.extracted, text: "# Extracted attachment: \(fileURL.lastPathComponent)\n\n" + text)
+            }
             let extractor = SafeArchiveExtractor(backend: SystemZipArchiveBackend(), limits: .init(
                 maxEntries: 4096, maxEntryBytes: 8_000_000, maxTotalBytes: 64_000_000))
             let entries = try extractor.extract(fileURL, to: root)
