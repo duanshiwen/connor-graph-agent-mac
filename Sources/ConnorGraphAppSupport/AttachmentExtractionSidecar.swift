@@ -283,6 +283,10 @@ public struct AttachmentExtractionOrchestrator: Sendable {
             }
         }
 
+        if OfficeAttachmentTextExtraction.supports(fileExtension: request.originalFileURL.pathExtension) {
+            return try OfficeAttachmentTextExtraction.extract(fileURL: request.originalFileURL, attachmentID: request.manifest.id)
+        }
+
         if AttachmentTextExtraction.supports(kind: request.manifest.kind) {
             let builtin = try AttachmentTextExtraction.extract(fileURL: request.originalFileURL, kind: request.manifest.kind, maxBytes: maxBuiltinTextBytes)
             let report = AgentAttachmentExtractionReport(

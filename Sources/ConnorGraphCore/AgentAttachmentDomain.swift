@@ -105,6 +105,7 @@ public enum AgentAttachmentExtractionEngine: String, Codable, Sendable, Equatabl
     case builtinText
     case builtinPDFText
     case builtinIWorkText
+    case builtinOfficeText
     case markItDown
     case docling
     case providerNative
