@@ -87,6 +87,42 @@ struct ChatSessionRuntimeCoordinatorTests {
         #expect(!coordinator.begin(sessionID: "session", backend: backend))
     }
 
+    @Test func powerLeaseSurvivesConcurrentRunsAndReleasesAfterLastRun() {
+        let coordinator = ChatRunCoordinator(model: ChatRunModel(), fallbackSession: AgentSession(id: "one"))
+        var acquired = 0
+        var released = 0
+        coordinator.acquireExecutionActivity = {
+            AppExecutionLease(reason: "test", begin: { _ in acquired += 1; return NSObject() },
+                              end: { _ in released += 1 })
+        }
+        let backend = AnyAgentBackend(CoordinatorTestBackend())
+        #expect(coordinator.begin(sessionID: "one", backend: backend))
+        #expect(coordinator.begin(sessionID: "two", backend: backend))
+        coordinator.selectedSessionID = { "two" }
+        coordinator.refreshSelectedSubmittingState()
+        #expect(acquired == 1)
+        coordinator.finish(sessionID: "one")
+        #expect(released == 0)
+        coordinator.finish(sessionID: "two")
+        #expect(released == 1)
+        coordinator.shutdown()
+        #expect(released == 1)
+    }
+
+    @Test func powerLeaseReleasesOnShutdownAndRejectsRestart() {
+        let coordinator = ChatRunCoordinator(model: ChatRunModel(), fallbackSession: AgentSession(id: "one"))
+        var released = 0
+        coordinator.acquireExecutionActivity = {
+            AppExecutionLease(reason: "test", begin: { _ in NSObject() }, end: { _ in released += 1 })
+        }
+        let backend = AnyAgentBackend(CoordinatorTestBackend())
+        #expect(coordinator.begin(sessionID: "one", backend: backend))
+        coordinator.shutdown()
+        coordinator.shutdown()
+        #expect(released == 1)
+        #expect(!coordinator.begin(sessionID: "two", backend: backend))
+    }
+
     @Test func completedRunDoesNotRestoreManagerReplacedDuringSubmission() throws {
         let fixture = try RepositoryFixture()
         defer { fixture.cleanup() }

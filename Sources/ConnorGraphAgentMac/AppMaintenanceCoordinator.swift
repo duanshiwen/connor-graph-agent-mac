@@ -128,6 +128,8 @@ final class AppMaintenanceCoordinator {
                   self.isSchedulerRunning,
                   self.generation == currentGeneration,
                   self.schedulerGeneration == currentSchedulerGeneration else { return }
+            let execution = AppExecutionLease(reason: "Connor background operation")
+            defer { execution.release() }
             await self.runScheduledTasks()
             guard self.generation == currentGeneration,
                   self.schedulerGeneration == currentSchedulerGeneration else { return }
@@ -145,6 +147,8 @@ final class AppMaintenanceCoordinator {
                   !Task.isCancelled,
                   self.generation == currentGeneration,
                   !self.isShutdown else { throw CancellationError() }
+            let execution = AppExecutionLease(reason: "Connor background operation")
+            defer { execution.release() }
             try await operation(scope)
         }
         reconcileTasks[scope] = task
@@ -165,6 +169,8 @@ final class AppMaintenanceCoordinator {
             guard let self,
                   !Task.isCancelled,
                   self.generation == currentGeneration else { return }
+            let execution = AppExecutionLease(reason: "Connor background operation")
+            defer { execution.release() }
             await self.runBackgroundJobs()
             guard self.generation == currentGeneration else { return }
             self.backgroundJobsTask = nil
@@ -182,6 +188,8 @@ final class AppMaintenanceCoordinator {
             guard let self,
                   !Task.isCancelled,
                   self.generation == currentGeneration else { return }
+            let execution = AppExecutionLease(reason: "Connor background operation")
+            defer { execution.release() }
             await self.runDailySweep()
             guard self.generation == currentGeneration else { return }
             self.dailySweepTask = nil
@@ -321,5 +329,33 @@ final class AppMaintenanceCoordinator {
 #if DEBUG
         stallMonitor.stop()
 #endif
+    }
+}
+
+/// Process activity prevents App Nap and idle system sleep; display sleep remains allowed.
+/// Explicit sleep, lid closure and shutdown are still controlled by the operating system.
+final class AppExecutionLease {
+    private var activity: NSObjectProtocol?
+    private let end: (NSObjectProtocol) -> Void
+
+    init(reason: String,
+         begin: (String) -> NSObjectProtocol = { reason in
+             ProcessInfo.processInfo.beginActivity(
+                 options: [.userInitiated, .idleSystemSleepDisabled], reason: reason
+             )
+         },
+         end: @escaping (NSObjectProtocol) -> Void = { ProcessInfo.processInfo.endActivity($0) }) {
+        self.end = end
+        activity = begin(reason)
+    }
+
+    func release() {
+        guard let activity else { return }
+        self.activity = nil
+        end(activity)
+    }
+
+    deinit {
+        if let activity { end(activity) }
     }
 }

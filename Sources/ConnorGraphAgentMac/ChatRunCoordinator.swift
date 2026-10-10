@@ -17,6 +17,7 @@ final class ChatRunCoordinator {
     private var pendingCancellationReasons: [String: String] = [:]
     private var timelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var timelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
+    private var executionActivity: AppExecutionLease?
     private var isShutdown = false
     private var generation = 0
     private var pendingTimelineFlushBySession: [String: Task<Void, Never>] = [:]
@@ -26,6 +27,9 @@ final class ChatRunCoordinator {
     @ObservationIgnored var selectedSessionID: () -> String? = { nil }
     @ObservationIgnored var onTimelineChanged: (String, [AgentEventPresentation]) -> Void = { _, _ in }
     @ObservationIgnored var onSubmittingChanged: () -> Void = {}
+    @ObservationIgnored var acquireExecutionActivity: () -> AppExecutionLease = {
+        AppExecutionLease(reason: "Connor is completing active operations")
+    }
 
     init(model: ChatRunModel, fallbackSession: AgentSession) {
         self.model = model
@@ -336,6 +340,14 @@ final class ChatRunCoordinator {
     }
 
     func refreshSelectedSubmittingState() {
+        if isActive {
+            if executionActivity == nil {
+                executionActivity = acquireExecutionActivity()
+            }
+        } else {
+            executionActivity?.release()
+            executionActivity = nil
+        }
         model.isSubmitting = selectedSessionID().map { model.submittingSessionIDs.contains($0) } ?? false
         onSubmittingChanged()
     }
@@ -369,6 +381,8 @@ final class ChatRunCoordinator {
         model.submittingSessionIDs.removeAll(); model.isSubmitting = false
         manager = nil
         managerRevision &+= 1
+        executionActivity?.release()
+        executionActivity = nil
         onSubmittingChanged()
     }
 }
