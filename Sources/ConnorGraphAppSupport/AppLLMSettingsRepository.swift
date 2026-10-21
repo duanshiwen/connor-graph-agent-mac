@@ -124,7 +124,7 @@ public enum AppLLMThinkingLevel: String, Sendable, Equatable, CaseIterable, Coda
         return [
             "claude-opus-4-6", "claude-sonnet-4-6",
             "claude-opus-4-7", "claude-opus-4-8",
-            "claude-opus-5", "claude-sonnet-5",
+            "claude-opus-5", "claude-sonnet-5", "claude-haiku-5",
             "claude-fable-5", "claude-mythos"
         ].contains { model.contains($0) }
     }

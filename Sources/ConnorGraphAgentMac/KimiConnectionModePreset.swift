@@ -31,7 +31,7 @@ enum KimiConnectionModePreset: String, CaseIterable, Identifiable, Equatable {
 
     var defaultModel: String {
         switch self {
-        case .payAsYouGo: "kimi-k2.6"
+        case .payAsYouGo: "kimi-k3"
         case .codingPlan: "kimi-for-coding"
         }
     }
@@ -45,7 +45,7 @@ enum KimiConnectionModePreset: String, CaseIterable, Identifiable, Equatable {
                 "moonshot-v1-8k-vision-preview", "moonshot-v1-32k-vision-preview", "moonshot-v1-128k-vision-preview"
             ]
         case .codingPlan:
-            ["kimi-for-coding", "kimi-for-coding-highspeed", "k3"]
+            ["kimi-for-coding", "kimi-for-coding-highspeed", "k3", "k3-256k"]
         }
     }
 

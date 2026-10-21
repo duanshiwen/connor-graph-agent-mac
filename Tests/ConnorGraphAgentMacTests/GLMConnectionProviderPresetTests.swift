@@ -9,12 +9,12 @@ struct GLMConnectionProviderPresetTests {
 
     @Test func usesCurrentFlagshipModelAndOfficialEndpoint() {
         #expect(preset.endpoint == "https://open.bigmodel.cn/api/paas/v4")
-        #expect(preset.defaultModel == "glm-5.2")
-        #expect(preset.supportedModels.first == "glm-5.2")
+        #expect(preset.defaultModel == "glm-5.3")
+        #expect(preset.supportedModels.first == "glm-5.3")
     }
 
     @Test func includesCurrentChatModelsAndRemovesDeprecatedModels() {
-        #expect(preset.supportedModels.contains("glm-5.2"))
+        #expect(preset.supportedModels.contains("glm-5.3"))
         #expect(preset.supportedModels.contains("glm-4.7-flash"))
         #expect(preset.supportedModels.contains("glm-4.6v-flash"))
         #expect(preset.supportedModels.contains("glm-z1-air") == false)

@@ -20,7 +20,7 @@ struct ChineseProviderSubscriptionPlanPresetTests {
         #expect(preset("doubao").subscriptionPlan?.endpoint == "https://ark.cn-beijing.volces.com/api/plan/v3")
         #expect(preset("moonshot").subscriptionPlan?.endpoint == "https://api.kimi.com/coding/v1")
         #expect(preset("zhipu").subscriptionPlan?.endpoint == "https://open.bigmodel.cn/api/coding/paas/v4")
-        #expect(preset("minimax").subscriptionPlan?.endpoint == "https://api.minimaxi.com/v1")
+        #expect(preset("minimax").subscriptionPlan?.endpoint == "https://api.minimax.cn/v1")
         #expect(preset("stepfun").subscriptionPlan?.endpoint == "https://api.stepfun.com/step_plan/v1")
         #expect(preset("zai").subscriptionPlan?.endpoint == "https://api.z.ai/api/coding/paas/v4")
     }

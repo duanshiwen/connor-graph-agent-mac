@@ -49,6 +49,8 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
 }
 
 @Test func anthropicThinkingPolicyUsesAdaptiveModeForCurrentClaudeModels() {
+    #expect(AppLLMThinkingLevel.medium.anthropicThinking(modelID: "claude-haiku-5-5") == .adaptive(display: .omitted))
+    #expect(AppLLMThinkingLevel.medium.anthropicEffort(modelID: "claude-haiku-5-5") == "medium")
     #expect(AppLLMThinkingLevel.medium.anthropicThinking(modelID: "claude-sonnet-4-6") == .adaptive(display: .omitted))
     #expect(AppLLMThinkingLevel.medium.anthropicEffort(modelID: "claude-sonnet-4-6") == "medium")
     #expect(AppLLMThinkingLevel.xhigh.anthropicEffort(modelID: "claude-sonnet-4-6") == "high")
