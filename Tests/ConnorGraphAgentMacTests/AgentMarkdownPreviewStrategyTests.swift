@@ -216,6 +216,39 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(textView.contentCompressionResistancePriority(for: .horizontal) == .defaultLow)
     }
 
+    @Test @MainActor func linkedListMeasurementsDoNotChangeDisplayedWrapping() throws {
+        let textView = AgentMarkdownLinkText.LinkTextView()
+        let attributed = try AttributedString(
+            markdown: String(repeating: "剧情（来源：[知乎拆解笔记](https://example.com)）：中英文混排 with links，内容需要多行展示。", count: 5),
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )
+        textView.textStorage?.setAttributedString(AgentMarkdownLinkText.renderedAttributedString(
+            attributed, baseFont: .systemFont(ofSize: 16), baseColor: .labelColor, strikethrough: false
+        ))
+        textView.setFrameSize(NSSize(width: 260, height: 800))
+        let container = try #require(textView.textContainer)
+        let layout = try #require(textView.layoutManager)
+        layout.ensureLayout(for: container)
+        let displayedWidth = container.containerSize.width
+        let displayedHeight = ceil(layout.usedRect(for: container).height)
+
+        let narrow = textView.measuredSize(for: 260)
+        let wide = textView.measuredSize(for: 700)
+        let ideal = textView.measuredSize(for: nil)
+        _ = textView.measuredSize(for: .infinity)
+
+        #expect(narrow.height == displayedHeight)
+        #expect(narrow.height > wide.height)
+        #expect(ideal.width.isFinite && ideal.height > 0)
+        #expect(container.containerSize.width == displayedWidth)
+        #expect(textView.measuredSize(for: 260) == narrow)
+        #expect(textView.intrinsicContentSize.height == narrow.height)
+
+        textView.setFrameSize(NSSize(width: 700, height: 800))
+        #expect(textView.intrinsicContentSize.height == wide.height)
+        #expect(!textView.isVerticallyResizable)
+    }
+
     @Test func markdownImageSourcePolicyAllowsOnlyFilesInsideTheSessionRoot() {
         let root = URL(fileURLWithPath: "/tmp/connor/sessions/session-1")
         let inside = root.appendingPathComponent("attachments/image/original/chart.png")

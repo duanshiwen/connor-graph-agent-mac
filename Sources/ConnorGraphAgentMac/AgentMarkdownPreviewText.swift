@@ -799,18 +799,13 @@ struct AgentMarkdownLinkText: NSViewRepresentable {
         )
         if !textView.attributedString().isEqual(to: rendered) {
             textView.textStorage?.setAttributedString(rendered)
+            textView.invalidateIntrinsicContentSize()
             textView.window?.invalidateCursorRects(for: textView)
         }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: LinkTextView, context: Context) -> CGSize? {
-        guard let width = proposal.width, width.isFinite, width > 0,
-              let textContainer = nsView.textContainer,
-              let layoutManager = nsView.layoutManager else { return nil }
-        textContainer.containerSize = CGSize(width: width, height: .greatestFiniteMagnitude)
-        layoutManager.ensureLayout(for: textContainer)
-        let height = ceil(layoutManager.usedRect(for: textContainer).height)
-        return CGSize(width: width, height: max(height, baseFont.ascender - baseFont.descender))
+        nsView.measuredSize(for: proposal.width, minimumHeight: baseFont.ascender - baseFont.descender)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -834,6 +829,36 @@ struct AgentMarkdownLinkText: NSViewRepresentable {
     }
 
     final class LinkTextView: NSTextView {
+        // SwiftUI probes several widths while arranging list HStacks. Measuring the
+        // live container changes its wrapping before the final frame is assigned.
+        private let measurementStorage = NSTextStorage()
+        private let measurementLayoutManager = NSLayoutManager()
+        private let measurementContainer = NSTextContainer(size: .zero)
+
+        func measuredSize(for proposedWidth: CGFloat?, minimumHeight: CGFloat = 0) -> CGSize {
+            if !measurementStorage.isEqual(to: attributedString()) {
+                measurementStorage.setAttributedString(attributedString())
+            }
+            let width = proposedWidth.flatMap { $0.isFinite ? max(1, $0) : nil }
+            measurementContainer.containerSize = CGSize(
+                width: width ?? .greatestFiniteMagnitude,
+                height: .greatestFiniteMagnitude
+            )
+            measurementLayoutManager.ensureLayout(for: measurementContainer)
+            let usedSize = measurementLayoutManager.usedRect(for: measurementContainer).size
+            return CGSize(width: width ?? ceil(usedSize.width), height: max(ceil(usedSize.height), minimumHeight))
+        }
+
+        override var intrinsicContentSize: NSSize {
+            measuredSize(for: bounds.width > 0 ? bounds.width : nil)
+        }
+
+        override func setFrameSize(_ newSize: NSSize) {
+            let widthChanged = frame.width != newSize.width
+            super.setFrameSize(newSize)
+            if widthChanged { invalidateIntrinsicContentSize() }
+        }
+
         init() {
             let storage = NSTextStorage()
             let layoutManager = NSLayoutManager()
@@ -842,12 +867,18 @@ struct AgentMarkdownLinkText: NSViewRepresentable {
             layoutManager.addTextContainer(container)
             super.init(frame: .zero, textContainer: container)
 
+            measurementStorage.addLayoutManager(measurementLayoutManager)
+            measurementLayoutManager.addTextContainer(measurementContainer)
+            measurementContainer.lineFragmentPadding = 0
+            measurementContainer.lineBreakMode = .byWordWrapping
+
             drawsBackground = false
             isEditable = false
             isSelectable = true
             isRichText = true
             isHorizontallyResizable = false
-            isVerticallyResizable = true
+            // SwiftUI owns the frame; NSTextView must not resize it after layout.
+            isVerticallyResizable = false
             textContainerInset = .zero
             container.lineFragmentPadding = 0
             container.lineBreakMode = .byWordWrapping
