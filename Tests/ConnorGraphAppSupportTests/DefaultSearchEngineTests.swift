@@ -9,7 +9,7 @@ struct DefaultSearchEngineTests {
     }
 
     @Test func supportedEnginesExposeUserFacingNames() {
-        #expect(DefaultSearchEngine.allCases.map(\.displayName) == ["Bing", "Google", "DuckDuckGo", "Yahoo"])
+        #expect(DefaultSearchEngine.allCases.map(\.displayName) == ["Bing", "Google", "DuckDuckGo", "Yahoo", "360", "搜狗"])
     }
 
     @Test func buildsBingSearchURL() throws {
@@ -25,7 +25,9 @@ struct DefaultSearchEngineTests {
         let cases: [(DefaultSearchEngine, String, String, String)] = [
             (.google, "www.google.com", "/search", "q"),
             (.duckDuckGo, "duckduckgo.com", "/", "q"),
-            (.yahoo, "search.yahoo.com", "/search", "p")
+            (.yahoo, "search.yahoo.com", "/search", "p"),
+            (.so360, "www.so.com", "/s", "q"),
+            (.sogou, "www.sogou.com", "/web", "query")
         ]
 
         for (engine, host, path, queryName) in cases {
@@ -36,6 +38,16 @@ struct DefaultSearchEngineTests {
             #expect(url.host == host)
             #expect(url.path == path)
             #expect(components.queryItems?.first(where: { $0.name == queryName })?.value == "swift testing")
+        }
+    }
+
+    @Test func alternativeEnginesPersistAndEncodeChineseQueries() throws {
+        for engine in [DefaultSearchEngine.so360, .sogou] {
+            let data = try JSONEncoder().encode(engine)
+            #expect(try JSONDecoder().decode(DefaultSearchEngine.self, from: data) == engine)
+            let url = try #require(engine.searchURL(for: "中文 & C++"))
+            #expect(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first?.value == "中文 & C++")
+            #expect(BrowserNavigationURLResolver.normalizedURLString(from: "中文 & C++", defaultSearchEngine: engine) == url.absoluteString)
         }
     }
 

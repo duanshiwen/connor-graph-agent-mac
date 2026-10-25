@@ -237,7 +237,7 @@ public struct NativeWebSearchTool: AgentTool {
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "query": .string(description: "Search query keywords."),
-        "engine": .stringEnumeration(values: ["duckduckgo", "bing", "google", "yahoo"], description: "Search engine. Defaults to duckduckgo."),
+        "engine": .stringEnumeration(values: ["duckduckgo", "bing", "google", "yahoo", "so360", "sogou"], description: "Search engine. Defaults to duckduckgo."),
         "maxResults": .integer(description: "Maximum number of results, 1-10. Defaults to 5.")
     ], required: ["query"])
 

@@ -294,8 +294,8 @@ public struct NativeWebSearchClient: Sendable {
 
     public func search(query: String, engine: String, maxResults: Int) async throws -> NativeWebSearchResult {
         let normalizedEngine = engine.lowercased()
-        guard normalizedEngine == "duckduckgo" else {
-            throw AgentToolError.invalidArguments("Native HTTP search currently supports duckduckgo. Engine \(engine) requires browser-assisted search.")
+        guard ["duckduckgo", "so360", "sogou"].contains(normalizedEngine) else {
+            throw AgentToolError.invalidArguments("Native HTTP search supports duckduckgo, so360 and sogou. Engine \(engine) requires browser-assisted search.")
         }
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AgentToolError.invalidArguments("web_search requires query")
@@ -303,16 +303,16 @@ public struct NativeWebSearchClient: Sendable {
 
         var components = URLComponents()
         components.scheme = "https"
-        components.host = "duckduckgo.com"
-        components.path = "/html/"
-        components.queryItems = [URLQueryItem(name: "q", value: query)]
+        components.host = normalizedEngine == "so360" ? "m.so.com" : normalizedEngine == "sogou" ? "www.sogou.com" : "duckduckgo.com"
+        components.path = normalizedEngine == "so360" ? "/s" : normalizedEngine == "sogou" ? "/web" : "/html/"
+        components.queryItems = [URLQueryItem(name: normalizedEngine == "sogou" ? "query" : "q", value: query)]
         guard let url = components.url else {
-            throw AgentToolError.invalidArguments("Unable to construct DuckDuckGo search URL")
+            throw AgentToolError.invalidArguments("Unable to construct search URL")
         }
 
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "GET"
-        request.setValue("ConnorGraphAgent/1.0 (+https://local-agent)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36", forHTTPHeaderField: "User-Agent")
         request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5", forHTTPHeaderField: "Accept")
 
         let response = try await httpClient.data(for: request)
@@ -321,7 +321,13 @@ public struct NativeWebSearchClient: Sendable {
         }
 
         let decoded = WebPageDecodingSupport.decodeWebPageText(data: response.data, responseEncodingName: response.textEncodingName)
-        let results = Array(NativeWebSearchParser.duckDuckGoResults(from: decoded.text).prefix(max(1, min(maxResults, 10))))
+        let parsed = normalizedEngine == "duckduckgo"
+            ? NativeWebSearchParser.duckDuckGoResults(from: decoded.text)
+            : AlternativeSearchParser.results(from: decoded.text, engine: normalizedEngine)
+        let results = Array(parsed.prefix(max(1, min(maxResults, 10))))
+        if results.isEmpty && normalizedEngine != "duckduckgo" {
+            throw AgentToolError.invalidArguments("\(normalizedEngine) returned no searchable results; the page may require browser verification. Open the search in the browser or try another engine.")
+        }
         let markdown = results.enumerated().map { index, item in
             var lines = ["\(index + 1). \(item.title)", "   URL: \(item.url)"]
             if !item.snippet.isEmpty { lines.append("   Snippet: \(item.snippet)") }

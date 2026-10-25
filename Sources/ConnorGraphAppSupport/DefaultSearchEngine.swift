@@ -5,6 +5,8 @@ public enum DefaultSearchEngine: String, Codable, Sendable, Equatable, CaseItera
     case google
     case duckDuckGo
     case yahoo
+    case so360
+    case sogou
 
     public static let `default`: DefaultSearchEngine = .bing
 
@@ -28,6 +30,8 @@ public enum DefaultSearchEngine: String, Codable, Sendable, Equatable, CaseItera
         case .google: "Google"
         case .duckDuckGo: "DuckDuckGo"
         case .yahoo: "Yahoo"
+        case .so360: "360"
+        case .sogou: "搜狗"
         }
     }
 
@@ -53,6 +57,8 @@ public enum DefaultSearchEngine: String, Codable, Sendable, Equatable, CaseItera
         case .google: "www.google.com"
         case .duckDuckGo: "duckduckgo.com"
         case .yahoo: "search.yahoo.com"
+        case .so360: "www.so.com"
+        case .sogou: "www.sogou.com"
         }
     }
 
@@ -60,13 +66,16 @@ public enum DefaultSearchEngine: String, Codable, Sendable, Equatable, CaseItera
         switch self {
         case .bing, .google, .yahoo: "/search"
         case .duckDuckGo: "/"
+        case .so360: "/s"
+        case .sogou: "/web"
         }
     }
 
     private var queryParameterName: String {
         switch self {
-        case .bing, .google, .duckDuckGo: "q"
+        case .bing, .google, .duckDuckGo, .so360: "q"
         case .yahoo: "p"
+        case .sogou: "query"
         }
     }
 }
