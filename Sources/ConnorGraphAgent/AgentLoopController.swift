@@ -1408,8 +1408,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         } catch let error as CancellationError {
             throw error
         } catch {
-            // 流式响应在拿到完成信封前中断（连接断开、超时或提供方异常）。
-            // 这是模型服务端的问题，用面向用户的文案包装后抛出，避免用户误以为是本应用故障。
+            // HTTP 请求拒绝与连接中断须分别呈现，不能根据流式调用路径判断故障原因。
             throw AgentModelStreamInterruptedError(underlying: error)
         }
         if let completedResponse { return completedResponse }
@@ -1424,7 +1423,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         } catch let error as CancellationError {
             throw error
         } catch {
-            // 流已结束但未给出完成信封，改用非流式请求兜底；兜底失败同样是模型服务端问题。
+            // 流未给出完成信封，非流式兜底失败时保留实际错误原因。
             throw AgentModelStreamInterruptedError(underlying: error)
         }
     }
@@ -2816,16 +2815,20 @@ public enum AgentLoopError: Error, Sendable, Equatable {
     case cancelled
 }
 
-/// 模型服务商流式响应未正常结束（连接中断、超时或未收到完成信封），
-/// 且恢复请求也失败时的用户可见错误。错误信息明确说明这是模型服务端的问题，
-/// 不是康纳应用自身的问题。
+/// 流式调用或非流式兜底失败时，保留服务商返回的错误，不预判责任归属。
 private struct AgentModelStreamInterruptedError: Error, CustomStringConvertible, AgentModelProviderErrorClassifying, Sendable {
     let underlying: Error
 
     var description: String {
-        """
-        模型服务商返回的流式响应未正常结束（连接中断、超时或未收到完整响应），本次请求无法完成（\(Self.summarize(underlying))）。这是模型服务端的问题，不是康纳应用的问题；请稍后重试，或检查模型接口配置后重试。
-        """
+        if let providerError = underlying as? OpenAICompatibleProviderError,
+           case let .httpStatus(status, message) = providerError {
+            let detail = message.map { "：\($0)" } ?? ""
+            if status == 400 || status == 422 {
+                return "模型接口拒绝了请求（HTTP \(status)\(detail)）。请求参数可能与当前模型或接口不兼容，请检查模型名称、API 地址及参数配置。"
+            }
+            return "模型接口请求失败（HTTP \(status)\(detail)）。请检查接口配置及服务状态。"
+        }
+        return "模型服务商返回的流式响应未正常结束（连接中断、超时或未收到完整响应），本次请求无法完成（\(Self.summarize(underlying))）。请稍后重试，或检查模型接口配置。"
     }
 
     var providerErrorClass: AgentModelProviderErrorClass {

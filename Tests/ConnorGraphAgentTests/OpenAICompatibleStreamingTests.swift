@@ -288,3 +288,27 @@ private func deepSeekStreamProvider(_ frames: [String]) -> OpenAICompatibleProvi
     }
     #expect(completed)
 }
+
+@Test func openAICompatibleProviderAdaptsGLM53StreamingRequest() async throws {
+    let sseClient = OpenAIStreamingCapturingSSEClient(frames: [
+        #"data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}"# + "\n"
+    ])
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://open.bigmodel.cn/api/paas/v4")!, apiKey: "test-key", model: "glm-5.3-flash", reasoningEffort: "medium"),
+        httpClient: OpenAIStreamingFallbackHTTPClient(),
+        sseClient: sseClient
+    )
+    var completed = false
+    for try await event in provider.streamComplete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Hello")])) {
+        if case .completed(let response) = event {
+            #expect(response.text == "OK")
+            completed = true
+        }
+    }
+    #expect(completed)
+    let data = try #require(sseClient.captured?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(object["stream"] as? Bool == true)
+    #expect(object["reasoning_effort"] as? String == "high")
+    #expect((object["thinking"] as? [String: String])?["type"] == "enabled")
+}

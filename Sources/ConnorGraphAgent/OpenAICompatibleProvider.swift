@@ -234,9 +234,8 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
     }
 
     public func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
-        var client = httpClient
         let request = try makeRequest(prompt: prompt, context: context)
-        let response = try await client.send(request)
+        let response = try await sendWithGLMParameterFallback(request)
         if response.statusCode < 200 || response.statusCode >= 300 {
             throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
         }
@@ -251,10 +250,9 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
     private static var visionDegradationWarning: String { "⚠️ 当前模型不支持图片输入，已自动发送文字内容。图片内容已忽略。" }
 
     public func completeWithTools(_ modelRequest: AgentModelRequest) async throws -> AgentModelResponse {
-        var client = httpClient
         do {
             let request = try makeToolCallingRequest(modelRequest)
-            let response = try await client.send(request)
+            let response = try await sendWithGLMParameterFallback(request)
             if response.statusCode < 200 || response.statusCode >= 300 {
                 throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
             }
@@ -263,7 +261,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             guard modelRequest.containsImageInput else { throw OpenAICompatibleProviderError.unsupportedVisionInput(model: capabilityProfile.modelID, reason: "vision not supported") }
             let stripped = modelRequest.stripImageContent()
             let request = try makeToolCallingRequest(stripped)
-            let response = try await client.send(request)
+            let response = try await sendWithGLMParameterFallback(request)
             if response.statusCode < 200 || response.statusCode >= 300 {
                 throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
             }
@@ -284,7 +282,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                     }
                     do {
                         let httpRequest = try makeToolCallingRequest(request, stream: true)
-                        let frames = try await sseClient.stream(httpRequest)
+                        let frames = streamWithGLMParameterFallback(httpRequest, client: sseClient)
                         var accumulator = OpenAIChatCompletionStreamAccumulator()
                         var receivedDone = false
                         for try await frame in frames {
@@ -303,7 +301,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                         guard request.containsImageInput else { throw OpenAICompatibleProviderError.unsupportedVisionInput(model: capabilityProfile.modelID, reason: "vision not supported") }
                         let stripped = request.stripImageContent()
                         let httpRequest = try makeToolCallingRequest(stripped, stream: true)
-                        let frames = try await sseClient.stream(httpRequest)
+                        let frames = streamWithGLMParameterFallback(httpRequest, client: sseClient)
                         var accumulator = OpenAIChatCompletionStreamAccumulator()
                         var receivedDone = false
                         for try await frame in frames {
@@ -328,6 +326,63 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
         }
     }
 
+    // Agent Plan may reject model-specific optional controls with a generic 400.
+    // Retry only validation failures before any stream frame, keeping the model,
+    // messages, tools and output budget intact. The model supplies its defaults.
+    private func glmDefaultParametersRequest(_ request: AgentHTTPRequest, error: Error) -> AgentHTTPRequest? {
+        guard isGLM53,
+              let host = config.baseURL.host?.lowercased(),
+              host == "volces.com" || host.hasSuffix(".volces.com"),
+              let providerError = error as? OpenAICompatibleProviderError,
+              case let .httpStatus(status, message) = providerError,
+              status == 400 || status == 422,
+              let message,
+              message.lowercased().contains("parameter") || message.contains("参数"),
+              var body = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any] else { return nil }
+        let optionalControls = ["thinking", "reasoning_effort", "temperature", "top_p"]
+        guard optionalControls.contains(where: { body[$0] != nil }) else { return nil }
+        for key in optionalControls { body.removeValue(forKey: key) }
+        guard let data = try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]) else { return nil }
+        var fallback = request
+        fallback.body = data
+        return fallback
+    }
+
+    private func sendWithGLMParameterFallback(_ request: AgentHTTPRequest) async throws -> AgentHTTPResponse {
+        var client = httpClient
+        let response = try await client.send(request)
+        let error = OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
+        guard let fallback = glmDefaultParametersRequest(request, error: error) else { return response }
+        try Task.checkCancellation()
+        return try await client.send(fallback)
+    }
+
+    private func streamWithGLMParameterFallback(_ request: AgentHTTPRequest, client: any AgentSSEHTTPClient) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var receivedFrame = false
+                do {
+                    do {
+                        for try await frame in try await client.stream(request) {
+                            receivedFrame = true
+                            continuation.yield(frame)
+                        }
+                    } catch {
+                        guard !receivedFrame, let fallback = glmDefaultParametersRequest(request, error: error) else { throw error }
+                        try Task.checkCancellation()
+                        for try await frame in try await client.stream(fallback) {
+                            continuation.yield(frame)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
+    }
+
     private static func decodeStreamChunk(_ payload: String) throws -> OpenAIChatCompletionStreamChunk {
         let data = Data(payload.utf8)
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -344,9 +399,8 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
     }
 
     public func healthCheck() async throws -> LLMProviderHealthCheckResult {
-        var client = httpClient
         let request = try makeHealthCheckRequest()
-        let response = try await client.send(request)
+        let response = try await sendWithGLMParameterFallback(request)
         if response.statusCode < 200 || response.statusCode >= 300 {
             throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
         }
@@ -387,8 +441,8 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                 OpenAIChatMessage(role: "user", content: "Question:\n\(prompt)")
             ],
             temperature: resolvedTemperature(requestTemperature: 0.2),
-            reasoningEffort: config.reasoningEffort,
-            thinking: config.thinkingEnabled == true ? OpenAIThinkingConfig() : nil,
+            reasoningEffort: resolvedReasoningEffort,
+            thinking: (isGLM53 || config.thinkingEnabled == true) ? OpenAIThinkingConfig() : nil,
             topP: config.topP
         )
         let encoder = JSONEncoder()
@@ -460,13 +514,13 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             messages: messages,
             temperature: resolvedTemperature(requestTemperature: request.temperature),
             tools: tools.isEmpty ? nil : tools,
-            toolChoice: tools.isEmpty || request.toolChoice == .auto
+            toolChoice: tools.isEmpty || request.toolChoice == .auto || isGLM53
                 ? nil
                 : request.toolChoice.rawValue,
-            reasoningEffort: config.reasoningEffort,
+            reasoningEffort: resolvedReasoningEffort,
             // 默认不发送 max_tokens（由服务端默认决定）；互动网页等长任务显式放大。
             maxTokens: request.maxTokens,
-            thinking: config.thinkingEnabled == true ? OpenAIThinkingConfig() : nil,
+            thinking: (isGLM53 || config.thinkingEnabled == true) ? OpenAIThinkingConfig() : nil,
             topP: config.topP,
             stream: stream
         )
@@ -490,17 +544,37 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
         }
     }
 
+    // GLM-5.3 (including Flash/FlashX and dated variants) always reasons and
+    // accepts only low/high/max. Apply this at serialization for direct configs
+    // as well as saved connections, including OpenAI-compatible gateways.
+    private var isGLM53: Bool {
+        let model = config.requestModel.lowercased()
+        return model == "glm-5.3" || model.hasPrefix("glm-5.3-")
+    }
+
+    private var resolvedReasoningEffort: String? {
+        guard isGLM53, let effort = config.reasoningEffort else { return config.reasoningEffort }
+        switch effort.lowercased() {
+        case "none", "minimal", "low": return "low"
+        case "medium", "high": return "high"
+        case "xhigh", "max": return "max"
+        default: return nil // Use the model default rather than sending an invalid enum.
+        }
+    }
+
     /// 方舟等供应商配置了 temperature 覆盖值时优先使用覆盖值；否则沿用请求自带值。
     private func resolvedTemperature(requestTemperature: Double?) -> Double? {
-        if let temperatureOverride = config.temperatureOverride { return temperatureOverride }
-        return requestTemperature
+        let temperature = config.temperatureOverride ?? requestTemperature
+        guard isGLM53, let temperature else { return temperature }
+        // GLM accepts [0, 1], while the common OpenAI range extends to 2.
+        return (min(1, max(0, temperature)) * 100).rounded() / 100
     }
 
     private func projectedRole(for message: AgentModelMessage, index: Int, instructionPlacement: AgentInstructionPlacement) -> String {
         guard index == 0, message.role == .system else { return message.role.rawValue }
         switch instructionPlacement {
         case .developerMessage:
-            return "developer"
+            return isGLM53 ? "system" : "developer"
         case .systemMessage, .providerNativeSystem:
             return "system"
         }

@@ -494,21 +494,24 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 }
 
 private struct InterruptedStreamProvider: StreamingAgentModelProvider {
+    var failure: OpenAICompatibleProviderError = .httpStatus(503, message: "temporary upstream failure")
+    var rejectsStream = false
     let modelID = "interrupted-stream"
     let capabilities = AgentModelCapabilities(supportsStreaming: true, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
-        throw OpenAICompatibleProviderError.httpStatus(503, message: "temporary upstream failure")
+        throw failure
     }
 
     func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            continuation.finish()
+            if rejectsStream { continuation.finish(throwing: failure) }
+            else { continuation.finish() }
         }
     }
 }
 
-@Test func agentLoopReportsInterruptedStreamAsProviderSideIssue() async throws {
+@Test func agentLoopPreservesHTTPFailureFromStreamFallback() async throws {
     let provider = InterruptedStreamProvider()
     let loop = AgentLoopController(
         modelProvider: provider,
@@ -529,9 +532,9 @@ private struct InterruptedStreamProvider: StreamingAgentModelProvider {
         thrownDescription = String(describing: error)
     }
 
-    #expect(failureMessage?.contains("模型服务商返回的流式响应未正常结束") == true)
-    #expect(failureMessage?.contains("不是康纳应用的问题") == true)
-    #expect(thrownDescription?.contains("模型服务商返回的流式响应未正常结束") == true)
+    #expect(failureMessage?.contains("HTTP 503") == true)
+    #expect(failureMessage?.contains("不是康纳应用的问题") == false)
+    #expect(thrownDescription?.contains("HTTP 503") == true)
 }
 
 @Test func progressUpdateToolEmitsAssistantMessageAndContinuesRun() async throws {
@@ -4057,4 +4060,28 @@ private actor ArkOutputBudgetCaptureProvider: AgentModelProvider {
     let requests = await provider.requests
     #expect(!requests.isEmpty)
     #expect(requests.allSatisfy { $0.maxTokens == 16_384 })
+}
+
+@Test(arguments: [false, true]) func agentLoopReportsInvalidParametersWithoutBlamingStream(rejectsStream: Bool) async throws {
+    let provider = InterruptedStreamProvider(
+        failure: .httpStatus(400, message: "A parameter specified in the request is not valid Request id: regression-id"),
+        rejectsStream: rejectsStream
+    )
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(providerRetryCount: 0),
+        streamComplete: { provider, request in provider.streamComplete(request) }
+    )
+    do {
+        for try await _ in loop.run(AgentChatRequest(runID: "invalid-parameters", sessionID: "invalid-parameters", userMessage: "Hello")) { }
+        Issue.record("Expected HTTP 400 failure")
+    } catch {
+        let message = String(describing: error)
+        #expect(message.contains("HTTP 400"))
+        #expect(message.contains("regression-id"))
+        #expect(message.contains("请求参数可能"))
+        #expect(!message.contains("流式响应未正常结束"))
+        #expect(!message.contains("不是康纳应用的问题"))
+    }
 }

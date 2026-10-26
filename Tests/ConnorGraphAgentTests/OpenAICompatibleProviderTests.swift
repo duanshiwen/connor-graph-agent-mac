@@ -625,3 +625,35 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     #expect(object["top_p"] == nil)
     #expect(object["temperature"] as? Double == 0.2)
 }
+
+@Test(arguments: ["glm-5.3", "glm-5.3-flash", "glm-5.3-flashx", "glm-5.3-flash-20261020", "gpt-test"])
+func openAICompatibleProviderAdaptsGLM53Requests(model: String) async throws {
+    let isGLM = model.hasPrefix("glm-5.3")
+    for (effort, expected) in [("none", "low"), ("minimal", "low"), ("low", "low"), ("medium", "high"), ("high", "high"), ("xhigh", "max"), ("max", "max")] {
+        let client = CapturingHTTPClient(responseBody: Data(#"{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"#.utf8))
+        let provider = OpenAICompatibleProvider(
+            config: OpenAICompatibleConfig(baseURL: URL(string: "https://gateway.example/v1")!, apiKey: "test-key", model: model, reasoningEffort: effort, thinkingEnabled: false),
+            httpClient: client
+        )
+        _ = try await provider.complete(AgentModelRequest(
+            messages: [AgentModelMessage(role: .system, content: "Be helpful"), AgentModelMessage(role: .user, content: "Hello")],
+            tools: [AgentToolDefinition(name: "search", description: "Search", inputSchema: .object(properties: [:], required: []))],
+            temperature: 1.5,
+            instructionPlacement: .developerMessage,
+            toolChoice: .required
+        ))
+        let data = try #require(client.captured?.body)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["reasoning_effort"] as? String == (isGLM ? expected : effort))
+        #expect((object["thinking"] as? [String: String])?["type"] == (isGLM ? "enabled" : nil))
+        #expect(object["temperature"] as? Double == (isGLM ? 1 : 1.5))
+        #expect(object["tool_choice"] as? String == (isGLM ? nil : "required"))
+        #expect((object["tools"] as? [Any])?.count == 1)
+        let messages = try #require(object["messages"] as? [[String: Any]])
+        #expect(messages.first?["role"] as? String == (isGLM ? "system" : "developer"))
+        _ = try await provider.complete(prompt: "Hello", context: AgentContext(query: "Hello", items: []))
+        let promptData = try #require(client.captured?.body)
+        let promptObject = try #require(try JSONSerialization.jsonObject(with: promptData) as? [String: Any])
+        #expect(promptObject["reasoning_effort"] as? String == (isGLM ? expected : effort))
+    }
+}
