@@ -99,6 +99,7 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
 
     private func createTables() throws {
         try execute("""
+            CREATE TABLE IF NOT EXISTS mail_account_sync_deletions (id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS mail_accounts (
                 id TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL,
@@ -177,7 +178,17 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         return try decoder.decode(MailAccount.self, from: Data(row[0].utf8))
     }
 
+    public func pendingAccountDeletions() async throws -> [String:Int64] {
+        Dictionary(uniqueKeysWithValues: try querySQL("SELECT id, deleted_at FROM mail_account_sync_deletions").map { ($0[0], Int64($0[1]) ?? 0) })
+    }
+    public func clearAccountDeletion(id: MailAccountID) async throws {
+        try execute("DELETE FROM mail_account_sync_deletions WHERE id = '\(esc(id.rawValue))'")
+    }
+    public func applyRemoteAccountDelete(id: MailAccountID) async throws {
+        try execute("DELETE FROM mail_accounts WHERE id = '\(esc(id.rawValue))'")
+    }
     public func deleteAccount(id: MailAccountID) async throws {
+        try execute("INSERT OR REPLACE INTO mail_account_sync_deletions (id, deleted_at) VALUES ('\(esc(id.rawValue))', \(Int64(Date().timeIntervalSince1970 * 1_000)))")
         // 邮箱/邮件缓存随 mail_mailboxes 的 ON DELETE CASCADE 一并清理；
         // 凭证由 credential store 单独清理，不经此路径。
         try execute("DELETE FROM mail_accounts WHERE id = '\(esc(id.rawValue))'")

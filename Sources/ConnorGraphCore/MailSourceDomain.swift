@@ -172,6 +172,11 @@ public struct MailAccount: Codable, Sendable, Equatable, Hashable, Identifiable 
     public var incoming: MailServerEndpoint?
     public var outgoing: MailServerEndpoint?
     public var credentialBinding: MailCredentialBinding?
+    /// Server login name is shared configuration; credentialBinding is a device-local vault key.
+    public var username: String?
+    public var loginUsername: String {
+        username ?? credentialBinding?.accountName.components(separatedBy: ":").last ?? identities.first?.address.email ?? ""
+    }
     public var health: MailAccountHealth
     public var createdAt: Date
     public var updatedAt: Date
@@ -184,6 +189,7 @@ public struct MailAccount: Codable, Sendable, Equatable, Hashable, Identifiable 
         incoming: MailServerEndpoint? = nil,
         outgoing: MailServerEndpoint? = nil,
         credentialBinding: MailCredentialBinding? = nil,
+        username: String? = nil,
         health: MailAccountHealth = MailAccountHealth(status: .unknown, summary: "Not checked"),
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -195,6 +201,7 @@ public struct MailAccount: Codable, Sendable, Equatable, Hashable, Identifiable 
         self.incoming = incoming
         self.outgoing = outgoing
         self.credentialBinding = credentialBinding
+        self.username = username
         self.health = health
         self.createdAt = createdAt
         self.updatedAt = updatedAt

@@ -139,7 +139,7 @@ public struct MailCore2MailBackend: MailProtocolBackend {
         guard let endpoint = account.incoming, endpoint.protocolKind == .imap else { return [] }
         guard let email = account.identities.first?.address.email, !email.isEmpty else { return [] }
         var lastError: Error?
-        for username in MailIMAPInitialSyncService.candidateUsernames(email: email, provider: account.provider) {
+        for username in MailIMAPInitialSyncService.candidateUsernames(email: account.loginUsername, provider: account.provider) {
             let session = makeIMAPSession(hostname: endpoint.host, port: UInt32(endpoint.port), username: username, password: credential)
             do {
                 return try await fetchAllFolders(session: session)
@@ -167,7 +167,7 @@ public struct MailCore2MailBackend: MailProtocolBackend {
         guard let numericUID = UInt32(uid) else { return nil }
 
         var lastError: Error?
-        for username in MailIMAPInitialSyncService.candidateUsernames(email: email, provider: account.provider) {
+        for username in MailIMAPInitialSyncService.candidateUsernames(email: account.loginUsername, provider: account.provider) {
             let session = makeIMAPSession(hostname: endpoint.host, port: UInt32(endpoint.port), username: username, password: credential)
             do {
                 let rawData = try await fetchParsedMessageData(session: session, folder: mailbox.path, uid: numericUID)
@@ -201,7 +201,7 @@ public struct MailCore2MailBackend: MailProtocolBackend {
         let numericUIDs = uids.compactMap { UInt32($0) }
         guard !numericUIDs.isEmpty else { return [] }
         var lastError: Error?
-        for username in MailIMAPInitialSyncService.candidateUsernames(email: email, provider: account.provider) {
+        for username in MailIMAPInitialSyncService.candidateUsernames(email: account.loginUsername, provider: account.provider) {
             let session = makeIMAPSession(hostname: endpoint.host, port: UInt32(endpoint.port), username: username, password: credential)
             var results: [MailMessageDetail?] = []
             results.reserveCapacity(numericUIDs.count)

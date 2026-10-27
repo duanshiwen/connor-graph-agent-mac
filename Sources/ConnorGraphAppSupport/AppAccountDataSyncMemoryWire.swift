@@ -78,8 +78,8 @@ struct SyncUserPreferences: Codable, Sendable, Equatable {
         displayName = preferences.displayName
         timezone = preferences.timezone
         preferredLanguage = preferences.preferredLanguage
-        city = preferences.city.isEmpty ? nil : preferences.city
-        country = preferences.country.isEmpty ? nil : preferences.country
+        city = preferences.city
+        country = preferences.country
         genderIdentity = preferences.genderIdentity
         birthDate = preferences.birthDate
         notes = preferences.notes

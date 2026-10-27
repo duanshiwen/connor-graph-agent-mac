@@ -810,3 +810,27 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(config.topP == 0.95)
     #expect(config.temperatureOverride == 1.0)
 }
+
+@Test func sharedConfigFixturePreservesModelsClearsKeysAndPropagatesEmptyList() throws {
+    let url = try #require(Bundle.module.url(forResource: "account-sync-config-v1", withExtension: "json", subdirectory: "SessionSync"))
+    let fixture = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    let credentials = FakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: credentials)
+    let wire = try JSONDecoder().decode(SyncAIConnections.self, from: JSONSerialization.data(withJSONObject: fixture["connections"]!))
+    try repository.saveAPIKey("obsolete-local-key", connectionID: "ai")
+    #expect(try repository.applyAccountSyncRecord(wire))
+    #expect(try repository.apiKey(for: "ai") == nil)
+    #expect(try repository.accountSyncProjection()?.connections.first?.models == ["model-a", "model-b"])
+    let clear = try JSONDecoder().decode(SyncAIConnections.self, from: Data(#"{"connections":[],"defaultConnectionId":"","updatedAt":3000}"#.utf8))
+    #expect(try repository.applyAccountSyncRecord(clear))
+    #expect(try repository.loadSettings().connections.isEmpty)
+    #expect(try repository.accountSyncProjection()?.connections.isEmpty == true)
+    #expect(try repository.applyAccountSyncRecord(wire) == false)
+    for key in ["rss", "legacyRss"] {
+        let rss = try JSONDecoder().decode(SyncRSSSubscription.self, from: JSONSerialization.data(withJSONObject: fixture[key]!))
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(rss)) as! [String: Any]
+        #expect(encoded["feedURL"] != nil)
+        #expect(encoded["feedUrl"] == nil)
+        #expect(rss.title.isEmpty)
+    }
+}

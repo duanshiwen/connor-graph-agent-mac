@@ -484,6 +484,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
     public var shortcuts: AgentRuntimeShortcutSettings
     public var workspace: AgentRuntimeWorkspaceSettings
     public var preferences: AgentRuntimePreferenceSettings
+    public var userPreferencesUpdatedAt: Int64
     public var updatedAt: Date
 
     public init(
@@ -509,6 +510,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         self.shortcuts = shortcuts
         self.workspace = workspace
         self.preferences = preferences
+        self.userPreferencesUpdatedAt = 0
         self.updatedAt = updatedAt
     }
 
@@ -525,6 +527,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         case shortcuts
         case workspace
         case preferences
+        case userPreferencesUpdatedAt
         case updatedAt
     }
 
@@ -540,7 +543,9 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         self.shortcuts = try container.decodeIfPresent(AgentRuntimeShortcutSettings.self, forKey: .shortcuts) ?? AgentRuntimeShortcutSettings()
         self.workspace = try container.decodeIfPresent(AgentRuntimeWorkspaceSettings.self, forKey: .workspace) ?? AgentRuntimeWorkspaceSettings()
         self.preferences = try container.decodeIfPresent(AgentRuntimePreferenceSettings.self, forKey: .preferences) ?? AgentRuntimePreferenceSettings()
-        self.updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+        let decodedUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+        self.updatedAt = decodedUpdatedAt
+        self.userPreferencesUpdatedAt = try container.decodeIfPresent(Int64.self, forKey: .userPreferencesUpdatedAt) ?? Int64(decodedUpdatedAt.timeIntervalSince1970 * 1_000)
     }
 }
 
@@ -629,6 +634,14 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
         try fileManager.createDirectory(at: configDirectory, withIntermediateDirectories: true)
         var updated = settings
         updated.updatedAt = Date()
+        if stampPersonalitySetAt {
+            let previous = loadPersistedSettings()
+            let before = previous.map { SyncUserPreferences($0.preferences, updatedAtMillis: 0) }
+            let after = SyncUserPreferences(updated.preferences, updatedAtMillis: 0)
+            if before != after && (previous != nil || after != SyncUserPreferences(AgentRuntimePreferenceSettings(), updatedAtMillis: 0)) {
+                updated.userPreferencesUpdatedAt = Int64(Date().timeIntervalSince1970 * 1_000)
+            }
+        }
         if stampPersonalitySetAt,
            let current = loadPersistedSettings(),
            current.preferences.connorPersonality != updated.preferences.connorPersonality

@@ -485,7 +485,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     public func loadSettings() throws -> AppLLMSettings {
         if let raw = settingsStore.string(forKey: Keys.connections), let data = raw.data(using: .utf8) {
             let decoded = try JSONDecoder().decode([AppLLMConnectionConfig].self, from: data)
-            if decoded.isEmpty {
+            if decoded.isEmpty && connectionsSyncedAtMillis() == 0 {
                 return try loadLegacySettings()
             }
             let hydrated = try decoded.map { connection in
@@ -655,12 +655,11 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     }
 
     /// 生成 ai_connections 账号同步投影（recordId 「ai_connections」，整条记录“后写者胜”）。
-    /// 从未保存过连接（同步时间戳为 0）或连接列表为空时不投影，避免一台空设备把其它端已配置的连接清空。
+    /// 从未保存过连接（同步时间戳为 0）时不投影；已有正时间戳的空列表表示主动清空，避免一台空设备把其它端已配置的连接清空。
     public func accountSyncProjection() throws -> SyncAIConnections? {
         let syncedAtMillis = connectionsSyncedAtMillis()
         guard syncedAtMillis > 0 else { return nil }
         let settings = try loadSettings()
-        guard !settings.connections.isEmpty else { return nil }
         let wireConnections = try settings.connections.map { connection -> SyncAIConnection in
             // Codex/Copilot 订阅连接的 OAuth 凭据设备特定不同步，只投影连接定义。
             let apiKey: String?
@@ -681,14 +680,14 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
 
     /// 应用远端 ai_connections 记录：远端 updatedAt 不晚于本地同步时间戳则忽略（后写者胜）。
     /// 应用语义=按远端连接列表对齐本地——远端各连接 upsert（连接配置写 UserDefaults，
-    /// api_key 模式且携带非空明文 Key 时写入凭据库，none/空 Key 不写库），本地有而远端无的
+    /// api_key 模式且携带非空明文 Key 时写入凭据库，none/空 Key 清除旧 API Key），本地有而远端无的
     /// 连接删除（本机 Codex/Copilot 订阅连接保留不动、凭据不动）；默认连接随远端，但本地
     /// 保留的订阅连接原是默认时保持本地默认。应用成功后广播 connectionsDidChange 让
     /// UI 与运行时刷新。返回是否实际应用。
     @discardableResult
     public func applyAccountSyncRecord(_ wire: SyncAIConnections) throws -> Bool {
-        // 空连接列表不应用：更可能是异常载荷而非“删光了全部”，避免清空本机连接。
-        guard !wire.connections.isEmpty, wire.updatedAt > connectionsSyncedAtMillis() else { return false }
+        // 正时间戳的空列表是有效清空操作；OAuth 本机连接仍按统一保留策略处理。
+        guard wire.updatedAt > connectionsSyncedAtMillis() else { return false }
         let current = try loadSettings()
         let remoteIDs = Set(wire.connections.map(\.id))
         // 本地有而远端无：非订阅连接删除（含凭据），Codex/Copilot 订阅连接保留不动。
@@ -723,10 +722,12 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             ),
             apiKey: nil
         )
-        // api_key 模式且携带非空明文 Key 才写凭据库；none/空 Key 与 OAuth 订阅连接不动本地凭据。
+        // api_key 模式且携带非空明文 Key 才写凭据库；none/空 Key 清除旧 API Key；OAuth 订阅连接不动本地凭据。
         for wireConnection in wire.connections {
             if let apiKey = wireConnection.syncableAPIKey {
                 try saveAPIKey(apiKey, connectionID: wireConnection.id)
+            } else if wireConnection.authMode != "oauth" {
+                try credentialStore.deleteSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount(for: wireConnection.id))
             }
         }
         // 应用后采用远端记录时间戳，避免本轮 reconcile 把刚收到的记录原样推回去。

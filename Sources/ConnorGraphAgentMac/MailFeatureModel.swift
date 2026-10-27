@@ -260,10 +260,10 @@ final class MailFeatureModel {
         let resolvedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? normalizedEmail : username.trimmingCharacters(in: .whitespacesAndNewlines)
         let identity = MailIdentity(id: MailIdentityID(rawValue: "identity-\(accountID.rawValue)"), displayName: displayName, address: MailAddress(name: displayName, email: normalizedEmail))
         let binding = AppMailCredentialStore.binding(accountID: accountID, email: resolvedUsername, authMode: authMode)
-        let account = MailAccount(id: accountID, provider: provider, displayName: displayName.isEmpty ? email : displayName, identities: [identity], incoming: MailServerEndpoint(host: incomingHost, port: incomingPort, security: incomingSecurity, protocolKind: .imap), outgoing: MailServerEndpoint(host: outgoingHost, port: outgoingPort, security: outgoingSecurity, protocolKind: .smtp), credentialBinding: binding, health: MailAccountHealth(status: .unknown, summary: "Ready to sync"))
+        let account = MailAccount(id: accountID, provider: provider, displayName: displayName.isEmpty ? email : displayName, identities: [identity], incoming: MailServerEndpoint(host: incomingHost, port: incomingPort, security: incomingSecurity, protocolKind: .imap), outgoing: MailServerEndpoint(host: outgoingHost, port: outgoingPort, security: outgoingSecurity, protocolKind: .smtp), credentialBinding: binding, username: resolvedUsername, health: MailAccountHealth(status: .unknown, summary: "Ready to sync"))
         let inbox = MailMailbox(id: MailMailboxID(rawValue: "\(accountID.rawValue)-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
         try credentialStore.saveCredential(password, binding: binding)
-        try await store.saveAccount(account); try await store.saveMailbox(inbox)
+        try await store.saveAccount(account); try await store.clearAccountDeletion(id: accountID); try await store.saveMailbox(inbox)
         selectedAccountID = accountID; selectedMailboxID = inbox.id
         isSyncStatusBannerDismissed = false
         syncMessage = "已添加邮箱：\(account.displayName)，正在全量同步全部邮箱文件夹…"

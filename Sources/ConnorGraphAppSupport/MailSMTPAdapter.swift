@@ -37,7 +37,7 @@ public struct MailSMTPSender: Sendable {
                 do {
                     let client = BlockingSMTPClient(host: outgoing.host, port: outgoing.port, security: outgoing.security)
                     try client.send(
-                        username: binding.accountName.components(separatedBy: ":").last ?? sender.email,
+                        username: account.loginUsername,
                         password: credential,
                         from: sender,
                         to: to,

@@ -80,7 +80,7 @@ public struct AppSessionGovernanceConfig: Codable, Sendable, Equatable {
             if copy.updatedAt == 0, copy.name != builtIn.name {
                 copy.name = builtIn.name
             }
-            if copy.systemImage == "tag", builtIn.systemImage != "tag" {
+            if copy.updatedAt == 0, copy.systemImage == "tag", builtIn.systemImage != "tag" {
                 copy.systemImage = builtIn.systemImage
             }
             return copy
@@ -116,6 +116,21 @@ public struct AppSessionGovernanceConfigRepository: Sendable {
     }
 
     public func save(_ config: AppSessionGovernanceConfig) throws {
+        try config.validate()
+        let deletions = AccountSyncLocalDeletions(directory: configDirectory)
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            let data = try Data(contentsOf: configURL)
+            let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+            let previous = try decoder.decode(AppSessionGovernanceConfig.self, from: data)
+            for label in previous.labels where !config.labels.contains(where: { $0.id == label.id }) {
+                try deletions.record(collection: "governance_labels", id: label.id)
+            }
+        }
+        for label in config.labels { try deletions.clear("governance_labels|\(label.id)") }
+        try saveSynced(config)
+    }
+
+    public func saveSynced(_ config: AppSessionGovernanceConfig) throws {
         try config.validate()
         try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
         let encoder = JSONEncoder()

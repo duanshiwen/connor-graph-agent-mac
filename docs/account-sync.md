@@ -6,7 +6,7 @@
 
 Mac、Android、Windows、Linux 登录同一账号后，先 pull/apply，再 project/push；运行期间约每 45 秒兜底同步，Mac/Android 另有 WebSocket 唤醒。载荷由密码和用户 ID 经 PBKDF2-SHA256（210,000 次）派生密钥，以 AES-256-GCM 加密；同步元数据（集合、记录 ID、版本等）不在密文内。
 
-四端共有范围：会话与笔记、会话标签定义、RSS 订阅源、邮箱服务器配置、用户技能包、人格、用户基本偏好、AI 连接定义及 API Key，以及 memory_l0 / memory_l0_spans / memory_l1 / memory_l2 / memory_l2_nodes / memory_l3 / memory_l4_entities / memory_l4_relations。Mac 额外保留 macos_runtime 设置；它不属于四端共有设置。
+四端共有范围：会话与笔记、会话标签定义、RSS 订阅源、邮箱服务器配置、用户技能包、人格、用户基本偏好、AI 连接定义及 API Key，以及 memory_l0 / memory_l0_spans / memory_l1 / memory_l2 / memory_l2_nodes / memory_l3 / memory_l4_entities / memory_l4_relations。设备运行时设置（主题、代理、权限、工作区等）在四端均保留本机；Mac 不再上传或应用历史 macos_runtime 记录。settings 只接受 personality、user_preferences、ai_connections 三条共享记录。
 
 邮箱密码、OAuth 访问/刷新令牌、客户端 secret 不进入邮箱配置同步；各端独立授权。AI 连接中的普通 API Key 在 E2EE 信封内同步，Codex/Copilot OAuth 凭据不同步。邮件正文、日历事件、RSS 文章及阅读状态、附件文件、工作区文件、浏览器状态、定时/事件任务不进入通用账号同步；真人 IM 走独立链路。Base 的导入导出/同步格式尚未接入通用账号同步。
 
@@ -20,7 +20,29 @@ Android 独立笔记使用笔记 ID 作为会话 ID，已关联的笔记使用�
 
 集合为 `mail_accounts`。共享字段：id、displayName、address、username、imapHost、imapPort、imapSecurity、smtpHost、smtpPort、smtpSecurity、createdAt、updatedAt。时间戳为 epoch 毫秒，安全模式为 `ssl`、`starttls`、`none`。STARTTLS 必须升级成功后才发送凭据。
 
-配置按 updatedAt 合并，保留本机凭据和认证状态；历史同地址不同 ID 的账户按较新记录合并。删除最后一个邮箱也传播；Windows/Linux 使用持久化删除队列，Mac/Android 从已同步基线与可用邮箱存储的差异生成 tombstone。单纯刷新本机 OAuth 凭据不应让共享服务器配置变新。
+配置按 updatedAt 合并，保留本机凭据和认证状态；历史同地址不同 ID 的账户按较新记录合并。删除最后一个邮箱也传播；四端的本地删除入口均先持久化删除标记，收到服务端确认后清理。Mac SQLite 邮箱存储使用独立删除表，远端删除与本地删除入口分开；Android 邮箱/标签/技能删除使用同步协调器持久标记。单纯刷新本机 OAuth 凭据不应让共享服务器配置变新。
+
+## 共享字段与合并规则
+
+| 项目 | 四端共同传输与保留的内容 |
+| --- | --- |
+| 会话与笔记 | id/title/kind/status/archived/labels/createdAt/updatedAt，以及 user/assistant 消息；status 使用 in_progress、needs_review 等下划线值，归档标记独立于状态保存 |
+| 标签定义 | id/name/colorName/systemImage/updatedAt；编辑及删除按最后设置时间合并；Windows 原始颜色名与本地显示用十六进制颜色分别保存 |
+| RSS 订阅源 | id/feedURL/title/createdAt/updatedAt；兼容旧 Android feedUrl 和 null 标题；已有源也更新，抓取状态不改变配置时间 |
+| 邮箱 | 见上方 mail_accounts 字段；username 是服务器登录名，绝不是本机凭据库索引；Mac 单独保存这两项并在 IMAP/SMTP 使用共享登录名 |
+| 用户基本偏好 | displayName/timezone/preferredLanguage/city/country/genderIdentity/birthDate/notes/updatedAt；空字符串可以清空，旧载荷缺失 city/country 时保留本机值 |
+| 人格 | 人格定义与最后设置时间；已设置后的空人格也投影，以传播清空操作 |
+| AI 连接 | id/name/protocol/baseUrl/models/defaultModel/apiKey/authMode；整条连接记录及 defaultConnectionId 使用共同 updatedAt；Windows/Linux 完整保留多模型目录及远端时间，Mac 接受有正时间戳的空列表 |
+| 用户技能包 | id/title/category/summary/instructionsJson/templatesJson/enabled/createdAt/updatedAt；Windows/Mac/Linux 用本机 sidecar 保留远端不透明 ID、模板与分类，Markdown 落盘不改变共享身份或时间 |
+| Memory OS | memory_l0、memory_l0_spans、memory_l1、memory_l2、memory_l2_nodes、memory_l3、memory_l4_entities、memory_l4_relations；L1 是提取工作队列，Mac 已处理的本机保留行不作为待处理事件重新发布 |
+
+AI OAuth 的访问/刷新令牌始终留在本机；三种普通连接协议和 ChatGPT Codex 定义可供 Android 使用，其他协议定义在 Android 加密保留并原样回传。各端对本机已授权、远端列表未列出的订阅连接采用保留策略；因此共享连接列表清空不等于撤销其他设备的 OAuth 登录。none/空 API Key 清除已有普通连接密钥，不能意外留下旧密钥。
+
+Mac 用户基本偏好使用独立版本时间；修改主题、代理或其他本机设置不会使旧偏好变成更新版本。四端从未配置过的空 AI 连接（时间戳 0）不覆盖其他设备；用户主动保存后产生的空列表参与同步。
+
+RSS、邮箱、标签和技能的显式删除标记不依赖该集合仍有其他记录，也覆盖上传超时尚未确认的情况。重订阅、重新添加或重新导入是新的本地意图，应取消相应待删除标记。远端驱动的删除不产生新的本地删除意图。历史基线差异检测保留为空集合的数据丢失防护，不能代替显式删除入口。
+
+四端共用 account-sync-config-v1.json 样例，覆盖历史 RSS 地址拼写、空标题、标签颜色/图标/版本、多模型连接及清空、独立归档状态、不同于邮箱地址的登录名，以及含路径字符的技能 ID 和模板；样例副本 SHA-256 必须一致。
 
 ## 超大会话传输 v1
 
@@ -36,7 +58,7 @@ semanticHash 用于避免各端 JSON 编码和 Mac 存储时间精度差异导�
 
 ## 升级与验证
 
-四端需一起升级：旧客户端无法解码分块清单，可能显示接收重试。升级修复版本为 2，会重新请求历史快照，补收此前被过滤的邮箱和独立笔记记录；后端不支持快照时仍可增量同步，但历史补偿不可用。上线前需确认后端允许 sessions 中的透明加密载荷及上述记录 ID，并进行四端安装包联调。
+四端需一起升级：旧客户端无法解码分块清单，可能显示接收重试。升级修复版本为 3，会重新请求历史快照，补收此前被过滤的邮箱和独立笔记记录；后端不支持快照时仍可增量同步，但历史补偿不可用。上线前需确认后端允许 sessions 中的透明加密载荷及上述记录 ID，并进行四端安装包联调。
 
 共享测试向量为 `session-chunks-v1.json`，覆盖中文、emoji、转义字符和毫秒时间；四仓副本应一致。各端测试另覆盖大消息、缺块、乱序、状态序列化恢复及校验失败。运行结果以本次实际测试报告为准，不将静态检查视为真机验证。
 
@@ -44,7 +66,7 @@ semanticHash 用于避免各端 JSON 编码和 Mac 存储时间精度差异导�
 
 后端 main/c6632fb 的同账号不同记录可乱序提交：自增 cursor=3 先提交并被客户端消费，cursor=2 后提交后将被 cursor>3 永久跳过。后端本次修复在分配游标前取得账号级事务锁，保持至提交；所有服务实例需更新。修复前并发回归稳定失败，修复后通过；四端各有本地对话、三轮新增及单条分页的持续拉取也有回归覆盖。
 
-客户端接收不再依赖本地投影/上传成功：投影失败仍尝试接收，已接收记录先持久化并刷新界面，上传失败保留错误和重试状态。Linux 后台接收新增 watch 通知到 GTK 会话列表；Windows 发出 Changed；Mac 通过 onReceived 刷新；Android 在上传前运行接收后的刷新。快照修复版本 2 用于补回此前已被跳过的记录，不清空本地独有对话。
+客户端接收不再依赖本地投影/上传成功：投影失败仍尝试接收，已接收记录先持久化并刷新界面，上传失败保留错误和重试状态。Linux 后台接收新增 watch 通知到 GTK 会话列表；Windows 发出 Changed；Mac 通过 onReceived 刷新；Android 在上传前运行接收后的刷新。快照修复版本 3 用于补回此前已被跳过的记录，不清空本地独有对话。
 
 ## 真实后端协议与本次验证（2026-10-27）
 
@@ -55,9 +77,9 @@ semanticHash 用于避免各端 JSON 编码和 Mac 存储时间精度差异导�
 | 范围 | 本机验证结果 |
 | --- | --- |
 | 后端 | 隔离 PostgreSQL 17：16 项顶层同步/接口/租约/WebSocket 测试通过，旧版并发漏收测试失败、修复后通过 |
-| Windows | 54 项同步相关测试通过，包含真实登录协议、历史笔记编辑/删除、缺块/乱序分页、离线消息合并和重新上传 |
-| Android | app 模块 161 项单元测试通过，无跳过；包含笔记适配、共享向量和分块恢复 |
-| Linux | 15 项协调器、3 项分块、2 项邮箱测试通过；GTK 桌面 cargo check 通过 |
-| Mac | 6 个变更 Swift 文件语法解析通过；共享向量副本一致；新增原生测试尚未在 macOS 执行 |
+| Windows | 55 项同步相关测试通过，另有 4 项 RSS 运行时测试通过，Windows 桌面项目构建通过，包含真实登录协议、历史笔记编辑/删除、缺块/乱序分页、离线消息合并和重新上传 |
+| Android | app 模块 165 项单元测试通过，无跳过；包含笔记适配、共享向量和分块恢复 |
+| Linux | 16 项协调器、3 项分块、2 项邮箱测试通过；GTK 桌面 cargo check 通过 |
+| Mac | 19 个变更 Swift 文件语法解析通过；共享向量副本一致；新增原生测试尚未在 macOS 执行 |
 
-这些结果不等同于四端真机联调或线上修复已经生效。改动尚未部署/发布，Mac 仍需原生编译验收。分块格式需要四端一起升级，服务端各实例需同时更新提交顺序修复；客户端升级后以修复版本 2 重新读取快照补偿历史漏收。
+这些结果不等同于四端真机联调或线上修复已经生效。代码已提交推送；改动尚未部署/发布，Mac 仍需原生编译验收。分块格式需要四端一起升级，服务端各实例需同时更新提交顺序修复；客户端升级后以修复版本 3 重新读取快照补偿历史漏收。

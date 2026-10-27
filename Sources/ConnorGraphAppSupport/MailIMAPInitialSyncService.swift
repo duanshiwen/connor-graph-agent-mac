@@ -243,7 +243,7 @@ public struct MailIMAPInitialSyncService: Sendable {
                 )
             }
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
-            let loginUsernames = Self.candidateUsernames(email: email, provider: originalAccount.provider)
+            let loginUsernames = Self.candidateUsernames(email: originalAccount.loginUsername, provider: originalAccount.provider)
             let accountID = originalAccount.id
             let onBatchWithDetail: (@Sendable (RemoteIMAPMailbox, [BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
                 return { @Sendable (remoteMailbox: RemoteIMAPMailbox, batch: [BlockingIMAPClient.FetchedMessage]) in
@@ -349,7 +349,7 @@ public struct MailIMAPInitialSyncService: Sendable {
                 )
             }
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
-            let loginUsernames = Self.candidateUsernames(email: email, provider: originalAccount.provider)
+            let loginUsernames = Self.candidateUsernames(email: originalAccount.loginUsername, provider: originalAccount.provider)
             let accountID = originalAccount.id
             let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
             let onBatchWithDetail: (@Sendable ([BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
@@ -451,7 +451,7 @@ public struct MailIMAPInitialSyncService: Sendable {
                 )
             }
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
-            let loginUsernames = Self.candidateUsernames(email: email, provider: originalAccount.provider)
+            let loginUsernames = Self.candidateUsernames(email: originalAccount.loginUsername, provider: originalAccount.provider)
             let accountID = originalAccount.id
             let onBatchWithDetail: (@Sendable (RemoteIMAPMailbox, [BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
                 return { @Sendable (remoteMailbox: RemoteIMAPMailbox, batch: [BlockingIMAPClient.FetchedMessage]) in
@@ -551,7 +551,7 @@ public struct MailIMAPInitialSyncService: Sendable {
         }
 
         let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
-        let loginUsernames = Self.candidateUsernames(email: email, provider: account.provider)
+        let loginUsernames = Self.candidateUsernames(email: account.loginUsername, provider: account.provider)
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MailMessageDetail?, Error>) in
             DispatchQueue.global(qos: .utility).async {
@@ -592,7 +592,7 @@ public struct MailIMAPInitialSyncService: Sendable {
             throw BlockingIMAPClient.IMAPError.protocolError("缺少邮箱地址")
         }
         let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
-        let loginUsernames = Self.candidateUsernames(email: email, provider: account.provider)
+        let loginUsernames = Self.candidateUsernames(email: account.loginUsername, provider: account.provider)
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[String], Error>) in
             DispatchQueue.global(qos: .utility).async {
                 do {

@@ -1,0 +1,100 @@
+{
+  "rss": {
+    "id": "feed",
+    "feedURL": "https://example.test/feed",
+    "title": "",
+    "createdAt": 1000,
+    "updatedAt": 2000
+  },
+  "legacyRss": {
+    "id": "legacy",
+    "feedUrl": "https://example.test/old",
+    "title": null,
+    "createdAt": 1000,
+    "updatedAt": 2000
+  },
+  "label": {
+    "id": "tag",
+    "name": "Shared",
+    "colorName": "orange",
+    "systemImage": "star.fill",
+    "updatedAt": 2000
+  },
+  "connections": {
+    "connections": [
+      {
+        "id": "ai",
+        "name": "Shared AI",
+        "protocol": "openai_chat",
+        "baseUrl": "https://example.test/v1",
+        "models": [
+          "model-a",
+          "model-b"
+        ],
+        "defaultModel": "model-b",
+        "apiKey": "",
+        "authMode": "none",
+        "updatedAt": 2000
+      }
+    ],
+    "defaultConnectionId": "ai",
+    "updatedAt": 2000
+  },
+  "preferences": {
+    "displayName": "",
+    "timezone": "UTC",
+    "preferredLanguage": "en",
+    "city": "",
+    "country": "",
+    "genderIdentity": "",
+    "birthDate": "",
+    "notes": "",
+    "updatedAt": 2000
+  },
+  "session": {
+    "id": "session",
+    "title": "Archived done note",
+    "kind": "note",
+    "status": "done",
+    "archived": true,
+    "labels": [
+      "tag"
+    ],
+    "messages": [
+      {
+        "id": "body",
+        "role": "user",
+        "content": "shared note",
+        "createdAt": 1000,
+        "status": "complete"
+      }
+    ],
+    "createdAt": 1000,
+    "updatedAt": 2000
+  },
+  "mail": {
+    "id": "mail",
+    "displayName": "",
+    "address": "person@example.test",
+    "username": "custom-login",
+    "imapHost": "imap.example.test",
+    "imapPort": 993,
+    "imapSecurity": "ssl",
+    "smtpHost": "smtp.example.test",
+    "smtpPort": 587,
+    "smtpSecurity": "starttls",
+    "createdAt": 1000,
+    "updatedAt": 2000
+  },
+  "skill": {
+    "id": "user:/Users/peer/skills/shared",
+    "title": "Shared Skill",
+    "category": "custom",
+    "summary": "Shared skill metadata",
+    "instructionsJson": "[\"First instruction\",\"Second instruction\"]",
+    "templatesJson": "[{\"name\":\"template\",\"content\":\"{{input}}\"}]",
+    "enabled": false,
+    "createdAt": 1000,
+    "updatedAt": 2000
+  }
+}

@@ -40,7 +40,7 @@ public struct NetworkMailSentMessageRemoteAppender: MailSentMessageRemoteAppende
         guard let email = account.identities.first?.address.email, !email.isEmpty else {
             throw MailRuntimeError.unsupportedNetworkOperation("Missing mail identity address for remote Sent APPEND: \(account.id.rawValue)")
         }
-        let usernames = MailIMAPInitialSyncService.candidateUsernames(email: email, provider: account.provider)
+        let usernames = MailIMAPInitialSyncService.candidateUsernames(email: account.loginUsername, provider: account.provider)
         let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.global(qos: .utility).async {

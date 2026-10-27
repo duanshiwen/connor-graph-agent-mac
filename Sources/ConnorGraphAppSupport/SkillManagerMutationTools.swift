@@ -56,6 +56,7 @@ public struct SkillManagerMutationService: Sendable {
             slug: slug
         )
         _ = try parser.parse(markdown: markdown, slug: slug)
+        try clearPendingSkillDeletion(directory: directory)
         try markdown.write(to: skillURL, atomically: true, encoding: .utf8)
         return skillURL.path
     }
@@ -85,6 +86,7 @@ public struct SkillManagerMutationService: Sendable {
             slug: slug
         )
         _ = try parser.parse(markdown: markdown, slug: slug)
+        try clearPendingSkillDeletion(directory: directory)
         try markdown.write(to: skillURL, atomically: true, encoding: .utf8)
         return skillURL.path
     }
@@ -94,6 +96,9 @@ public struct SkillManagerMutationService: Sendable {
         try validateSlug(slug)
         let directory = try validatedUserSkillDirectory(slug: slug)
         guard FileManager.default.fileExists(atPath: directory.path) else { throw SkillManagerMutationToolError.missingSkill(slug) }
+        let existing = SkillPackageScanner.applicationDefault().scan(storagePaths: storagePaths).packages.first { $0.packagePath == directory.path }
+        let recordID = try existing.map { try SkillSyncStore.wire(package: $0).id } ?? "user:\(directory.path)"
+        try AccountSyncLocalDeletions(directory: storagePaths.configDirectory).record(collection: "skills", id: recordID)
         try FileManager.default.removeItem(at: directory)
     }
 
@@ -101,6 +106,12 @@ public struct SkillManagerMutationService: Sendable {
         let slug = normalizedSlug(rawSlug)
         try validateSlug(slug)
         return skillManifestURL(in: try validatedUserSkillDirectory(slug: slug))
+    }
+
+    private func clearPendingSkillDeletion(directory: URL) throws {
+        let existing = SkillPackageScanner.applicationDefault().scan(storagePaths: storagePaths).packages.first { $0.packagePath == directory.path }
+        let id = try existing.map { try SkillSyncStore.wire(package: $0).id } ?? "user:\(directory.path)"
+        try AccountSyncLocalDeletions(directory: storagePaths.configDirectory).clear("skills|\(id)")
     }
 
     private func userSkillDirectory(slug: String) -> URL {

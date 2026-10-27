@@ -7,6 +7,15 @@ public protocol MailSourceRepository: Sendable {
     func account(id: MailAccountID) async throws -> MailAccount?
     /// 删除账户配置（账号同步删除/本地删除共用；凭证由 credential store 另行清理）。
     func deleteAccount(id: MailAccountID) async throws
+    func pendingAccountDeletions() async throws -> [String:Int64]
+    func clearAccountDeletion(id: MailAccountID) async throws
+    func applyRemoteAccountDelete(id: MailAccountID) async throws
+}
+
+public extension MailSourceRepository {
+    func pendingAccountDeletions() async throws -> [String:Int64] { [:] }
+    func clearAccountDeletion(id: MailAccountID) async throws {}
+    func applyRemoteAccountDelete(id: MailAccountID) async throws { try await deleteAccount(id: id) }
 }
 
 /// Combined protocol for mail store operations used by the app runtime

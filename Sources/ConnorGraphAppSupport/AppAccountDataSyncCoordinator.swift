@@ -129,6 +129,19 @@ public struct SyncRSSSubscription: Codable, Sendable, Equatable {
     public var createdAt: Int64
     public var updatedAt: Int64
 
+    private enum CodingKeys: String, CodingKey { case id, feedURL, title, createdAt, updatedAt }
+    private enum LegacyKeys: String, CodingKey { case feedUrl }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        if let url = try c.decodeIfPresent(String.self, forKey: .feedURL) { feedURL = url }
+        else { feedURL = try decoder.container(keyedBy: LegacyKeys.self).decode(String.self, forKey: .feedUrl) }
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        createdAt = try c.decode(Int64.self, forKey: .createdAt)
+        updatedAt = try c.decode(Int64.self, forKey: .updatedAt)
+    }
+
     public init(_ source: RSSSource) {
         id = source.id.rawValue
         feedURL = source.feedURL.absoluteString
@@ -141,7 +154,7 @@ public struct SyncRSSSubscription: Codable, Sendable, Equatable {
     static func makeSource(_ wire: SyncRSSSubscription, local: RSSSource?) -> RSSSource {
         if var source = local {
             if let url = URL(string: wire.feedURL) { source.feedURL = url }
-            source.displayName = wire.title.isEmpty ? (source.feedURL.host ?? source.feedURL.absoluteString) : wire.title
+            source.displayName = wire.title
             source.createdAt = Date(timeIntervalSince1970: Double(wire.createdAt) / 1_000)
             source.updatedAt = Date(timeIntervalSince1970: Double(wire.updatedAt) / 1_000)
             return source
@@ -150,7 +163,7 @@ public struct SyncRSSSubscription: Codable, Sendable, Equatable {
         return RSSSource(
             id: RSSSourceID(rawValue: wire.id),
             feedURL: url,
-            displayName: wire.title.isEmpty ? (url.host ?? url.absoluteString) : wire.title,
+            displayName: wire.title,
             createdAt: Date(timeIntervalSince1970: Double(wire.createdAt) / 1_000),
             updatedAt: Date(timeIntervalSince1970: Double(wire.updatedAt) / 1_000)
         )
@@ -177,7 +190,7 @@ public struct SyncMailAccount: Codable, Sendable, Equatable {
         id = account.id.rawValue
         displayName = account.displayName
         address = account.identities.first?.address.email ?? ""
-        username = account.credentialBinding?.accountName ?? account.identities.first?.address.email ?? ""
+        username = account.loginUsername
         imapHost = account.incoming?.host ?? ""
         imapPort = account.incoming?.port ?? 0
         imapSecurity = Self.securityWire(account.incoming?.security)
@@ -190,7 +203,7 @@ public struct SyncMailAccount: Codable, Sendable, Equatable {
 
     /// 合并回 MailAccount：优先保留本机 provider/凭证绑定/健康度等字段，只覆盖共享字段。
     static func makeAccount(_ wire: SyncMailAccount, local: MailAccount?) -> MailAccount {
-        let displayName = wire.displayName.isEmpty ? wire.address : wire.displayName
+        let displayName = wire.displayName
         let identity = MailIdentity(
             id: MailIdentityID(rawValue: "identity-\(wire.id)"),
             displayName: displayName,
@@ -204,10 +217,8 @@ public struct SyncMailAccount: Codable, Sendable, Equatable {
         if !wire.smtpHost.isEmpty {
             outgoing = MailServerEndpoint(host: wire.smtpHost, port: wire.smtpPort, security: security(from: wire.smtpSecurity), protocolKind: .smtp)
         }
-        let binding = local?.credentialBinding ?? MailCredentialBinding(
-            credentialNamespace: AppMailCredentialStore.credentialNamespace,
-            accountName: wire.username.isEmpty ? wire.address.lowercased() : wire.username,
-            authMode: .password
+        let binding = local?.credentialBinding ?? AppMailCredentialStore.binding(
+            accountID: MailAccountID(rawValue: wire.id), email: wire.address, authMode: .password
         )
         return MailAccount(
             id: MailAccountID(rawValue: wire.id),
@@ -217,6 +228,7 @@ public struct SyncMailAccount: Codable, Sendable, Equatable {
             incoming: incoming,
             outgoing: outgoing,
             credentialBinding: binding,
+            username: wire.username,
             health: local?.health ?? MailAccountHealth(status: .unknown, summary: "Synced from account settings"),
             createdAt: Date(timeIntervalSince1970: Double(wire.createdAt) / 1_000),
             updatedAt: Date(timeIntervalSince1970: Double(wire.updatedAt) / 1_000)
@@ -432,7 +444,7 @@ public actor AppAccountDataSyncCoordinator {
     private func isSyncableRecord(_ collection: String, _ recordId: String) -> Bool {
         switch collection {
         case SyncCollection.sessions, "notes": return true
-        case SyncCollection.settings: return recordId == "macos_runtime" || recordId == "personality" || recordId == "user_preferences" || recordId == "ai_connections"
+        case SyncCollection.settings: return recordId == "personality" || recordId == "user_preferences" || recordId == "ai_connections"
         case SyncCollection.governanceLabels: return true
         case SyncCollection.rssSubscriptions: return true
         case SyncCollection.mailAccounts: return true
@@ -598,7 +610,7 @@ public actor AppAccountDataSyncCoordinator {
 
         // One upgrade repair reads current records, not hundreds of thousands of
         // obsolete log entries. Persist the page position to resume after a restart.
-        if state.repairVersion < 2 {
+        if state.repairVersion < 3 {
             do {
                 repeat {
                     let page = try await identity.syncSnapshot(afterID: state.snapshotAfterID)
@@ -609,7 +621,7 @@ public actor AppAccountDataSyncCoordinator {
                     hasMore = page.hasMore
                     if !hasMore {
                         state.cursor = max(state.cursor, state.snapshotCursor ?? 0)
-                        state.repairVersion = 2
+                        state.repairVersion = 3
                         didRepair = true
                         state.snapshotCursor = nil
                     }
@@ -751,6 +763,21 @@ public actor AppAccountDataSyncCoordinator {
             }
         }
 
+        if let mail {
+            for (id, deletedAt) in try await mail.pendingAccountDeletions() {
+                let key = recordKey("mail_accounts", id)
+                mutations.removeAll { $0.collection == "mail_accounts" && $0.recordId == id }
+                mutations.append(try ConnorSyncChange(collection: "mail_accounts", recordId: id, baseVersion: state.records[key]?.version ?? 0,
+                    payload: cipher.encrypt(jsonValue(SyncTombstone(updatedAt: deletedAt)), collection: "mail_accounts", recordID: id), deleted: true))
+            }
+        }
+        for (key, deletedAt) in try AccountSyncLocalDeletions(directory: settings.configDirectory).pending() {
+            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { continue }
+            mutations.removeAll { $0.collection == parts[0] && $0.recordId == parts[1] }
+            mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0,
+                payload: cipher.encrypt(jsonValue(SyncTombstone(updatedAt: deletedAt)), collection: parts[0], recordID: parts[1]), deleted: true))
+        }
         var batches: [[ConnorSyncChange]] = []; var batch: [ConnorSyncChange] = []; var batchBytes = 0
         for mutation in mutations {
             let size = try encoder.encode(mutation).count
@@ -772,6 +799,10 @@ public actor AppAccountDataSyncCoordinator {
                 let key = recordKey(mutation.collection, mutation.recordId)
                 state.records[key] = RecordState(version: pushResult.version ?? (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(clear.payload), deleted: mutation.deleted, encrypted: true)
                 state.dirtyKeys.remove(key)
+                if mutation.deleted {
+                    try AccountSyncLocalDeletions(directory: settings.configDirectory).clear(key)
+                    if mutation.collection == "mail_accounts" { try await mail?.clearAccountDeletion(id: MailAccountID(rawValue: mutation.recordId)) }
+                }
                 syncResult.pushedChangeCount += 1
                 if let sourceID = rssTombstoneKeys[recordKey(mutation.collection, mutation.recordId)] {
                     try? await rss?.clearPendingDelete(id: sourceID)
@@ -809,13 +840,9 @@ public actor AppAccountDataSyncCoordinator {
         values[recordKey("settings", "user_preferences")] = try jsonValue(
             SyncUserPreferences(
                 runtimeSettings.preferences,
-                updatedAtMillis: Int64(runtimeSettings.updatedAt.timeIntervalSince1970 * 1_000)
+                updatedAtMillis: runtimeSettings.userPreferencesUpdatedAt
             )
         )
-        var syncedSettings = runtimeSettings
-        // macos_runtime 排除个人偏好；个人偏好已由 user_preferences 独立同步。
-        syncedSettings.preferences = AgentRuntimePreferenceSettings()
-        values[recordKey("settings", "macos_runtime")] = try jsonValue(syncedSettings)
         if let memory {
             for provenance in try memory.listAllProvenanceObjects() {
                 values[recordKey(SyncCollection.memoryL0, provenance.id)] = try jsonValue(SyncL0Provenance(provenance: provenance))
@@ -919,13 +946,6 @@ public actor AppAccountDataSyncCoordinator {
                 _ = try sessions.saveSession(portable.merging(into: try sessions.loadSession(id: id)))
                 return .session(id)
             }
-        case ("settings", "macos_runtime") where !change.deleted:
-            var synced: AgentRuntimeSettings = try decode(change.payload)
-            let local = try settings.loadOrCreateDefault()
-            guard synced.updatedAt > local.updatedAt else { return nil }
-            synced.preferences = local.preferences
-            try settings.save(synced)
-            return .settings
         case ("settings", "personality"):
             let wire: SyncPersonality = try decode(change.payload)
             try settings.applySyncedPersonality(wire.connorPersonality(), revision: wire.revision ?? 0, updatedAtMillis: wire.updatedAt ?? 0)
@@ -936,10 +956,11 @@ public actor AppAccountDataSyncCoordinator {
             let wire: SyncUserPreferences = try decode(change.payload)
             let local = try settings.loadOrCreateDefault()
             let remoteMillis = wire.updatedAt
-            let localMillis = Int64(local.updatedAt.timeIntervalSince1970 * 1_000)
+            let localMillis = local.userPreferencesUpdatedAt
             if remoteMillis > localMillis {
                 var synced = local
                 synced.preferences = wire.applying(to: local.preferences)
+                synced.userPreferencesUpdatedAt = remoteMillis
                 try settings.saveSynced(synced)
             }
             return .settings
@@ -1016,6 +1037,7 @@ public actor AppAccountDataSyncCoordinator {
             try memory.withForeignKeysDisabled { try memory.upsert(entityStatement: wire.makeEntityStatement()) }
             return nil
         case ("skills", let id):
+            if !change.deleted, try AccountSyncLocalDeletions(directory: settings.configDirectory).pending()["skills|\(id)"] != nil { return nil }
             guard let skillStore else { return nil }
             if change.deleted {
                 let tombstone: SyncSkillTombstone = try decode(change.payload)
@@ -1032,6 +1054,7 @@ public actor AppAccountDataSyncCoordinator {
             }
             return nil
         case ("governance_labels", let id):
+            if !change.deleted, try AccountSyncLocalDeletions(directory: settings.configDirectory).pending()["governance_labels|\(id)"] != nil { return nil }
             guard let governance else { return nil }
             var config = try governance.loadOrCreateDefault()
             if change.deleted {
@@ -1040,7 +1063,7 @@ public actor AppAccountDataSyncCoordinator {
                 let local = config.labels.first { $0.id == id }
                 if tombstone.updatedAt > (local?.updatedAt ?? 0) {
                     config.labels.removeAll { $0.id == id }
-                    try governance.save(config)
+                    try governance.saveSynced(config)
                     return .governanceLabels
                 }
             } else {
@@ -1052,7 +1075,7 @@ public actor AppAccountDataSyncCoordinator {
                     } else {
                         config.labels.append(wire)
                     }
-                    try governance.save(config)
+                    try governance.saveSynced(config)
                     return .governanceLabels
                 }
             }
@@ -1091,13 +1114,14 @@ public actor AppAccountDataSyncCoordinator {
             return nil
         case ("mail_accounts", let id):
             guard let mail else { return nil }
+            if !change.deleted, try await mail.pendingAccountDeletions()[id] != nil { return nil }
             let accountID = MailAccountID(rawValue: id)
             if change.deleted {
                 // 删除按“最新操作优先”：远端删除时间比本地账户时间新才删除。
                 let tombstone: SyncTombstone = try decode(change.payload)
                 let local = try await mail.account(id: accountID)
                 if tombstone.updatedAt > Int64((local?.updatedAt ?? .distantPast).timeIntervalSince1970 * 1_000) {
-                    try await mail.deleteAccount(id: accountID)
+                    try await mail.applyRemoteAccountDelete(id: accountID)
                     return .mailAccounts
                 }
             } else {
@@ -1107,7 +1131,7 @@ public actor AppAccountDataSyncCoordinator {
                 let accounts = try await mail.listAccounts()
                 if let byAddress = accounts.first(where: { ($0.identities.first?.address.email ?? "").lowercased() == wire.address.lowercased() && $0.id.rawValue != id }) {
                     if wire.updatedAt > Int64(byAddress.updatedAt.timeIntervalSince1970 * 1_000) {
-                        try await mail.deleteAccount(id: byAddress.id)
+                        try await mail.applyRemoteAccountDelete(id: byAddress.id)
                         try await mail.saveAccount(SyncMailAccount.makeAccount(wire, local: byAddress))
                     }
                     return .mailAccounts

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ConnorGraphCore
 
 /// 技能同步存储适配：扫描用户级技能包、落盘/更新、按 tombstone 删除。
@@ -13,9 +14,9 @@ public struct SkillSyncStore: @unchecked Sendable {
     }
 
     public func listUserPacks() throws -> [SyncSkillPack] {
-        return scanner.scan(storagePaths: storagePaths).packages
+        return try scanner.scan(storagePaths: storagePaths).packages
             .filter { $0.sourceTier == .user }
-            .map(SyncSkillPack.init(package:))
+            .map { try Self.wire(package: $0) }
     }
 
     public func pack(id: String) throws -> SyncSkillPack? {
@@ -25,20 +26,39 @@ public struct SkillSyncStore: @unchecked Sendable {
     /// 应用远端技能包：同 id 已存在则更新其目录，否则按 slug 新建目录并写 SKILL.md。
     public func apply(_ pack: SyncSkillPack) throws {
         let snapshot = scanner.scan(storagePaths: storagePaths)
-        let existing = snapshot.packages.first { $0.id.rawValue == pack.id }
+        let existing = try snapshot.packages.filter { $0.sourceTier == .user }.first { try Self.wire(package: $0).id == pack.id }
         let directory: URL
         if let existing {
             directory = URL(fileURLWithPath: existing.packagePath)
         } else {
-            directory = storagePaths.skillsDirectory.appendingPathComponent(Self.slugify(pack.id), isDirectory: true)
+            directory = storagePaths.skillsDirectory.appendingPathComponent("synced-" + String(Self.hash(Data(pack.id.utf8)).prefix(32)), isDirectory: true)
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try Self.skillMarkdown(pack).write(to: directory.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        let markdown = Self.skillMarkdown(pack)
+        try markdown.write(to: directory.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        try JSONEncoder().encode(Metadata(wire: pack, markdownHash: Self.hash(Data(markdown.utf8))))
+            .write(to: directory.appendingPathComponent(".connor-sync.json"), options: .atomic)
     }
 
     public func delete(id: String) throws {
-        guard let existing = scanner.scan(storagePaths: storagePaths).packages.first(where: { $0.id.rawValue == id }) else { return }
+        guard let existing = try scanner.scan(storagePaths: storagePaths).packages.filter { $0.sourceTier == .user }.first(where: { try Self.wire(package: $0).id == id }) else { return }
         try FileManager.default.removeItem(at: URL(fileURLWithPath: existing.packagePath))
+    }
+
+    private struct Metadata: Codable { var wire: SyncSkillPack; var markdownHash: String }
+    private static func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+    static func wire(package: SkillPackage) throws -> SyncSkillPack {
+        let directory = URL(fileURLWithPath: package.packagePath)
+        let metadataURL = directory.appendingPathComponent(".connor-sync.json")
+        var current = SyncSkillPack(package: package)
+        guard FileManager.default.fileExists(atPath: metadataURL.path) else { return current }
+        let metadata = try JSONDecoder().decode(Metadata.self, from: Data(contentsOf: metadataURL))
+        if try hash(Data(contentsOf: directory.appendingPathComponent("SKILL.md"))) == metadata.markdownHash { return metadata.wire }
+        current.id = metadata.wire.id
+        current.createdAt = metadata.wire.createdAt
+        current.category = metadata.wire.category
+        current.templatesJson = metadata.wire.templatesJson
+        return current
     }
 
     private static func slugify(_ value: String) -> String {
