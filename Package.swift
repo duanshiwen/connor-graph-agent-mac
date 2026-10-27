@@ -97,7 +97,7 @@ let package = Package(
         .testTarget(name: "ConnorGraphSearchTests", dependencies: ["ConnorGraphSearch"]),
         .testTarget(name: "ConnorGraphAgentTests", dependencies: ["ConnorGraphAgent"]),
         .testTarget(name: "ConnorGraphAgentMacTests", dependencies: ["ConnorGraphAgentMac"]),
-        .testTarget(name: "ConnorGraphAppSupportTests", dependencies: ["ConnorGraphAppSupport"], resources: [.copy("Fixtures/LegacyOffice")]),
+        .testTarget(name: "ConnorGraphAppSupportTests", dependencies: ["ConnorGraphAppSupport"], resources: [.copy("Fixtures/LegacyOffice"), .copy("Fixtures/SessionSync")]),
         .testTarget(name: "ConnorGraphBaseTests",
                     dependencies: ["ConnorGraphBase"],
                     resources: [.copy("Golden"), .copy("GoldenSync")])

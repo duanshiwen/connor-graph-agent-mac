@@ -1,0 +1,47 @@
+{
+  "session": {
+    "archived": false,
+    "createdAt": 1234,
+    "id": "session-v1",
+    "kind": "note",
+    "labels": [
+      "a",
+      "z"
+    ],
+    "messages": [
+      {
+        "content": "中文 😀 / \"quoted\"\nline",
+        "createdAt": 2345,
+        "id": "m1",
+        "role": "user",
+        "status": "complete"
+      }
+    ],
+    "status": "todo",
+    "title": "共享笔记",
+    "updatedAt": 3456
+  },
+  "records": {
+    "csp_7eee52bad1bd9d56b856306263c577e4203b42d74917687d": {
+      "_connorSessionChunk": {
+        "v": 1,
+        "sessionId": "session-v1",
+        "sha256": "2eb4317b312519cd19799502db7602190d110c302d27df11d5e5d3fd9afcdc09",
+        "index": 0,
+        "data": "eyJhcmNoaXZlZCI6ZmFsc2UsImNyZWF0ZWRBdCI6MTIzNCwiaWQiOiJzZXNzaW9uLXYxIiwia2luZCI6Im5vdGUiLCJsYWJlbHMiOlsiYSIsInoiXSwibWVzc2FnZXMiOlt7ImNvbnRlbnQiOiLkuK3mlocg8J+YgCAvIFwicXVvdGVkXCJcbmxpbmUiLCJjcmVhdGVkQXQiOjIzNDUsImlkIjoibTEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImNvbXBsZXRlIn1dLCJzdGF0dXMiOiJ0b2RvIiwidGl0bGUiOiLlhbHkuqvnrJTorrAiLCJ1cGRhdGVkQXQiOjM0NTZ9"
+      }
+    },
+    "session-v1": {
+      "id": "session-v1",
+      "_connorSessionChunks": {
+        "v": 1,
+        "sha256": "2eb4317b312519cd19799502db7602190d110c302d27df11d5e5d3fd9afcdc09",
+        "semanticHash": "2f761a4d76a7b4c01805bcf3dbe1b6f927e3e6b16c1eda6e5249812e977320f3",
+        "byteLength": 261,
+        "parts": [
+          "csp_7eee52bad1bd9d56b856306263c577e4203b42d74917687d"
+        ]
+      }
+    }
+  }
+}

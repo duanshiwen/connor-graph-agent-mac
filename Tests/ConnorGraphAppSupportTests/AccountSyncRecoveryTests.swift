@@ -6,6 +6,30 @@ import ConnorGraphStore
 
 @Suite("Account sync recovery", .serialized)
 struct AccountSyncRecoveryTests {
+    @Test @MainActor func receivedDialogueIsVisibleEvenWhenLocalUploadFails() async throws {
+        let fixture = try await Fixture(remote: [change(session("remote", messageID: "remote-message", at: 2))], failPush: true)
+        defer { fixture.cleanUp() }
+        _ = try fixture.sessions.saveSession(session("local", messageID: "local-message", at: 1))
+        let observation = ReceiveObservation()
+        let coordinator = fixture.coordinator(onReceived: { result in await observation.record(result) })
+        var uploadFailed = false
+        do { _ = try await coordinator.reconcile() } catch { uploadFailed = true }
+        #expect(uploadFailed)
+        #expect(try fixture.sessions.loadSession(id: "local") != nil)
+        #expect(try fixture.sessions.loadSession(id: "remote") != nil)
+        #expect(observation.received.contains("remote"))
+    }
+
+    @Test @MainActor func portableNotesRetainTheirKindAndLegacyPayloadsDoNotDemoteExistingNotes() throws {
+        var note = session("note", messageID: "body", at: 1)
+        note.governance.kind = .note
+        let wire = ConnorPortableSession(note)
+        #expect(wire.kind == "note")
+        #expect(wire.merging(into: nil).governance.kind == .note)
+        var legacy = wire; legacy.kind = nil
+        #expect(legacy.merging(into: note).governance.kind == .note)
+    }
+
     @Test @MainActor func offlineMessagesSurvivePullAndAreUploaded() async throws {
         let local = session("shared", messageID: "local", at: 2)
         let remote = session("shared", messageID: "remote", at: 1)
@@ -123,7 +147,7 @@ struct AccountSyncRecoveryTests {
     let identity: AppUserIdentityStore
     let transport: RecoveryTransport
 
-    init(remote: [ConnorSyncChange], rejectSessionOnce: Bool = false) async throws {
+    init(remote: [ConnorSyncChange], rejectSessionOnce: Bool = false, failPush: Bool = false) async throws {
         defaults = UserDefaults(suiteName: suite)!
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let store = try SQLiteGraphKernelStore(path: root.appendingPathComponent("graph.sqlite").path)
@@ -132,12 +156,12 @@ struct AccountSyncRecoveryTests {
         credentials = AppConnorAccountCredentialStore(store: LocalEncryptedCredentialStore(rootDirectory: root.appendingPathComponent("credentials")))
         try credentials.saveTokens(.init(accessToken: "access", refreshToken: "refresh"))
         try credentials.saveSyncKey(Data(repeating: 7, count: 32), userID: "1")
-        transport = RecoveryTransport(remote: remote, rejectSessionOnce: rejectSessionOnce)
+        transport = RecoveryTransport(remote: remote, rejectSessionOnce: rejectSessionOnce, failPush: failPush)
         identity = AppUserIdentityStore(baseURL: URL(string: "http://127.0.0.1:1/")!, credentials: credentials, transport: transport, networkIsAvailable: { false }, syncDefaults: defaults)
         await identity.restoreSession()
     }
-    func coordinator() -> AppAccountDataSyncCoordinator {
-        AppAccountDataSyncCoordinator(sessions: sessions, settings: AppRuntimeSettingsRepository(configDirectory: root.appendingPathComponent("config")), memory: nil, identity: identity, defaults: UserDefaults(suiteName: suite)!)
+    func coordinator(onReceived: (@Sendable (AppAccountDataSyncResult) async -> Void)? = nil) -> AppAccountDataSyncCoordinator {
+        AppAccountDataSyncCoordinator(sessions: sessions, settings: AppRuntimeSettingsRepository(configDirectory: root.appendingPathComponent("config")), memory: nil, identity: identity, defaults: UserDefaults(suiteName: suite)!, onReceived: onReceived)
     }
     func cleanUp() {
         defaults.removePersistentDomain(forName: suite)
@@ -148,11 +172,12 @@ struct AccountSyncRecoveryTests {
 private actor RecoveryTransport: ConnorBackendHTTPTransport {
     let remote: [ConnorSyncChange]
     var rejectSessionOnce: Bool
+    let failPush: Bool
     var snapshotRequests = 0
     var pushedSessions: [ConnorPortableSession] = []
     var pushedSessionDeletes: [String] = []
     var sessionUploadAttempts = 0
-    init(remote: [ConnorSyncChange], rejectSessionOnce: Bool) { self.remote = remote; self.rejectSessionOnce = rejectSessionOnce }
+    init(remote: [ConnorSyncChange], rejectSessionOnce: Bool, failPush: Bool = false) { self.remote = remote; self.rejectSessionOnce = rejectSessionOnce; self.failPush = failPush }
 
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         let path = request.url!.path
@@ -167,6 +192,7 @@ private actor RecoveryTransport: ConnorBackendHTTPTransport {
         } else if path.hasSuffix("/pull") {
             payload = ["changes": [], "nextCursor": 77, "hasMore": false]
         } else if path.hasSuffix("/push") {
+            if failPush { return (Data("{}".utf8), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!) }
             let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
             let changes = try JSONDecoder().decode([ConnorSyncChange].self, from: JSONSerialization.data(withJSONObject: body["changes"]!))
             let cipher = try AccountSyncPayloadCipher(keyData: Data(repeating: 7, count: 32))
@@ -191,4 +217,9 @@ private actor RecoveryTransport: ConnorBackendHTTPTransport {
         }
         return (try JSONSerialization.data(withJSONObject: ["code": 0, "data": payload]), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
+}
+
+@MainActor private final class ReceiveObservation {
+    var received: Set<String> = []
+    func record(_ result: AppAccountDataSyncResult) { received.formUnion(result.appliedSessionIDs) }
 }

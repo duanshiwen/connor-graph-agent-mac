@@ -4110,33 +4110,8 @@ extension AppRuntimeLifecycle {
         )
     }
 
-    func syncAccountData(using identityStore: AppUserIdentityStore) async throws {
-        guard let chatSessionRepository, let storagePaths else {
-            throw NSError(domain: "ConnorAccountSync", code: 2, userInfo: [NSLocalizedDescriptionKey: "本地数据尚未准备完成，同步将自动重试。"])
-        }
-        let coordinator = AppAccountDataSyncCoordinator(
-            sessions: chatSessionRepository,
-            settings: AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory),
-            governance: AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory),
-            memory: memoryOSStore,
-            skillStore: SkillSyncStore(storagePaths: storagePaths),
-            rss: rssFeatureModel.agentRuntime.repository,
-            mail: mailFeatureModel.sourceRepository,
-            llm: llmSettingsRepository,
-            identity: identityStore
-        )
-        // 消费本机「好友并入/解绑」动作：写入或清除 L4 实体的 connor_friend_* 元数据，
-        // 让本轮 reconcile 的投影把它上推给安卓端。动作驱动，不做全量镜像，避免与
-        // 安卓端的解绑互相“打架”（Mac 每轮把本地绑定写回、覆盖安卓刚清除的解绑）。
-        await projectPendingFriendBindingActions()
-        let syncTask = Task.detached(priority: .utility) {
-            try await coordinator.reconcile()
-        }
-        let result = try await withTaskCancellationHandler {
-            try await syncTask.value
-        } onCancel: {
-            syncTask.cancel()
-        }
+    private func applyReceivedAccountSync(_ result: AppAccountDataSyncResult) async {
+        guard let storagePaths else { return }
         if result.settingsChanged { loadRuntimeSettings() }
         if result.governanceLabelsChanged,
            let config = try? AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory).loadOrCreateDefault() {
@@ -4151,6 +4126,36 @@ extension AppRuntimeLifecycle {
         if result.sessionsChanged {
             scheduleChatSessionListRefresh(reason: "account-sync")
             chatSessionCoordinator.refreshSelectedSessionIfChanged(sessionIDs: result.appliedSessionIDs)
+        }
+    }
+
+    func syncAccountData(using identityStore: AppUserIdentityStore) async throws {
+        guard let chatSessionRepository, let storagePaths else {
+            throw NSError(domain: "ConnorAccountSync", code: 2, userInfo: [NSLocalizedDescriptionKey: "本地数据尚未准备完成，同步将自动重试。"])
+        }
+        let coordinator = AppAccountDataSyncCoordinator(
+            sessions: chatSessionRepository,
+            settings: AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory),
+            governance: AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory),
+            memory: memoryOSStore,
+            skillStore: SkillSyncStore(storagePaths: storagePaths),
+            rss: rssFeatureModel.agentRuntime.repository,
+            mail: mailFeatureModel.sourceRepository,
+            llm: llmSettingsRepository,
+            identity: identityStore,
+            onReceived: { [weak self] result in await self?.applyReceivedAccountSync(result) }
+        )
+        // 消费本机「好友并入/解绑」动作：写入或清除 L4 实体的 connor_friend_* 元数据，
+        // 让本轮 reconcile 的投影把它上推给安卓端。动作驱动，不做全量镜像，避免与
+        // 安卓端的解绑互相“打架”（Mac 每轮把本地绑定写回、覆盖安卓刚清除的解绑）。
+        await projectPendingFriendBindingActions()
+        let syncTask = Task.detached(priority: .utility) {
+            try await coordinator.reconcile()
+        }
+        let result = try await withTaskCancellationHandler {
+            try await syncTask.value
+        } onCancel: {
+            syncTask.cancel()
         }
         // 回放跨端「好友并入人物」的合并：安卓端把好友写入人物 L4 实体的 metadata
         // （connor_friend_* 键）随 memory_l4_entities 同步过来，本机据此把好友重新绑定到
