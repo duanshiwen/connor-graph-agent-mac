@@ -41,6 +41,8 @@ final class MailFeatureModel {
             reloadForCurrentListFilters()
         }
     }
+    private(set) var sharedMessages: [SharedMailMessage] = []
+    @ObservationIgnored private let sharedMailStore: SharedMailStore?
     private(set) var filteredListMessages: [MailMessageSummary] = []
     private(set) var visibleListMessages: [MailMessageSummary] = []
     private(set) var visibleListMessageIDs: Set<MailMessageID> = []
@@ -76,6 +78,7 @@ final class MailFeatureModel {
     @ObservationIgnored private let bodyBackfillService: MailBodyBackfillService
     @ObservationIgnored private var isBodyBackfillRunning = false
     @ObservationIgnored private var bodyBackfillTask: Task<Void, Never>?
+    @ObservationIgnored private var cacheReloadTask: Task<Void, Never>?
     @ObservationIgnored private var cacheObserver: NSObjectProtocol?
     @ObservationIgnored private var reloadGeneration: UInt64 = 0
     @ObservationIgnored private let listPageSize = 50
@@ -95,18 +98,20 @@ final class MailFeatureModel {
         preferencesStore: (any MailPreferencesStore)?,
         credentialStore: AppMailCredentialStore = AppMailCredentialStore(),
         draftStore: (any MailDraftRepository)? = nil,
+        sharedMailStore: SharedMailStore? = nil,
         syncServiceFactory: @escaping SyncServiceFactory = { MailIMAPInitialSyncService(messageLimit: 0) },
         bodyBackfillService: MailBodyBackfillService = MailBodyBackfillService(),
         notificationCenter: NotificationCenter = .default
     ) {
         self.store = store
+        self.sharedMailStore = sharedMailStore
         self.preferencesStore = preferencesStore
         self.credentialStore = credentialStore
         self.draftStore = draftStore
         self.syncServiceFactory = syncServiceFactory
         self.bodyBackfillService = bodyBackfillService
         cacheObserver = notificationCenter.addObserver(forName: .connorMailCacheDidChange, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in await self?.reload() }
+            Task { @MainActor [weak self] in self?.enqueueCacheReload() }
         }
     }
 
@@ -117,10 +122,29 @@ final class MailFeatureModel {
     var sourceRepository: (any MailSourceRepository)? { store }
     var sharedStoreForTests: FileBackedMailSourceStore? { store }
 
+    private func enqueueCacheReload() {
+        cacheReloadTask?.cancel()
+        cacheReloadTask=Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: 150_000_000) } catch { return }
+            guard !Task.isCancelled else { return }
+            await self?.reload()
+        }
+    }
+
     func reload() async {
-        guard !isShutdown, let store else { return }
+        guard !isShutdown else { return }
         reloadGeneration &+= 1
         let generation = reloadGeneration
+        let replicas = sharedMailStore
+        do {
+            let values=try await Task.detached(priority: .utility) { try replicas?.visible() ?? [] }.value
+            guard generation==reloadGeneration, !isShutdown else { return }
+            sharedMessages=values
+        } catch {
+            guard generation==reloadGeneration else { return }
+            errorMessage="跨端邮件读取失败：\(error.localizedDescription)"
+        }
+        guard let store else { return }
         do {
             let requestedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             let requestedDirection = listDirectionFilter
@@ -368,6 +392,8 @@ final class MailFeatureModel {
         guard !isShutdown else { return }; isShutdown = true; reloadGeneration &+= 1
         if let cacheObserver { notificationCenter.removeObserver(cacheObserver); self.cacheObserver = nil }
         for task in ownedTasks.values { task.cancel() }; ownedTasks.removeAll()
+        cacheReloadTask?.cancel()
+        cacheReloadTask=nil
         bodyBackfillTask?.cancel()
         bodyBackfillTask = nil
         bodyDisplayCache.removeAll()

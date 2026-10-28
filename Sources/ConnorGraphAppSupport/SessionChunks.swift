@@ -12,9 +12,9 @@ enum SessionChunks {
     static func partID(_ id: String, _ hash: String, _ index: Int) -> String {
         "csp_" + String(digest(Data("\(id)\0\(hash)\0\(index)".utf8)).prefix(48))
     }
-    static func project(id: String, payload: ConnorJSONValue) throws -> [String: ConnorJSONValue] {
+    static func project(id: String, payload: ConnorJSONValue, mail: Bool = false) throws -> [String: ConnorJSONValue] {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let normalized = try normalize(payload)
+        let normalized = try (mail ? payload : normalize(payload))
         let bytes = try encoder.encode(normalized)
         if bytes.count <= inlineBytes { return [id: normalized] }
         let count = (bytes.count + partBytes - 1) / partBytes
@@ -32,7 +32,7 @@ enum SessionChunks {
             ])])
         }
         records[id] = .object(["id": .string(id), manifestKey: .object([
-            "v": .number(1), "sha256": .string(hash), "semanticHash": .string(try semanticHash(normalized)), "byteLength": .number(Double(bytes.count)), "parts": .array(ids)
+            "v": .number(1), "sha256": .string(hash), "semanticHash": .string(try mail ? SharedMailStore.semanticHash(normalized) : semanticHash(normalized)), "byteLength": .number(Double(bytes.count)), "parts": .array(ids)
         ])])
         return records
     }
@@ -58,7 +58,7 @@ enum SessionChunks {
         })
         return .object(canonical)
     }
-    static func resolve(id: String, payload: ConnorJSONValue, parts: inout [String: ConnorJSONValue]) throws -> ConnorJSONValue? {
+    static func resolve(id: String, payload: ConnorJSONValue, parts: inout [String: ConnorJSONValue], mail: Bool = false) throws -> ConnorJSONValue? {
         guard case .object(let root) = payload else { throw Failure.invalid }
         if case .object(let part) = root[partKey] {
             guard part["v"] == .number(1), case .string(let parent) = part["sessionId"],
@@ -87,7 +87,7 @@ enum SessionChunks {
         guard bytes.count == Int(rawLength), digest(bytes) == hash else { throw Failure.invalid }
         let session = try JSONDecoder().decode(ConnorJSONValue.self, from: bytes)
         guard case .object(let object) = session, object["id"] == .string(id) else { throw Failure.invalid }
-        guard manifest["semanticHash"] == .string(try semanticHash(session)) else { throw Failure.invalid }
+        guard manifest["semanticHash"] == .string(try mail ? SharedMailStore.semanticHash(session) : semanticHash(session)) else { throw Failure.invalid }
         return session
     }
     static func tag(_ payload: ConnorJSONValue) -> String? {

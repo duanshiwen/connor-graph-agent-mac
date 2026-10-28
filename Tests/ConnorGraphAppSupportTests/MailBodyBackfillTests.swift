@@ -90,6 +90,7 @@ struct MailBodyBackfillTests {
             batchBodyFetcher: { _, _, _ in [] }
         ) { _, _, detail in
             var copy = detail
+            copy.attachments = [MailAttachmentDescriptor(id: MailAttachmentID(rawValue: "attachment-1"), messageID: detail.id, filename: "report.pdf", mimeType: "application/pdf", byteCount: 128)]
             copy.body = MailMessageBody(
                 plainText: MailBodyPart(mimeType: "text/plain", text: "回填正文", byteCount: 4),
                 redactedPreview: "回填正文"
@@ -103,6 +104,7 @@ struct MailBodyBackfillTests {
         let sentDetail = try #require(await store.message(id: sentMessageID))
         #expect(MailBodyOnDemandFetchPlanner.hasDisplayableBody(sentDetail))
         #expect(sentDetail.body?.plainText?.text == "回填正文")
+        #expect(sentDetail.attachments.map(\.filename) == ["report.pdf"])
     }
 
     @Test func backfillProcessesAllMissingMessagesAcrossMultiplePages() async throws {

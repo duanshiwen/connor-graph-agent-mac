@@ -1,0 +1,69 @@
+{
+  "message": {
+    "schemaVersion": 1,
+    "id": "mail_7f800319ff2994b15d952c5b442bee2061e2680be0433844ec19756492141dbc",
+    "mailboxAddress": "owner@example.test",
+    "mailboxName": "owner@example.test",
+    "folder": "INBOX",
+    "uidValidity": "123",
+    "uid": "7",
+    "messageId": "message@example.test",
+    "subject": "跨端正文 😀",
+    "from": "sender@example.test",
+    "to": [
+      "owner@example.test"
+    ],
+    "cc": [],
+    "sentAt": 1700000000000,
+    "snippet": "完整正文 你好 😀",
+    "bodyText": "完整正文\n你好 😀",
+    "bodyAvailable": true,
+    "bodyTruncated": false,
+    "attachments": [
+      {
+        "id": "0",
+        "fileName": "report.pdf",
+        "mimeType": "application/pdf",
+        "size": 12345,
+        "contentId": "",
+        "isInline": false
+      }
+    ],
+    "isRead": false,
+    "updatedAt": 1700000001000
+  },
+  "semanticHash": "7d91e5f96eb74dce4be2159d815def00a793af52e240ae90fa78d501664007cc",
+  "records": {
+    "csp_902ad566a996bac3160a91d37698bcc49e64ef0d3ccbdacc": {
+      "_connorSessionChunk": {
+        "v": 1,
+        "sessionId": "mail_7f800319ff2994b15d952c5b442bee2061e2680be0433844ec19756492141dbc",
+        "sha256": "3f7aad15a9f8d8dc9becaf7e8c976fcfb282b15abfd985dc01c709cd1fe5ae74",
+        "index": 0,
+        "data": "eyJhdHRhY2htZW50cyI6W3siY29udGVudElkIjoiIiwiZmlsZU5hbWUiOiJyZXBvcnQucGRmIiwiaWQiOiIwIiwiaXNJbmxpbmUiOmZhbHNlLCJtaW1lVHlwZSI6ImFwcGxpY2F0aW9uL3BkZiIsInNpemUiOjEyMzQ1fV0sImJvZHlBdmFpbGFibGUiOnRydWUsImJvZHlUZXh0Ijoi5a6M5pW05q2j5paHXG7kvaDlpb0g8A=="
+      }
+    },
+    "csp_a0e26b1b2c91224a93baa7d77ca4cc1e28edea943edff1ad": {
+      "_connorSessionChunk": {
+        "v": 1,
+        "sessionId": "mail_7f800319ff2994b15d952c5b442bee2061e2680be0433844ec19756492141dbc",
+        "sha256": "3f7aad15a9f8d8dc9becaf7e8c976fcfb282b15abfd985dc01c709cd1fe5ae74",
+        "index": 1,
+        "data": "n5iAIiwiYm9keVRydW5jYXRlZCI6ZmFsc2UsImNjIjpbXSwiZm9sZGVyIjoiSU5CT1giLCJmcm9tIjoic2VuZGVyQGV4YW1wbGUudGVzdCIsImlkIjoibWFpbF83ZjgwMDMxOWZmMjk5NGIxNWQ5NTJjNWI0NDJiZWUyMDYxZTI2ODBiZTA0MzM4NDRlYzE5NzU2NDkyMTQxZGJjIiwiaXNSZWFkIjpmYWxzZSwibWFpbGJveEFkZHJlc3MiOiJvd25lckBleGFtcGxlLnRlc3QiLCJtYWlsYm94TmFtZSI6Im93bmVyQGV4YW1wbGUudGVzdCIsIm1lc3NhZ2VJZCI6Im1lc3NhZ2VAZXhhbXBsZS50ZXN0Iiwic2NoZW1hVmVyc2lvbiI6MSwic2VudEF0IjoxNzAwMDAwMDAwMDAwLCJzbmlwcGV0Ijoi5a6M5pW05q2j5paHIOS9oOWlvSDwn5iAIiwic3ViamVjdCI6Iui3qOerr+ato+aWhyDwn5iAIiwidG8iOlsib3duZXJAZXhhbXBsZS50ZXN0Il0sInVpZCI6IjciLCJ1aWRWYWxpZGl0eSI6IjEyMyIsInVwZGF0ZWRBdCI6MTcwMDAwMDAwMTAwMH0="
+      }
+    },
+    "mail_7f800319ff2994b15d952c5b442bee2061e2680be0433844ec19756492141dbc": {
+      "id": "mail_7f800319ff2994b15d952c5b442bee2061e2680be0433844ec19756492141dbc",
+      "_connorSessionChunks": {
+        "v": 1,
+        "sha256": "3f7aad15a9f8d8dc9becaf7e8c976fcfb282b15abfd985dc01c709cd1fe5ae74",
+        "semanticHash": "7d91e5f96eb74dce4be2159d815def00a793af52e240ae90fa78d501664007cc",
+        "byteLength": 654,
+        "parts": [
+          "csp_902ad566a996bac3160a91d37698bcc49e64ef0d3ccbdacc",
+          "csp_a0e26b1b2c91224a93baa7d77ca4cc1e28edea943edff1ad"
+        ]
+      }
+    }
+  }
+}

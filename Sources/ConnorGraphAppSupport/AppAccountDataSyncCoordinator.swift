@@ -170,7 +170,7 @@ public struct SyncRSSSubscription: Codable, Sendable, Equatable {
     }
 }
 
-/// 邮件账户跨端共享线格式：只含服务器配置/显示名/邮箱/登录名与时间戳。
+/// 历史邮箱配置编解码（兼容测试用）；账号同步不再投影或应用 mail_accounts。
 /// 密码等凭证不入库也不进同步（各端凭证库独立），邮件消息体更不参与账号同步。
 public struct SyncMailAccount: Codable, Sendable, Equatable {
     public var id: String
@@ -394,16 +394,16 @@ public struct AppAccountDataSyncResult: Sendable, Equatable {
     public var appliedSettingsChangeCount: Int
     public var appliedGovernanceLabelChangeCount: Int
     public var appliedRSSChangeCount: Int
-    public var appliedMailAccountChangeCount: Int
+    public var appliedMailMessageChangeCount: Int
     public var pushedChangeCount: Int
     public var appliedSessionIDs: Set<String>
 
-    public init(appliedSessionChangeCount: Int = 0, appliedSettingsChangeCount: Int = 0, appliedGovernanceLabelChangeCount: Int = 0, appliedRSSChangeCount: Int = 0, appliedMailAccountChangeCount: Int = 0, pushedChangeCount: Int = 0, appliedSessionIDs: Set<String> = []) {
+    public init(appliedSessionChangeCount: Int = 0, appliedSettingsChangeCount: Int = 0, appliedGovernanceLabelChangeCount: Int = 0, appliedRSSChangeCount: Int = 0, appliedMailMessageChangeCount: Int = 0, pushedChangeCount: Int = 0, appliedSessionIDs: Set<String> = []) {
         self.appliedSessionChangeCount = appliedSessionChangeCount
         self.appliedSettingsChangeCount = appliedSettingsChangeCount
         self.appliedGovernanceLabelChangeCount = appliedGovernanceLabelChangeCount
         self.appliedRSSChangeCount = appliedRSSChangeCount
-        self.appliedMailAccountChangeCount = appliedMailAccountChangeCount
+        self.appliedMailMessageChangeCount = appliedMailMessageChangeCount
         self.pushedChangeCount = pushedChangeCount
         self.appliedSessionIDs = appliedSessionIDs
     }
@@ -412,7 +412,7 @@ public struct AppAccountDataSyncResult: Sendable, Equatable {
     public var settingsChanged: Bool { appliedSettingsChangeCount > 0 }
     public var governanceLabelsChanged: Bool { appliedGovernanceLabelChangeCount > 0 }
     public var rssChanged: Bool { appliedRSSChangeCount > 0 }
-    public var mailAccountsChanged: Bool { appliedMailAccountChangeCount > 0 }
+    public var mailMessagesChanged: Bool { appliedMailMessageChangeCount > 0 }
 }
 
 public actor AppAccountDataSyncCoordinator {
@@ -432,7 +432,7 @@ public actor AppAccountDataSyncCoordinator {
         static let skills = "skills"
         static let governanceLabels = "governance_labels"
         static let rssSubscriptions = "rss_subscriptions"
-        static let mailAccounts = "mail_accounts"
+        static let mailMessages = "mail_messages"
     }
 
     /// 记录级同步边界：sessions 全量同步；settings 同步运行时设置、人格、用户偏好与
@@ -447,7 +447,7 @@ public actor AppAccountDataSyncCoordinator {
         case SyncCollection.settings: return recordId == "personality" || recordId == "user_preferences" || recordId == "ai_connections"
         case SyncCollection.governanceLabels: return true
         case SyncCollection.rssSubscriptions: return true
-        case SyncCollection.mailAccounts: return true
+        case SyncCollection.mailMessages: return true
         case SyncCollection.memoryL0, SyncCollection.memoryL0Spans, SyncCollection.memoryL1: return true
         case "memory_l2", "memory_l2_nodes", "memory_l3", "memory_l4_entities", "memory_l4_relations": return true
         case SyncCollection.skills: return true
@@ -455,7 +455,7 @@ public actor AppAccountDataSyncCoordinator {
         }
     }
 
-    private enum AppliedChangeKind { case session(String), settings, governanceLabels, rssSubscriptions, mailAccounts }
+    private enum AppliedChangeKind { case session(String), settings, governanceLabels, rssSubscriptions, mailMessages }
     private struct RecordState: Codable { var version: Int64; var hash: String; var deleted: Bool; var encrypted: Bool = false }
     private struct PersistedState: Codable {
         var cursor: Int64 = 0
@@ -545,13 +545,13 @@ public actor AppAccountDataSyncCoordinator {
                     continue
                 }
             }
-            let tombstoneCollections: Set<String> = ["sessions", "notes", "skills", "memory_l0", "memory_l0_spans", "memory_l1", "governance_labels", "rss_subscriptions", "mail_accounts"]
+            let tombstoneCollections: Set<String> = ["sessions", "notes", "skills", "memory_l0", "memory_l0_spans", "memory_l1", "governance_labels", "rss_subscriptions"]
             guard !change.deleted || tombstoneCollections.contains(change.collection) else { continue }
             do {
                 var clear = try decrypted(change, using: cipher)
                 let transport = clear.change.payload
-                if change.collection == "sessions", !change.deleted {
-                    guard let resolved = try SessionChunks.resolve(id: change.recordId, payload: transport, parts: &state.sessionParts) else {
+                if (change.collection == "sessions" || change.collection == "mail_messages"), !change.deleted {
+                    guard let resolved = try SessionChunks.resolve(id: change.recordId, payload: transport, parts: &state.sessionParts, mail: change.collection == "mail_messages") else {
                         state.records[key] = RecordState(version: change.version ?? 0, hash: try payloadHash(transport), deleted: false, encrypted: clear.encrypted)
                         state.pending.removeValue(forKey: key); state.dirtyKeys.remove(key)
                         continue
@@ -572,6 +572,7 @@ public actor AppAccountDataSyncCoordinator {
                     }
                 }
                 var baseline = state.dirtyKeys.contains(key) ? "" : (state.records[key]?.hash ?? "")
+                if change.collection == "mail_messages", !change.deleted { baseline = try payloadHash(transport) }
                 if change.collection == "sessions", !change.deleted {
                     let portable: ConnorPortableSession = try decode(clear.change.payload)
                     guard portable.id == change.recordId else { throw ConnorBackendAPIError.invalidResponse }
@@ -600,6 +601,9 @@ public actor AppAccountDataSyncCoordinator {
         var syncResult = AppAccountDataSyncResult()
         let stateKey = "ConnorAccountSyncState.\(userID)"
         var state = loadState(key: stateKey)
+        state.records = state.records.filter { !$0.key.hasPrefix("mail_accounts|") }
+        state.pending = state.pending.filter { !$0.key.hasPrefix("mail_accounts|") }
+        state.dirtyKeys = state.dirtyKeys.filter { !$0.hasPrefix("mail_accounts|") }
         var hasMore = false
         var appliedKeys: [String] = []
         var capturedLocalChanges = false
@@ -610,7 +614,7 @@ public actor AppAccountDataSyncCoordinator {
 
         // One upgrade repair reads current records, not hundreds of thousands of
         // obsolete log entries. Persist the page position to resume after a restart.
-        if state.repairVersion < 3 {
+        if state.repairVersion < 4 {
             do {
                 repeat {
                     let page = try await identity.syncSnapshot(afterID: state.snapshotAfterID)
@@ -621,7 +625,7 @@ public actor AppAccountDataSyncCoordinator {
                     hasMore = page.hasMore
                     if !hasMore {
                         state.cursor = max(state.cursor, state.snapshotCursor ?? 0)
-                        state.repairVersion = 3
+                        state.repairVersion = 4
                         didRepair = true
                         state.snapshotCursor = nil
                     }
@@ -666,7 +670,7 @@ public actor AppAccountDataSyncCoordinator {
         // 两端编码（键序/日期格式/可选字段）不同，若保存远端载荷哈希，下一次投影
         // 比较必然不相等，会把刚收到的记录又推回去，形成两端无限互推。
         for key in appliedKeys {
-            guard !key.hasPrefix("sessions|"), !state.dirtyKeys.contains(key) else { continue }
+            guard !key.hasPrefix("sessions|") && !key.hasPrefix("mail_messages|"), !state.dirtyKeys.contains(key) else { continue }
             guard var record = state.records[key], let payload = projected[key] else { continue }
             record.hash = try payloadHash(payload)
             state.records[key] = record
@@ -675,6 +679,7 @@ public actor AppAccountDataSyncCoordinator {
         let pendingSessionDeleteKeys = Set(deletedSessions.map { recordKey(SyncCollection.sessions, $0.id) })
         for (key, payload) in projected {
             guard state.pending[key] == nil else { continue }
+            if key.hasPrefix("mail_messages|"), let parent = SessionChunks.parent(payload), let root = projected[recordKey("mail_messages", parent)], let tag = SessionChunks.tag(root), state.records[recordKey("mail_messages", parent)]?.hash == tag { continue }
             if let parent = SessionChunks.parent(payload), let root = projected[recordKey("sessions", parent)],
                let tag = SessionChunks.tag(root), state.receivedSessions[parent] == tag, state.records[recordKey("sessions", parent)]?.hash == tag { continue }
             guard !pendingSessionDeleteKeys.contains(key) else { continue }
@@ -699,9 +704,8 @@ public actor AppAccountDataSyncCoordinator {
         // 丢失/列表被清空，而不是“删光了全部”，避免一台空设备把其它端的数据也清掉。
         // 会话与 RSS 订阅源不走这里：它们使用显式、持久化的删除标记，见下方单独逻辑。
         let nowMillis = Int64(Date().timeIntervalSince1970 * 1_000)
-        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|", "mail_accounts|"]
+        let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|"]
         var projectedCollections = Set(projected.keys.map { String($0.split(separator: "|", maxSplits: 1)[0]) })
-        if mail != nil { projectedCollections.insert("mail_accounts") }
         for key in state.records.keys where tombstonePrefixes.contains(where: { key.hasPrefix($0) }) {
             guard state.pending[key] == nil else { continue }
             guard state.records[key]?.deleted != true, projected[key] == nil else { continue }
@@ -763,14 +767,6 @@ public actor AppAccountDataSyncCoordinator {
             }
         }
 
-        if let mail {
-            for (id, deletedAt) in try await mail.pendingAccountDeletions() {
-                let key = recordKey("mail_accounts", id)
-                mutations.removeAll { $0.collection == "mail_accounts" && $0.recordId == id }
-                mutations.append(try ConnorSyncChange(collection: "mail_accounts", recordId: id, baseVersion: state.records[key]?.version ?? 0,
-                    payload: cipher.encrypt(jsonValue(SyncTombstone(updatedAt: deletedAt)), collection: "mail_accounts", recordID: id), deleted: true))
-            }
-        }
         for (key, deletedAt) in try AccountSyncLocalDeletions(directory: settings.configDirectory).pending() {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
             guard parts.count == 2 else { continue }
@@ -801,7 +797,6 @@ public actor AppAccountDataSyncCoordinator {
                 state.dirtyKeys.remove(key)
                 if mutation.deleted {
                     try AccountSyncLocalDeletions(directory: settings.configDirectory).clear(key)
-                    if mutation.collection == "mail_accounts" { try await mail?.clearAccountDeletion(id: MailAccountID(rawValue: mutation.recordId)) }
                 }
                 syncResult.pushedChangeCount += 1
                 if let sourceID = rssTombstoneKeys[recordKey(mutation.collection, mutation.recordId)] {
@@ -888,11 +883,11 @@ public actor AppAccountDataSyncCoordinator {
                 values[recordKey(SyncCollection.rssSubscriptions, source.id.rawValue)] = try jsonValue(SyncRSSSubscription(source))
             }
         }
-        // 邮件账户：只同步跨端共享的服务器配置/显示名/邮箱/登录名与时间戳，
-        // 密码等凭证不入库不参与同步（各端凭证库独立），邮件消息体更不进账号同步。
-        if let mail {
-            for account in try await mail.listAccounts() {
-                values[recordKey(SyncCollection.mailAccounts, account.id.rawValue)] = try jsonValue(SyncMailAccount(account))
+        let sharedMail = SharedMailStore(configDirectory: settings.configDirectory)
+        if let localMail = mail as? any MailStoreProtocol { try await sharedMail.capture(from: localMail) }
+        for message in try sharedMail.all() {
+            for (id, payload) in try SessionChunks.project(id: message.id, payload: SharedMailStore.wire(message), mail: true) {
+                values[recordKey("mail_messages", id)] = payload
             }
         }
         // AI 连接：连接定义与 API Key（明文随 E2EE 信封传输）随账号同步；Codex/Copilot
@@ -1112,37 +1107,10 @@ public actor AppAccountDataSyncCoordinator {
                 }
             }
             return nil
-        case ("mail_accounts", let id):
-            guard let mail else { return nil }
-            if !change.deleted, try await mail.pendingAccountDeletions()[id] != nil { return nil }
-            let accountID = MailAccountID(rawValue: id)
-            if change.deleted {
-                // 删除按“最新操作优先”：远端删除时间比本地账户时间新才删除。
-                let tombstone: SyncTombstone = try decode(change.payload)
-                let local = try await mail.account(id: accountID)
-                if tombstone.updatedAt > Int64((local?.updatedAt ?? .distantPast).timeIntervalSince1970 * 1_000) {
-                    try await mail.applyRemoteAccountDelete(id: accountID)
-                    return .mailAccounts
-                }
-            } else {
-                let wire: SyncMailAccount = try decode(change.payload)
-                // 邮箱地址去重：同地址已存在不同 id（历史 UUID/旧版本）时按“后更新者胜”采用胜者 id，
-                // 避免跨端重复账户；这是远端驱动的合并，不是用户删除，不产生本机删除标记。
-                let accounts = try await mail.listAccounts()
-                if let byAddress = accounts.first(where: { ($0.identities.first?.address.email ?? "").lowercased() == wire.address.lowercased() && $0.id.rawValue != id }) {
-                    if wire.updatedAt > Int64(byAddress.updatedAt.timeIntervalSince1970 * 1_000) {
-                        try await mail.applyRemoteAccountDelete(id: byAddress.id)
-                        try await mail.saveAccount(SyncMailAccount.makeAccount(wire, local: byAddress))
-                    }
-                    return .mailAccounts
-                }
-                let local = try await mail.account(id: accountID)
-                if wire.updatedAt > Int64((local?.updatedAt ?? .distantPast).timeIntervalSince1970 * 1_000) {
-                    try await mail.saveAccount(SyncMailAccount.makeAccount(wire, local: local))
-                    return .mailAccounts
-                }
-            }
-            return nil
+        case ("mail_messages", let id):
+            let value = try SharedMailStore.decode(change.payload)
+            guard value.id == id else { throw ConnorBackendAPIError.invalidResponse }
+            return try SharedMailStore(configDirectory: settings.configDirectory).apply(change.payload) ? .mailMessages : nil
         default: return nil
         }
     }
@@ -1155,7 +1123,7 @@ public actor AppAccountDataSyncCoordinator {
         case .settings: result.appliedSettingsChangeCount += 1
         case .governanceLabels: result.appliedGovernanceLabelChangeCount += 1
         case .rssSubscriptions: result.appliedRSSChangeCount += 1
-        case .mailAccounts: result.appliedMailAccountChangeCount += 1
+        case .mailMessages: result.appliedMailMessageChangeCount += 1
         }
     }
 
@@ -1163,6 +1131,7 @@ public actor AppAccountDataSyncCoordinator {
     private func decode<T: Decodable>(_ payload: ConnorJSONValue) throws -> T { try decoder.decode(T.self, from: encoder.encode(payload)) }
     private func payloadHash(_ payload: ConnorJSONValue) throws -> String {
         if let tag = SessionChunks.tag(payload) { return tag }
+        if case .object(let root) = payload, root["mailboxAddress"] != nil, root["schemaVersion"] != nil { return try SharedMailStore.semanticHash(payload) }
         var canonical = payload
         if var session = try? decode(payload) as ConnorPortableSession {
             // SQLite's ISO-8601 dates retain seconds, while other clients retain

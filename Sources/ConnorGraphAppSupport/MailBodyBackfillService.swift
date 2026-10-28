@@ -118,6 +118,7 @@ public struct MailBodyBackfillService: Sendable {
                     guard let result, MailBodyOnDemandFetchPlanner.hasDisplayableBody(result) else { continue }
                     var merged = detail
                     merged.body = result.body
+                    merged.attachments = result.attachments
                     do {
                         try await store.saveMessage(merged)
                         savedIDs.insert(detail.id)
@@ -193,6 +194,7 @@ public struct MailBodyBackfillService: Sendable {
                 guard let result, MailBodyOnDemandFetchPlanner.hasDisplayableBody(result) else { continue }
                 var merged = detail
                 merged.body = result.body
+                    merged.attachments = result.attachments
                 do {
                     try await store.saveMessage(merged)
                     savedCount += 1
