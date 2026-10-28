@@ -234,3 +234,46 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
 public extension NativeMailBrowserPresentation {
     static let empty = NativeMailBrowserPresentation(accounts: [], mailboxes: [], messages: [])
 }
+
+
+public extension NativeMailBrowserPresentation {
+    /// A presentation-only merge: content never becomes a configured login account.
+    func merging(sharedMessages: [SharedMailMessage], localMessageIDs: Set<MailMessageID>) -> NativeMailBrowserPresentation {
+        var merged = messages.filter { message in
+            guard let box = mailbox(id: message.mailboxID), let account = account(id: message.accountID),
+                  let validity = (box.status.syncCursor?.uidValidity).flatMap(UInt64.init),
+                  let address = account.identities.first?.address.email else { return true }
+            return !sharedMessages.contains { mail in
+                mail.mailboxAddress.lowercased() == address.lowercased() &&
+                (mail.folder == box.path || mail.folder.uppercased() == "INBOX" && box.path.uppercased() == "INBOX") &&
+                (UInt64(mail.uidValidity) ?? 0) > validity
+            }
+        }
+        var boxes = mailboxes
+        for mail in sharedMessages {
+            let account = accounts.first { account in
+                account.identities.contains { $0.address.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == mail.mailboxAddress.lowercased() }
+            }
+            let localBox = account.flatMap { account in mailboxes.first {
+                $0.accountID == account.id && ($0.path == mail.folder || $0.path.uppercased() == "INBOX" && mail.folder.uppercased() == "INBOX")
+            } }
+            if let account, let localBox, localBox.status.syncCursor?.uidValidity == mail.uidValidity {
+                let localID = RemoteIMAPMailbox(name: localBox.name, path: localBox.path, role: localBox.role).messageID(accountID: account.id, uid: mail.uid)
+                if localMessageIDs.contains(localID) { continue }
+            }
+            let accountID = account?.id ?? MailAccountID(rawValue: "content-" + SharedMailStore.digest(mail.mailboxAddress))
+            let mailboxID = MailMailboxID(rawValue: "content-" + SharedMailStore.digest(mail.mailboxAddress + "\0" + mail.folder))
+            if !boxes.contains(where: { $0.id == mailboxID }) {
+                let role = localBox?.role ?? (mail.folder.lowercased().contains("sent") || mail.folder.contains("已发送") ? .sent : .custom)
+                boxes.append(MailMailbox(id: mailboxID, accountID: accountID, name: "\(mail.mailboxAddress) · \(mail.folder)", path: mail.folder, role: role))
+            }
+            merged.append(MailMessageSummary(
+                id: MailMessageID(rawValue: mail.id), accountID: accountID, mailboxID: mailboxID,
+                subject: mail.subject, from: MailAddress(email: mail.from), to: mail.to.map { MailAddress(email: $0) }, cc: mail.cc.map { MailAddress(email: $0) },
+                date: Date(timeIntervalSince1970: Double(mail.sentAt) / 1_000), snippet: mail.snippet,
+                flags: MailMessageFlags(isRead: mail.isRead), hasAttachments: !mail.attachments.isEmpty
+            ))
+        }
+        return NativeMailBrowserPresentation(accounts: accounts, mailboxes: boxes, messages: merged)
+    }
+}

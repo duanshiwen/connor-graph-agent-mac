@@ -136,3 +136,36 @@ struct NativeMailBrowserPresentationTests {
         )
     }
 }
+
+
+extension NativeMailBrowserPresentationTests {
+    @Test func syncedContentUsesTheSameListWithoutCreatingAnAccount() {
+        var received = SharedMailMessage()
+        received.id = "mail-received"; received.mailboxAddress = "reader@example.test"; received.subject = "Received"; received.sentAt = 100_000
+        var sent = received
+        sent.id = "mail-sent"; sent.folder = "Sent"; sent.subject = "Sent"; sent.sentAt = 200_000
+        let merged = NativeMailBrowserPresentation.empty.merging(sharedMessages: [received, sent], localMessageIDs: [])
+        #expect(merged.accounts.isEmpty)
+        #expect(merged.messages.map(\.subject) == ["Sent", "Received"])
+        #expect(merged.unqueriedMessages(direction: .sent).map(\.subject) == ["Sent"])
+        #expect(merged.unqueriedMessages(direction: .received).map(\.subject) == ["Received"])
+    }
+
+    @Test func localAndSyncedCopiesAreDeduplicatedEvenOutsideTheLoadedPage() {
+        let accountID = MailAccountID(rawValue: "local")
+        let account = MailAccount(id: accountID, provider: .genericIMAPSMTP, displayName: "Local", identities: [
+            MailIdentity(id: MailIdentityID(rawValue: "identity"), displayName: "Reader", address: MailAddress(email: "reader@example.test"))
+        ])
+        let box = MailMailbox(id: MailMailboxID(rawValue: "inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox,
+            status: MailMailboxStatus(syncCursor: MailSyncCursor(value: "42", uidValidity: "123")))
+        let local = Self.makeMessage(id: "local-INBOX-42", accountID: accountID, mailboxID: box.id, date: Date(timeIntervalSince1970: 100), subject: "Local")
+        var synced = SharedMailMessage()
+        synced.id = "mail-copy"; synced.mailboxAddress = "reader@example.test"; synced.uid = "42"; synced.uidValidity = "123"
+        let loaded = NativeMailBrowserPresentation(accounts: [account], mailboxes: [box], messages: [local])
+        #expect(loaded.merging(sharedMessages: [synced], localMessageIDs: [local.id]).messages.map(\.id) == [local.id])
+        let unloaded = NativeMailBrowserPresentation(accounts: [account], mailboxes: [box], messages: [])
+        #expect(unloaded.merging(sharedMessages: [synced], localMessageIDs: [local.id]).messages.isEmpty)
+        synced.uidValidity = "124"
+        #expect(loaded.merging(sharedMessages: [synced], localMessageIDs: [local.id]).messages.map { $0.id.rawValue } == [synced.id])
+    }
+}

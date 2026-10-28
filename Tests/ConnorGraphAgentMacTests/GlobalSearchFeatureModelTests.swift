@@ -252,6 +252,18 @@ struct GlobalSearchFeatureModelTests {
         model.shutdown()
     }
 
+    @Test func receivedMailRemainsSearchableBeforeTheNativeIndexIsReady() async {
+        let model = GlobalSearchFeatureModel(nativeSourceSearchBackend: SlowNativeSourceSearchBackend(), sessionSearchIndexService: nil, historyRepository: nil)
+        model.fallbackNativeSearchProvider = { kind, _, _ in
+            kind == .mail ? [Self.nativeResult(kind: .mail, id: "mail-received", title: "Received mail")] : []
+        }
+        model.updateQuery("Received")
+        await model.refreshPreview(for: "Received")
+        #expect(model.previewState.mailResults.map(\.externalID) == ["mail-received"])
+        #expect(model.previewState.sectionStatusMessages[.mail] == nil)
+        model.shutdown()
+    }
+
     private func makeModel() -> GlobalSearchFeatureModel {
         GlobalSearchFeatureModel(nativeSourceSearchBackend: nil, sessionSearchIndexService: nil, historyRepository: nil)
     }

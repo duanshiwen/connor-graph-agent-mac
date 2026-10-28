@@ -43,7 +43,8 @@ struct MailContentSyncTests {
   var large=mail;large.bodyText=String(repeating:"文",count:600_000)+"😀 complete"
   let projected=try SessionChunks.project(id:large.id,payload:SharedMailStore.wire(large),mail:true);#expect(projected.count>3);parts=[:]
   for(id,value)in projected where id != large.id{_ = try SessionChunks.resolve(id:id,payload:value,parts:&parts,mail:true)}
-  let restored=try #require(SessionChunks.resolve(id:large.id,payload:#require(projected[large.id]),parts:&parts,mail:true))
+  let rootPayload = try #require(projected[large.id])
+  let restored=try #require(SessionChunks.resolve(id:large.id,payload:rootPayload,parts:&parts,mail:true))
   #expect(try SharedMailStore.decode(restored).bodyText==large.bodyText)
  }
 }

@@ -135,29 +135,7 @@ final class GlobalSearchRuntimeCoordinator {
                 )
             }
         case .mail:
-            let normalized = trimmed.lowercased()
-            return mail.presentation.messages
-                .filter { message in
-                    guard !normalized.isEmpty else { return true }
-                    return message.subject.lowercased().contains(normalized)
-                        || message.snippet.lowercased().contains(normalized)
-                        || message.from.email.lowercased().contains(normalized)
-                        || (message.from.name?.lowercased().contains(normalized) ?? false)
-                        || message.to.contains { $0.email.lowercased().contains(normalized) || ($0.name?.lowercased().contains(normalized) ?? false) }
-                }
-                .sorted { $0.date > $1.date }
-                .prefix(limit)
-                .map { message in
-                    NativeSearchResult(
-                        id: "mail:\(message.id.rawValue)", sourceKind: .mail,
-                        externalID: message.id.rawValue, sourceInstanceID: message.accountID.rawValue,
-                        title: message.subject.isEmpty ? "(No subject)" : message.subject,
-                        snippet: [message.from.name ?? message.from.email, message.snippet].filter { !$0.isEmpty }.joined(separator: " · "),
-                        score: 1, lexicalScore: 1, freshnessScore: 0, fieldScore: 0,
-                        temporal: NativeSearchTemporalMetadata(primaryTime: message.date, primaryTimeKind: .sentAt, receivedAt: message.date, sentAt: message.date, indexedAt: now),
-                        resultTimeLabel: message.date.connorLocalFormatted(date: .medium, time: .short)
-                    )
-                }
+            return mail.fallbackSearchResults(query: trimmed, now: now, limit: limit)
         case .browserHistory:
             return browser.fallbackSearchResults(query: trimmed, now: now, limit: limit)
         }

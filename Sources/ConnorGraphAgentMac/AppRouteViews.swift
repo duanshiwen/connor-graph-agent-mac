@@ -43,13 +43,8 @@ struct ChatDetailRouteView: View {
 struct MailListRouteView: View {
     @Bindable var model: MailFeatureModel
     var forwarding: ListItemForwardingContext
-    @State private var showsSharedMail = false
-
     var body: some View {
-        VStack(spacing: 0) {
-            HStack { Button("跨端邮件（\(model.sharedMessages.count)）") { showsSharedMail = true }; Spacer() }.padding(8)
-            CraftMailListPane(model: model, forwarding: forwarding)
-        }.sheet(isPresented: $showsSharedMail) { SharedMailReplicaView(messages: model.sharedMessages) }
+        CraftMailListPane(model: model, forwarding: forwarding)
     }
 }
 

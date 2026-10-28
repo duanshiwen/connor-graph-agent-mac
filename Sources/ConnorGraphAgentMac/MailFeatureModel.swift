@@ -42,6 +42,14 @@ final class MailFeatureModel {
         }
     }
     private(set) var sharedMessages: [SharedMailMessage] = []
+    private(set) var totalMailCount = 0
+    private(set) var listPresentation: NativeMailBrowserPresentation = .empty
+    @ObservationIgnored private var localMessageIDs: Set<MailMessageID> = []
+
+    func sharedMessage(id: MailMessageID?) -> SharedMailMessage? {
+        guard let id else { return nil }
+        return sharedMessages.first { $0.id == id.rawValue }
+    }
     @ObservationIgnored private let sharedMailStore: SharedMailStore?
     private(set) var filteredListMessages: [MailMessageSummary] = []
     private(set) var visibleListMessages: [MailMessageSummary] = []
@@ -140,12 +148,14 @@ final class MailFeatureModel {
             let values=try await Task.detached(priority: .utility) { try replicas?.visible() ?? [] }.value
             guard generation==reloadGeneration, !isShutdown else { return }
             sharedMessages=values
+            rebuildListProjection()
         } catch {
             guard generation==reloadGeneration else { return }
-            errorMessage="跨端邮件读取失败：\(error.localizedDescription)"
+            errorMessage="邮件读取失败：\(error.localizedDescription)"
         }
         guard let store else { return }
         do {
+            let allLocalIDs = Set(try await store.allMessageIDs())
             let requestedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             let requestedDirection = listDirectionFilter
             let (loaded, nextCursor) = try await store.presentationPage(MailMessagePageRequest(
@@ -158,6 +168,7 @@ final class MailFeatureModel {
             loadedListQuery = requestedQuery
             loadedListDirection = requestedDirection
             nextListPageCursor = nextCursor
+            localMessageIDs = allLocalIDs
             presentation = loaded
             preferences = loadedPreferences
             repairSelection()
@@ -171,12 +182,13 @@ final class MailFeatureModel {
 
     func fallbackSearchResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
         let normalized = query.lowercased()
-        return presentation.messages.filter { message in
+        return listPresentation.messages.filter { message in
             normalized.isEmpty || message.subject.lowercased().contains(normalized)
                 || message.snippet.lowercased().contains(normalized)
                 || message.from.email.lowercased().contains(normalized)
                 || (message.from.name?.lowercased().contains(normalized) ?? false)
                 || message.to.contains { $0.email.lowercased().contains(normalized) || ($0.name?.lowercased().contains(normalized) ?? false) }
+                || sharedMessage(id: message.id).map { $0.mailboxAddress.lowercased().contains(normalized) || $0.bodyText.lowercased().contains(normalized) } == true
         }.sorted { $0.date > $1.date }.prefix(limit).map { message in
             NativeSearchResult(id: "mail:\(message.id.rawValue)", sourceKind: .mail, externalID: message.id.rawValue, sourceInstanceID: message.accountID.rawValue, title: message.subject.isEmpty ? "(No subject)" : message.subject, snippet: [message.from.name ?? message.from.email, message.snippet].filter { !$0.isEmpty }.joined(separator: " · "), score: 1, lexicalScore: 1, freshnessScore: 0, fieldScore: 0, temporal: NativeSearchTemporalMetadata(primaryTime: message.date, primaryTimeKind: .sentAt, receivedAt: message.date, sentAt: message.date, indexedAt: now), resultTimeLabel: message.date.connorLocalFormatted(date: .medium, time: .short))
         }
@@ -187,7 +199,7 @@ final class MailFeatureModel {
         guard let messageID = Self.messageID(from: result) else {
             syncMessage = "无法打开这封邮件：搜索结果缺少有效 messageID。"; return
         }
-        if let message = presentation.message(id: messageID) ?? legacyMatch(messageID) { selectMessage(message); return }
+        if let message = listPresentation.message(id: messageID) ?? legacyMatch(messageID) { selectMessage(message); return }
         selectedMessageID = messageID
         navigationTargetID = messageID
         navigationMessage = "正在打开搜索结果中的邮件…"
@@ -213,6 +225,8 @@ final class MailFeatureModel {
     /// 右键菜单「标记为已读 / 标记为未读」：更新本地缓存并触发列表刷新。
     func setReadState(messageIDs: [MailMessageID], isRead: Bool) async {
         guard !isShutdown, let runtime = agentRuntime else { return }
+        let messageIDs = messageIDs.filter { sharedMessage(id: $0) == nil }
+        guard !messageIDs.isEmpty else { return }
         do {
             try await runtime.setReadState(messageIDs: messageIDs, isRead: isRead)
             await reload()
@@ -223,7 +237,7 @@ final class MailFeatureModel {
         }
     }
     func selectedMessageForDetail() -> MailMessageSummary? {
-        if let message = presentation.message(id: selectedMessageID) { return message }
+        if let message = listPresentation.message(id: selectedMessageID) { return message }
         return selectedMessageSummary?.id == selectedMessageID ? selectedMessageSummary : nil
     }
     func listMessages(direction: MailMessageDirectionFilter = .all) -> [MailMessageSummary] {
@@ -232,7 +246,7 @@ final class MailFeatureModel {
     }
 
     func loadMoreListMessagesIfNeeded(currentMessageID: MailMessageID) {
-        guard visibleListMessages.last?.id == currentMessageID,
+        guard (presentation.messages.last?.id == currentMessageID || visibleListMessages.last?.id == currentMessageID),
               nextListPageCursor != nil,
               !isLoadingNextPage else { return }
         startOwnedTask { [weak self] in await self?.loadNextListPage() }
@@ -403,11 +417,19 @@ final class MailFeatureModel {
 
     private func rebuildListProjection() {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        listPresentation = presentation.merging(sharedMessages: sharedMessages, localMessageIDs: localMessageIDs)
+        totalMailCount = max(presentation.totalMailboxMessageCount, localMessageIDs.count) + listPresentation.messages.filter { $0.id.rawValue.hasPrefix("mail_") }.count
+        let matchingSharedIDs = Set(sharedMessages.filter { mail in
+            query.isEmpty || [mail.subject, mail.from, mail.mailboxAddress, mail.snippet, mail.bodyText].contains { $0.localizedCaseInsensitiveContains(query) }
+        }.map(\.id))
+        let candidates = listPresentation.unqueriedMessages(direction: listDirectionFilter)
+        let nativeIDs: Set<MailMessageID>
         if query == loadedListQuery, listDirectionFilter == loadedListDirection {
-            filteredListMessages = presentation.messages
+            nativeIDs = Set(presentation.messages.map(\.id))
         } else {
-            filteredListMessages = listMessages(direction: listDirectionFilter)
+            nativeIDs = Set(listMessages(direction: listDirectionFilter).map(\.id))
         }
+        filteredListMessages = candidates.filter { nativeIDs.contains($0.id) || matchingSharedIDs.contains($0.id.rawValue) }
         visibleListMessages = filteredListMessages
         visibleListMessageIDs = Set(filteredListMessages.map(\.id))
         listProjectionRevision &+= 1
@@ -511,8 +533,8 @@ final class MailFeatureModel {
     private func repairSelection() {
         if selectedAccountID == nil || presentation.account(id: selectedAccountID) == nil { selectedAccountID = presentation.defaultAccountID() }
         if selectedMailboxID == nil || presentation.mailbox(id: selectedMailboxID) == nil { selectedMailboxID = presentation.defaultMailboxID(for: selectedAccountID) }
-        if let message = presentation.message(id: selectedMessageID) { selectedMessageSummary = message }
-        else if selectedMessageID == nil || selectedMessageSummary?.id != selectedMessageID { selectedMessageID = presentation.defaultMessageID(accountID: selectedAccountID, mailboxID: selectedMailboxID); selectedMessageSummary = presentation.message(id: selectedMessageID) }
+        if let message = listPresentation.message(id: selectedMessageID) { selectedMessageSummary = message }
+        else if selectedMessageID == nil || selectedMessageSummary?.id != selectedMessageID { selectedMessageID = listPresentation.messages.first?.id; selectedMessageSummary = listPresentation.message(id: selectedMessageID) }
     }
     private func selectMessage(_ message: MailMessageSummary) { selectedAccountID = message.accountID; selectedMailboxID = message.mailboxID; selectedMessageID = message.id; selectedMessageSummary = message; navigationTargetID = nil; navigationMessage = nil }
     private func legacyMatch(_ id: MailMessageID) -> MailMessageSummary? { let key = Self.normalizeIDForSearchIndex(id.rawValue); return presentation.messages.first { Self.normalizeIDForSearchIndex($0.id.rawValue) == key } }

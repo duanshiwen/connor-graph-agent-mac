@@ -497,7 +497,17 @@ final class GlobalSearchFeatureModel {
             for await sectionResult in coordinator.previewResults(query: query, limitsBySource: limits) {
                 guard canApply(query: query, generation: generation) else { return }
                 timings.append(sectionResult.timing)
-                applySection(GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: sectionResult.kind), results: sectionResult.results, errorMessage: sectionResult.errorMessage, timing: sectionResult.timing), query: query, tokens: tokens, generation: generation)
+                var results = sectionResult.results
+                if sectionResult.kind == .mail {
+                    var seen = Set(results.map(\.externalID))
+                    let supplemental = fallbackNativeSearchProvider(.mail, query, limits[.mail] ?? 3)
+                    results.append(contentsOf: supplemental.filter { seen.insert($0.externalID).inserted })
+                    results = Array(results.prefix(limits[.mail] ?? 3))
+                    if !results.isEmpty, health.documentCountBySource[.mail, default: 0] == 0 {
+                        previewState.sectionStatusMessages[.mail] = nil
+                    }
+                }
+                applySection(GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: sectionResult.kind), results: results, errorMessage: sectionResult.errorMessage, timing: sectionResult.timing), query: query, tokens: tokens, generation: generation)
             }
             return
         }

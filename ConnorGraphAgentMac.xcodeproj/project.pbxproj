@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E72800010000000000000001 /* Sources/ConnorGraphAgentMac/SharedMailReplicaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E72800000000000000000001 /* Sources/ConnorGraphAgentMac/SharedMailReplicaView.swift */; };
 		E90000000000000000000003 /* Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90100000000000000000003 /* Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift */; };
 		51A7E0010000000000000001 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7E0010000000000000011 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionCoordinator.swift */; };
 		51A7E0010000000000000002 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7E0010000000000000012 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionController.swift */; };
@@ -193,6 +194,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		E72800000000000000000001 /* Sources/ConnorGraphAgentMac/SharedMailReplicaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SharedMailReplicaView.swift; sourceTree = "<group>"; };
 		E90100000000000000000003 /* Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift; sourceTree = "<group>"; };
 		B1A000000000000000000001 /* Sources/ConnorGraphAgentMac/ImFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ImFeatureModel.swift; sourceTree = "<group>"; };
 		B1A000000000000000000002 /* Sources/ConnorGraphAgentMac/ImChatViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ImChatViews.swift; sourceTree = "<group>"; };
@@ -443,6 +445,7 @@
 				A00000000000000000000071 /* Sources/ConnorGraphAgentMac/AppShellFeatureModel.swift */,
 				E71500000000000000000001 /* Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift */,
 				E71500000000000000000002 /* Sources/ConnorGraphAgentMac/AppRouteViews.swift */,
+				E72800000000000000000001 /* Sources/ConnorGraphAgentMac/SharedMailReplicaView.swift */,
 				E71500000000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift */,
 				F71000000000000000000001 /* Sources/ConnorGraphAgentMac/NativeFilePreviewViews.swift */,
 				F71000000000000000000002 /* Sources/ConnorGraphAgentMac/WorkspaceCodePreviewTextView.swift */,
@@ -767,6 +770,7 @@
 				A00000000000000000000070 /* Sources/ConnorGraphAgentMac/AppShellFeatureModel.swift in Sources */,
 				E71500010000000000000001 /* Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift in Sources */,
 				E71500010000000000000002 /* Sources/ConnorGraphAgentMac/AppRouteViews.swift in Sources */,
+				E72800010000000000000001 /* Sources/ConnorGraphAgentMac/SharedMailReplicaView.swift in Sources */,
 				E71500010000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift in Sources */,
 				F71000010000000000000001 /* Sources/ConnorGraphAgentMac/NativeFilePreviewViews.swift in Sources */,
 				F71000010000000000000002 /* Sources/ConnorGraphAgentMac/WorkspaceCodePreviewTextView.swift in Sources */,

@@ -353,7 +353,7 @@ struct MailSourceDetailView: View {
     @Bindable var model: MailFeatureModel
 
     private var presentation: NativeMailBrowserPresentation {
-        model.presentation
+        model.listPresentation
     }
 
     private var selectedAccount: MailAccount? {
@@ -370,7 +370,9 @@ struct MailSourceDetailView: View {
 
     var body: some View {
         Group {
-            if let selectedMessage {
+            if let shared = model.sharedMessage(id: model.selectedMessageID) {
+                SharedMailMessageDetailView(message: shared)
+            } else if let selectedMessage {
                 MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {

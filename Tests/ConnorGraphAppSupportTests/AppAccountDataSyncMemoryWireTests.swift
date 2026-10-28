@@ -151,7 +151,7 @@ extension AppAccountDataSyncMemoryWireTests {
         let fixture = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
         let wire = try JSONDecoder().decode(SyncSkillPack.self, from: JSONSerialization.data(withJSONObject: fixture["skill"]!))
         try store.apply(wire)
-        let received = try #require(store.pack(id: wire.id))
+        let received = try #require(try store.pack(id: wire.id))
         #expect(received.id == wire.id && received.templatesJson == wire.templatesJson)
         #expect(received.category == wire.category && received.instructionsJson == wire.instructionsJson)
         #expect(received.updatedAt == wire.updatedAt && received.enabled == wire.enabled)

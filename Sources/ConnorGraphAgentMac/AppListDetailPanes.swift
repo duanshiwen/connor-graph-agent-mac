@@ -2203,7 +2203,7 @@ struct CraftMailListPane: View {
     @State private var pendingForwardBundle: ForwardedChatBundle?
     @State private var isForwardSending = false
 
-    private var presentation: NativeMailBrowserPresentation { model.presentation }
+    private var presentation: NativeMailBrowserPresentation { model.listPresentation }
     private var visibleMessages: [MailMessageSummary] { model.visibleListMessages }
 
     var body: some View {
@@ -2241,10 +2241,10 @@ struct CraftMailListPane: View {
                 )
             }
 
-            if presentation.accounts.isEmpty {
+            if presentation.accounts.isEmpty && model.sharedMessages.isEmpty {
                 ContentUnavailableView("暂无邮件账户", systemImage: "envelope.badge", description: Text("点击右上角 + 添加 IMAP/SMTP 邮件账户。"))
                     .padding(.top, 80)
-            } else if presentation.mailboxes.isEmpty {
+            } else if presentation.mailboxes.isEmpty && model.sharedMessages.isEmpty {
                 ContentUnavailableView("还没有邮箱文件夹", systemImage: "tray", description: Text("账户添加后，康纳同学会在同步完成时显示收件箱和其他文件夹。"))
                     .padding(.top, 80)
             } else if presentation.messages.isEmpty
@@ -2269,6 +2269,7 @@ struct CraftMailListPane: View {
                                     account: presentation.account(id: message.accountID),
                                     mailbox: presentation.mailbox(id: message.mailboxID),
                                     isSelected: message.id == model.selectedMessageID,
+                                    canSetRead: model.sharedMessage(id: message.id) == nil,
                                     onSelect: { selectMessage(message) },
                                     onSetRead: { isRead in
                                         Task { await model.setReadState(messageIDs: [message.id], isRead: isRead) }
@@ -2488,6 +2489,7 @@ private struct MailMessageListRow: View, Equatable {
     var account: MailAccount?
     var mailbox: MailMailbox?
     var isSelected: Bool
+    var canSetRead = true
     var onSelect: () -> Void
     var onSetRead: (Bool) -> Void
     var onForward: () -> Void
@@ -2498,6 +2500,7 @@ private struct MailMessageListRow: View, Equatable {
             && lhs.account == rhs.account
             && lhs.mailbox == rhs.mailbox
             && lhs.isSelected == rhs.isSelected
+            && lhs.canSetRead == rhs.canSetRead
     }
 
     private var presentation: MailMessageListRowPresentation {
@@ -2566,10 +2569,12 @@ private struct MailMessageListRow: View, Equatable {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            if canSetRead {
             if message.flags.isRead {
                 Button("标记为未读", systemImage: "envelope.badge") { onSetRead(false) }
             } else {
                 Button("标记为已读", systemImage: "envelope.open") { onSetRead(true) }
+            }
             }
             Button("转发到…", systemImage: "arrowshape.turn.up.right") { onForward() }
             Divider()
