@@ -87,7 +87,8 @@ enum SessionChunks {
         guard bytes.count == Int(rawLength), digest(bytes) == hash else { throw Failure.invalid }
         let session = try JSONDecoder().decode(ConnorJSONValue.self, from: bytes)
         guard case .object(let object) = session, object["id"] == .string(id) else { throw Failure.invalid }
-        guard (!mail && manifest["semanticVersion"] != .number(2)) || manifest["semanticHash"] == .string(try mail ? SharedMailStore.semanticHash(session) : semanticHash(session)) else { throw Failure.invalid }
+        let expectedHash = try mail ? SharedMailStore.semanticHash(session) : semanticHash(session)
+        guard (!mail && manifest["semanticVersion"] != .number(2)) || manifest["semanticHash"] == .string(expectedHash) else { throw Failure.invalid }
         return try mail ? session : normalize(session)
     }
     static func tag(_ payload: ConnorJSONValue) -> String? {
