@@ -2078,8 +2078,8 @@ final class AppRuntimeLifecycle {
             configuration: configuration,
             sessionWorkspace: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.workspace,
             sessionLLMOverride: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.llmOverride,
-            remoteKnowledgeBaseIDs: effectiveRemoteKnowledgeBaseIDs(sessionID: session.id),
-            allowedMCPToolNames: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.allowedMCPToolNames
+            remoteKnowledgeBaseIDs: availableRemoteKnowledgeBaseIDs(),
+            allowedMCPToolNames: nil
         )
     }
 
@@ -2168,10 +2168,9 @@ final class AppRuntimeLifecycle {
         workspaceSettingsModel.applySessionState(state)
     }
 
-    private func effectiveRemoteKnowledgeBaseIDs(sessionID: String) -> [String] {
-        let available = Set(knowledgeMarketplaceStore.library.availableForConsumption.map(\.id))
-        let explicit = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.remoteKnowledgeBaseIDs
-        return (explicit.map { Set($0).intersection(available) } ?? available).sorted()
+    private func availableRemoteKnowledgeBaseIDs() -> [String] {
+        // 所有已连接、允许检索的知识库均交给模型按需查询，旧会话选择不再限制范围。
+        Array(Set(knowledgeMarketplaceStore.library.availableForConsumption.map(\.id))).sorted()
     }
 
     private func setSessionRemoteKnowledgeBaseIDs(_ ids: [String]?) {
@@ -2539,7 +2538,7 @@ final class AppRuntimeLifecycle {
             agentPermissionMode = permissionMode
         }
         let sessionState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
-        let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
+        let remoteKnowledgeBaseIDs = availableRemoteKnowledgeBaseIDs()
         let previousState: AppSessionStateSnapshot? = previousSessionID.map { sessionID in
             var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
                 ?? AppSessionStateSnapshot(sessionID: sessionID)
@@ -2571,7 +2570,7 @@ final class AppRuntimeLifecycle {
                         sessionWorkspace: sessionState?.workspace,
                         sessionLLMOverride: sessionState?.llmOverride,
                         remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs,
-                        allowedMCPToolNames: sessionState?.allowedMCPToolNames
+                        allowedMCPToolNames: nil
                     ) : nil
                     try Task.checkCancellation()
                     return NewSessionPreparationResult.success(
@@ -3119,7 +3118,7 @@ final class AppRuntimeLifecycle {
         let permissionMode = effectivePermissionMode(for: session.id)
         agentPermissionMode = permissionMode
         let runtimeState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
-        let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
+        let remoteKnowledgeBaseIDs = availableRemoteKnowledgeBaseIDs()
         chatRunCoordinator.applySelectedSnapshot(
             session: session,
             manager: nil,
@@ -3152,7 +3151,7 @@ final class AppRuntimeLifecycle {
                 sessionWorkspace: runtimeState?.workspace,
                 sessionLLMOverride: runtimeState?.llmOverride,
                 remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs,
-                allowedMCPToolNames: runtimeState?.allowedMCPToolNames
+                allowedMCPToolNames: nil
             )
             guard !Task.isCancelled else { return }
             let elapsed = startedAt.duration(to: ContinuousClock.now)
