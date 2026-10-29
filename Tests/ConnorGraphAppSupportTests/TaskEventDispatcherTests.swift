@@ -5,7 +5,7 @@ import ConnorGraphAppSupport
 
 @Suite("Task Event Dispatcher Tests")
 struct TaskEventDispatcherTests {
-    @Test func dispatcherMatchesSessionStatusChangedTasks() async throws {
+    @Test func dispatcherDoesNotRunRemovedSessionStatusTasks() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
@@ -23,12 +23,12 @@ struct TaskEventDispatcherTests {
         let runner = TaskTargetRunner(mailRefresher: { _ in "mail" }, calendarRefresher: { _ in "calendar" }, rssRefresher: { _ in "rss" }, sessionMessenger: session.perform)
         let dispatcher = TaskEventDispatcher(repository: repository, runner: runner)
 
-        let outcomes = try await dispatcher.dispatchSessionStatusChanged(sessionID: "session-1", fromStatus: "todo", toStatus: "done")
+        let outcomes = try await dispatcher.dispatch(eventName: ConnorTaskEventName.sessionStatusChanged, payload: ["sessionID": "session-1", "toStatus": "done"])
         let history = try repository.loadRunHistory(taskID: task.id, limit: 10)
 
-        #expect(outcomes.map(\.taskID) == [task.id])
-        #expect(await session.messages == ["session-1:Summarize this session"])
-        #expect(history.map(\.status) == [.succeeded, .running])
+        #expect(outcomes.isEmpty)
+        #expect(await session.messages.isEmpty)
+        #expect(history.isEmpty)
     }
 
     @Test func dispatcherIgnoresStoppedOrNonMatchingTasks() async throws {
@@ -53,7 +53,7 @@ struct TaskEventDispatcherTests {
         let runner = TaskTargetRunner(mailRefresher: { _ in "mail" }, calendarRefresher: { _ in "calendar" }, rssRefresher: { _ in "rss" }, sessionMessenger: session.perform)
         let dispatcher = TaskEventDispatcher(repository: repository, runner: runner)
 
-        let outcomes = try await dispatcher.dispatchSessionStatusChanged(sessionID: "session-1", fromStatus: "todo", toStatus: "done")
+        let outcomes = try await dispatcher.dispatch(eventName: ConnorTaskEventName.sessionStatusChanged, payload: ["sessionID": "session-1", "toStatus": "done"])
 
         #expect(outcomes.isEmpty)
         #expect(await session.messages.isEmpty)

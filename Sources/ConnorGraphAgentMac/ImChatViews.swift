@@ -58,7 +58,7 @@ struct ImConversationRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: AppListCardLayout.contentPadding) {
-            Image(systemName: statusIcon)
+            Image(systemName: "bubble.left.and.bubble.right")
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
@@ -121,12 +121,6 @@ struct ImConversationRow: View {
 
     private var metadataRow: some View {
         HStack(spacing: 6) {
-            Text(conversation.status.displayName)
-                .font(AppListTypography.rowCaptionEmphasized)
-                .foregroundStyle(statusColor)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(statusColor.opacity(0.14), in: Capsule())
             Text(conversation.lastMessagePreview.isEmpty ? conversationKindLabel : conversation.lastMessagePreview)
                 .font(AppListTypography.rowCaption)
                 .foregroundStyle(.secondary)
@@ -168,7 +162,7 @@ struct ImConversationRow: View {
     }
 
     private var statusColor: Color {
-        AppSessionStatusVisualStyle.color(for: conversation.status)
+        .secondary
     }
 
     @ViewBuilder private var labelRow: some View {
@@ -874,7 +868,6 @@ private struct ImConversationInfoSheet: View {
                     }
                     Section("会话") {
                         LabeledContent("类型", value: "单聊")
-                        LabeledContent("状态", value: conversation.status.displayName)
                         LabeledContent("消息", value: "\(model.messages.count) 条")
                         LabeledContent("通知", value: conversation.muted ? "已静音" : "正常")
                     }

@@ -10,16 +10,8 @@ public struct TaskEventDispatcher: Sendable {
         self.runner = runner
     }
 
-    public func dispatchSessionStatusChanged(sessionID: String, fromStatus: String?, toStatus: String, now: Date = Date()) async throws -> [TaskSchedulerRunOutcome] {
-        let payload = [
-            "sessionID": sessionID,
-            "fromStatus": fromStatus ?? "",
-            "toStatus": toStatus
-        ]
-        return try await dispatch(eventName: ConnorTaskEventName.sessionStatusChanged, payload: payload, now: now)
-    }
-
     public func dispatch(eventName: String, payload: [String: String], now: Date = Date()) async throws -> [TaskSchedulerRunOutcome] {
+        guard eventName != ConnorTaskEventName.sessionStatusChanged else { return [] }
         let tasks = try repository.loadOrCreateDefault(now: now)
         let matching = tasks.filter { task in
             guard task.trigger.kind == .eventTriggered else { return false }

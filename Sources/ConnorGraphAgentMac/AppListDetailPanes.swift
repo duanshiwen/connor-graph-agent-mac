@@ -1761,7 +1761,7 @@ enum TaskAutomationKind {
     var emptyDescription: String {
         switch self {
         case .scheduled: "系统任务会在启动时自动补齐；用户和 AI 任务可按时间或周期新建会话并发送消息。"
-        case .eventTriggered: "用户或 AI 可创建：当会话状态变为特定状态后，向 AI 发送指定内容。"
+        case .eventTriggered: "会话通过标签管理。"
         }
     }
 
@@ -1839,13 +1839,7 @@ struct CraftTaskAutomationListPane: View {
                         rationale: request.rationale
                     )
                 case .eventTriggered:
-                    try model.createSessionStatusMessageTask(
-                        name: request.name,
-                        toStatus: request.toStatus,
-                        message: request.message,
-                        sessionID: nil,
-                        rationale: request.rationale
-                    )
+                    throw TaskCreationServiceError.unsupportedTrigger
                 }
             }
         }
@@ -1937,7 +1931,6 @@ private struct AddTaskAutomationRequest {
     var name: String
     var runAt: Date
     var recurrence: ConnorTaskRecurrence
-    var toStatus: String
     var message: String
     var sessionTitle: String
     var rationale: String?
@@ -1959,7 +1952,6 @@ private struct AddTaskAutomationSheet: View {
     @State private var name: String = ""
     @State private var runAt: Date = Date().addingTimeInterval(3600)
     @State private var recurrence: ConnorTaskRecurrence = .once
-    @State private var toStatus: String = AgentSessionStatus.done.rawValue
     @State private var message: String = ""
     @State private var sessionTitle: String = ""
     @State private var rationale: String = ""
@@ -1980,19 +1972,6 @@ private struct AddTaskAutomationSheet: View {
 
     private var selectableRecurrences: [ConnorTaskRecurrence] {
         [.once, .daily, .weekly, .monthly]
-    }
-
-    private var selectableStatuses: [AgentSessionStatusDefinition] {
-        let configured = governanceConfig.statuses
-            .filter { $0.id != AgentSessionStatus.archived.rawValue }
-            .filter { AgentSessionStatus(rawValue: $0.id) != nil }
-            .sorted { $0.sortOrder < $1.sortOrder }
-        if configured.isEmpty {
-            return AgentSessionStatusDefinition.defaults
-                .filter { $0.id != AgentSessionStatus.archived.rawValue }
-                .sorted { $0.sortOrder < $1.sortOrder }
-        }
-        return configured
     }
 
     var body: some View {
@@ -2029,17 +2008,6 @@ private struct AddTaskAutomationSheet: View {
                                 TextField("可选；留空时由会话自动命名", text: $sessionTitle)
                                     .textFieldStyle(.roundedBorder)
                             }
-                        } else {
-                            RSSSetupRow("触发状态", labelWidth: Layout.labelWidth) {
-                                Picker("触发状态", selection: $toStatus) {
-                                    ForEach(selectableStatuses) { definition in
-                                        Label(definition.name, systemImage: definition.systemImage)
-                                            .tag(definition.id)
-                                    }
-                                }
-                                .labelsHidden()
-                                .frame(width: Layout.compactControlWidth, alignment: .leading)
-                            }
                         }
                     }
 
@@ -2050,7 +2018,7 @@ private struct AddTaskAutomationSheet: View {
                                 .frame(minHeight: 118)
                                 .appFormTextEditor()
                         }
-                        RSSSetupHint(kind == .scheduled ? "到达时间后，Connor 会创建一个新会话并发送这段消息。" : "当会话状态切换到所选状态时，Connor 会向该会话发送这段消息。")
+                        RSSSetupHint("到达时间后，Connor 会创建一个新会话并发送这段消息。")
                     }
 
                     RSSSetupSection(title: "治理备注", systemImage: "checkmark.shield") {
@@ -2078,11 +2046,7 @@ private struct AddTaskAutomationSheet: View {
         .padding(AppShellLayout.spaceXL)
         .frame(width: Layout.sheetWidth, height: Layout.sheetHeight)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear {
-            if let first = selectableStatuses.first, !selectableStatuses.contains(where: { $0.id == toStatus }) {
-                toStatus = first.id
-            }
-        }
+
     }
 
     private var dialogHeader: some View {
@@ -2099,7 +2063,7 @@ private struct AddTaskAutomationSheet: View {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(kind.createButtonHelp)
                     .font(AppTypography.pageTitle)
-                Text(kind == .scheduled ? "创建一个按时间触发的用户任务，到点后新建会话并发送消息。" : "创建一个由会话状态变化触发的用户任务，状态命中后向该会话发送消息。")
+                Text("创建一个按时间触发的任务，到点后新建会话并发送消息。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -2143,7 +2107,7 @@ private struct AddTaskAutomationSheet: View {
     private var hintTitle: String {
         switch kind {
         case .scheduled: "定时任务只负责触发，不绕过权限"
-        case .eventTriggered: "事件触发任务跟随会话治理状态"
+        case .eventTriggered: "会话通过标签管理"
         }
     }
 
@@ -2152,7 +2116,7 @@ private struct AddTaskAutomationSheet: View {
         case .scheduled:
             "任务运行时仍会走 Connor 的会话、审计和工具权限机制。建议把消息写成清晰的目标，而不是隐藏复杂策略。"
         case .eventTriggered:
-            "当前支持“会话状态已变更”事件。任务只在状态命中时发送消息，不直接修改会话内容或绕过审批。"
+            "按时间或周期运行任务。"
         }
     }
 
@@ -2165,7 +2129,6 @@ private struct AddTaskAutomationSheet: View {
                 name: trimmedName,
                 runAt: runAt,
                 recurrence: recurrence,
-                toStatus: toStatus,
                 message: trimmedMessage,
                 sessionTitle: normalizedTitle,
                 rationale: normalizedRationale
@@ -4528,7 +4491,7 @@ struct CraftSessionRow: View {
                 .controlSize(.small)
                 .frame(width: 18, height: 18)
         } else if cardStyle.dotColor == nil {
-            Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
+            Image(systemName: row.isFlagged ? "pin.fill" : "bubble.left.and.bubble.right")
                 .foregroundStyle(leadingIconColor)
                 .frame(width: 18)
         }
@@ -4558,12 +4521,6 @@ struct CraftSessionRow: View {
             }
 
             HStack(spacing: 6) {
-                Text(row.statusText)
-                    .font(AppListTypography.rowCaptionEmphasized)
-                    .foregroundStyle(statusPillForegroundColor)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(statusPillBackgroundColor, in: Capsule())
                 Text("\(row.messageCount) 条消息")
                     .font(AppListTypography.rowCaption)
                     .foregroundStyle(secondaryTextColor)
@@ -4839,7 +4796,6 @@ struct CraftSimpleListPane: View {
         }
     }
 }
-
 
 // MARK: - 列表项「转发到…」卡片构造
 

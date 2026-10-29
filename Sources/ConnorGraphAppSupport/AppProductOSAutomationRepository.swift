@@ -76,7 +76,6 @@ public struct AppProductOSAutomationRepository: Sendable {
     public var automationConfigURL: URL { storagePaths.automationsDirectory.appendingPathComponent("automations.json") }
     public var automationLogURL: URL { storagePaths.automationsDirectory.appendingPathComponent("automation-trigger-log.json") }
     public var executionHistoryURL: URL { storagePaths.automationsDirectory.appendingPathComponent("automation-execution-history.json") }
-    public var statusesMirrorURL: URL { storagePaths.statusesDirectory.appendingPathComponent("statuses.json") }
     public var labelsMirrorURL: URL { storagePaths.labelsDirectory.appendingPathComponent("labels.json") }
 
     public func loadOrCreateDefault(governanceConfig: AppSessionGovernanceConfig = .default) throws -> ProductOSAutomationConfig {
@@ -85,7 +84,8 @@ public struct AppProductOSAutomationRepository: Sendable {
         if FileManager.default.fileExists(atPath: automationConfigURL.path) {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            let config = try decoder.decode(ProductOSAutomationConfig.self, from: try Data(contentsOf: automationConfigURL))
+            var config = try decoder.decode(ProductOSAutomationConfig.self, from: try Data(contentsOf: automationConfigURL))
+            config.rules.removeAll { $0.trigger.kind == .sessionStatusChanged || $0.actions.contains { $0.kind == .setSessionStatus } }
             try validate(config)
             return config
         }
@@ -99,7 +99,7 @@ public struct AppProductOSAutomationRepository: Sendable {
         try storagePaths.ensureDirectoryHierarchy()
         try mirrorGovernanceConfig(governanceConfig)
         var normalized = config
-        normalized.rules = config.rules.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        normalized.rules = config.rules.filter { $0.trigger.kind != .sessionStatusChanged && !$0.actions.contains { $0.kind == .setSessionStatus } }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         normalized.updatedAt = Date()
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -207,11 +207,9 @@ public struct AppProductOSAutomationRepository: Sendable {
     }
 
     private func mirrorGovernanceConfig(_ config: AppSessionGovernanceConfig) throws {
-        try FileManager.default.createDirectory(at: storagePaths.statusesDirectory, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: storagePaths.labelsDirectory, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(config.statuses).write(to: statusesMirrorURL, options: .atomic)
         try encoder.encode(config.labels).write(to: labelsMirrorURL, options: .atomic)
     }
 

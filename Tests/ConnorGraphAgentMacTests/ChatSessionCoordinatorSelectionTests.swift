@@ -39,7 +39,7 @@ struct ChatSessionRuntimeIntegrationTests {
         #expect(!paneSource.contains("reloadChatSessions()"))
     }
 
-    @Test func rapidStatusLabelAndAllRoundTripRestoresCompleteSessionList() async throws {
+    @Test func rapidLabelAndAllRoundTripRestoresCompleteSessionList() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
@@ -53,10 +53,6 @@ struct ChatSessionRuntimeIntegrationTests {
         let allIDs = fixture.runtime.chatFeatureModel.sessions.allSessions.map(\.id)
         #expect(allIDs.contains(todo.id))
         #expect(allIDs.contains(inProgress.id))
-
-        fixture.runtime.setSessionListFilter(.status(.todo))
-        #expect(fixture.runtime.chatFeatureModel.sessions.filter == .status(.todo))
-        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.allSatisfy { $0.governance.status == .todo })
 
         fixture.runtime.setSessionListFilter(.label("important"))
         #expect(fixture.runtime.chatFeatureModel.sessions.filter == .label("important"))
@@ -73,59 +69,9 @@ struct ChatSessionRuntimeIntegrationTests {
         #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(inProgress.id))
     }
 
-    @Test func statusFilterClearsDetailWhenSelectedSessionIsNoLongerVisible() async throws {
-        let fixture = try makeFixture()
-        defer { fixture.cleanup() }
 
-        var hiddenSession = try fixture.repository.createSession(title: "Hidden in progress", now: Date(timeIntervalSince1970: 2_000))
-        hiddenSession.messages = [AgentMessage(role: .user, content: "Hidden transcript")]
-        hiddenSession = try fixture.repository.saveSession(hiddenSession)
-        hiddenSession = try fixture.repository.setStatus(sessionID: hiddenSession.id, status: .inProgress)
 
-        var visibleSession = try fixture.repository.createSession(title: "Visible todo", now: Date(timeIntervalSince1970: 3_000))
-        visibleSession = try fixture.repository.setStatus(sessionID: visibleSession.id, status: .todo)
 
-        fixture.runtime.reloadChatSessions()
-        fixture.runtime.selectChatSession(hiddenSession.id)
-        try await waitForTranscript(fixture.runtime, expectedContents: ["Hidden transcript"])
-
-        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == hiddenSession.id)
-        #expect(fixture.runtime.chatFeatureModel.run.transcript.map(\.content) == ["Hidden transcript"])
-
-        fixture.runtime.setSessionListFilter(.status(.todo))
-
-        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(visibleSession.id))
-        #expect(!fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(hiddenSession.id))
-        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == nil)
-        #expect(fixture.runtime.chatFeatureModel.run.transcript.isEmpty)
-        #expect(fixture.runtime.chatFeatureModel.run.eventTimeline.isEmpty)
-        #expect(fixture.runtime.chatFeatureModel.run.latestSummary == nil)
-        #expect(fixture.runtime.chatFeatureModel.sessions.selectedArtifactDirectories == nil)
-    }
-
-    @Test func statusFilterKeepsDetailWhenSelectedSessionRemainsVisible() async throws {
-        let fixture = try makeFixture()
-        defer { fixture.cleanup() }
-
-        var selectedSession = try fixture.repository.createSession(title: "Selected todo", now: Date(timeIntervalSince1970: 2_000))
-        selectedSession.messages = [AgentMessage(role: .user, content: "Selected transcript")]
-        selectedSession = try fixture.repository.saveSession(selectedSession)
-        selectedSession = try fixture.repository.setStatus(sessionID: selectedSession.id, status: .todo)
-
-        let otherSession = try fixture.repository.createSession(title: "Other in progress", now: Date(timeIntervalSince1970: 3_000))
-        _ = try fixture.repository.setStatus(sessionID: otherSession.id, status: .inProgress)
-
-        fixture.runtime.reloadChatSessions()
-        fixture.runtime.selectChatSession(selectedSession.id)
-        try await waitForTranscript(fixture.runtime, expectedContents: ["Selected transcript"])
-
-        fixture.runtime.setSessionListFilter(.status(.todo))
-
-        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(selectedSession.id))
-        #expect(!fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(otherSession.id))
-        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == selectedSession.id)
-        #expect(fixture.runtime.chatFeatureModel.run.transcript.map(\.content) == ["Selected transcript"])
-    }
 
     @Test func labelFilterClearsDetailWhenSelectedSessionDoesNotHaveLabel() async throws {
         let fixture = try makeFixture()
@@ -296,27 +242,7 @@ struct ChatSessionRuntimeIntegrationTests {
         #expect(fixture.runtime.agentPermissionMode == .askToWrite)
     }
 
-    @Test func creatingNewSessionRespectsActiveStatusFilterWithoutReloadingList() async throws {
-        let fixture = try makeFixture()
-        defer { fixture.cleanup() }
 
-        fixture.runtime.reloadChatSessions()
-        fixture.runtime.setSessionListFilter(.status(.inProgress))
-        let visibleIDs = fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id)
-
-        fixture.runtime.newChatSession()
-
-        let createdID = try #require(fixture.runtime.chatFeatureModel.sessions.allSessions.first?.id)
-        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id) == visibleIDs)
-        #expect(!fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(createdID))
-        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == nil)
-        #expect(fixture.runtime.chatFeatureModel.sessions.selectedArtifactDirectories == nil)
-        #expect(fixture.runtime.chatFeatureModel.run.transcript.isEmpty)
-        #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == nil)
-
-        await fixture.runtime.waitForNewSessionPreparation(sessionID: createdID)
-        #expect(try fixture.repository.loadSession(id: createdID)?.id == createdID)
-    }
 
     @Test func selectingMissingSessionDoesNotLeaveLoadingStuck() async throws {
         let fixture = try makeFixture()

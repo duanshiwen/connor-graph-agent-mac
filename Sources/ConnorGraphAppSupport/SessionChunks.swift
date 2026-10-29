@@ -32,7 +32,7 @@ enum SessionChunks {
             ])])
         }
         records[id] = .object(["id": .string(id), manifestKey: .object([
-            "v": .number(1), "sha256": .string(hash), "semanticHash": .string(try mail ? SharedMailStore.semanticHash(normalized) : semanticHash(normalized)), "byteLength": .number(Double(bytes.count)), "parts": .array(ids)
+            "v": .number(1), "semanticVersion": .number(2), "sha256": .string(hash), "semanticHash": .string(try mail ? SharedMailStore.semanticHash(normalized) : semanticHash(normalized)), "byteLength": .number(Double(bytes.count)), "parts": .array(ids)
         ])])
         return records
     }
@@ -50,8 +50,8 @@ enum SessionChunks {
         }
         let labels: [String]
         if case .array(let values) = root["labels"] { labels = values.compactMap { if case .string(let s) = $0 { return s }; return nil } } else { labels = [] }
-        var canonical = root.filter { ["id", "title", "createdAt", "updatedAt", "status", "archived", "kind"].contains($0.key) }
-        canonical["kind"] = root["kind"] ?? .string("chat"); canonical["status"] = root["status"] ?? .string("todo"); canonical["archived"] = root["archived"] ?? .bool(false)
+        var canonical = root.filter { ["id", "title", "createdAt", "updatedAt", "archived", "kind"].contains($0.key) }
+        canonical["kind"] = root["kind"] ?? .string("chat"); canonical["archived"] = root["archived"] ?? .bool(false)
         canonical["labels"] = .array(Set(labels).sorted().map(ConnorJSONValue.string))
         canonical["messages"] = .array(messages.map { message in
             var result = message.filter { ["id", "content", "createdAt", "role"].contains($0.key) }; result["status"] = .string("complete"); return .object(result)
@@ -87,8 +87,8 @@ enum SessionChunks {
         guard bytes.count == Int(rawLength), digest(bytes) == hash else { throw Failure.invalid }
         let session = try JSONDecoder().decode(ConnorJSONValue.self, from: bytes)
         guard case .object(let object) = session, object["id"] == .string(id) else { throw Failure.invalid }
-        guard manifest["semanticHash"] == .string(try mail ? SharedMailStore.semanticHash(session) : semanticHash(session)) else { throw Failure.invalid }
-        return session
+        guard (!mail && manifest["semanticVersion"] != .number(2)) || manifest["semanticHash"] == .string(try mail ? SharedMailStore.semanticHash(session) : semanticHash(session)) else { throw Failure.invalid }
+        return try mail ? session : normalize(session)
     }
     static func tag(_ payload: ConnorJSONValue) -> String? {
         guard case .object(let root) = payload, case .object(let manifest) = root[manifestKey], case .string(let tag) = manifest["semanticHash"] else { return nil }; return tag
@@ -115,7 +115,7 @@ enum SessionChunks {
             default: throw Failure.invalid
             }
         }
-        for key in ["id","title","createdAt","updatedAt","kind","status"] { add(try text(canonical[key])) }
+        for key in ["id","title","createdAt","updatedAt","kind"] { add(try text(canonical[key])) }
         add(canonical["archived"] == .bool(true) ? "1" : "0")
         add(String(labels.count)); for label in labels { add(try text(label)) }
         add(String(items.count)); for item in items { guard case .object(let message) = item else { throw Failure.invalid }; for key in ["id","role","content","createdAt"] { add(try text(message[key])) } }

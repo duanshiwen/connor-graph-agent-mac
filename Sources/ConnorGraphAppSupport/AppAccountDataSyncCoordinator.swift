@@ -34,7 +34,6 @@ public struct ConnorPortableSession: Codable, Sendable, Equatable {
     public var title: String
     public var createdAt: Int64
     public var updatedAt: Int64
-    public var status: String
     public var archived: Bool
     public var labels: [String]
     public var messages: [ConnorPortableMessage]
@@ -45,7 +44,7 @@ public struct ConnorPortableSession: Codable, Sendable, Equatable {
         kind = session.governance.kind.rawValue
         createdAt = Int64(session.createdAt.timeIntervalSince1970 * 1_000)
         updatedAt = Int64(session.updatedAt.timeIntervalSince1970 * 1_000)
-        status = session.governance.status.rawValue; archived = session.governance.isArchived
+        archived = session.governance.isArchived
         labels = session.governance.labels.map(\.id)
         messages = session.messages.map {
             ConnorPortableMessage(id: $0.id, role: $0.role.rawValue, content: $0.content, createdAt: Int64($0.createdAt.timeIntervalSince1970 * 1_000), status: "complete")
@@ -55,7 +54,6 @@ public struct ConnorPortableSession: Codable, Sendable, Equatable {
     public func merging(into existing: AgentSession?) -> AgentSession {
         var governance = existing?.governance ?? .default
         governance.kind = kind.flatMap(AgentSessionKind.init(rawValue:)) ?? existing?.governance.kind ?? .chat
-        governance.status = AgentSessionStatus(rawValue: status) ?? .todo
         governance.isArchived = archived
         governance.labels = labels.map(AgentSessionLabel.init(id:))
         let remote = AgentSession(
@@ -611,7 +609,6 @@ public actor AppAccountDataSyncCoordinator {
         var snapshotUnavailable = false
         var didRepair = false
 
-
         // One upgrade repair reads current records, not hundreds of thousands of
         // obsolete log entries. Persist the page position to resume after a restart.
         if state.repairVersion < 4 {
@@ -916,7 +913,7 @@ public actor AppAccountDataSyncCoordinator {
                 let note: LegacyNote = try decode(change.payload)
                 canonical.recordId = note.sessionId ?? note.id
                 canonical.payload = .object([
-                    "id": .string(canonical.recordId), "title": .string(note.title), "kind": .string("note"), "status": .string("todo"),
+                    "id": .string(canonical.recordId), "title": .string(note.title), "kind": .string("note"),
                     "archived": .bool(false), "labels": .array([]), "createdAt": .number(Double(note.createdAt)), "updatedAt": .number(Double(note.updatedAt)),
                     "messages": .array([.object(["id": .string((try sessions.loadSession(id: canonical.recordId))?.messages.first(where: { $0.role == .user })?.id ?? "note-body-" + note.id), "role": .string("user"), "content": .string(note.content), "createdAt": .number(Double(note.updatedAt)), "status": .string("complete")])])
                 ])

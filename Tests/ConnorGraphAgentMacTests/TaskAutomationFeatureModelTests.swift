@@ -39,31 +39,20 @@ struct TaskAutomationFeatureModelTests {
         #expect(scheduled.target == .createSessionAndSendMessage(message: "Review today", title: "Daily Review"))
         #expect(model.selectedTaskID == scheduledID)
 
-        let eventID = try model.createSessionStatusMessageTask(
-            name: "Done summary",
-            toStatus: "done",
-            message: "Summarize this session",
-            sessionID: nil,
-            rationale: nil
-        )
-        let loadedEvent = try fixture.repository.loadTask(id: eventID)
-        let event = try #require(loadedEvent)
-        #expect(event.metadata.createdBySessionID == "session-current")
-        #expect(event.trigger.eventFilter == ["toStatus": "done"])
-        #expect(model.selectedTaskID == eventID)
         #expect(model.presentation.cards.contains(where: { $0.id == scheduledID }))
-        #expect(model.presentation.cards.contains(where: { $0.id == eventID }))
+
     }
 
     @Test func stopRestoreDeleteMutateRepositoryAndSelection() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let model = TaskAutomationFeatureModel(repository: fixture.repository)
-        let taskID = try model.createSessionStatusMessageTask(
+        let taskID = try model.createScheduledSessionMessageTask(
             name: "Lifecycle task",
-            toStatus: "done",
+            runAt: Date(timeIntervalSince1970: 100),
+            recurrence: .daily,
             message: "Continue",
-            sessionID: nil,
+            title: "",
             rationale: nil
         )
 
@@ -99,11 +88,12 @@ struct TaskAutomationFeatureModelTests {
         let model = TaskAutomationFeatureModel(repository: nil)
 
         #expect(throws: TaskAutomationFeatureModelError.self) {
-            try model.createSessionStatusMessageTask(
+            try model.createScheduledSessionMessageTask(
                 name: "Unavailable",
-                toStatus: "done",
+                runAt: Date(timeIntervalSince1970: 100),
+            recurrence: .daily,
                 message: "No repository",
-                sessionID: nil,
+                title: "",
                 rationale: nil
             )
         }

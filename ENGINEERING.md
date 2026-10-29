@@ -291,7 +291,6 @@ Memory OS 证据描述用户历史、偏好、决定、关系和内部项目；W
 - AI task tools：
   - `tasks_list`
   - `tasks_create_scheduled_session_message`
-  - `tasks_create_session_status_message`
 - System tasks 包括 Memory OS daily sweeps、10 分钟 Mail/Calendar refresh 和 per-source RSS refresh。
 - missed recurring schedules 会补跑一次，然后推进到下一个未来 anchor。
 

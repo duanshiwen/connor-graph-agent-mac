@@ -12,7 +12,6 @@ struct AgentChatView: View {
     var imModel: ImFeatureModel? = nil
     @State private var isSessionInfoPresented = false
 
-
     var body: some View {
         Group {
             if model.sessions.selectedSessionID == nil && !chatActions.dependencies.browser.isVisible {
@@ -537,7 +536,6 @@ private struct AgentChatSessionRow: View {
                     Spacer(minLength: 0)
                 }
                 HStack(spacing: AgentChatLayout.spaceS) {
-                    AgentStatusPill(status: row.status, text: row.statusText)
                     Text("\(row.messageCount) msgs")
                         .font(AgentChatTypography.micro)
                         .foregroundStyle(.secondary)
@@ -771,8 +769,6 @@ private struct AgentChatConversationView: View {
             preservedOpenProcessState: preservedOpenProcessState
         )
     }
-
-
 
     private func resetVisibleMessageWindow() {
         visibleMessageLimit = Self.initialVisibleMessageLimit
@@ -1186,7 +1182,6 @@ private struct AgentChatConversationView: View {
                 guard isSubmitting else { return }
                 chatViewportController.followLatestIfPinned()
             }
-
 
             conversationFooter
             .padding(.horizontal, 0)
@@ -1782,20 +1777,6 @@ private struct AgentChatInspectorView: View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             Text("会话")
                 .font(AgentChatTypography.calloutEmphasis)
-            Picker("状态", selection: Binding(
-                get: { session.governance.status },
-                set: { newValue in
-                    DispatchQueue.main.async {
-                        chatActions.session.setSelectedSessionStatus(newValue)
-                    }
-                }
-            )) {
-                ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
-                    Text(status.displayName).tag(status)
-                }
-            }
-            .pickerStyle(.menu)
-
             HStack(spacing: AgentChatLayout.spaceS) {
                 Button(session.governance.isFlagged ? "取消标记" : "标记") { chatActions.session.toggleSelectedSessionFlag() }
             }

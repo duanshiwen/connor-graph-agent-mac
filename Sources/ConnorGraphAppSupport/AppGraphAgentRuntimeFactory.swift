@@ -255,7 +255,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let environmentStore = environmentProvider.map { _ in AgentEnvironmentSnapshotStore() }
         let governanceConfig = storagePaths.flatMap { try? AppSessionGovernanceConfigRepository(configDirectory: $0.configDirectory).loadOrCreateDefault() } ?? .default
         let sessionRepository = AppChatSessionRepository(store: store, storagePaths: storagePaths)
-        registry.registerSessionStatusTools(repository: sessionRepository, governanceConfig: governanceConfig)
+        registry.registerSessionTools(repository: sessionRepository)
         registry.registerNoteReadTools(repository: AppNoteRepository(store: store))
         registry.register(NoteCreateTool(repository: sessionRepository, noteRepository: AppNoteRepository(store: store)))
         registry.register(NoteEditTool(repository: sessionRepository, noteRepository: AppNoteRepository(store: store)))

@@ -116,7 +116,7 @@ struct PhaseHSourceSkillAutomationUITests {
                 id: "rule-archive",
                 name: "Archive done sessions",
                 isEnabled: true,
-                trigger: ProductOSAutomationTrigger(kind: .sessionStatusChanged, status: .done),
+                trigger: ProductOSAutomationTrigger(kind: .sessionLabelAdded, labelID: "important"),
                 actions: [ProductOSAutomationAction(kind: .appendTimelineEvent, message: "done")],
                 requiresReview: false,
                 tags: ["cleanup"]
@@ -135,7 +135,7 @@ struct PhaseHSourceSkillAutomationUITests {
             id: "trigger-1",
             ruleID: "rule-archive",
             ruleName: "Archive done sessions",
-            trigger: .sessionStatusChanged,
+            trigger: .sessionLabelAdded,
             sessionID: "session-1",
             actionSummaries: ["done"],
             requiresReview: false
@@ -143,7 +143,7 @@ struct PhaseHSourceSkillAutomationUITests {
         let history = [ProductOSAutomationExecutionHistoryRecord(
             id: "history-1",
             sessionID: "session-1",
-            trigger: .sessionStatusChanged,
+            trigger: .sessionLabelAdded,
             ruleIDs: ["rule-archive"],
             appliedActionCount: 1,
             skippedActionCount: 0,
@@ -161,7 +161,7 @@ struct PhaseHSourceSkillAutomationUITests {
         #expect(presentation.ruleCards[0].dispositionLabel == "ready")
         #expect(presentation.ruleCards[1].severity == .warning)
         #expect(presentation.triggerCards.first?.detail == "done")
-        #expect(presentation.historyCards.first?.title == "completed · sessionStatusChanged")
+        #expect(presentation.historyCards.first?.title == "completed · sessionLabelAdded")
     }
 
     @Test func automationRouteIsWiredToNativePanel() {

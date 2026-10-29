@@ -123,9 +123,11 @@ public struct ConnorCLICommandPresentation: Codable, Sendable, Equatable, Identi
 }
 
 public struct ConnorAutomationSurfaceTriggerRequest: Codable, Sendable, Equatable {
+    private enum CodingKeys: String, CodingKey { case triggerKind, sessionID, labelID, registryEntryID, dryRun, reviewed }
+
     public var triggerKind: ProductOSAutomationTriggerKind
     public var sessionID: String
-    public var status: AgentSessionStatus?
+    public var status: AgentSessionStatus? = nil
     public var labelID: String?
     public var registryEntryID: String?
     public var dryRun: Bool
@@ -153,7 +155,6 @@ public struct ConnorAutomationSurfaceTriggerRequest: Codable, Sendable, Equatabl
         ProductOSAutomationEventContext(
             triggerKind: triggerKind,
             sessionID: sessionID,
-            status: status,
             labelID: labelID,
             registryEntryID: registryEntryID
         )
@@ -252,7 +253,7 @@ public enum ConnorLocalAutomationSurfaceCatalog {
         .init(id: .sessionList, name: "sessions list", usage: "connor sessions list --limit 20", summary: "List recent sessions.", examples: ["connor sessions list"], apiRoute: .sessions),
         .init(id: .sessionShow, name: "sessions show", usage: "connor sessions show <session-id>", summary: "Show one session.", examples: ["connor sessions show session-1"], apiRoute: .sessionDetail),
         .init(id: .automationList, name: "automations list", usage: "connor automations list", summary: "List automation rules.", examples: ["connor automations list"], apiRoute: .automations),
-        .init(id: .automationEvaluate, name: "automations evaluate", usage: "connor automations evaluate --trigger sessionStatusChanged --session <id> --status needsReview --dry-run", summary: "Dry-run automation trigger evaluation.", riskLevel: .reviewRequired, examples: ["connor automations evaluate --trigger sessionStatusChanged --session demo --status needsReview --dry-run"], apiRoute: .automationEvaluate),
+        .init(id: .automationEvaluate, name: "automations evaluate", usage: "connor automations evaluate --trigger sessionLabelAdded --session <id> --label important --dry-run", summary: "Dry-run automation trigger evaluation.", riskLevel: .reviewRequired, examples: ["connor automations evaluate --trigger sessionLabelAdded --session demo --label important --dry-run"], apiRoute: .automationEvaluate),
         .init(id: .automationExecuteReviewed, name: "automations execute-reviewed", usage: "connor automations execute-reviewed <evaluation-id> --reviewed", summary: "Execute reviewed safe automation actions.", riskLevel: .stateChanging, requiresReview: true, examples: ["connor automations execute-reviewed eval-1 --reviewed"], apiRoute: .automationExecuteReviewed),
         .init(id: .sourceHealth, name: "sources health", usage: "connor sources health", summary: "Inspect source runtime health.", examples: ["connor sources health"], apiRoute: .sourceHealth),
         .init(id: .graphMemoryReview, name: "memory review", usage: "connor memory review --summary", summary: "Inspect graph memory review queue.", examples: ["connor memory review --summary"], apiRoute: .graphMemoryReview),

@@ -333,10 +333,12 @@ public struct AgentBudgetWarning: Codable, Sendable, Equatable {
 }
 
 public struct AgentSessionGovernanceEvent: Codable, Sendable, Equatable {
+    private enum CodingKeys: String, CodingKey { case runID, sessionID, message, labels }
+
     public var runID: String?
     public var sessionID: String
     public var message: String
-    public var status: AgentSessionStatus?
+    public var status: AgentSessionStatus? = nil
     public var labels: [AgentSessionLabel]
 
     public init(runID: String? = nil, sessionID: String, message: String, status: AgentSessionStatus? = nil, labels: [AgentSessionLabel] = []) {

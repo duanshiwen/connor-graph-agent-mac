@@ -36,7 +36,7 @@ import ConnorGraphStore
     #expect(controller.toolRegistry.permission(named: "ApplyPatch") == .editWorkspaceFile)
 }
 
-@Test func agentLoopRuntimeFactoryRegistersSessionStatusTools() throws {
+@Test func agentLoopRuntimeFactoryRegistersPlainSessionTools() throws {
     let storeURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("connor-factory-session-status-tools-")
         .appendingPathComponent(UUID().uuidString)
@@ -53,10 +53,10 @@ import ConnorGraphStore
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
     let names = controller.toolRegistry.definitions.map(\.name)
 
-    #expect(names.contains("session_get_status"))
-    #expect(names.contains("session_set_status"))
-    #expect(names.contains("session_list_by_status"))
-    #expect(names.contains("session_batch_set_status"))
+    #expect(names.contains("session_list"))
+    #expect(!names.contains("session_set_status"))
+    #expect(!names.contains("session_list_by_status"))
+    #expect(!names.contains("session_batch_set_status"))
     #expect(names.contains("session_batch_delete"))
     #expect(names.contains("note_search"))
     #expect(names.contains("note_get"))

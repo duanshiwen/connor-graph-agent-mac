@@ -552,24 +552,6 @@ enum AppSessionNativeContextMenu {
             menu.addItem(header)
         }
 
-        // 更改状态（子菜单）
-        let statusItem = NSMenuItem(title: "更改状态", action: nil, keyEquivalent: "")
-        statusItem.image = NSImage(systemSymbolName: "circle.dashed", accessibilityDescription: "更改状态")
-        let statusMenu = NSMenu(title: "更改状态")
-        for status in statuses ?? AgentSessionStatus.allCases.filter({ $0 != .archived }) {
-            let item = NSMenuItem(title: status.displayName, action: #selector(NativeMenuActionTarget.invoke(_:)), keyEquivalent: "")
-            item.image = NSImage(systemSymbolName: statusImageProvider(status), accessibilityDescription: status.displayName)
-            let target = NativeMenuActionTarget { onSetStatus(status) }
-            item.target = target
-            retainedTargets.append(target)
-            if status == currentStatus {
-                item.state = .on
-            }
-            statusMenu.addItem(item)
-        }
-        statusItem.submenu = statusMenu
-        menu.addItem(statusItem)
-
         // 标签（子菜单）
         let labelItem = NSMenuItem(title: "标签", action: nil, keyEquivalent: "")
         labelItem.image = NSImage(systemSymbolName: "tag", accessibilityDescription: "标签")

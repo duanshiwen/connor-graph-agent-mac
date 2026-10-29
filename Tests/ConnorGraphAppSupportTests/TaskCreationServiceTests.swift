@@ -31,29 +31,6 @@ struct TaskCreationServiceTests {
         #expect(try repository.loadTask(id: task.id) != nil)
     }
 
-    @Test func createsSessionStatusMessageTaskForUser() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
-        let service = TaskCreationService(repository: repository)
-
-        let task = try service.createSessionStatusMessageTask(
-            origin: .user,
-            name: "Done summary",
-            toStatus: "done",
-            message: "Summarize this done session",
-            sessionID: nil,
-            createdBySessionID: nil,
-            rationale: "Summarize done work"
-        )
-
-        #expect(task.origin == .user)
-        #expect(task.trigger.eventName == ConnorTaskEventName.sessionStatusChanged)
-        #expect(task.trigger.eventFilter == ["toStatus": "done"])
-        #expect(task.target == .sendMessageToSession(message: "Summarize this done session"))
-        #expect(try repository.loadTask(id: task.id) != nil)
-    }
-
     @Test func rejectsSystemOriginAndInvalidRecurrenceForUserCreatableTasks() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }

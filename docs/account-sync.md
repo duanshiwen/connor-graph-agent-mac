@@ -24,7 +24,7 @@
 
 笔记统一为 sessions、kind=note，正文为 user 消息，复用消息 ID。Android 未关联笔记使用笔记 ID，已关联笔记使用 sessionId。四端仍接收历史 notes，保留到规范会话的映射，编辑和删除继续落到规范 sessions。缺少 kind 的历史载荷兼容原有会话类型。
 
-会话保留 user/assistant 消息并集和标签并集；共享元数据按更新时间合并。status 使用 in_progress、needs_review 等规范值，archived 独立保存，不能因“已完成”状态丢失归档。会话 tombstone 阻止旧副本恢复，显式恢复走恢复版本协议。
+会话保留 user/assistant 消息并集和标签并集；共享元数据按更新时间合并。会话仅通过标签管理，不再读取、保存或同步 status/sessionStatus 字段；归档标记独立保存。会话 tombstone 阻止旧副本恢复，显式恢复走恢复版本协议。
 
 标签定义保留原始颜色、图标和版本；RSS 配置时间独立于抓取时间，已有源同样更新。用户偏好允许用空串清空 city/country；缺失历史字段不覆盖本机值，Mac 的共享偏好时钟独立于主题等本机设置。已设置后的空人格参与同步。
 

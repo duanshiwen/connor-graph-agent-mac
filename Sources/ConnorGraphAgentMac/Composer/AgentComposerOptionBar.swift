@@ -33,10 +33,6 @@ struct AgentComposerOptionBar: View {
         HStack(spacing: windowWidthClass.usesStackedPanes ? AgentChatLayout.spaceXS : AgentChatLayout.spaceS) {
             permissionModeMenu
 
-            if let selectedSession {
-                sessionStatusMenu(selectedSession)
-            }
-
             // 极窄（phone）模式下隐藏知识库与 MCP 工具选择，给输入区留出空间。
             if !windowWidthClass.isPhone {
                 RemoteKnowledgeBaseSelectionMenu(
@@ -124,49 +120,6 @@ struct AgentComposerOptionBar: View {
         .help("调整本轮会话权限")
     }
 
-    private func sessionStatusMenu(_ session: AgentSession) -> some View {
-        Menu {
-            ForEach(selectableStatusDefinitions, id: \.id) { definition in
-                if let status = AgentSessionStatus(rawValue: definition.id) {
-                    Button {
-                        onAction(.setSessionStatus(status))
-                    } label: {
-                        Text(menuOptionTitle(definition.name, isSelected: status == session.governance.status))
-                    }
-                }
-            }
-        } label: {
-            let definition = statusDefinition(for: session.governance.status)
-            AgentComposerOptionBadge(
-                title: definition.name,
-                systemImage: definition.systemImage,
-                tint: sessionStatusColor(session.governance.status),
-                isActive: false,
-                style: .prominent
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize(horizontal: true, vertical: false)
-        .layoutPriority(1)
-        .help("更改会话状态")
-    }
-
-    private var selectableStatusDefinitions: [AgentSessionStatusDefinition] {
-        governanceConfig.statuses
-            .filter { $0.id != AgentSessionStatus.archived.rawValue }
-            .filter { AgentSessionStatus(rawValue: $0.id) != nil }
-            .sorted { lhs, rhs in
-                if lhs.sortOrder == rhs.sortOrder { return lhs.name < rhs.name }
-                return lhs.sortOrder < rhs.sortOrder
-            }
-    }
-
-    private func statusDefinition(for status: AgentSessionStatus) -> AgentSessionStatusDefinition {
-        governanceConfig.statuses.first(where: { $0.id == status.rawValue })
-            ?? AgentSessionStatusDefinition.defaults.first(where: { $0.id == status.rawValue })
-            ?? AgentSessionStatusDefinition(id: status.rawValue, name: status.displayName, systemImage: sessionStatusIcon(status))
-    }
-
     private var controlForeground: Color { .secondary }
 
     private var activeForeground: Color { .accentColor }
@@ -190,24 +143,6 @@ struct AgentComposerOptionBar: View {
         }
     }
 
-    private func sessionStatusIcon(_ status: AgentSessionStatus) -> String {
-        switch status {
-        case .todo: "circle"
-        case .inProgress: "play.circle"
-        case .waiting: "clock"
-        case .needsReview: "exclamationmark.bubble"
-        case .done: "checkmark.circle"
-        case .blocked: "nosign"
-        case .cancelled: "xmark.circle"
-        case .archived: "archivebox"
-        }
-    }
-
-    private func sessionStatusColor(_ status: AgentSessionStatus) -> Color {
-        switch status {
-        case .todo, .inProgress, .waiting, .needsReview, .done, .blocked, .cancelled, .archived: controlForeground
-        }
-    }
 }
 
 private struct MCPToolSelectionMenu: View {

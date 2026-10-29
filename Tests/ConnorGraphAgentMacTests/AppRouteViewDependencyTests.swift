@@ -256,14 +256,13 @@ struct AppRouteViewDependencyTests {
         #expect(progressSource.contains("if summary.isVisible"))
     }
 
-    @Test func remoteKnowledgeSelectorLivesAfterSessionStatusAndUsesBorderlessProminentStyle() throws {
+    @Test func remoteKnowledgeSelectorHasNoSessionStatusControl() throws {
         let optionBar = try String(contentsOf: projectSourceURL(named: "Composer/AgentComposerOptionBar.swift"), encoding: .utf8)
         let composer = try String(contentsOf: projectSourceURL(named: "AgentChatComposerView.swift"), encoding: .utf8)
 
-        let status = try #require(optionBar.range(of: "sessionStatusMenu(selectedSession)"))
+        #expect(!optionBar.contains("sessionStatusMenu"))
         let remote = try #require(optionBar.range(of: "RemoteKnowledgeBaseSelectionMenu("))
         let spacer = try #require(optionBar.range(of: "Spacer(minLength: AgentChatLayout.spaceS)"))
-        #expect(status.lowerBound < remote.lowerBound)
         #expect(remote.lowerBound < spacer.lowerBound)
         #expect(composer.contains("style: .prominent,\n                showsBorder: false"))
 

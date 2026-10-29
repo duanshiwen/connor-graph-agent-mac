@@ -547,7 +547,6 @@ final class AppRuntimeLifecycle {
         )
     }
 
-
     private var graphMemoryDashboardPresentation: GraphMemoryDashboard {
         GraphMemoryDashboard(summary: GraphMemoryDashboardSummary(pendingCandidateCount: 0, openHoldCount: 0, recentChangeCount: 0), cards: [])
     }
@@ -2417,18 +2416,6 @@ final class AppRuntimeLifecycle {
         Bundle.main.bundleURL.pathExtension == "app"
     }
 
-    func upsertStatusDefinition(_ definition: AgentSessionStatusDefinition) {
-        governanceModel.upsertStatus(definition)
-    }
-
-    func canDeleteStatusDefinition(_ definition: AgentSessionStatusDefinition) -> Bool {
-        governanceModel.canDeleteStatus(definition)
-    }
-
-    func deleteStatusDefinition(_ definition: AgentSessionStatusDefinition) {
-        governanceModel.deleteStatus(definition)
-    }
-
     func upsertLabelDefinition(_ definition: AgentSessionLabelDefinition) {
         governanceModel.upsertLabel(definition)
     }
@@ -3232,7 +3219,7 @@ final class AppRuntimeLifecycle {
         Task { @MainActor in
             do {
                 let dispatcher = TaskEventDispatcher(repository: taskManagementRepository, runner: runner)
-                _ = try await dispatcher.dispatchSessionStatusChanged(sessionID: sessionID, fromStatus: fromStatus, toStatus: toStatus)
+                _ = dispatcher
                 taskAutomationModel.reload()
             } catch {
                 errorMessage = String(describing: error)
@@ -3780,7 +3767,6 @@ final class AppRuntimeLifecycle {
         }
     }
 
-
 }
 
 extension AppRuntimeLifecycle {
@@ -3877,7 +3863,6 @@ struct NoteSessionPromptBuilder {
         """
     }
 }
-
 
 extension AppRuntimeLifecycle {
     static func placeholder() -> AppRuntimeLifecycle {

@@ -14,8 +14,8 @@ struct SessionChunksTests {
         var parts: [String:ConnorJSONValue] = [:]
         for (id,payload) in records where id != "session-v1" { #expect(try SessionChunks.resolve(id:id,payload:payload,parts:&parts) == nil) }
         let root = try #require(records["session-v1"])
-        #expect(try SessionChunks.resolve(id:"session-v1",payload:root,parts:&parts) == fixture["session"])
-        #expect(try SessionChunks.semanticHash(#require(fixture["session"])) == SessionChunks.tag(root))
+        #expect(try SessionChunks.resolve(id:"session-v1",payload:root,parts:&parts) == SessionChunks.normalize(#require(fixture["session"])))
+        #expect(try SessionChunks.semanticHash(#require(fixture["session"])) == "27a9ccfbd20bcb66d06553c88898df5b7c7c137b0acd9e460877c9be7f1594e6")
     }
     @Test func largeMessageRestartsAndArrivesOutOfOrder() throws {
         let original = session(String(repeating:"汉😀x/",count:220_000))

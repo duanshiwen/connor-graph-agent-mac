@@ -14,9 +14,9 @@ struct ChatSessionListRefreshCoordinatorTests {
             id: "session-active",
             title: "Active",
             messages: [AgentMessage(role: .user, content: "persisted transcript")],
-            governance: AgentSessionGovernanceMetadata(status: .inProgress)
+            governance: AgentSessionGovernanceMetadata(labels: [AgentSessionLabel(id: "active")])
         ))
-        try repository.saveSession(AgentSession(id: "session-done", title: "Done", governance: AgentSessionGovernanceMetadata(status: .done)))
+        try repository.saveSession(AgentSession(id: "session-done", title: "Done", governance: AgentSessionGovernanceMetadata(labels: [AgentSessionLabel(id: "finished")])))
         let coordinator = ChatSessionListRefreshCoordinator()
 
         let loaded = try repository.loadSession(id: "session-active")
@@ -24,7 +24,7 @@ struct ChatSessionListRefreshCoordinatorTests {
         preserved.messages = [AgentMessage(role: .user, content: "preserved transcript")]
         let result = try await coordinator.refresh(
             repository: repository,
-            filter: AgentSessionListFilter.status(.inProgress),
+            filter: AgentSessionListFilter.label("active"),
             preserving: [preserved]
         )
 
@@ -33,8 +33,6 @@ struct ChatSessionListRefreshCoordinatorTests {
         #expect(result.visibleSessions.first?.messages.map(\.content) == ["preserved transcript"])
         #expect(result.allSessions.first(where: { $0.id == "session-done" })?.messages.isEmpty == true)
         #expect(result.summary.totalCount == 2)
-        #expect(result.summary.countsByStatus[.inProgress] == 1)
-        #expect(result.summary.countsByStatus[.done] == 1)
     }
 
     @Test func refreshDropsStaleMessagesWithoutDecodingFullSession() async throws {
@@ -92,8 +90,6 @@ struct ChatSessionListRefreshCoordinatorTests {
         #expect(loaded.count == 137)
         #expect(Set(loaded.map(\.id)).count == 137)
 
-        let done = try repository.loadSessionPage(filter: .status(.done), limit: 100)
-        #expect(done.sessions.count == 69)
         let labeled = try repository.loadSessionPage(filter: .label("important"), limit: 100)
         #expect(labeled.sessions.count == 28)
         let searched = try repository.loadSessionPage(filter: .all, query: "Needle", limit: 100)
@@ -101,8 +97,6 @@ struct ChatSessionListRefreshCoordinatorTests {
 
         let summary = try repository.loadSessionSummary()
         #expect(summary.totalCount == 137)
-        #expect(summary.countsByStatus[.done] == 69)
-        #expect(summary.countsByStatus[.todo] == 68)
         #expect(summary.countsByLabelID["important"] == 28)
     }
 }

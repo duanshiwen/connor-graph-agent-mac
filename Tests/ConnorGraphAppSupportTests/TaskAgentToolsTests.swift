@@ -55,26 +55,6 @@ struct TaskAgentToolsTests {
         #expect(payload["task_id"] == nil)
     }
 
-    @Test func aiToolCreatesStatusTriggeredTask() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
-        let service = TaskCreationService(repository: repository)
-        let tool = TaskCreateSessionStatusMessageTool(service: service)
-
-        _ = try await tool.execute(
-            arguments: try AgentToolArguments(json: """
-            {"name":"Done summary","toStatus":"done","message":"Summarize","rationale":"Summarize done session"}
-            """),
-            context: AgentToolExecutionContext(runID: "run-1", sessionID: "session-1", groupID: "group-1", userPrompt: "create task", toolCallID: "tool-1", policyEngine: AgentPolicyEngine(permissionMode: .allowAll))
-        )
-        let task = try #require(try repository.loadTasks().first)
-
-        #expect(task.origin == .ai)
-        #expect(task.trigger.eventFilter["toStatus"] == "done")
-        #expect(task.target.parameters["message"] == "Summarize")
-    }
-
     @Test func taskListReturnsEveryTaskOnceAcrossStablePages() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -153,10 +133,6 @@ struct TaskAgentToolsTests {
 
         #expect(throws: AppTaskManagementError.taskVersionConflict(original.id)) {
             try repository.updateScheduledSessionMessageTask(id: original.id, expectedUpdatedAt: stale) { $0.name = "Overwrite" }
-        }
-        let statusTask = try service.createSessionStatusMessageTask(origin: .ai, name: "Status", toStatus: "done", message: "Summarize")
-        #expect(throws: AppTaskManagementError.unsupportedScheduledSessionMessageTask(statusTask.id)) {
-            try repository.updateScheduledSessionMessageTask(id: statusTask.id) { $0.name = "No" }
         }
         let system = try #require(try repository.loadOrCreateDefault().first { $0.metadata.isProtectedSystemTask })
         #expect(throws: AppTaskManagementError.cannotUpdateProtectedSystemTask(system.id)) {

@@ -61,7 +61,7 @@ public struct AgentEventReplayer: Sendable {
         case .compactionFailed:
             return .compactionFailed(try decoder.decode(AgentCompactionFailedEvent.self, from: data))
         case .sessionStatusChanged:
-            return .sessionStatusChanged(try decoder.decode(AgentSessionGovernanceEvent.self, from: data))
+            throw AgentEventReplayError.unsupportedKind(event.kind)
         case .sessionLabelsChanged:
             return .sessionLabelsChanged(try decoder.decode(AgentSessionGovernanceEvent.self, from: data))
         case .sessionArchived:
@@ -90,6 +90,6 @@ public struct AgentEventReplayer: Sendable {
     }
 
     public func replay(_ events: [PersistedAgentEvent]) throws -> [AgentEvent] {
-        try events.map(replay)
+        try events.filter { $0.kind != .sessionStatusChanged }.map(replay)
     }
 }

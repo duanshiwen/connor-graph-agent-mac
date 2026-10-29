@@ -27,7 +27,7 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
             ? .missing(sessions.isEmpty ? "No persisted session repository configured" : "Session artifact directories are not ready")
             : .ready(
                 sessionCount: sessions.count,
-                statusDefinitionCount: governanceConfig.statuses.count,
+                statusDefinitionCount: 0,
                 labelDefinitionCount: governanceConfig.labels.count,
                 artifactDirectoriesReady: artifactDirectoriesReady,
                 persistedRunCount: 0,
@@ -158,4 +158,3 @@ public struct CommercialReadinessReleaseGate: Sendable, Equatable {
         )
     }
 }
-

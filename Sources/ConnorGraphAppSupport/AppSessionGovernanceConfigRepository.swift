@@ -2,36 +2,29 @@ import Foundation
 import ConnorGraphCore
 
 public enum AppSessionGovernanceConfigError: Error, Equatable, CustomStringConvertible {
-    case duplicateStatusID(String)
     case duplicateLabelID(String)
 
     public var description: String {
         switch self {
-        case .duplicateStatusID(let id): "duplicateStatusID: \(id)"
         case .duplicateLabelID(let id): "duplicateLabelID: \(id)"
         }
     }
 }
 
 public struct AppSessionGovernanceConfig: Codable, Sendable, Equatable {
-    public var statuses: [AgentSessionStatusDefinition]
+    private enum CodingKeys: String, CodingKey { case labels }
+
     public var labels: [AgentSessionLabelDefinition]
 
     public init(
-        statuses: [AgentSessionStatusDefinition] = AgentSessionStatusDefinition.defaults,
         labels: [AgentSessionLabelDefinition] = AgentSessionLabelDefinition.defaults
     ) {
-        self.statuses = statuses.sorted { $0.sortOrder < $1.sortOrder }
         self.labels = labels
     }
 
     public static let `default` = AppSessionGovernanceConfig()
 
     public func validate() throws {
-        var statusIDs: Set<String> = []
-        for status in statuses {
-            if !statusIDs.insert(status.id).inserted { throw AppSessionGovernanceConfigError.duplicateStatusID(status.id) }
-        }
         var labelIDs: Set<String> = []
         for label in labels {
             if !labelIDs.insert(label.id).inserted { throw AppSessionGovernanceConfigError.duplicateLabelID(label.id) }
@@ -47,31 +40,7 @@ public struct AppSessionGovernanceConfig: Codable, Sendable, Equatable {
     }
 
     public func normalizingBuiltInDisplayNames() -> AppSessionGovernanceConfig {
-        let statusDefaults = Dictionary(uniqueKeysWithValues: AgentSessionStatusDefinition.defaults.map { ($0.id, $0) })
         let labelDefaults = Dictionary(uniqueKeysWithValues: AgentSessionLabelDefinition.defaults.map { ($0.id, $0) })
-        var normalizedStatuses = statuses.map { definition in
-            var copy = definition
-            if copy.name == "已取消", AgentSessionStatus(rawValue: copy.id) == nil {
-                copy.id = AgentSessionStatus.cancelled.rawValue
-            }
-            if let builtIn = statusDefaults[copy.id] {
-                copy.name = builtIn.name
-                if copy.systemImage == "circle" || copy.systemImage.isEmpty {
-                    copy.systemImage = builtIn.systemImage
-                }
-                copy.sortOrder = builtIn.sortOrder
-                copy.isTerminal = builtIn.isTerminal
-            }
-            return copy
-        }
-        if let cancelled = statusDefaults[AgentSessionStatus.cancelled.rawValue], !normalizedStatuses.contains(where: { $0.id == cancelled.id }) {
-            normalizedStatuses.append(cancelled)
-        }
-        normalizedStatuses = normalizedStatuses.reduce(into: []) { result, definition in
-            if !result.contains(where: { $0.id == definition.id }) {
-                result.append(definition)
-            }
-        }
         let normalizedLabels = labels.map { definition in
             guard let builtIn = labelDefaults[definition.id] else { return definition }
             var copy = definition
@@ -85,7 +54,7 @@ public struct AppSessionGovernanceConfig: Codable, Sendable, Equatable {
             }
             return copy
         }
-        return AppSessionGovernanceConfig(statuses: normalizedStatuses, labels: normalizedLabels)
+        return AppSessionGovernanceConfig(labels: normalizedLabels)
     }
 
 }

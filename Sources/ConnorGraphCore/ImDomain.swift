@@ -160,6 +160,8 @@ public enum ImMessageStatus: String, Codable, Sendable, Equatable, Hashable, Cas
 }
 
 public struct ImConversation: Codable, Sendable, Equatable, Hashable, Identifiable {
+    private enum CodingKeys: String, CodingKey { case id, kind, peerUserId, groupId, title, participantName, avatar, lastMessagePreview, lastMessageAt, unreadCount, pinned, muted, labelIds, titleCustomized, updatedAt }
+
     public var id: String
     public var kind: ImConversationKind
     public var peerUserId: Int64?
@@ -175,7 +177,7 @@ public struct ImConversation: Codable, Sendable, Equatable, Hashable, Identifiab
     /// Local-only preferences, preserved across server-side conversation merges.
     public var pinned: Bool
     public var muted: Bool
-    public var status: AgentSessionStatus
+    public var status: AgentSessionStatus = .todo
     public var labelIds: [String]
     /// Prevents server refreshes from replacing a manual or AI-generated title.
     public var titleCustomized: Bool

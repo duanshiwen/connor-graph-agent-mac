@@ -17,8 +17,9 @@ public enum ProductOSAutomationTriggerKind: String, Codable, Sendable, Equatable
 }
 
 public struct ProductOSAutomationTrigger: Codable, Sendable, Equatable {
+    private enum CodingKeys: String, CodingKey { case kind, labelID, registryEntryID }
     public var kind: ProductOSAutomationTriggerKind
-    public var status: AgentSessionStatus?
+    public var status: AgentSessionStatus? = nil
     public var labelID: String?
     public var registryEntryID: String?
 
@@ -45,9 +46,10 @@ public enum ProductOSAutomationActionKind: String, Codable, Sendable, Equatable,
 }
 
 public struct ProductOSAutomationAction: Codable, Sendable, Equatable, Identifiable {
+    private enum CodingKeys: String, CodingKey { case id, kind, label, skillID, message }
     public var id: String
     public var kind: ProductOSAutomationActionKind
-    public var status: AgentSessionStatus?
+    public var status: AgentSessionStatus? = nil
     public var label: AgentSessionLabel?
     public var skillID: String?
     public var message: String
@@ -120,7 +122,7 @@ public struct ProductOSAutomationConfig: Codable, Sendable, Equatable {
 public struct ProductOSAutomationEventContext: Sendable, Equatable {
     public var triggerKind: ProductOSAutomationTriggerKind
     public var sessionID: String
-    public var status: AgentSessionStatus?
+    public var status: AgentSessionStatus? = nil
     public var labelID: String?
     public var registryEntryID: String?
 

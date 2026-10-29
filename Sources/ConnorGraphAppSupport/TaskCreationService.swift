@@ -5,14 +5,14 @@ public enum TaskCreationServiceError: Error, Sendable, Equatable, CustomStringCo
     case originNotUserCreatable(ConnorTaskOrigin)
     case emptyName
     case emptyMessage
-    case emptyStatus
+    case unsupportedTrigger
 
     public var description: String {
         switch self {
         case .originNotUserCreatable(let origin): "originNotUserCreatable: \(origin.rawValue)"
         case .emptyName: "emptyName"
         case .emptyMessage: "emptyMessage"
-        case .emptyStatus: "emptyStatus"
+        case .unsupportedTrigger: "Only scheduled tasks are supported."
         }
     }
 }
@@ -49,37 +49,6 @@ public struct TaskCreationService: Sendable {
             target: .createSessionAndSendMessage(message: message, title: title),
             lifecycle: ConnorTaskLifecycle(status: .active, nextRunAt: runAt),
             metadata: ConnorTaskMetadata(createdBySessionID: createdBySessionID, createdByDisplayName: origin == .ai ? "AI" : "User", rationale: rationale, tags: [origin.rawValue, "scheduled-session-message"]),
-            createdAt: now,
-            updatedAt: now
-        )
-        try task.validateUserCreatableTemplate()
-        try repository.saveTask(task)
-        return task
-    }
-
-    @discardableResult
-    public func createSessionStatusMessageTask(
-        origin: ConnorTaskOrigin,
-        name rawName: String,
-        toStatus rawStatus: String,
-        message rawMessage: String,
-        sessionID: String? = nil,
-        createdBySessionID: String? = nil,
-        rationale: String? = nil
-    ) throws -> ConnorTaskDefinition {
-        try validateOrigin(origin)
-        let name = try nonEmpty(rawName, error: .emptyName)
-        let status = try nonEmpty(rawStatus, error: .emptyStatus)
-        let message = try nonEmpty(rawMessage, error: .emptyMessage)
-        let now = Date()
-        let task = ConnorTaskDefinition(
-            id: uniqueTaskID(prefix: origin.rawValue, name: name),
-            name: name,
-            origin: origin,
-            trigger: ConnorTaskTrigger(kind: .eventTriggered, eventName: ConnorTaskEventName.sessionStatusChanged, eventFilter: ["toStatus": status]),
-            target: .sendMessageToSession(sessionID: sessionID ?? "", message: message),
-            lifecycle: ConnorTaskLifecycle(status: .active),
-            metadata: ConnorTaskMetadata(createdBySessionID: createdBySessionID, createdByDisplayName: origin == .ai ? "AI" : "User", rationale: rationale, tags: [origin.rawValue, "session-status-message"]),
             createdAt: now,
             updatedAt: now
         )

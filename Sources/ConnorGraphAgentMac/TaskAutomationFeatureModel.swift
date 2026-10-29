@@ -97,29 +97,6 @@ final class TaskAutomationFeatureModel {
         return task.id
     }
 
-    @discardableResult
-    func createSessionStatusMessageTask(
-        name: String,
-        toStatus: String,
-        message: String,
-        sessionID: String?,
-        rationale: String?
-    ) throws -> String {
-        guard let taskRepository else { throw TaskAutomationFeatureModelError.missingRepository }
-        let task = try TaskCreationService(repository: taskRepository).createSessionStatusMessageTask(
-            origin: .user,
-            name: name,
-            toStatus: toStatus,
-            message: message,
-            sessionID: sessionID,
-            createdBySessionID: createdBySessionIDProvider(),
-            rationale: rationale
-        )
-        reload()
-        selectedTaskID = task.id
-        return task.id
-    }
-
     func stopTask(_ id: String) {
         do {
             _ = try taskRepository?.stopTask(id: id, reason: "已从任务管理界面暂停")

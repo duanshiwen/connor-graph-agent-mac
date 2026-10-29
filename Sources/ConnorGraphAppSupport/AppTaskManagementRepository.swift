@@ -88,7 +88,8 @@ public struct AppTaskManagementRepository: Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let tasks = try decoder.decode([ConnorTaskDefinition].self, from: try Data(contentsOf: taskDefinitionsURL))
-        let filtered = includeDeleted ? tasks : tasks.filter { $0.lifecycle.status != .deleted }
+        let currentTasks = tasks.filter { $0.trigger.eventName != ConnorTaskEventName.sessionStatusChanged }
+        let filtered = includeDeleted ? currentTasks : currentTasks.filter { $0.lifecycle.status != .deleted }
         return filtered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 

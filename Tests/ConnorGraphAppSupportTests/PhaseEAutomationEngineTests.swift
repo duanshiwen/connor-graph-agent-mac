@@ -14,7 +14,7 @@ struct PhaseEAutomationEngineTests {
         let rule = ProductOSAutomationRule(
             id: "needs-review-plan",
             name: "Needs Review Plan",
-            trigger: ProductOSAutomationTrigger(kind: .sessionStatusChanged, status: .needsReview),
+            trigger: ProductOSAutomationTrigger(kind: .sessionLabelAdded, labelID: "important"),
             actions: [
                 ProductOSAutomationAction(kind: .appendTimelineEvent, message: "Record review timeline entry."),
                 ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "research"), message: "Suggest research label.")
@@ -25,7 +25,7 @@ struct PhaseEAutomationEngineTests {
         let engine = AutomationEngine(repository: repository)
 
         let run = try engine.evaluate(context: ProductOSAutomationEventContext(
-            triggerKind: .sessionStatusChanged,
+            triggerKind: .sessionLabelAdded,
             sessionID: "session-1",
             status: .needsReview
         ))
@@ -81,7 +81,7 @@ struct PhaseEAutomationEngineTests {
             actions: [
                 ProductOSAutomationAction(kind: .appendTimelineEvent, message: "Important label changed."),
                 ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "research"), message: "Add research."),
-                ProductOSAutomationAction(kind: .setSessionStatus, status: .needsReview, message: "Move to Needs Review.")
+
             ],
             requiresReview: false
         )
@@ -96,12 +96,12 @@ struct PhaseEAutomationEngineTests {
         let result = try engine.execute(run: run, sessionRepository: sessionRepository)
         let session = try #require(try sessionRepository.loadSession(id: "session-1"))
 
-        #expect(result.appliedPlans.count == 3)
+        #expect(result.appliedPlans.count == 2)
         #expect(result.skippedPlans.isEmpty)
-        #expect(session.governance.status == .needsReview)
+
         #expect(session.governance.labels.map(\.id).contains("research"))
         #expect(result.events.contains { $0.kind == .sessionLabelsChanged })
-        #expect(result.events.contains { $0.kind == .sessionStatusChanged })
+        #expect(!result.events.contains { $0.kind == .sessionStatusChanged })
         #expect(result.events.contains { $0.kind == .automationTriggered })
     }
 
@@ -119,14 +119,14 @@ struct PhaseEAutomationEngineTests {
         let rule = ProductOSAutomationRule(
             id: "review-required-actions",
             name: "Review Required Actions",
-            trigger: ProductOSAutomationTrigger(kind: .sessionStatusChanged, status: .needsReview),
+            trigger: ProductOSAutomationTrigger(kind: .sessionLabelAdded, labelID: "important"),
             actions: [ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "research"), message: "Add research.")],
             requiresReview: true
         )
         try repository.save(ProductOSAutomationConfig(rules: [rule]))
         let engine = AutomationEngine(repository: repository)
         let run = try engine.evaluate(context: ProductOSAutomationEventContext(
-            triggerKind: .sessionStatusChanged,
+            triggerKind: .sessionLabelAdded,
             sessionID: "session-1",
             status: .needsReview
         ))
@@ -214,7 +214,7 @@ struct PhaseEAutomationEngineTests {
         let engine = AutomationEngine(repository: repository)
 
         let run = try engine.evaluate(context: ProductOSAutomationEventContext(
-            triggerKind: .sessionStatusChanged,
+            triggerKind: .sessionLabelAdded,
             sessionID: "session-1",
             status: .done
         ))

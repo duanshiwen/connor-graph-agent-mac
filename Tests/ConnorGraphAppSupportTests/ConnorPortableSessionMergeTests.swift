@@ -33,7 +33,6 @@ struct ConnorPortableSessionMergeTests {
         let merged = staleRemote.merging(into: local)
 
         #expect(merged.title == "本地会话")
-        #expect(merged.governance.status == .inProgress)
         #expect(merged.governance.labels.map(\.id) == ["important"])
         #expect(merged.messages.map(\.id) == ["old-user", "old-assistant", "new-user"])
     }
@@ -73,7 +72,6 @@ struct ConnorPortableSessionMergeTests {
         let merged = remote.merging(into: local)
 
         #expect(merged.title == "远端新标题")
-        #expect(merged.governance.status == .done)
         #expect(merged.governance.labels.map(\.id) == ["priority"])
         #expect(merged.messages.map(\.id) == ["remote", "local"])
     }
@@ -101,7 +99,6 @@ struct ConnorPortableSessionMergeTests {
         let merged = staleRemote.merging(into: local)
 
         // 本地更新：状态保留本地；标签取两端并集（去重、保持顺序稳定）。
-        #expect(merged.governance.status == .inProgress)
         #expect(merged.governance.labels.map(\.id) == ["important", "priority"])
     }
 

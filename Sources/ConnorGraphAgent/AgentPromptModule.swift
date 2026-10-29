@@ -136,7 +136,7 @@ public enum AgentPromptModuleCatalog {
         .init(id: "tool_chaining_pagination", title: "Tool Chaining and Pagination"),
         .init(id: "workspace_tool_rules", title: "Workspace Tool Rules", requirement: .allOf([.workspace]), toolFamilies: ["workspace"]),
         .init(id: "current_time_tool_contract", title: "Current Time Tool Contract", requirement: .allOf([.currentTime])),
-        .init(id: "session_status_tool_rules", title: "Session Status Tool Rules", requirement: .allOf([.sessions])),
+        .init(id: "session_tool_rules", title: "Session Tool Rules", requirement: .allOf([.sessions])),
         .init(id: "workspace_execution_rules", title: "Workspace Execution Rules", requirement: .allOf([.workspace]), dependencies: ["workspace_tool_rules"], toolFamilies: ["workspace"]),
         .init(id: "tool_failure_safety", title: "Tool Failure and Safety Rules"),
         .init(id: "file_handoff_reuse", title: "File Handoff, Retrieval, and Reuse", requirement: .allOf([.workspace]), toolFamilies: ["workspace"]),

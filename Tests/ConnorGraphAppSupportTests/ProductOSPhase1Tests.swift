@@ -33,8 +33,6 @@ struct ProductOSPhase1Tests {
 
     @Test func governanceDefaultsUseChineseDisplayNames() throws {
         let config = AppSessionGovernanceConfig.default
-        #expect(AgentSessionStatus.allCases.map(\.displayName) == ["待办", "进行中", "等待中", "待审阅", "已完成", "受阻", "已取消", "已归档"])
-        #expect(config.statuses.map(\.name) == ["待办", "进行中", "等待中", "待审阅", "受阻", "已完成", "已取消", "已归档"])
         #expect(config.labels.map(\.name) == ["重要", "研究", "优先级", "截止日期", "项目"])
     }
 
@@ -42,10 +40,6 @@ struct ProductOSPhase1Tests {
         let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true)
         let repository = AppSessionGovernanceConfigRepository(configDirectory: root)
         let legacyConfig = AppSessionGovernanceConfig(
-            statuses: [
-                .init(id: AgentSessionStatus.todo.rawValue, name: "Todo", systemImage: "circle", sortOrder: 10),
-                .init(id: AgentSessionStatus.inProgress.rawValue, name: "In Progress", systemImage: "play.circle", sortOrder: 20)
-            ],
             labels: [
                 .init(id: "important", name: "Important", colorName: "orange"),
                 .init(id: "custom", name: "Custom", colorName: "blue")
@@ -55,7 +49,6 @@ struct ProductOSPhase1Tests {
 
         let loaded = try repository.loadOrCreateDefault()
 
-        #expect(loaded.statuses.map(\.name) == ["待办", "进行中", "已取消"])
         #expect(loaded.labels.map(\.name) == ["重要", "Custom"])
     }
 
@@ -71,9 +64,6 @@ struct ProductOSPhase1Tests {
         let labeled = try repository.setLabels(sessionID: session.id, labels: [AgentSessionLabel(id: "important")])
         #expect(labeled.governance.labels.map(\.id) == ["important"])
 
-        let inProgress = try repository.setStatus(sessionID: session.id, status: .inProgress)
-        #expect(inProgress.governance.status == .inProgress)
-
         let dirs = try repository.artifactDirectories(sessionID: session.id)
         #expect(dirs != nil)
         #expect(FileManager.default.fileExists(atPath: dirs!.plans.path))
@@ -84,6 +74,5 @@ struct ProductOSPhase1Tests {
 
         let restored = try repository.clearLegacyArchived(sessionID: session.id)
         #expect(!restored.governance.isArchived)
-        #expect(restored.governance.status == .inProgress)
     }
 }

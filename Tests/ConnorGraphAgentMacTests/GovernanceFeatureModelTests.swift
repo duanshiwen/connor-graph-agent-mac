@@ -5,52 +5,13 @@ import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
 
 @MainActor
-@Test func governanceModelCreatesStableUniqueSlugsAndEmitsSectionMessage() {
-    let existing = AgentSessionStatusDefinition(id: "in_review", name: "Existing", systemImage: "circle", sortOrder: 10, isTerminal: false)
-    let model = GovernanceFeatureModel(config: AppSessionGovernanceConfig(statuses: [existing], labels: []))
-    var messages: [(String, ConnorSettingsSection)] = []
-    model.onSettingsMessage = { messages.append(($0, $1)) }
-
-    model.upsertStatus(AgentSessionStatusDefinition(id: "", name: "In Review", systemImage: "clock", sortOrder: 20, isTerminal: false))
-
-    #expect(model.config.statuses.map(\.id).contains("in_review_2"))
-    #expect(messages.count == 1)
-    #expect(messages[0].0 == "状态定义已保存。")
-    #expect(messages[0].1 == .statuses)
-}
-
-@MainActor
-@Test func governanceModelBlocksDeletingInUseStatusWithExistingMessage() {
-    let status = AgentSessionStatusDefinition(id: AgentSessionStatus.inProgress.rawValue, name: "进行中", systemImage: "clock", sortOrder: 20, isTerminal: false)
-    let fallback = AgentSessionStatusDefinition(id: AgentSessionStatus.todo.rawValue, name: "待办", systemImage: "circle", sortOrder: 10, isTerminal: false)
-    let model = GovernanceFeatureModel(config: AppSessionGovernanceConfig(statuses: [fallback, status], labels: []))
-    var session = AgentSession(id: "session-1")
-    session.governance.status = .inProgress
-    model.sessionsProvider = { [session] }
-    model.statusUsageCountProvider = { id in id == status.id ? 1 : 0 }
-
-    #expect(!model.canDeleteStatus(status))
-    model.deleteStatus(status)
-
-    #expect(model.config.statuses.contains(where: { $0.id == status.id }))
-    #expect(model.errorMessage == "无法删除状态“进行中”: 仍有 1 个会话处于此状态。")
-}
-
-@MainActor
-@Test func governanceDeleteAvailabilityNeverLoadsSessions() {
-    let status = AgentSessionStatusDefinition(id: AgentSessionStatus.inProgress.rawValue, name: "进行中", systemImage: "clock", sortOrder: 20, isTerminal: false)
-    let fallback = AgentSessionStatusDefinition(id: AgentSessionStatus.todo.rawValue, name: "待办", systemImage: "circle", sortOrder: 10, isTerminal: false)
-    let model = GovernanceFeatureModel(config: AppSessionGovernanceConfig(statuses: [fallback, status], labels: []))
-    var loadCount = 0
-    model.sessionsProvider = {
-        loadCount += 1
-        return []
-    }
-    model.statusUsageCountProvider = { id in id == status.id ? 1 : 0 }
-
-    #expect(!model.canDeleteStatus(status))
-    #expect(model.canDeleteStatus(fallback))
-    #expect(loadCount == 0)
+@Test func governanceModelCreatesUniqueLabelSlugs() {
+    let model = GovernanceFeatureModel(config: AppSessionGovernanceConfig(labels: [
+        .init(id: "project", name: "Project", colorName: "blue")
+    ]))
+    model.upsertLabel(.init(id: "", name: "Project", colorName: "green"))
+    #expect(model.config.labels.map(\.id) == ["project", "project_2"])
+    #expect(!ConnorSettingsSection.allCases.map(\.rawValue).contains("statuses"))
 }
 
 @MainActor
@@ -77,14 +38,11 @@ import ConnorGraphAppSupport
 }
 
 @MainActor
-@Test func governanceModelKeepsSavedConfigWhenDownstreamAutomationReloadFails() {
+@Test func governanceModelKeepsSavedLabelWhenDownstreamReloadFails() {
     struct ReloadFailure: Error {}
-    let original = AgentSessionStatusDefinition(id: "todo", name: "待办", systemImage: "circle", sortOrder: 10, isTerminal: false)
-    let model = GovernanceFeatureModel(config: AppSessionGovernanceConfig(statuses: [original], labels: []))
+    let model = GovernanceFeatureModel(config: AppSessionGovernanceConfig(labels: []))
     model.onConfigSaved = { _ in throw ReloadFailure() }
-
-    model.upsertStatus(AgentSessionStatusDefinition(id: "todo", name: "新的待办", systemImage: "clock", sortOrder: 10, isTerminal: false))
-
-    #expect(model.config.statuses.first?.name == "新的待办")
+    model.upsertLabel(.init(id: "", name: "Project", colorName: "green"))
+    #expect(model.config.labels.first?.name == "Project")
     #expect(model.errorMessage != nil)
 }

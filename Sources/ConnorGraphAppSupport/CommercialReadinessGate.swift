@@ -145,7 +145,6 @@ public enum CommercialLocalAutomationSurfaceReadiness: Codable, Sendable, Equata
     case missing(String)
 }
 
-
 public struct CommercialReadinessInput: Codable, Sendable, Equatable {
     public var sessionGovernance: CommercialSessionGovernanceReadiness
     public var modelProvider: CommercialModelProviderReadiness
@@ -262,10 +261,9 @@ public struct CommercialReadinessGate: Sendable, Equatable {
             return CommercialReadinessCard(
                 phase: .sessionGovernance,
                 status: blockedReasons.isEmpty ? .ready : .blocked,
-                evidence: "\(sessionCount) sessions · \(statusDefinitionCount) statuses · \(labelDefinitionCount) labels · \(persistedRunCount) runs · \(journalEventCount) journal events · \(pendingPlanCount) pending plans · \(branchRecordCount) branches · artifacts \(artifactDirectoriesReady ? "ready" : "not ready") · restore \(restorableSnapshotReady ? "ready" : "not ready")",
+                evidence: "\(sessionCount) sessions · \(labelDefinitionCount) labels · \(persistedRunCount) runs · \(journalEventCount) journal events · \(pendingPlanCount) pending plans · \(branchRecordCount) branches · artifacts \(artifactDirectoriesReady ? "ready" : "not ready") · restore \(restorableSnapshotReady ? "ready" : "not ready")",
                 metrics: [
                     "sessions": "\(sessionCount)",
-                    "statuses": "\(statusDefinitionCount)",
                     "labels": "\(labelDefinitionCount)",
                     "runs": "\(persistedRunCount)",
                     "journalEvents": "\(journalEventCount)",

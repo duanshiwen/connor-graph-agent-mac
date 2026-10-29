@@ -16,7 +16,6 @@ struct CraftPrimarySidebarView: View {
     @State private var labelsExpanded = true
     @State private var sourcesExpanded = true
     @State private var automationExpanded = true
-    @State private var statusEditorRequest: StatusDefinitionEditorRequest?
     @State private var labelEditorRequest: LabelDefinitionEditorRequest?
 
     var body: some View {
@@ -53,38 +52,6 @@ struct CraftPrimarySidebarView: View {
                     SidebarDisclosure(title: "所有会话", systemImage: "tray", isExpanded: $sessionsExpanded) {
                         SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: allSessionsCount, isSelected: selection == .agentChat && graph.chat.sessions.filter == .all) {
                             selectSessionFilter(.all)
-                        }
-                        .contextMenu {
-                            Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor() }
-                        }
-                        ForEach(graph.governance.config.statuses.sorted { $0.sortOrder < $1.sortOrder }) { status in
-                            if let sessionStatus = AgentSessionStatus(rawValue: status.id) {
-                                SidebarRow(title: status.name, systemImage: status.systemImage, count: count(for: sessionStatus), isSelected: selection == .agentChat && graph.chat.sessions.filter == .status(sessionStatus)) {
-                                    selectSessionFilter(.status(sessionStatus))
-                                }
-                                .contextMenu {
-                                    Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
-                                    Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
-                                    Divider()
-                                    Button(role: .destructive) { graph.governance.deleteStatus(status) } label: {
-                                        Label("删除状态", systemImage: "trash")
-                                    }
-                                    .disabled(!graph.governance.canDeleteStatus(status))
-                                }
-                            } else {
-                                SidebarRow(title: status.name, systemImage: status.systemImage, count: 0, isSelected: false) {
-                                    presentStatusEditor(status)
-                                }
-                                .contextMenu {
-                                    Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
-                                    Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
-                                    Divider()
-                                    Button(role: .destructive) { graph.governance.deleteStatus(status) } label: {
-                                        Label("删除状态", systemImage: "trash")
-                                    }
-                                    .disabled(!graph.governance.canDeleteStatus(status))
-                                }
-                            }
                         }
                     }
 
@@ -136,7 +103,6 @@ struct CraftPrimarySidebarView: View {
 
                     SidebarDisclosure(title: "自动化", systemImage: "wand.and.stars", isExpanded: $automationExpanded) {
                         SidebarRow(title: "定时任务", systemImage: "clock", count: graph.tasks.presentation.summary.scheduledTaskCount, isSelected: selection == .scheduledTasks) { select(.scheduledTasks) }
-                        SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: graph.tasks.presentation.summary.eventTriggeredTaskCount, isSelected: selection == .eventTriggeredTasks) { select(.eventTriggeredTasks) }
                     }
                 }
                 .padding(.horizontal, AppShellLayout.spaceM)
@@ -150,18 +116,6 @@ struct CraftPrimarySidebarView: View {
             }
             .padding(.horizontal, AppShellLayout.spaceM)
             .padding(.bottom, AppShellLayout.spaceM)
-        }
-        .sheet(item: $statusEditorRequest) { request in
-            StatusDefinitionEditorSheet(
-                title: request.isCreating ? "创建状态" : "编辑状态",
-                definition: request.definition,
-                isCreating: request.isCreating,
-                onCancel: { statusEditorRequest = nil },
-                onSave: { definition in
-                    graph.governance.upsertStatus(definition)
-                    statusEditorRequest = nil
-                }
-            )
         }
         .sheet(item: $labelEditorRequest) { request in
             LabelDefinitionEditorSheet(
@@ -235,24 +189,6 @@ struct CraftPrimarySidebarView: View {
         }
     }
 
-    private func presentStatusEditor(_ definition: AgentSessionStatusDefinition) {
-        statusEditorRequest = StatusDefinitionEditorRequest(definition: definition, isCreating: false)
-    }
-
-    private func presentNewStatusEditor(after definition: AgentSessionStatusDefinition? = nil) {
-        let nextSortOrder = (definition?.sortOrder ?? graph.governance.config.statuses.map(\.sortOrder).max() ?? 0) + 10
-        statusEditorRequest = StatusDefinitionEditorRequest(
-            definition: AgentSessionStatusDefinition(
-                id: "",
-                name: "",
-                systemImage: "circle",
-                sortOrder: nextSortOrder,
-                isTerminal: false
-            ),
-            isCreating: true
-        )
-    }
-
     private func presentLabelEditor(_ definition: AgentSessionLabelDefinition) {
         labelEditorRequest = LabelDefinitionEditorRequest(definition: definition, isCreating: false)
     }
@@ -266,62 +202,10 @@ struct CraftPrimarySidebarView: View {
 
 }
 
-struct StatusDefinitionEditorRequest: Identifiable {
-    var id = UUID()
-    var definition: AgentSessionStatusDefinition
-    var isCreating: Bool
-}
-
 struct LabelDefinitionEditorRequest: Identifiable {
     var id = UUID()
     var definition: AgentSessionLabelDefinition
     var isCreating: Bool
-}
-
-struct StatusDefinitionEditorSheet: View {
-    var title: String
-    var definition: AgentSessionStatusDefinition
-    var isCreating: Bool
-    var onCancel: () -> Void
-    var onSave: (AgentSessionStatusDefinition) -> Void
-
-    @State private var name: String
-    @State private var systemImage: String
-
-    init(title: String, definition: AgentSessionStatusDefinition, isCreating: Bool, onCancel: @escaping () -> Void, onSave: @escaping (AgentSessionStatusDefinition) -> Void) {
-        self.title = title
-        self.definition = definition
-        self.isCreating = isCreating
-        self.onCancel = onCancel
-        self.onSave = onSave
-        _name = State(initialValue: definition.name)
-        _systemImage = State(initialValue: definition.systemImage)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(title).font(.headline)
-            TextField("状态名称", text: $name)
-                .textFieldStyle(.roundedBorder)
-            Picker("图标", selection: $systemImage) {
-                ForEach(statusIconOptions, id: \.self) { icon in
-                    Label(statusIconTitle(for: icon), systemImage: icon).tag(icon)
-                }
-            }
-            .pickerStyle(.menu)
-            HStack {
-                Spacer()
-                Button("取消", action: onCancel)
-                Button("保存") {
-                    onSave(AgentSessionStatusDefinition(id: definition.id, name: trimmed(name), systemImage: systemImage, sortOrder: definition.sortOrder, isTerminal: definition.isTerminal))
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(trimmed(name).isEmpty)
-            }
-        }
-        .padding(20)
-        .frame(width: 420)
-    }
 }
 
 struct LabelDefinitionEditorSheet: View {
@@ -416,7 +300,7 @@ private func statusIconTitle(for icon: String) -> String {
     case "star": return "星标"
     case "bolt": return "闪电"
     case "flame": return "火焰"
-    case "tray": return "待办"
+    case "tray": return "收件箱"
     case "archivebox": return "归档"
     case "paperplane": return "发送"
     case "hammer": return "构建"

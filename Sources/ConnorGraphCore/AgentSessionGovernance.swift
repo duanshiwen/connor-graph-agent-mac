@@ -132,7 +132,11 @@ public struct AgentSessionLabel: Codable, Sendable, Equatable, Identifiable, Has
 }
 
 public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
-    public var status: AgentSessionStatus
+    private enum CodingKeys: String, CodingKey {
+        case kind, labels, isArchived, isFlagged, archivedAt, deletedAt, contentFormat
+    }
+
+    public var status: AgentSessionStatus = .todo
     public var kind: AgentSessionKind
     public var labels: [AgentSessionLabel]
     public var isArchived: Bool
@@ -164,7 +168,6 @@ public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.status = try container.decodeIfPresent(AgentSessionStatus.self, forKey: .status) ?? .todo
         self.kind = try container.decodeIfPresent(AgentSessionKind.self, forKey: .kind) ?? .chat
         self.labels = try container.decodeIfPresent([AgentSessionLabel].self, forKey: .labels) ?? []
         self.isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false

@@ -974,14 +974,13 @@ struct AutomationRuntimePanelView: View {
     var body: some View {
         RuntimePanelScaffold(
             title: "任务与自动化",
-            subtitle: "三类任务：系统任务、用户任务、AI 任务。系统任务受保护；用户和 AI 任务暂时只支持会话状态触发消息，以及按时间/周期新建会话并发送消息。",
+            subtitle: "系统任务、用户任务和 AI 任务按时间或周期运行，新建会话并发送消息。",
             metrics: [
                 ("总计", "\(presentation.summary.totalTaskCount)"),
                 ("系统", "\(presentation.summary.systemTaskCount)"),
                 ("用户", "\(presentation.summary.userTaskCount)"),
                 ("AI", "\(presentation.summary.aiTaskCount)"),
                 ("定时", "\(presentation.summary.scheduledTaskCount)"),
-                ("事件", "\(presentation.summary.eventTriggeredTaskCount)")
             ],
             onRefresh: {
                 model.reload()
@@ -1000,16 +999,6 @@ struct AutomationRuntimePanelView: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(presentation.scheduledTasks) { card in
-                TaskRuntimeCard(card: card, model: model)
-            }
-
-            SectionHeader(title: "事件触发")
-            if presentation.eventTriggeredTasks.isEmpty {
-                Text("暂无事件触发任务。用户或 AI 可创建：当会话状态变为特定状态后，向 AI 发送指定内容。")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            ForEach(presentation.eventTriggeredTasks) { card in
                 TaskRuntimeCard(card: card, model: model)
             }
         }

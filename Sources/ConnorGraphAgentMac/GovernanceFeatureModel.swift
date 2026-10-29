@@ -27,53 +27,7 @@ final class GovernanceFeatureModel {
     }
 
     func apply(_ config: AppSessionGovernanceConfig) {
-        self.config = AppSessionGovernanceConfig(statuses: config.statuses, labels: config.labels)
-    }
-
-    func upsertStatus(_ definition: AgentSessionStatusDefinition) {
-        var next = config
-        let trimmedID = definition.id.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedID.isEmpty, let index = next.statuses.firstIndex(where: { $0.id == trimmedID }) {
-            var updated = definition
-            updated.id = trimmedID
-            next.statuses[index] = updated
-        } else {
-            var created = definition
-            created.id = makeUniqueSlug(
-                existingIDs: Set(next.statuses.map(\.id)),
-                prefix: "status",
-                preferredName: definition.name
-            )
-            next.statuses.append(created)
-        }
-        save(next, successMessage: "状态定义已保存。", section: .statuses)
-    }
-
-    func canDeleteStatus(_ definition: AgentSessionStatusDefinition) -> Bool {
-        guard config.statuses.count > 1 else { return false }
-        return statusUsageCountProvider(definition.id) == 0
-    }
-
-    func deleteStatus(_ definition: AgentSessionStatusDefinition) {
-        guard config.statuses.count > 1 else {
-            setError("至少需要保留一个状态。")
-            return
-        }
-        do {
-            let sessionsUsingStatus = try sessionsProvider().filter {
-                $0.governance.status.rawValue == definition.id
-            }
-            guard sessionsUsingStatus.isEmpty else {
-                setError("无法删除状态“\(definition.name)”: 仍有 \(sessionsUsingStatus.count) 个会话处于此状态。")
-                return
-            }
-            var next = config
-            next.statuses.removeAll { $0.id == definition.id }
-            guard save(next, successMessage: "状态“\(definition.name)”已删除。", section: .statuses) else { return }
-            onDefinitionDeleted(.status(definition.id))
-        } catch {
-            setError(String(describing: error))
-        }
+        self.config = AppSessionGovernanceConfig(labels: config.labels)
     }
 
     func upsertLabel(_ definition: AgentSessionLabelDefinition) {
@@ -121,7 +75,7 @@ final class GovernanceFeatureModel {
         section: ConnorSettingsSection
     ) -> Bool {
         do {
-            let normalized = AppSessionGovernanceConfig(statuses: next.statuses, labels: next.labels)
+            let normalized = AppSessionGovernanceConfig(labels: next.labels)
             try repository?.save(normalized)
             config = normalized
             try onConfigSaved(normalized)

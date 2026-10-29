@@ -838,7 +838,7 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
                 .integer(conversation.muted ? 1 : 0),
                 .integer(conversation.updatedAt),
                 .text(conversation.participantName),
-                .text(conversation.status.rawValue),
+                .text(""),
                 .text(Self.encodeLabelIds(conversation.labelIds)),
                 .integer(conversation.titleCustomized ? 1 : 0)
             ]
@@ -1055,7 +1055,7 @@ public final class SQLiteImStore: ImStore, @unchecked Sendable {
                 unreadCount: Int(sqlite3_column_int64(statement, 8)),
                 pinned: sqlite3_column_int64(statement, 9) != 0,
                 muted: sqlite3_column_int64(statement, 10) != 0,
-                status: AgentSessionStatus(rawValue: columnText(statement, 13)) ?? .todo,
+                status: .todo,
                 labelIds: Self.decodeLabelIds(columnText(statement, 14)),
                 titleCustomized: sqlite3_column_int64(statement, 15) != 0,
                 updatedAt: sqlite3_column_int64(statement, 11)

@@ -75,89 +75,9 @@ struct SettingsLabelsSection: View {
     }
 }
 
-struct SettingsStatusesSection: View {
-    @Bindable var model: GovernanceFeatureModel
-    var sessions: [AgentSession]
-    @State private var editorRequest: SettingsStatusEditorRequest?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsHeroHeader(
-                title: "状态",
-                subtitle: "管理会话状态的名称和图标，用来标记会话当前进展。",
-                systemImage: "circle.dashed"
-            ) {
-                Button("新建状态…") { presentNewStatusEditor() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(AppButtonLayout.controlSize)
-            }
-
-            SettingsGroup(title: "状态") {
-                ForEach(sortedStatuses) { status in
-                    SettingsStatusDefinitionRow(
-                        definition: status,
-                        usageCount: countSessions(using: status),
-                        canDelete: model.canDeleteStatus(status),
-                        edit: { presentStatusEditor(status) },
-                        delete: { model.deleteStatus(status) }
-                    )
-                    if status.id != sortedStatuses.last?.id { Divider().padding(.leading, 48) }
-                }
-            }
-
-            SettingsGroup(title: "删除限制") {
-                Text("至少需要保留一个状态。正在被会话使用的状态不能删除。")
-                    .font(SettingsListTypography.rowTitle)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .sheet(item: $editorRequest) { request in
-            SettingsStatusEditorSheet(
-                title: request.isCreating ? "新建状态" : "编辑状态",
-                definition: request.definition,
-                onCancel: { editorRequest = nil },
-                onSave: { updated in
-                    model.upsertStatus(updated)
-                    editorRequest = nil
-                }
-            )
-        }
-    }
-
-    private var sortedStatuses: [AgentSessionStatusDefinition] {
-        model.config.statuses.sorted { lhs, rhs in
-            if lhs.sortOrder == rhs.sortOrder { return lhs.name < rhs.name }
-            return lhs.sortOrder < rhs.sortOrder
-        }
-    }
-
-    private func presentStatusEditor(_ definition: AgentSessionStatusDefinition) {
-        editorRequest = SettingsStatusEditorRequest(definition: definition, isCreating: false)
-    }
-
-    private func presentNewStatusEditor() {
-        let nextSortOrder = (model.config.statuses.map(\.sortOrder).max() ?? 0) + 10
-        editorRequest = SettingsStatusEditorRequest(
-            definition: AgentSessionStatusDefinition(id: "", name: "", systemImage: "circle", sortOrder: nextSortOrder, isTerminal: false),
-            isCreating: true
-        )
-    }
-
-    private func countSessions(using definition: AgentSessionStatusDefinition) -> Int {
-        sessions.filter { $0.governance.status.rawValue == definition.id }.count
-    }
-}
-
 struct SettingsLabelEditorRequest: Identifiable {
     var id = UUID()
     var definition: AgentSessionLabelDefinition
-    var isCreating: Bool
-}
-
-struct SettingsStatusEditorRequest: Identifiable {
-    var id = UUID()
-    var definition: AgentSessionStatusDefinition
     var isCreating: Bool
 }
 
@@ -249,46 +169,6 @@ struct SettingsLabelDefinitionRow: View {
     }
 }
 
-struct SettingsStatusDefinitionRow: View {
-    var definition: AgentSessionStatusDefinition
-    var usageCount: Int
-    var canDelete: Bool
-    var edit: () -> Void
-    var delete: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: definition.systemImage)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 44, height: 44)
-                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(definition.name).font(SettingsListTypography.rowTitleSelected)
-                Text("用于 \(usageCount) 个会话")
-                    .font(SettingsListTypography.rowCaption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("编辑…", action: edit)
-                .controlSize(.regular)
-            Button(role: .destructive, action: delete) {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .frame(width: 44, height: 44)
-            .disabled(!canDelete)
-            .help(canDelete ? "删除状态" : "至少保留一个状态，且不能删除正在被会话使用的状态")
-        }
-        .frame(minHeight: 56)
-        .contextMenu {
-            Button("编辑状态…", systemImage: "pencil", action: edit)
-            Button(role: .destructive, action: delete) { Label("删除状态", systemImage: "trash") }
-                .disabled(!canDelete)
-        }
-    }
-}
-
 struct SettingsLabelEditorSheet: View {
     var title: String
     var definition: AgentSessionLabelDefinition
@@ -337,51 +217,6 @@ struct SettingsLabelEditorSheet: View {
     }
 }
 
-struct SettingsStatusEditorSheet: View {
-    var title: String
-    var definition: AgentSessionStatusDefinition
-    var onCancel: () -> Void
-    var onSave: (AgentSessionStatusDefinition) -> Void
-
-    @State private var name: String
-    @State private var systemImage: String
-
-    init(title: String, definition: AgentSessionStatusDefinition, onCancel: @escaping () -> Void, onSave: @escaping (AgentSessionStatusDefinition) -> Void) {
-        self.title = title
-        self.definition = definition
-        self.onCancel = onCancel
-        self.onSave = onSave
-        _name = State(initialValue: definition.name)
-        _systemImage = State(initialValue: definition.systemImage)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text(title).font(SettingsListTypography.header)
-            TextField("状态名称", text: $name)
-                .textFieldStyle(.roundedBorder)
-            Picker("图标", selection: $systemImage) {
-                ForEach(settingsStatusIconOptions, id: \.self) { icon in
-                    Label(settingsStatusIconTitle(for: icon), systemImage: icon).tag(icon)
-                }
-            }
-            .pickerStyle(.menu)
-            HStack {
-                Spacer()
-                Button("取消", action: onCancel)
-                Button("保存") {
-                    onSave(AgentSessionStatusDefinition(id: definition.id, name: settingsTrimmed(name), systemImage: systemImage, sortOrder: definition.sortOrder, isTerminal: definition.isTerminal))
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(settingsTrimmed(name).isEmpty)
-            }
-        }
-        .padding(20)
-        .frame(width: 420)
-    }
-}
-
 private let settingsStatusIconOptions: [String] = [
     "circle", "clock", "pause.circle", "play.circle", "checkmark.circle", "checkmark.circle.fill", "xmark.circle", "nosign", "exclamationmark.circle", "exclamationmark.bubble", "questionmark.circle", "flag", "star", "bolt", "flame", "tray", "archivebox", "paperplane", "hammer", "wrench.and.screwdriver", "lightbulb", "sparkles", "target"
 ]
@@ -403,7 +238,7 @@ private func settingsStatusIconTitle(for icon: String) -> String {
     case "star": return "星标"
     case "bolt": return "闪电"
     case "flame": return "火焰"
-    case "tray": return "待办"
+    case "tray": return "收件箱"
     case "archivebox": return "归档"
     case "paperplane": return "发送"
     case "hammer": return "构建"

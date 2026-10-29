@@ -46,14 +46,12 @@ struct SQLiteImStoreTests {
         try await store.upsertConversation(makeConversation(id: "peer:9", peerUserId: 9))
 
         try await store.renameConversation(conversationId: "peer:9", title: "项目讨论", customized: true, now: 10)
-        try await store.setConversationStatus(conversationId: "peer:9", status: .inProgress, now: 20)
         try await store.setConversationLabels(conversationId: "peer:9", labelIds: ["important", "project"], now: 30)
 
         let conversation = try #require(try await store.conversation(id: "peer:9"))
         #expect(conversation.title == "项目讨论")
         #expect(conversation.participantName == "用户 9")
         #expect(conversation.titleCustomized)
-        #expect(conversation.status == .inProgress)
         #expect(conversation.labelIds == ["important", "project"])
         #expect(conversation.updatedAt == 30)
     }

@@ -86,11 +86,6 @@ struct ConnorSettingsDetailView: View {
                             model: graph.governance,
                             sessions: graph.chat.sessions.allSessions
                         )
-                    case .statuses:
-                        SettingsStatusesSection(
-                            model: graph.governance,
-                            sessions: graph.chat.sessions.allSessions
-                        )
                     case .shortcuts:
                         SettingsShortcutsSection(model: graph.inputSettings)
                     case .preferences:

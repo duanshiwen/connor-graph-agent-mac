@@ -56,7 +56,6 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
     case mail
     case permissions
     case labels
-    case statuses
     case shortcuts
     case preferences
     case identity
@@ -73,7 +72,6 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .mail: "邮件系统"
         case .permissions: "权限"
         case .labels: "标签"
-        case .statuses: "状态"
         case .shortcuts: "快捷键"
         case .preferences: "偏好"
         }
@@ -89,7 +87,6 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .mail: "账户、同步、安全"
         case .permissions: "默认权限和审批"
         case .labels: "管理会话标签"
-        case .statuses: "管理会话状态"
         case .shortcuts: "键盘快捷键"
         case .preferences: "用户偏好"
         }
@@ -105,7 +102,6 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .mail: "envelope.badge"
         case .permissions: "shield"
         case .labels: "tag"
-        case .statuses: "circle.dashed"
         case .shortcuts: "command"
         case .preferences: "slider.horizontal.3"
         }

@@ -155,45 +155,11 @@ public struct TaskCreateScheduledSessionMessageTool: AgentTool {
     }
 }
 
-public struct TaskCreateSessionStatusMessageTool: AgentTool {
-    public let name = "tasks_create_session_status_message"
-    public let description = "Create an AI task that runs when a session changes to a specific status, then sends a message to AI in that session. This is the only event-triggered task template available."
-    public let permission: AgentPermissionCapability = .commitGraphWrite
-    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "name": .string(description: "Task name"),
-        "toStatus": .string(description: "Target session status ID, e.g. done"),
-        "message": .string(description: "Message to send to AI when the status is reached"),
-        "sessionID": .string(description: "Optional fixed session ID; omit to use the event session"),
-        "rationale": .string(description: "Why this task should exist")
-    ], required: ["name", "toStatus", "message"])
-    private let service: TaskCreationService
-
-    public init(service: TaskCreationService) {
-        self.service = service
-    }
-
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let name = arguments.string("name") else { throw AgentToolError.invalidArguments("name is required") }
-        guard let toStatus = arguments.string("toStatus") else { throw AgentToolError.invalidArguments("toStatus is required") }
-        let task = try service.createSessionStatusMessageTask(
-            origin: .ai,
-            name: name,
-            toStatus: toStatus,
-            message: arguments.string("message") ?? "",
-            sessionID: arguments.string("sessionID"),
-            createdBySessionID: context.sessionID,
-            rationale: arguments.string("rationale")
-        )
-        return try result(task: task, context: context, toolName: self.name, text: "Created session-status AI task \(task.id)")
-    }
-}
-
 public extension AgentToolRegistry {
     mutating func registerTaskManagementTools(repository: AppTaskManagementRepository) {
         let service = TaskCreationService(repository: repository)
         register(TaskListTool(repository: repository))
         register(TaskCreateScheduledSessionMessageTool(service: service))
-        register(TaskCreateSessionStatusMessageTool(service: service))
         register(TaskUpdateScheduledSessionMessageTool(repository: repository))
         register(TaskDeleteTool(repository: repository))
     }
