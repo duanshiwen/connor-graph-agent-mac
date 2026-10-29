@@ -10,7 +10,7 @@ struct AgentSendControlButton: View {
             Image(systemName: isSubmitting ? "stop.fill" : "arrow.up")
                 .font(.system(size: AgentChatTypography.sendIconSize, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
-                .frame(width: AgentChatLayout.primaryButtonSize, height: AgentChatLayout.primaryButtonSize)
+                .frame(width: 36, height: 36)
                 .background(buttonBackground, in: Circle())
                 .overlay(Circle().stroke(buttonBorder, lineWidth: 1))
                 .shadow(color: buttonShadow, radius: 7, x: 0, y: 2)

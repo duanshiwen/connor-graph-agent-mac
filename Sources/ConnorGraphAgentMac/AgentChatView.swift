@@ -1424,7 +1424,7 @@ private struct AgentChatConversationHeader: View {
 
     /// 标题右侧留白：按右侧图标按钮区实际宽度动态计算，长标题在此边界内截断，不再覆盖按钮。
     private var titleTrailingInset: CGFloat {
-        var buttonCount: CGFloat = 2  // 会话信息 + 自动朗读
+        var buttonCount: CGFloat = 2  // 会话信息 + 后台任务
         if !isForwardSelectionMode { buttonCount += 2 }  // 转发会话 + 选择消息
         let spacing = (buttonCount - 1) * AgentChatLayout.spaceS
         return buttonCount * headerButtonSize + spacing + 12
@@ -1507,18 +1507,17 @@ private struct AgentChatConversationHeader: View {
                     .help("会话信息")
                     .accessibilityLabel("打开会话信息")
 
-                    // 自动朗读开关：位于会话页右上角，与安卓端统一位置。
                     Button {
-                        chatActions.dependencies.speech.autoReadEnabled.toggle()
+                        model.sessions.isBackgroundTasksPresented = true
                     } label: {
-                        Image(systemName: chatActions.dependencies.speech.autoReadEnabled ? "speaker.wave.2.fill" : "speaker.slash")
-                            .font(.system(size: windowWidthClass.usesStackedPanes ? 14 : 13, weight: .semibold))
+                        Image(systemName: "tray.full")
+                            .font(.system(size: 14, weight: .semibold))
                             .frame(width: headerButtonSize, height: headerButtonSize)
                     }
                     .buttonStyle(.borderless)
-                    .foregroundStyle(chatActions.dependencies.speech.autoReadEnabled ? Color.accentColor : Color.secondary)
-                    .help(chatActions.dependencies.speech.autoReadEnabled ? "自动朗读 AI 回复（已开启），点击关闭" : "自动朗读 AI 回复（当前关闭），点击开启")
-                    .accessibilityLabel(chatActions.dependencies.speech.autoReadEnabled ? "关闭自动朗读" : "开启自动朗读")
+                    .foregroundStyle(chatActions.run.hasRunningActiveSessionBackgroundTask ? Color.accentColor : Color.secondary)
+                    .help(chatActions.run.hasRunningActiveSessionBackgroundTask ? "后台任务（运行中）" : "查看后台任务")
+                    .accessibilityLabel("查看后台任务")
                 }
             }
 

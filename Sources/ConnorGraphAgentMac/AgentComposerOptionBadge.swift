@@ -58,11 +58,13 @@ struct AgentComposerOptionBadge: View {
             Image(systemName: systemImage)
                 .font(.system(size: style.iconSize, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
-            Text(title)
-                .font(style.textFont)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: maximumTitleWidth, alignment: .leading)
+            if !title.isEmpty {
+                Text(title)
+                    .font(style.textFont)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: maximumTitleWidth, alignment: .leading)
+            }
             if showsChevron {
                 Image(systemName: "chevron.down")
                     .font(.system(size: style.chevronSize, weight: .semibold))
@@ -71,7 +73,7 @@ struct AgentComposerOptionBadge: View {
             }
         }
         .padding(.horizontal, horizontalPadding)
-        .frame(height: AgentChatLayout.chipHeight)
+        .frame(height: 36)
         .foregroundStyle(tint)
         .background(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
@@ -84,7 +86,7 @@ struct AgentComposerOptionBadge: View {
             }
         }
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
-        .frame(minHeight: AgentChatLayout.hitTargetSize)
+        .frame(minHeight: 36)
         .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
     }
 }

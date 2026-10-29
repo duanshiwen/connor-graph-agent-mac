@@ -129,8 +129,6 @@ struct AgentChatComposerView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            optionBadgeRow
-
             VStack(spacing: 0) {
                 VStack(spacing: 0) {
                     if composerState.displayMode == .note {
@@ -169,53 +167,18 @@ struct AgentChatComposerView: View {
                 .frame(minHeight: AgentChatLayout.composerTextMinHeight, maxHeight: composerState.displayMode == .note ? .infinity : AgentChatLayout.composerTextMaxHeight, alignment: .topLeading)
 
                 HStack(spacing: AgentChatLayout.spaceS) {
-                    attachmentButton
-
-                    // 极窄（phone）模式下隐藏工作目录选择，给输入区留出空间。
-                    if !windowWidthClass.isPhone {
-                        workingDirectoryMenu
-                    }
-
-                    // 堆叠窗口（narrow/phone）下省略次要控件，给输入区留出空间
-                    if !windowWidthClass.usesStackedPanes {
-                        Button {
-                            model.workspaceExplorer.toggleTree(
-                                sessionID: model.sessions.selectedSessionID,
-                                workingDirectoryPath: chatActions.dependencies.workspaceSettings.defaultWorkingDirectoryPath
-                            )
-                        } label: {
-                            AgentComposerOptionBadge(
-                                title: "工作区目录树",
-                                systemImage: "list.bullet.indent",
-                                tint: model.workspaceExplorer.isTreePresented ? composerControlActiveForeground : composerControlForeground,
-                                showsChevron: false,
-                                isActive: model.workspaceExplorer.isTreePresented,
-                                style: .compact,
-                                showsBorder: false
-                            )
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: AgentChatLayout.spaceXS) {
+                            attachmentButton
+                            workingDirectoryMenu
+                            workspaceTreeButton
+                            browserButton
                         }
-                        .buttonStyle(.plain)
-                        .help("展开或收回当前会话工作区目录树")
-                        .accessibilityLabel("切换工作区目录树")
-
-                        Button(action: { sendComposerAction(.toggleBrowserWorkspaceVisibility) }) {
-                            AgentComposerOptionBadge(
-                                title: chatActions.dependencies.browser.isVisible ? "隐藏浏览器" : "浏览器",
-                                systemImage: "safari",
-                                tint: chatActions.dependencies.browser.isVisible ? composerControlActiveForeground : composerControlForeground,
-                                showsChevron: false,
-                                isActive: chatActions.dependencies.browser.isVisible,
-                                style: .prominent,
-                                fill: Color.accentColor.opacity(chatActions.dependencies.browser.isVisible ? 0.12 : 0.06),
-                                borderTint: .accentColor
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .help(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
-                        .accessibilityLabel(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
                     }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: AgentChatLayout.hitTargetSize)
 
-                    Spacer(minLength: AgentChatLayout.spaceXS)
+                    optionBadgeRow
 
                     modelSelectionMenu
                         .layoutPriority(2)
@@ -694,7 +657,7 @@ struct AgentChatComposerView: View {
             isWorkspacePopoverPresented.toggle()
         } label: {
             AgentComposerOptionBadge(
-                title: workingDirectoryBadgeTitle,
+                title: windowWidthClass.usesStackedPanes ? "" : workingDirectoryBadgeTitle,
                 systemImage: chatActions.dependencies.workspaceSettings.primaryRoot == nil ? "folder" : "folder.fill",
                 tint: .secondary,
                 isActive: false,
@@ -707,6 +670,7 @@ struct AgentChatComposerView: View {
             workingDirectoryPopoverContent
         }
         .help(workingDirectoryHelpText)
+        .accessibilityLabel("选择工作目录")
     }
 
     private var workingDirectoryPopoverContent: some View {
@@ -921,15 +885,40 @@ struct AgentChatComposerView: View {
         "\(isSelected ? "✓" : "  ")  \(title)"
     }
 
+    private var workspaceTreeButton: some View {
+        Button {
+            model.workspaceExplorer.toggleTree(
+                sessionID: model.sessions.selectedSessionID,
+                workingDirectoryPath: chatActions.dependencies.workspaceSettings.defaultWorkingDirectoryPath
+            )
+        } label: {
+            Image(systemName: "list.bullet.indent")
+                .font(.system(size: 16, weight: .medium))
+                .frame(width: 36, height: 36)
+                .background(Color.accentColor.opacity(model.workspaceExplorer.isTreePresented ? 0.10 : 0), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(model.workspaceExplorer.isTreePresented ? Color.accentColor : composerControlForeground)
+        .help("展开或收回当前会话工作区目录树")
+        .accessibilityLabel("切换工作区目录树")
+    }
+
+    private var browserButton: some View {
+        Button { sendComposerAction(.toggleBrowserWorkspaceVisibility) } label: {
+            Image(systemName: "safari")
+                .font(.system(size: 16, weight: .medium))
+                .frame(width: 36, height: 36)
+                .background(Color.accentColor.opacity(chatActions.dependencies.browser.isVisible ? 0.10 : 0), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(chatActions.dependencies.browser.isVisible ? Color.accentColor : composerControlForeground)
+        .help(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
+        .accessibilityLabel(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
+    }
+
     private var optionBadgeRow: some View {
         AgentComposerOptionBar(
-            selectedSession: selectedSession,
             composerState: composerState,
-            governanceConfig: chatActions.dependencies.governance.config,
-            knowledgeMarketplace: chatActions.dependencies.knowledgeMarketplace,
-            sourceRuntime: chatActions.dependencies.sources,
-            hasRunningBackgroundTask: chatActions.run.hasRunningActiveSessionBackgroundTask,
-            currentTextSelectionRange: { composerSelectionTracker.selectedRange },
             onAction: sendComposerAction
         )
     }
@@ -1252,99 +1241,6 @@ struct AgentChatComposerView: View {
 
 }
 
-struct RemoteKnowledgeBaseSelectionMenu: View {
-    @ObservedObject var store: CloudKnowledgeMarketplaceStore
-    var explicitIDs: [String]?
-    var isDisabled: Bool
-    var onSelectionChanged: ([String]?) -> Void
-    @State private var isPresented = false
-
-    private var available: [CloudMarketplaceKnowledgeBase] {
-        store.library.availableForConsumption
-    }
-
-    private var selection: RemoteKnowledgeBaseSelection {
-        RemoteKnowledgeBaseSelection(available: available, explicitIDs: explicitIDs)
-    }
-
-    var body: some View {
-        Button { isPresented.toggle() } label: {
-            AgentComposerOptionBadge(
-                title: selection.label,
-                systemImage: "books.vertical",
-                tint: .secondary,
-                isActive: false,
-                style: .prominent,
-                showsBorder: false,
-                horizontalPadding: AgentChatLayout.spaceXS
-            )
-            .frame(minWidth: 96, alignment: .leading)
-        }
-        .buttonStyle(.plain)
-        .disabled(isDisabled)
-        .help("选择本会话允许访问的远端知识库")
-        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text("远端知识库")
-                        .font(AgentChatTypography.sectionTitle)
-                    Spacer()
-                    Button(selection.isAllSelected ? "清除全选" : "全选") {
-                        onSelectionChanged(selection.toggleAllValue)
-                    }
-                    .font(AgentChatTypography.callout)
-                    .disabled(available.isEmpty)
-                }
-                .padding(12)
-
-                Divider()
-
-                if available.isEmpty {
-                    AgentComposerPopoverEmptyState(
-                        title: "暂无可用知识库",
-                        systemImage: "books.vertical",
-                        message: "订阅知识库，或发布自己的知识库后会显示在这里。"
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(available) { knowledgeBase in
-                                Toggle(isOn: Binding(
-                                    get: { selection.selectedIDs.contains(knowledgeBase.id) },
-                                    set: { _ in onSelectionChanged(selection.toggling(knowledgeBase.id)) }
-                                )) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(knowledgeBase.name).lineLimit(1)
-                                        Text(knowledgeBase.id)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    }
-                                }
-                                .toggleStyle(.checkbox)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                            }
-                        }
-                        .padding(.vertical, 6)
-                    }
-                    .frame(maxHeight: .infinity)
-                }
-            }
-            .frame(
-                width: ComposerPopoverLayout.width,
-                height: ComposerPopoverLayout.height,
-                alignment: .topLeading
-            )
-        }
-        .task {
-            if store.library.availableForConsumption.isEmpty { await store.load() }
-        }
-    }
-}
-
 private struct ComposerModelSelectionLabel: View {
     let presentation: ComposerModelSelectionPresentation
     var foreground: Color
@@ -1379,7 +1275,7 @@ private struct ComposerModelSelectionLabel: View {
         .foregroundStyle(foreground)
         .padding(.leading, AgentChatLayout.spaceM)
         .padding(.trailing, presentation.showsSessionOverrideIndicator ? AgentChatLayout.spaceL : AgentChatLayout.spaceM)
-        .frame(minWidth: modelMenuMinWidth, idealWidth: modelMenuIdealWidth, maxWidth: modelMenuMaxWidth, minHeight: AgentChatLayout.chipHeight, maxHeight: AgentChatLayout.chipHeight, alignment: .leading)
+        .frame(minWidth: modelMenuMinWidth, idealWidth: modelMenuIdealWidth, maxWidth: modelMenuMaxWidth, minHeight: 36, maxHeight: 36, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor).opacity(0.42))
