@@ -24,7 +24,7 @@ struct WorkspaceRootsSettingsContent: View {
                 }
                 Spacer()
                 Button("选择目录…") { chooseDirectories() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ConnorSecondaryButtonStyle())
             }
             .frame(minHeight: SettingsListLayout.rowMinHeight)
 
@@ -49,7 +49,7 @@ struct WorkspaceRootsSettingsContent: View {
                 Button("添加路径") {
                     model.addRoot(path: model.pathInput)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
                 .disabled(model.pathInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             Text("这些目录只用于当前会话。本地工具可在你授权的目录中读取或处理文件；未设置时使用默认工作目录。")
@@ -118,7 +118,7 @@ struct WorkspaceRootRow: View {
             Spacer()
             if !root.isPrimary {
                 Button("设为主目录", action: setPrimary)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ConnorSecondaryButtonStyle())
             }
             Button(role: .destructive, action: remove) {
                 Image(systemName: "minus.circle")
@@ -297,7 +297,7 @@ struct SettingsPreferencesSection: View {
                     }
                     Spacer()
                     Button("重新读取空白项") { model.refreshSystemDefaults() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(ConnorSecondaryButtonStyle())
                         .controlSize(.regular)
                 }
             }
@@ -312,7 +312,7 @@ struct SettingsPreferencesSection: View {
                     }
                     Spacer()
                     Button("打开系统设置") { model.openLocationPrivacySettings() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(ConnorSecondaryButtonStyle())
                         .controlSize(.regular)
                 }
                 Divider()
@@ -360,7 +360,7 @@ struct SettingsPreferencesSection: View {
                             } label: {
                                 Label(model.personalityDraft == nil ? "AI 分析" : "重新生成", systemImage: "sparkles")
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(ConnorPrimaryButtonStyle())
                             .disabled(model.isGeneratingPersonality || model.personalityRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }
@@ -380,13 +380,13 @@ struct SettingsPreferencesSection: View {
                         HStack {
                             Spacer()
                             Button("取消") { model.cancelPersonalityDraft() }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(ConnorSecondaryButtonStyle())
                             Button {
                                 model.confirmPersonalityDraft()
                             } label: {
                                 Label("应用性格", systemImage: "checkmark")
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(ConnorPrimaryButtonStyle())
                         }
                     }
 
@@ -403,7 +403,7 @@ struct SettingsPreferencesSection: View {
                             } label: {
                                 Label("恢复默认性格", systemImage: "arrow.counterclockwise")
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(ConnorSecondaryButtonStyle())
                         }
                     }
                 }

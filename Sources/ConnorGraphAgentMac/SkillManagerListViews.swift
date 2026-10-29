@@ -469,7 +469,7 @@ struct CraftSkillRow: View {
                 Button(action: onEdit) {
                     Label("编辑", systemImage: "pencil")
                 }
-                .tint(.blue)
+                .tint(ConnorCraftPalette.accent)
 
                 Button(role: .destructive, action: onDelete) {
                     Label("删除", systemImage: "trash")

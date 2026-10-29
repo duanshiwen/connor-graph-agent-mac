@@ -192,7 +192,7 @@ struct SkillImportWizardView: View {
             Button(model.isImporting ? "导入中…" : "导入 \(selectedCount) 个技能") {
                 Task { await model.submitSkillImport() }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ConnorPrimaryButtonStyle())
             .keyboardShortcut(.defaultAction)
             .disabled(selectedCount == 0 || model.isImporting)
         }

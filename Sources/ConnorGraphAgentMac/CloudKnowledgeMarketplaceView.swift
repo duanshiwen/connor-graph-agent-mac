@@ -468,7 +468,7 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
         } label: {
             Label(title, systemImage: systemImage).padding(.horizontal, 10).padding(.vertical, 6)
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(ConnorSecondaryButtonStyle())
     }
 
     private var marketplaceBrowseTitle: String {
@@ -497,10 +497,10 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                         // 自己创建并已发布的知识库同样可以订阅自己（后端 v2 仅校验 published/active/clear，不限制所有者）。
                         if base.subscribed {
                             Button("取消订阅") { Task { await store.unsubscribe(id: base.id) } }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(ConnorSecondaryButtonStyle())
                         } else if !base.owned || base.publicationStatus == "published" {
                             Button("订阅") { Task { await store.subscribe(id: base.id) } }
-                                .buttonStyle(.borderedProminent)
+                                .buttonStyle(ConnorPrimaryButtonStyle())
                         }
                         // 所有者管理组：编辑 · 下架（仅已发布） · 删除，次要操作成组、破坏性操作放组尾并需确认。
                         if base.owned {
@@ -513,7 +513,7 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                                             isPresentingPublishingAgreement = true
                                         }
                                     }
-                                    .buttonStyle(.borderedProminent)
+                                    .buttonStyle(ConnorPrimaryButtonStyle())
                                     .help("发布到知识市场前需同意发布协议")
                                 }
                                 Button("编辑") {
@@ -522,7 +522,7 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                                         isPresentingEditor = true
                                     }
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(ConnorSecondaryButtonStyle())
                                 if base.publicationStatus == "published" {
                                     Button("下架") {
                                         Task {
@@ -539,12 +539,12 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                                             }
                                         }
                                     }
-                                    .buttonStyle(.bordered)
+                                    .buttonStyle(ConnorSecondaryButtonStyle())
                                     .disabled(base.subscriberCount > 0)
                                     .help(base.subscriberCount > 0 ? "有 \(base.subscriberCount) 位订阅者，暂不能下架；知识库是持续系统，只能持续更新" : "下架后知识库不再对外提供服务")
                                 }
                                 Button("删除", role: .destructive) { isConfirmingDelete = true }
-                                    .buttonStyle(.bordered)
+                                    .buttonStyle(ConnorSecondaryButtonStyle())
                                     .disabled(base.subscriberCount > 0)
                                     .help(base.subscriberCount > 0 ? "有 \(base.subscriberCount) 位订阅者，暂不能删除；知识库是持续系统，只能持续更新" : "删除知识库")
                             }
@@ -695,12 +695,12 @@ private struct KnowledgeBasePublishingAgreementSheet: View {
                     .font(.callout)
                 Spacer()
                 Button("取消") { dismiss() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ConnorSecondaryButtonStyle())
                 Button("同意并发布") {
                     onAgree()
                     dismiss()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .disabled(!termsAccepted)
             }
             .padding(16)

@@ -208,7 +208,7 @@ struct PersonProfileEditorView: View {
                 .accessibilityLabel(presentation.cancelAccessibilityLabel)
                 .help("放弃更改并关闭")
             Button(presentation.saveButtonTitle) { onSave(draft) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .keyboardShortcut(.defaultAction)
                 .disabled(!presentation.canSave)
                 .accessibilityLabel(presentation.saveAccessibilityLabel)

@@ -70,7 +70,7 @@ private struct AppInitializationView: View {
                 Button("重新尝试") {
                     Task { await startupCoordinator.retry() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .controlSize(AppButtonLayout.controlSize)
             }
         }
@@ -135,40 +135,25 @@ struct AppShellView: View {
                     openURL: graph.shellActions.openURL
                 )
             } else {
-                if widthClass.usesStackedPanes {
+                if shellContentWidth > 0 && shellContentWidth < 720 {
                     stackedContent
                 } else {
                     HStack(spacing: 0) {
                         if isPrimarySidebarVisible {
-                            CraftPrimarySidebarView(
-                                graph: graph,
-                                selection: selectionBinding,
-                                sendCommand: sendCommand
-                            )
-                            // 主侧栏固定宽度，不允许用户拖动更改。
-                            .frame(width: AppShellLayout.sidebarColumnWidth)
-                            .frame(maxHeight: .infinity)
-                            .background(.bar)
-                            .controlSize(AppButtonLayout.controlSize)
+                            workspaceNavigation
+                                .frame(width: 320)
+                                .frame(maxHeight: .infinity)
+                                .background(AppShellColors.listBackground)
+                            Divider()
                         }
-
-                        CraftListPaneView(
-                            graph: graph,
-                            selection: selectionBinding
-                        )
-                            .frame(width: AppShellLayout.listColumnWidth)
-                            .frame(maxHeight: .infinity)
-                            .background(AppShellColors.listBackground)
-                            .controlSize(AppButtonLayout.controlSize)
-
                         CraftDetailPaneView(
                             graph: graph,
                             identityStore: identityStore,
                             selection: graph.shell.selection ?? .agentChat
                         )
-                            .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
-                            .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
-                            .controlSize(AppButtonLayout.controlSize)
+                        .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                        .background(ConnorCraftPalette.background)
+                        .controlSize(AppButtonLayout.controlSize)
                     }
                 }
         }
@@ -191,8 +176,8 @@ struct AppShellView: View {
                 } label: {
                     Label(isPrimarySidebarVisible ? "隐藏主侧栏" : "显示主侧栏", systemImage: "sidebar.leading")
                 }
-                .disabled(shellContentWidth < AppShellLayout.sidebarCollapseThreshold)
-                .help(shellContentWidth < AppShellLayout.sidebarCollapseThreshold ? "窗口过窄，主侧栏已自动收起" : (isPrimarySidebarVisible ? "隐藏主侧栏" : "显示主侧栏"))
+                .disabled(shellContentWidth < 720)
+                .help(shellContentWidth < 720 ? "窗口较窄，使用单栏导航" : (isPrimarySidebarVisible ? "隐藏主侧栏" : "显示主侧栏"))
             }
 
             ToolbarItem(placement: .principal) {
@@ -337,12 +322,83 @@ struct AppShellView: View {
     private var widthClass: AppWindowWidthClass {
         if shellContentWidth < AppShellLayout.phoneWidthThreshold { return .phone }
         if shellContentWidth < AppShellLayout.narrowWidthThreshold { return .narrow }
-        if shellContentWidth < AppShellLayout.sidebarCollapseThreshold { return .compact }
+        if shellContentWidth < 720 { return .compact }
         return .regular
     }
 
     /// 窄窗口堆叠布局（narrow/phone）：列表/详情二选一，全屏堆叠，带滑动切换动画；
     /// 详情页始终提供返回入口，返回后回到列表。
+    /// 朝朝 claw 式左栏：集中入口和最近会话在同一栏，功能列表原位替换。
+    private var workspaceNavigation: some View {
+        VStack(spacing: 0) {
+            if (graph.shell.selection ?? .agentChat) == .agentChat {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 10) {
+                            Image("ConnorAvatar").resizable().scaledToFit().frame(width: 34, height: 34)
+                            Text("康纳同学").font(AppTypography.paneTitle)
+                            Spacer()
+                            Menu {
+                                Button("全部会话") { graph.chatActions.session.setSessionListFilter(.all) }
+                                ForEach(graph.governance.config.labels) { label in
+                                    Button(label.name) { graph.chatActions.session.setSessionListFilter(.label(label.id)) }
+                                }
+                                Button("批量导入笔记") { openWindow(id: AppMenuPresentation.noteImportWizardWindowID) }
+                            } label: { Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 18)).frame(width: 44, height: 48) }
+                            .help("筛选会话与导入笔记")
+                        }
+                        HStack {
+                            Button { sendCommand(.shortcut(.newSession)) } label: { Label("新建会话", systemImage: "square.and.pencil").frame(minWidth: 92, minHeight: 24) }
+                                .buttonStyle(ConnorPrimaryButtonStyle())
+                            Button { sendCommand(.newNote) } label: { Label("新建笔记", systemImage: "note.text").frame(minWidth: 92, minHeight: 24) }
+                                .buttonStyle(ConnorSecondaryButtonStyle())
+                        }
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                            workspaceEntry(.mail, "邮件", "envelope")
+                            workspaceEntry(.contacts, "人际关系", "person.2")
+                            workspaceEntry(.calendar, "日历", "calendar")
+                            workspaceEntry(.rss, "RSS 阅读", "dot.radiowaves.left.and.right")
+                            workspaceEntry(.skills, "技能", "bolt")
+                            workspaceEntry(.knowledgeMarketplace, "知识市场", "books.vertical")
+                            workspaceEntry(.sources, "MCP 数据源", "server.rack")
+                            workspaceEntry(.scheduledTasks, "定时任务", "clock")
+                            workspaceEntry(.interactiveWeb, "互动网页", "globe")
+                            workspaceEntry(.miniApps, "小程序", "square.grid.2x2")
+                            workspaceEntry(.llmSettings, "设置", "gearshape")
+                        }
+                    }.padding(16)
+                }.frame(maxHeight: 440)
+            } else {
+                HStack {
+                    Button {
+                        _ = graph.shell.select(.agentChat)
+                    } label: { Label("返回工作入口", systemImage: "chevron.left").font(.system(size: 14)).frame(minHeight: 48) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(ConnorCraftPalette.accent)
+                    Spacer()
+                }.padding(16)
+            }
+            Divider()
+            CraftListPaneView(graph: graph, selection: selectionBinding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .controlSize(AppButtonLayout.controlSize)
+        }
+    }
+
+    private func workspaceEntry(_ route: SidebarItem, _ title: String, _ icon: String) -> some View {
+        Button { _ = graph.shell.select(route) } label: {
+            HStack(spacing: 9) {
+                Image(systemName: icon).font(.system(size: 18)).frame(width: 20)
+                Text(title).font(.system(size: 14, weight: .medium)).lineLimit(1)
+            }
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .padding(.horizontal, 10)
+                .background(ConnorCraftPalette.surface, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(ConnorCraftPalette.foreground)
+    }
+
     private var stackedContent: some View {
         ZStack {
             if isDetailActive {
@@ -362,7 +418,7 @@ struct AppShellView: View {
                                 .font(.system(size: AppShellLayout.stackedBackButtonIconSize, weight: .bold))
                                 .frame(width: AppShellLayout.stackedBackButtonSize, height: AppShellLayout.stackedBackButtonSize)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(ConnorSecondaryButtonStyle())
                         .controlSize(.regular)
                         .padding(.horizontal, AppShellLayout.spaceM)
                         .padding(.top, AppShellLayout.spaceS)
@@ -371,10 +427,7 @@ struct AppShellView: View {
                     }
                 }
             } else {
-                CraftListPaneView(
-                    graph: graph,
-                    selection: selectionBinding
-                )
+                workspaceNavigation
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(AppShellColors.listBackground)
                 .controlSize(AppButtonLayout.controlSize)
@@ -412,7 +465,10 @@ struct AppShellView: View {
         let route = graph.shell.selection ?? .agentChat
         switch route {
         case .agentChat:
-            return nil
+            return {
+                if let im = graph.im { Task { await im.selectConversation(nil) } }
+                graph.chatActions.session.clearSelectedChatSession()
+            }
         case .mail:
             return { graph.mail.clearMessageSelection() }
         case .rss:
@@ -429,11 +485,7 @@ struct AppShellView: View {
     }
 
     private func applyResponsiveSidebar(width: CGFloat) {
-        if width < AppShellLayout.sidebarCollapseThreshold {
-            if isPrimarySidebarVisible { isPrimarySidebarVisible = false }
-        } else if width >= AppShellLayout.sidebarExpandThreshold, !userRequestedSidebarHidden {
-            if !isPrimarySidebarVisible { isPrimarySidebarVisible = true }
-        }
+        if width >= 720 && !userRequestedSidebarHidden { isPrimarySidebarVisible = true }
     }
 
     private func installTopSearchKeyMonitorIfNeeded() {

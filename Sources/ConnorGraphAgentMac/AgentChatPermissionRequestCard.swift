@@ -147,7 +147,7 @@ struct AgentChatPermissionRequestCard: View {
                         Label("放大审阅", systemImage: "arrow.up.left.and.arrow.down.right")
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
                 .controlSize(.regular)
                 .disabled(onExpandReview == nil)
                 .help("放大查看完整权限请求细节；缩小或按 Esc 不会批准或拒绝。")
@@ -158,7 +158,7 @@ struct AgentChatPermissionRequestCard: View {
                 } label: {
                     Label(mailApproval.isMailSendRequest ? "允许发送" : "允许", systemImage: "checkmark")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .controlSize(.regular)
 
                 if approvalPresentation.allowsAlwaysAllow {
@@ -171,7 +171,7 @@ struct AgentChatPermissionRequestCard: View {
                             Label("始终允许", systemImage: "arrow.triangle.2.circlepath")
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ConnorSecondaryButtonStyle())
                     .controlSize(.regular)
                     .help("将当前 Agent 会话切换为执行；批准此请求，并自动放行之后的所有权限请求")
                     .accessibilityLabel("始终允许")
@@ -182,7 +182,7 @@ struct AgentChatPermissionRequestCard: View {
                 } label: {
                     Label(mailApproval.isMailSendRequest ? "取消发送" : "拒绝", systemImage: "xmark")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
                 .controlSize(.regular)
 
                 if !windowWidthClass.usesStackedPanes {
@@ -292,7 +292,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
             Button(action: onCollapse) {
                 Label("缩小", systemImage: "arrow.down.right.and.arrow.up.left")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ConnorSecondaryButtonStyle())
             .keyboardShortcut(.cancelAction)
             .help("缩小审阅视图；也可以按 Esc。不会批准或拒绝。")
         }
@@ -312,7 +312,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
             } label: {
                 Label(mailApproval.isMailSendRequest ? "取消发送" : "拒绝", systemImage: "xmark")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ConnorSecondaryButtonStyle())
             .controlSize(AppButtonLayout.controlSize)
 
             Button {
@@ -321,7 +321,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
             } label: {
                 Label(mailApproval.isMailSendRequest ? "允许发送" : "允许", systemImage: "checkmark")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ConnorPrimaryButtonStyle())
             .controlSize(AppButtonLayout.controlSize)
         }
     }

@@ -243,7 +243,7 @@ struct ForwardDestinationSheet: View {
                 Button(isSending ? "发送中…" : selectedKeys.count > 1 ? "发送给 \(selectedKeys.count) 个会话" : "发送") {
                     Task { await onSend(caption, selectedKeys) }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .disabled(selectedKeys.isEmpty || isSending)
             }
         }

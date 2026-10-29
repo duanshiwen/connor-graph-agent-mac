@@ -199,8 +199,10 @@ struct NoteImportWizardView: View {
             if model.step == .source {
                 Button("扫描内容") { Task { await model.scanSource() } }
                     .buttonStyle(.borderedProminent).disabled(model.sourceURL == nil || model.isBusy)
+                    .foregroundStyle(ConnorCraftPalette.onAccent)
             } else if model.step != .confirm {
                 Button("继续") { model.advance() }.buttonStyle(.borderedProminent).disabled(model.notes.isEmpty || !model.encodingReview.isEmpty || model.isBusy)
+                .foregroundStyle(ConnorCraftPalette.onAccent)
             } else {
                 Button("开始导入") {
                     Task {
@@ -211,6 +213,7 @@ struct NoteImportWizardView: View {
                         }
                     }
                 }.buttonStyle(.borderedProminent).disabled(!importExecutionEnabled || model.notes.isEmpty || model.isBusy)
+                .foregroundStyle(ConnorCraftPalette.onAccent)
                     .help(importExecutionEnabled ? "开始后台导入" : "此构建尚未启用导入执行")
             }
         }.padding(.horizontal, 28).padding(.vertical, 16)

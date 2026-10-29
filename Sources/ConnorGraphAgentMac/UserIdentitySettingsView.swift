@@ -101,7 +101,7 @@ struct UserIdentitySettingsView: View {
                             Button("重新连接") {
                                 Task { await retryStoredSession() }
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(ConnorSecondaryButtonStyle())
                             .controlSize(AppButtonLayout.controlSize)
                             .disabled(isSubmitting || !canUseAccountService)
                         }
@@ -117,7 +117,7 @@ struct UserIdentitySettingsView: View {
                                 .font(SettingsListTypography.actionTitle)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ConnorPrimaryButtonStyle())
                     .controlSize(AppButtonLayout.controlSize)
                     .disabled(isSubmitting || !canUseAccountService)
                 }
@@ -162,7 +162,7 @@ struct UserIdentitySettingsView: View {
                     Spacer()
                     if isUploadingAvatar { ProgressView().controlSize(.small) }
                     Button("退出登录", role: .destructive) { Task { await identityStore.logout() } }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(ConnorSecondaryButtonStyle())
                         .disabled(!canUseAccountService)
                 }
                 if !connectivity.isConnected {
@@ -282,7 +282,7 @@ struct UserIdentitySettingsView: View {
                 Spacer()
                 if identityStore.isDeviceSyncEnabled, identityStore.currentUser != nil {
                     Button("立即同步") { identityStore.syncNow() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(ConnorSecondaryButtonStyle())
                         .controlSize(AppButtonLayout.controlSize)
                         .disabled(!canUseAccountService || isSyncing)
                 }

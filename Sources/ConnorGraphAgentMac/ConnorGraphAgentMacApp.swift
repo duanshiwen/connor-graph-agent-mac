@@ -47,6 +47,7 @@ struct ConnorGraphAgentMacApp: App {
                 )
             }
             .appFormTheme()
+            .tint(ConnorCraftPalette.accent)
             .preferredColorScheme(root.graph.appSettings.appearanceMode.colorScheme)
             .toolbarBackground(.visible, for: .windowToolbar)
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
@@ -157,18 +158,21 @@ struct ConnorGraphAgentMacApp: App {
                 importExecutionEnabled: root.featureFlags.noteImportEnabled
             )
             .appFormTheme()
+            .tint(ConnorCraftPalette.accent)
         }
         .defaultSize(width: 720, height: 560)
 
         Window("笔记导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
             NoteImportCenterView(model: root.noteImportModel)
                 .appFormTheme()
+            .tint(ConnorCraftPalette.accent)
         }
         .defaultSize(width: 900, height: 620)
 
         Window("导入技能", id: AppMenuPresentation.skillImportWindowID) {
             SkillImportWizardView(model: root.graph.skills)
                 .appFormTheme()
+            .tint(ConnorCraftPalette.accent)
         }
         .defaultSize(width: 820, height: 640)
 
@@ -179,6 +183,7 @@ struct ConnorGraphAgentMacApp: App {
                 messageCounts: root.graph.chat.sessions.messageCountsBySessionID
             )
             .appFormTheme()
+            .tint(ConnorCraftPalette.accent)
         }
         .defaultSize(width: 860, height: 620)
     }

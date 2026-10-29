@@ -444,11 +444,11 @@ struct AddCalendarSourceSheet: View {
                 Button("前往日历设置") {
                     model.requestOpenSettings()
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
             }
             Spacer()
             Button("取消") { dismiss() }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
                 .disabled(isSubmitting || isSyncingLocal)
 
             if selectedProvider == .macOSEventKit {
@@ -469,7 +469,7 @@ struct AddCalendarSourceSheet: View {
                         Label("同步本机日历", systemImage: "arrow.triangle.2.circlepath")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .disabled(isSyncingLocal)
                 .keyboardShortcut(.defaultAction)
             } else {
@@ -483,7 +483,7 @@ struct AddCalendarSourceSheet: View {
                         Label("添加并同步", systemImage: "plus")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .disabled(!isFormValid || isSubmitting)
                 .keyboardShortcut(.defaultAction)
             }
@@ -846,7 +846,7 @@ private struct ImFriendRequestSection: View {
                     }
                     Spacer()
                     Button("同意") { onAccept(request.id) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(ConnorPrimaryButtonStyle())
                     Button("拒绝") { onReject(request.id) }
                 }
                 .padding(.vertical, 2)
@@ -966,7 +966,7 @@ struct ImAddFriendSheet: View {
             )
 
             Button("搜索", action: performSearch)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .controlSize(.regular)
                 .disabled(!canSearch)
         }
@@ -1084,7 +1084,7 @@ struct ImAddFriendSheet: View {
                 Label("加好友", systemImage: "person.badge.plus")
                     .labelStyle(.titleAndIcon)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ConnorPrimaryButtonStyle())
             .controlSize(.small)
         }
     }
@@ -1612,7 +1612,7 @@ struct AddRSSSourceSheet: View {
                     Text(isEditing ? "保存修改" : "添加并抓取")
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ConnorPrimaryButtonStyle())
             .disabled(saveDisabled)
             .keyboardShortcut(.defaultAction)
         }
@@ -2097,7 +2097,7 @@ private struct AddTaskAutomationSheet: View {
                     Text("创建任务")
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ConnorPrimaryButtonStyle())
             .disabled(saveDisabled)
             .keyboardShortcut(.defaultAction)
         }
@@ -3641,14 +3641,14 @@ private struct PersonProfileDetailHero: View {
                 HStack(spacing: AppShellLayout.spaceS) {
                     if let onMessage {
                         Button("发消息", systemImage: "bubble.left.fill", action: onMessage)
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(ConnorPrimaryButtonStyle())
                             .controlSize(AppButtonLayout.controlSize)
                     }
                     Button("编辑", action: onEdit)
-                        .buttonStyle(.bordered)
+                        .buttonStyle(ConnorSecondaryButtonStyle())
                         .controlSize(AppButtonLayout.controlSize)
                     Button("添加关系", action: onAddRelationship)
-                        .buttonStyle(.bordered)
+                        .buttonStyle(ConnorSecondaryButtonStyle())
                         .controlSize(AppButtonLayout.controlSize)
                     Menu {
                         if !mergeCandidates.isEmpty {
@@ -3664,7 +3664,7 @@ private struct PersonProfileDetailHero: View {
                     } label: {
                         Image(systemName: "ellipsis")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ConnorSecondaryButtonStyle())
                     .controlSize(AppButtonLayout.controlSize)
                     .help("更多操作")
                 }
@@ -4116,7 +4116,7 @@ private struct TaskAutomationActionButton: View {
                 .padding(.horizontal, 4)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(ConnorSecondaryButtonStyle())
         .controlSize(AppButtonLayout.controlSize)
         .help(title)
     }
@@ -4616,7 +4616,7 @@ struct CraftSessionRow: View {
     }
 
     private var labelBackgroundColor: Color {
-        usesFilledAttentionStyle ? Color.white.opacity(0.14) : Color.purple.opacity(0.10)
+        usesFilledAttentionStyle ? Color.white.opacity(0.14) : ConnorCraftPalette.accentSoftFill
     }
 
     private var attentionLevel: SessionAttentionLevel {

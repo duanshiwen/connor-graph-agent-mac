@@ -303,7 +303,7 @@ struct ChatAudioPreview: View {
                     .font(.system(size: 26, weight: .semibold))
                     .frame(width: 56, height: 56)
                     .background(ConnorCraftPalette.accent, in: Circle())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(ConnorCraftPalette.onAccent)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isPlaying ? "暂停" : "播放")

@@ -17,7 +17,7 @@ struct SettingsLabelsSection: View {
                 systemImage: "tag"
             ) {
                 Button("新建标签…") { presentNewLabelEditor() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ConnorPrimaryButtonStyle())
                     .controlSize(AppButtonLayout.controlSize)
             }
 
@@ -208,7 +208,7 @@ struct SettingsLabelEditorSheet: View {
                     onSave(AgentSessionLabelDefinition(id: definition.id, name: settingsTrimmed(name), colorName: settingsColorStorageName(from: color), systemImage: systemImage))
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .disabled(settingsTrimmed(name).isEmpty)
             }
         }

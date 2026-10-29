@@ -51,7 +51,7 @@ struct AgentAttachmentPreviewSheetView: View {
                         Label("分享", systemImage: "square.and.arrow.up")
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
                 .accessibilityLabel("分享这个附件")
                 .help("使用 macOS 系统分享这个附件")
             }
@@ -63,7 +63,7 @@ struct AgentAttachmentPreviewSheetView: View {
                         Label("下载", systemImage: "square.and.arrow.down")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .accessibilityLabel("下载这张图片")
                 .help("将图片原件保存到你选择的位置")
             }
@@ -75,7 +75,7 @@ struct AgentAttachmentPreviewSheetView: View {
                         Label("重新解析", systemImage: "arrow.clockwise")
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
                 .help("重新排队解析这个附件")
                 .accessibilityLabel("重新解析")
             }

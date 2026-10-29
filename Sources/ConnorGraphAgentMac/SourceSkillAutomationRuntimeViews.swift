@@ -228,7 +228,7 @@ private struct MCPSourceTopBar: View {
                     Button(action: onTest) {
                         Label(isTesting ? "测试中…" : "测试 Source", systemImage: isTesting ? "hourglass" : "checkmark.circle")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ConnorPrimaryButtonStyle())
                     .disabled(isTesting)
                     .help("运行 MCP initialize + tools/list，并刷新 health/catalog/audit。")
                 }
@@ -236,7 +236,7 @@ private struct MCPSourceTopBar: View {
                     Button(action: onEdit) {
                         Label("编辑", systemImage: "pencil")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ConnorSecondaryButtonStyle())
                 }
                 if onToggleEnabled != nil || onArchive != nil || onDelete != nil {
                     Menu {
@@ -1080,7 +1080,7 @@ private struct TaskRuntimeCardActionButton: View {
                 .padding(.horizontal, 4)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(ConnorSecondaryButtonStyle())
         .controlSize(AppButtonLayout.controlSize)
         .help(title)
     }

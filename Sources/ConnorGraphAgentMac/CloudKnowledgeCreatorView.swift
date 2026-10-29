@@ -307,7 +307,7 @@ struct CloudKnowledgeCreatorView: View {
             Button(store.errorMessage == nil ? "提交知识变更" : "重试提交") {
                 Task { await store.finalizePublication() }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ConnorPrimaryButtonStyle())
             .controlSize(AppButtonLayout.controlSize)
             .disabled(store.isWorking || !store.snapshot.validationIssues.isEmpty)
         }
@@ -409,7 +409,7 @@ struct CloudKnowledgeCreatorView: View {
                             }
                         }
                     }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(ConnorPrimaryButtonStyle())
                         .disabled(!canRequestPublish)
                 }
             } else {
@@ -499,7 +499,7 @@ struct CloudKnowledgeCreatorView: View {
                     creatorTermsAccepted = true
                     isPresentingPublishingAgreement = false
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
             }
             .padding(16)
         }
@@ -530,7 +530,7 @@ struct CloudKnowledgeCreatorView: View {
                     store.updateDraft(draft)
                     Task { await store.saveKnowledgeBase() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .controlSize(AppButtonLayout.controlSize)
                 .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -543,7 +543,7 @@ struct CloudKnowledgeCreatorView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("下一步：确认生成") { store.advance(to: .confirm) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ConnorPrimaryButtonStyle())
                     .controlSize(AppButtonLayout.controlSize)
                     .disabled(store.snapshot.selectedConversationIDs.isEmpty)
             }
@@ -553,7 +553,7 @@ struct CloudKnowledgeCreatorView: View {
                     .controlSize(AppButtonLayout.controlSize)
                 Spacer()
                 Button("确认并开始") { Task { await store.beginPublication() } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ConnorPrimaryButtonStyle())
                     .controlSize(AppButtonLayout.controlSize)
             }
         case .generating, .paused:
@@ -566,7 +566,7 @@ struct CloudKnowledgeCreatorView: View {
                     .controlSize(AppButtonLayout.controlSize)
                 Spacer()
                 Button("验证发布") { Task { await store.validatePublication() } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ConnorPrimaryButtonStyle())
                     .controlSize(AppButtonLayout.controlSize)
                     .disabled(store.snapshot.processedConversationIDs.count < store.snapshot.selectedConversationIDs.count)
             }
@@ -574,7 +574,7 @@ struct CloudKnowledgeCreatorView: View {
             actionBar {
                 Spacer()
                 Button("修复后重试") { Task { await store.finalizePublication() } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ConnorPrimaryButtonStyle())
                     .controlSize(AppButtonLayout.controlSize)
                     .disabled(store.snapshot.validationIssues.isEmpty || store.isWorking)
             }
@@ -587,7 +587,7 @@ struct CloudKnowledgeCreatorView: View {
             actionBar {
                 Spacer()
                 Button("重新检索并继续") { store.resume() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ConnorPrimaryButtonStyle())
                     .controlSize(AppButtonLayout.controlSize)
             }
         case .completed:

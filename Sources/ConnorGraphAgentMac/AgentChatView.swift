@@ -15,7 +15,7 @@ struct AgentChatView: View {
     var body: some View {
         Group {
             if model.sessions.selectedSessionID == nil && !chatActions.dependencies.browser.isVisible {
-                Color.clear
+                AgentChatEmptyStateView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 activeSessionContent
@@ -1355,7 +1355,7 @@ private struct AgentChatConversationView: View {
                 Button("合并转发", systemImage: "arrowshape.turn.up.right") {
                     isForwardSheetPresented = true
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .disabled(selectedForwardMessageIDs.isEmpty || imModel == nil)
             }
             .padding(.horizontal, AgentChatLayout.spaceL)
@@ -1780,7 +1780,7 @@ private struct AgentChatInspectorView: View {
             HStack(spacing: AgentChatLayout.spaceS) {
                 Button(session.governance.isFlagged ? "取消标记" : "标记") { chatActions.session.toggleSelectedSessionFlag() }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ConnorSecondaryButtonStyle())
             .controlSize(.regular)
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {

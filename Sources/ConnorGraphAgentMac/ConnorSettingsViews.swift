@@ -147,7 +147,7 @@ struct SettingsCalendarSection: View {
                             .padding(.horizontal, SettingsListLayout.spaceM)
                             .padding(.vertical, SettingsListLayout.spaceXS)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ConnorPrimaryButtonStyle())
                     .disabled(model.isSyncingSystemCalendar)
 
                     Button(action: { model.isPresentingAddSourceSheet = true }) {
@@ -156,7 +156,7 @@ struct SettingsCalendarSection: View {
                             .padding(.horizontal, SettingsListLayout.spaceM)
                             .padding(.vertical, SettingsListLayout.spaceXS)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ConnorSecondaryButtonStyle())
                 }
                 if let message = model.syncMessage {
                     Text(message)
@@ -316,7 +316,7 @@ struct SettingsAppSection: View {
                         Label("恢复默认", systemImage: "arrow.counterclockwise")
                             .font(SettingsListTypography.rowCaptionEmphasized)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ConnorSecondaryButtonStyle())
                     .controlSize(.regular)
                 }
             }
@@ -379,7 +379,7 @@ struct SettingsAppSection: View {
                     }
                     Spacer()
                     Button("打开官网") { openProjectHelp() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(ConnorSecondaryButtonStyle())
                 }
                 Divider()
                 VStack(alignment: .leading, spacing: 6) {
@@ -429,7 +429,7 @@ struct SettingsAppSection: View {
                         ProgressView().controlSize(.small)
                     }
                     Button("检查更新") { Task { await updateCenter.checkNow() } }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(ConnorSecondaryButtonStyle())
                         .disabled(updateCenter.isChecking || updateCenter.isDownloading)
                 }
                 .frame(minHeight: SettingsListLayout.rowMinHeight)
@@ -445,9 +445,9 @@ struct SettingsAppSection: View {
                         }
                         HStack(spacing: SettingsListLayout.spaceM) {
                             Button("稍后") { updateCenter.dismissUpdate() }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(ConnorSecondaryButtonStyle())
                             Button("下载安装") { Task { await updateCenter.downloadAndOpen() } }
-                                .buttonStyle(.borderedProminent)
+                                .buttonStyle(ConnorPrimaryButtonStyle())
                                 .disabled(updateCenter.isDownloading)
                         }
                         if updateCenter.isDownloading {
@@ -505,7 +505,7 @@ private struct SettingsChatFontSizeRow: View {
                 Button("恢复默认") {
                     pointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
                 .disabled(pointSize == AgentChatFontPreferences.defaultMessageBodyPointSize)
             }
 
@@ -597,7 +597,7 @@ struct SettingsRSSSection: View {
                     .padding(.horizontal, SettingsListLayout.spaceM)
                     .padding(.vertical, SettingsListLayout.spaceXS)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ConnorSecondaryButtonStyle())
         }
     }
 
@@ -777,7 +777,7 @@ struct SettingsAISection: View {
                         .padding(.horizontal, SettingsListLayout.spaceM)
                         .padding(.vertical, SettingsListLayout.spaceXS)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
                 .controlSize(AppButtonLayout.controlSize)
 
                 Label("连接能力会在添加时一次性验证并保存。为保护 API Key 安全，我们暂时不支持编辑连接；如需更改，请删除后重建。", systemImage: "lock.shield")
@@ -1273,14 +1273,14 @@ struct AIConnectionSetupView: View {
                 Text("返回")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ConnorSecondaryButtonStyle())
             .controlSize(AppButtonLayout.controlSize)
 
             Button(action: primaryAction) {
                 Label(primaryButtonTitle, systemImage: primaryButtonIcon)
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ConnorPrimaryButtonStyle())
             .controlSize(AppButtonLayout.controlSize)
             .keyboardShortcut(.defaultAction)
             .disabled(isPrimaryButtonDisabled || isAuthenticating)
@@ -1699,7 +1699,7 @@ struct AIConnectionSetupView: View {
             } label: {
                 Label("查看官方套餐", systemImage: "cart")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ConnorSecondaryButtonStyle())
 
             Button {
                 guard let url = URL(string: managementURLString) else { return }

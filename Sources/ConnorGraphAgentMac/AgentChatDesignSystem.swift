@@ -2,19 +2,22 @@ import SwiftUI
 import AppKit
 
 enum ConnorCraftPalette {
-    // Mirrors Craft Agents OSS renderer tokens:
-    // --background: light oklch(0.98 0.003 265), dark oklch(0.2 0.005 270)
-    // --foreground: light oklch(0.185 0.01 270), dark oklch(0.92 0.005 270)
-    // --accent: light oklch(0.62 0.13 293), dark oklch(0.65 0.20 293)
-    static let background = dynamicColor(light: "#F7F8FA", dark: "#151618")
-    static let foreground = dynamicColor(light: "#111317", dark: "#E3E4E8")
-    static let accent = dynamicColor(light: "#8A75CD", dark: "#9770FC")
+    // 与 Android ConnorTheme 对齐：浅色深金文字、深色品牌黄，保持可读对比。
+    static let brandYellow = dynamicColor(light: "#FFD84D", dark: "#FFD84D")
+    static let background = dynamicColor(light: "#F6F6F7", dark: "#141416")
+    static let foreground = dynamicColor(light: "#242528", dark: "#EEEEF0")
+    static let accent = dynamicColor(light: "#715600", dark: "#FFD84D")
+    static let onAccent = dynamicColor(light: "#FFFFFF", dark: "#101820")
+    static let surface = dynamicColor(light: "#FFFFFF", dark: "#1E1E21")
+    static let surfaceVariant = dynamicColor(light: "#F1F1F3", dark: "#252528")
+    static let accentContainer = dynamicColor(light: "#FFF3C4", dark: "#544400")
+    static let onAccentContainer = dynamicColor(light: "#101820", dark: "#FFE89B")
     static let userBubble = foreground.opacity(0.05)
     static let userBubbleDimmed = foreground.opacity(0.03)
-    static let sendButton = foreground
-    static let sendButtonForeground = background
+    static let sendButton = brandYellow
+    static let sendButtonForeground = dynamicColor(light: "#101820", dark: "#101820")
     static let stopButton = foreground.opacity(0.05)
-    static let accentSoftFill = accent.opacity(0.14)
+    static let accentSoftFill = accentContainer
     static let accentSubtleFill = accent.opacity(0.08)
     static let accentBorder = accent.opacity(0.28)
 

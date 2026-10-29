@@ -288,7 +288,7 @@ private struct InteractiveWebDetailContent: View {
                     Label("转发到会话…", systemImage: "paperplane")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
                 .disabled(model.isMutating)
 
                 Button {
@@ -311,7 +311,7 @@ private struct InteractiveWebDetailContent: View {
                     Label("打开互动网页", systemImage: "safari")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .disabled(model.isMutating)
                 .help("新建会话并用会话浏览器查看这个互动网页（审核模式）")
             }

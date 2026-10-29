@@ -173,7 +173,7 @@ struct ImConversationRow: View {
                         .font(AppListTypography.rowCaption)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.purple.opacity(0.10), in: Capsule())
+                        .background(ConnorCraftPalette.accentSoftFill, in: Capsule())
                 }
             }
         }
@@ -472,7 +472,7 @@ struct ImChatDetailView: View {
             Spacer()
             Button("取消") { model.clearSelection() }
             Button("合并转发") { model.isForwardSheetPresented = true }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .disabled(model.selectedMessageIds.isEmpty)
         }
         .padding(.horizontal, 12)
@@ -688,7 +688,7 @@ struct ImCreateGroupSheet: View {
                 Spacer()
                 Button("取消") { isPresented = false }
                 Button("创建") { create() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ConnorPrimaryButtonStyle())
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCreating)
             }
             .padding(16)

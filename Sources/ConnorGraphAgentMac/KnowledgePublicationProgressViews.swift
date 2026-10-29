@@ -223,7 +223,7 @@ struct KnowledgePublicationProgressView: View {
                 Button(store.errorMessage == nil ? "提交知识变更" : "重试提交", systemImage: "tray.and.arrow.down") {
                     Task { await store.finalizePublication() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .disabled(store.isWorking)
             case .conflict:
                 Label("需要在发布页处理冲突", systemImage: "arrow.triangle.2.circlepath")

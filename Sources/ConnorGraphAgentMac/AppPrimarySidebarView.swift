@@ -24,7 +24,7 @@ struct CraftPrimarySidebarView: View {
                 select(.agentChat)
                 sendCommand(.shortcut(.newSession))
             } label: {
-                SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil", minHeight: 32)
+                SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil", minHeight: 44)
             }
             .buttonStyle(SidebarActionButtonStyle())
             .padding(.horizontal, AppShellLayout.spaceM)
@@ -34,7 +34,7 @@ struct CraftPrimarySidebarView: View {
                 select(.agentChat)
                 sendCommand(.newNote)
             } label: {
-                SidebarActionButtonLabel(title: "新建笔记", systemImage: "note.text.badge.plus", minHeight: 32)
+                SidebarActionButtonLabel(title: "新建笔记", systemImage: "note.text.badge.plus", minHeight: 44)
             }
             .buttonStyle(SidebarActionButtonStyle())
             .padding(.horizontal, AppShellLayout.spaceM)
@@ -42,7 +42,7 @@ struct CraftPrimarySidebarView: View {
             Button {
                 openWindow(id: AppMenuPresentation.noteImportWizardWindowID)
             } label: {
-                SidebarActionButtonLabel(title: "批量导入笔记", systemImage: "square.and.arrow.down.on.square", minHeight: 32)
+                SidebarActionButtonLabel(title: "批量导入笔记", systemImage: "square.and.arrow.down.on.square", minHeight: 44)
             }
             .buttonStyle(SidebarActionButtonStyle())
             .padding(.horizontal, AppShellLayout.spaceM)

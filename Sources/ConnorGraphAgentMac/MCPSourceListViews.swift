@@ -243,7 +243,7 @@ private struct MCPSourceAddSheet: View {
             Spacer()
             Button("取消", action: onCancel)
             Button(draft.isEditing ? "保存修改" : "保存连接", action: onSave)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 .disabled(!canSave)
                 .keyboardShortcut(.defaultAction)
         }

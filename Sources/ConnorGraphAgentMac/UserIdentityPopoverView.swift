@@ -46,7 +46,7 @@ struct UserIdentityPopoverView: View {
                 Button(action: openIdentitySettings) {
                     Text("登录或注册").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ConnorPrimaryButtonStyle())
                 if !connectivity.isConnected {
                     serviceStatus("当前没有网络连接", systemImage: "wifi.slash")
                 } else if backendConnectivity.state == .unreachable {

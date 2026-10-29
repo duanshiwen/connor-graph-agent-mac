@@ -198,7 +198,7 @@ struct SettingsMailSection: View {
                         .padding(.horizontal, SettingsListLayout.spaceM)
                         .padding(.vertical, SettingsListLayout.spaceXS)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
             }
         }
     }
@@ -418,7 +418,7 @@ private struct MailSettingsEmptyStateCard: View {
                     .padding(.horizontal, SettingsListLayout.spaceM)
                     .padding(.vertical, SettingsListLayout.spaceXS)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ConnorPrimaryButtonStyle())
         }
         .padding(SettingsListLayout.spaceL)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -914,7 +914,7 @@ private struct MailRemoteImagesBlockedBanner: View {
                 .foregroundStyle(.secondary)
             Spacer(minLength: AppShellLayout.spaceS)
             Button("加载此邮件的远程图片", action: onLoadRemoteImages)
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
                 .controlSize(AppButtonLayout.controlSize)
         }
         .padding(AppShellLayout.spaceS)
@@ -1232,7 +1232,7 @@ struct AddMailAccountSheet: View {
                     Text("添加账户")
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ConnorPrimaryButtonStyle())
             .keyboardShortcut(.defaultAction)
             .disabled(saveDisabled || isSubmitting)
         }

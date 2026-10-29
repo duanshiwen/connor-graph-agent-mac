@@ -115,7 +115,7 @@ struct WorkspaceFilePreviewOverlay: View {
                     } label: {
                         Image(systemName: "doc.on.doc")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ConnorSecondaryButtonStyle())
                     .accessibilityLabel("复制这个文件的全部文字")
                     .help("复制完整文件文字，不受当前预览范围影响")
                 }
@@ -129,7 +129,7 @@ struct WorkspaceFilePreviewOverlay: View {
                             Label("分享", systemImage: "square.and.arrow.up")
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ConnorSecondaryButtonStyle())
                     .accessibilityLabel("分享这个文件")
                     .help("使用 macOS 系统分享这个文件")
                 }
@@ -141,7 +141,7 @@ struct WorkspaceFilePreviewOverlay: View {
                             Label("继续加载", systemImage: "arrow.down.doc")
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ConnorSecondaryButtonStyle())
                     .disabled(isLoading)
                     .help("再加载 2 MB 文本")
                     .accessibilityLabel("继续加载")
@@ -233,7 +233,7 @@ struct WorkspaceFilePreviewOverlay: View {
                 Button(action: onLoadMore) {
                     Label("继续加载下一段", systemImage: "arrow.down.doc")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ConnorSecondaryButtonStyle())
                 .disabled(isLoading)
                 Spacer()
             }

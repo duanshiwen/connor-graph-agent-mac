@@ -40,7 +40,7 @@ struct ShortcutRecorderSheet: View {
                 Button("取消", action: onCancel)
                 Button("保存") { onSave(capturedShortcut ?? currentShortcut) }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ConnorPrimaryButtonStyle())
             }
         }
         .padding(22)

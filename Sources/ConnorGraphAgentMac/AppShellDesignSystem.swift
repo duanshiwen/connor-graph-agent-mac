@@ -197,14 +197,50 @@ extension EnvironmentValues {
 /// regular macOS control size; icon-only actions use one stable square target.
 enum AppButtonLayout {
     static let controlSize: ControlSize = .regular
-    static let height: CGFloat = 32
-    static let iconButtonSize: CGFloat = 32
-    static let iconSize: CGFloat = 14
+    static let height: CGFloat = 40
+    static let iconButtonSize: CGFloat = 36
+    static let iconSize: CGFloat = 16
 }
 
 /// Native macOS form defaults shared by every window. Individual search and
 /// title fields can still opt into `.plain` when their container supplies the
 /// border and focus treatment.
+/// 品牌主按钮只调整标签和表面，避免浅色白字与深色黄底冲突。
+struct ConnorPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(AppTypography.bodyEmphasis)
+            .foregroundStyle(configuration.role == .destructive ? Color.white : ConnorCraftPalette.onAccent)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(minHeight: AppButtonLayout.height)
+            .background(
+                configuration.role == .destructive ? Color.red : ConnorCraftPalette.accent,
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .opacity(isEnabled ? (configuration.isPressed ? 0.82 : 1) : 0.45)
+    }
+}
+
+/// Secondary actions share primary action metrics within a button group.
+struct ConnorSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(AppTypography.bodyEmphasis)
+            .foregroundStyle(configuration.role == .destructive ? Color.red : Color.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(minHeight: AppButtonLayout.height)
+            .background(Color.secondary.opacity(configuration.isPressed ? 0.16 : 0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.secondary.opacity(0.22), lineWidth: 1))
+            .opacity(isEnabled ? 1 : 0.45)
+    }
+}
+
 struct AppFormThemeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
@@ -221,7 +257,7 @@ struct AppFormTextEditorModifier: ViewModifier {
             .scrollContentBackground(.hidden)
             .padding(8)
             .background(
-                Color(nsColor: isEnabled ? .textBackgroundColor : .controlBackgroundColor),
+                isEnabled ? ConnorCraftPalette.surface : ConnorCraftPalette.surfaceVariant,
                 in: RoundedRectangle(cornerRadius: 6, style: .continuous)
             )
             .overlay {
@@ -341,10 +377,10 @@ enum AppSessionStatusVisualStyle {
 }
 
 enum AppShellColors {
-    static let listBackground = Color(nsColor: .windowBackgroundColor)
-    static let detailBackground = Color(nsColor: .textBackgroundColor).opacity(0.18)
-    static let cardBackground = Color(nsColor: .windowBackgroundColor)
-    static let subtleCardBackground = Color(nsColor: .textBackgroundColor).opacity(0.42)
+    static let listBackground = ConnorCraftPalette.background
+    static let detailBackground = ConnorCraftPalette.background
+    static let cardBackground = ConnorCraftPalette.surface
+    static let subtleCardBackground = ConnorCraftPalette.surfaceVariant
     static let hairline = Color.secondary.opacity(AppShellLayout.hairlineOpacity)
 }
 
