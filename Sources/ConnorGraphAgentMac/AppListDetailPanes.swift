@@ -1198,7 +1198,46 @@ struct CraftSessionListPane: View {
     var body: some View {
         let items = mixedConversationItems
         VStack(spacing: 0) {
-            AppListPaneHeader(title: sessionListTitle) {
+            HStack(spacing: AppShellLayout.spaceS) {
+                Menu {
+                    Button {
+                        sessionActions.setSessionListFilter(.all)
+                    } label: {
+                        if model.sessions.filter == .all {
+                            Label("全部会话", systemImage: "checkmark")
+                        } else {
+                            Text("全部会话")
+                        }
+                    }
+                    Divider()
+                    if governanceModel.config.labels.isEmpty {
+                        Text("暂无标签")
+                    } else {
+                        ForEach(governanceModel.config.labels) { label in
+                            Button {
+                                sessionActions.setSessionListFilter(.label(label.id))
+                            } label: {
+                                Label(label.name, systemImage: model.sessions.filter == .label(label.id) ? "checkmark" : label.systemImage)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: AppShellLayout.spaceS) {
+                        Text(sessionListTitle)
+                            .font(AppListTypography.header)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(AppTypography.captionEmphasis)
+                    }
+                    .frame(minHeight: AppButtonLayout.iconButtonSize)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .help("按标签筛选会话")
+                .accessibilityLabel("会话筛选：\(sessionListTitle)")
+
+                Spacer(minLength: 0)
+
                 Menu {
                     Button("新建会话", systemImage: "square.and.pencil") {
                         sessionActions.newChatSession()
@@ -1227,6 +1266,8 @@ struct CraftSessionListPane: View {
                 .help("新建")
                 .accessibilityLabel("打开新建菜单")
             }
+            .padding(.horizontal, AppShellLayout.paneHeaderHorizontalPadding)
+            .padding(.vertical, AppShellLayout.paneHeaderVerticalPadding)
 
             ListSearchFilterBanner(query: model.sessions.searchQuery, sourceTitle: "对话历史") {
                 model.sessions.searchQuery = ""

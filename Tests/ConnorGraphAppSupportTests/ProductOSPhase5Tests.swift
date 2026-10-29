@@ -5,7 +5,7 @@ import ConnorGraphAppSupport
 
 @Suite("Product OS Phase 5 Tests")
 struct ProductOSPhase5Tests {
-    @Test func automationRepositorySeedsRulesAndMirrorsLabelsStatuses() throws {
+    @Test func automationRepositorySeedsRulesAndMirrorsLabelsOnly() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let paths = AppStoragePaths(applicationSupportDirectory: root)
@@ -17,8 +17,10 @@ struct ProductOSPhase5Tests {
         #expect(config.schemaVersion == 1)
         #expect(config.rules.contains { $0.id == "important-label-adds-review-note" })
         #expect(FileManager.default.fileExists(atPath: repository.automationConfigURL.path))
-        #expect(FileManager.default.fileExists(atPath: repository.statusesMirrorURL.path))
         #expect(FileManager.default.fileExists(atPath: repository.labelsMirrorURL.path))
+        let mirroredLabels = try JSONDecoder().decode([AgentSessionLabelDefinition].self, from: Data(contentsOf: repository.labelsMirrorURL))
+        #expect(mirroredLabels == governance.labels)
+        #expect(!FileManager.default.fileExists(atPath: paths.statusesDirectory.appendingPathComponent("statuses.json").path))
         #expect(paths.automationsDirectory.path.contains("workspace") == false)
         #expect(paths.statusesDirectory.path.contains("workspace") == false)
         #expect(paths.labelsDirectory.path.contains("workspace") == false)

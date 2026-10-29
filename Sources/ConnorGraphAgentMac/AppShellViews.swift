@@ -103,6 +103,7 @@ struct AppShellView: View {
     @State private var isIdentityPopoverPresented = false
     @State private var shellContentWidth: CGFloat = 0
     @State private var userRequestedSidebarHidden = false
+    @AppStorage("workspaceEntriesExpanded") private var isWorkspaceEntriesExpanded = true
 
     private var selectionBinding: Binding<SidebarItem?> {
         Binding(
@@ -332,27 +333,34 @@ struct AppShellView: View {
     private var workspaceNavigation: some View {
         VStack(spacing: 0) {
             if (graph.shell.selection ?? .agentChat) == .agentChat {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            isWorkspaceEntriesExpanded.toggle()
+                        }
+                    } label: {
                         HStack(spacing: 10) {
                             Image("ConnorAvatar").resizable().scaledToFit().frame(width: 34, height: 34)
                             Text("康纳同学").font(AppTypography.paneTitle)
                             Spacer()
-                            Menu {
-                                Button("全部会话") { graph.chatActions.session.setSessionListFilter(.all) }
-                                ForEach(graph.governance.config.labels) { label in
-                                    Button(label.name) { graph.chatActions.session.setSessionListFilter(.label(label.id)) }
-                                }
-                                Button("批量导入笔记") { openWindow(id: AppMenuPresentation.noteImportWizardWindowID) }
-                            } label: { Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 18)).frame(width: 44, height: 48) }
-                            .help("筛选会话与导入笔记")
+                            Image(systemName: isWorkspaceEntriesExpanded ? "chevron.up" : "chevron.down")
+                                .font(AppTypography.captionEmphasis)
+                                .foregroundStyle(.secondary)
                         }
-                        HStack {
-                            Button { sendCommand(.shortcut(.newSession)) } label: { Label("新建会话", systemImage: "square.and.pencil").frame(minWidth: 92, minHeight: 24) }
-                                .buttonStyle(ConnorPrimaryButtonStyle())
-                            Button { sendCommand(.newNote) } label: { Label("新建笔记", systemImage: "note.text").frame(minWidth: 92, minHeight: 24) }
-                                .buttonStyle(ConnorSecondaryButtonStyle())
-                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(isWorkspaceEntriesExpanded ? "收起功能按钮" : "展开功能按钮")
+                    .accessibilityLabel("功能按钮区")
+                    .accessibilityValue(isWorkspaceEntriesExpanded ? "已展开" : "已收起")
+
+                    HStack {
+                        Button { sendCommand(.shortcut(.newSession)) } label: { Label("新建会话", systemImage: "square.and.pencil").frame(minWidth: 92, minHeight: 24) }
+                            .buttonStyle(ConnorPrimaryButtonStyle())
+                        Button { sendCommand(.newNote) } label: { Label("新建笔记", systemImage: "note.text").frame(minWidth: 92, minHeight: 24) }
+                            .buttonStyle(ConnorSecondaryButtonStyle())
+                    }
+                    if isWorkspaceEntriesExpanded {
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                             workspaceEntry(.mail, "邮件", "envelope")
                             workspaceEntry(.contacts, "人际关系", "person.2")
@@ -366,8 +374,11 @@ struct AppShellView: View {
                             workspaceEntry(.miniApps, "小程序", "square.grid.2x2")
                             workspaceEntry(.llmSettings, "设置", "gearshape")
                         }
-                    }.padding(16)
-                }.frame(maxHeight: 440)
+                    }
+                }
+                .padding(16)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, AppShellLayout.spaceM)
             } else {
                 HStack {
                     Button {

@@ -136,11 +136,12 @@ struct AgentChatEmptyStateView: View {
     private var copy: some View {
         VStack(spacing: 12) {
             Text("我是康纳同学，你的私人小助理")
-                .font(AgentChatTypography.title)
+                .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(ConnorCraftPalette.foreground)
             Text("我是一个有记忆、可以和你一起成长进化的 AI Agent。我会记得我们一起经历和做过的事情，在每一次相处中更懂你，也帮你把工作和生活中的想法一步步变成行动。")
-                .font(AgentChatTypography.callout)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 16))
+                .foregroundStyle(ConnorCraftPalette.foreground.opacity(0.78))
+                .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 440)
         }
