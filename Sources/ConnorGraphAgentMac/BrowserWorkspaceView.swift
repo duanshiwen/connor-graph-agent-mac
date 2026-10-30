@@ -53,13 +53,6 @@ struct BrowserWorkspaceView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.tabLayoutMode == .horizontal {
-                tabBar
-                    .padding(.horizontal, 8)
-                    .padding(.top, 5)
-                    .padding(.bottom, 4)
-                    .background(Color(nsColor: .windowBackgroundColor))
-            }
 
             toolbar
                 .padding(.horizontal, windowWidthClass.usesStackedPanes ? 8 : 12)
@@ -71,10 +64,8 @@ struct BrowserWorkspaceView: View {
             Divider()
 
             HStack(spacing: 0) {
-                if model.tabLayoutMode == .vertical {
-                    verticalTabSidebarContainer
-                    Divider()
-                }
+                verticalTabSidebarContainer
+                Divider()
 
                 GeometryReader { geometry in
                 ZStack(alignment: .topLeading) {
@@ -363,71 +354,6 @@ struct BrowserWorkspaceView: View {
         if webView.isLoading { webView.stopLoading() }
     }
 
-    private var tabBar: some View {
-        GeometryReader { geometry in
-            let addButtonWidth: CGFloat = 30
-            let cleanupButtonWidth: CGFloat = 30
-            let interItemSpacing: CGFloat = 8
-            let availableTabWidth = max(0, geometry.size.width - addButtonWidth - cleanupButtonWidth - interItemSpacing * 2)
-            let visibleTabs = globalTabs
-            let layout = BrowserTabStripLayoutCalculator().layout(tabCount: visibleTabs.count, availableWidth: Double(availableTabWidth))
-
-            HStack(spacing: interItemSpacing) {
-                ScrollView(.horizontal, showsIndicators: layout.requiresHorizontalScroll) {
-                    HStack(spacing: 4) {
-                        ForEach(visibleTabs) { item in
-                            BrowserTabChip(
-                                title: item.displayTitle,
-                                url: item.displayURL,
-                                width: CGFloat(layout.tabWidth),
-                                isSelected: item.reference.sessionID == activeSessionID && item.reference.tabID == activeSelectedTabID,
-                                isLoading: item.tab.isLoading,
-                                faviconURL: item.tab.faviconURLString.flatMap(URL.init(string:)),
-                                isPrivate: privateTabIDs.contains(item.reference.tabID),
-                                sessionTitle: item.sessionTitle,
-                                onSelect: { selectGlobalTab(item.reference) },
-                                onClose: { closeGlobalTab(item.reference) }
-                            )
-                        }
-                    }
-                }
-                .frame(width: availableTabWidth, alignment: .leading)
-
-                Button(action: { openNewTab(urlString: model.targetURLString, select: true) }) {
-                    Image(systemName: "plus")
-                        .font(BrowserFloatingTypography.toolbarIcon)
-                        .foregroundStyle(.secondary)
-                        .frame(width: addButtonWidth, height: 26)
-                }
-                .buttonStyle(.plain)
-                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
-                )
-                .help("新建标签页")
-
-                Button(action: closeOtherTabs) {
-                    Image(systemName: "xmark.circle")
-                        .font(BrowserFloatingTypography.toolbarIcon)
-                        .foregroundStyle(.secondary)
-                        .frame(width: cleanupButtonWidth, height: 26)
-                }
-                .buttonStyle(.plain)
-                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
-                )
-                .disabled(globalTabs.count <= 1)
-                .opacity(globalTabs.count <= 1 ? 0.48 : 1)
-                .help("关闭所有会话中的其他标签页")
-                .accessibilityLabel("关闭所有会话中的其他标签页")
-            }
-        }
-        .frame(height: 30)
-    }
-
     private var isVerticalTabSidebarExpanded: Bool {
         model.isVerticalTabSidebarPinned || isVerticalTabSidebarHovered
     }
@@ -577,7 +503,7 @@ struct BrowserWorkspaceView: View {
                 .padding(.bottom, 8)
             }
         }
-        .frame(width: isExpanded ? 248 : 44)
+        .frame(width: isExpanded ? (windowWidthClass.usesStackedPanes ? 210 : 248) : 44)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .trailing) {
@@ -618,17 +544,17 @@ struct BrowserWorkspaceView: View {
         HStack(spacing: windowWidthClass.usesStackedPanes ? 4 : 8) {
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.16)) {
-                    model.toggleTabLayoutMode()
+                    model.toggleVerticalTabSidebarPinned()
                 }
             }) {
                 BrowserToolbarIconButtonLabel(
                     systemImage: "sidebar.left",
-                    isActive: model.tabLayoutMode == .vertical
+                    isActive: model.isVerticalTabSidebarPinned
                 )
             }
             .buttonStyle(.plain)
-            .help(model.tabLayoutMode == .vertical ? "切换为横排标签页" : "切换为竖排标签页")
-            .accessibilityLabel(model.tabLayoutMode == .vertical ? "使用横排标签页" : "使用竖排标签页")
+            .help(model.isVerticalTabSidebarPinned ? "收起标签页列表" : "展开标签页列表")
+            .accessibilityLabel(model.isVerticalTabSidebarPinned ? "收起标签页列表" : "展开标签页列表")
 
             Button(action: { activeWebView?.goBack() }) {
                 BrowserToolbarIconButtonLabel(systemImage: "chevron.left")

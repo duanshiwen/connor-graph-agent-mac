@@ -46,7 +46,6 @@ struct BrowserGlobalTabItem: Identifiable, Equatable, Sendable {
 }
 
 enum BrowserTabLayoutMode: String, Sendable, Equatable {
-    case horizontal
     case vertical
 }
 
@@ -111,8 +110,8 @@ final class BrowserFeatureModel {
     var targetURLString = BrowserBuiltInPage.blankURLString
     private(set) var workspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
     private(set) var globalTabOrder: [BrowserGlobalTabReference] = []
-    private(set) var tabLayoutMode: BrowserTabLayoutMode = .horizontal
-    private(set) var isVerticalTabSidebarPinned = false
+    private(set) var tabLayoutMode: BrowserTabLayoutMode = .vertical
+    private(set) var isVerticalTabSidebarPinned = true
     let liveWebViewStore = BrowserLiveWebViewStore()
     private(set) var assistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
     private(set) var isBookmarksPanelVisible = false
@@ -260,16 +259,11 @@ final class BrowserFeatureModel {
     private static let formAssistantDisabledHostsDefaultsKey = "browser.form-assistant.disabled-hosts.v1"
     private static let globalTabOrderDefaultsKey = "browser.global-tab-order.v1"
     private static let tabLayoutModeDefaultsKey = "browser.tab-layout-mode.v1"
-    private static let verticalTabSidebarPinnedDefaultsKey = "browser.vertical-tab-sidebar-pinned.v1"
+    private static let verticalTabSidebarPinnedDefaultsKey = "browser.vertical-tab-sidebar-pinned.v2"
 
     func setTabLayoutMode(_ mode: BrowserTabLayoutMode) {
-        guard tabLayoutMode != mode else { return }
-        tabLayoutMode = mode
-        userDefaults.set(mode.rawValue, forKey: Self.tabLayoutModeDefaultsKey)
-    }
-
-    func toggleTabLayoutMode() {
-        setTabLayoutMode(tabLayoutMode == .horizontal ? .vertical : .horizontal)
+        tabLayoutMode = .vertical
+        userDefaults.set(BrowserTabLayoutMode.vertical.rawValue, forKey: Self.tabLayoutModeDefaultsKey)
     }
 
     func setVerticalTabSidebarPinned(_ isPinned: Bool) {
@@ -283,11 +277,10 @@ final class BrowserFeatureModel {
     }
 
     private func loadTabLayoutPreferences() {
-        if let rawValue = userDefaults.string(forKey: Self.tabLayoutModeDefaultsKey),
-           let mode = BrowserTabLayoutMode(rawValue: rawValue) {
-            tabLayoutMode = mode
-        }
-        isVerticalTabSidebarPinned = userDefaults.bool(forKey: Self.verticalTabSidebarPinnedDefaultsKey)
+        // 旧横排设置迁移到纵向；新版本首次使用固定展开，之后保留用户的收起选择。
+        tabLayoutMode = .vertical
+        userDefaults.set(BrowserTabLayoutMode.vertical.rawValue, forKey: Self.tabLayoutModeDefaultsKey)
+        isVerticalTabSidebarPinned = (userDefaults.object(forKey: Self.verticalTabSidebarPinnedDefaultsKey) as? Bool) ?? true
     }
 
     private func loadSitePermissions() {

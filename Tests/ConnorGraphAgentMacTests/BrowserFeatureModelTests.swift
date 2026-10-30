@@ -171,8 +171,10 @@ struct BrowserFeatureModelTests {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
 
+        #expect(fixture.model.tabLayoutMode == .vertical)
+        #expect(fixture.model.isVerticalTabSidebarPinned)
         fixture.model.setTabLayoutMode(.vertical)
-        fixture.model.setVerticalTabSidebarPinned(true)
+        fixture.model.setVerticalTabSidebarPinned(false)
 
         let reloaded = BrowserFeatureModel(
             historyStore: nil,
@@ -181,7 +183,19 @@ struct BrowserFeatureModelTests {
             userDefaults: fixture.userDefaults
         )
         #expect(reloaded.tabLayoutMode == .vertical)
+        #expect(!reloaded.isVerticalTabSidebarPinned)
+        reloaded.shutdown()
+    }
+
+    @Test func legacyHorizontalPreferenceMigratesToExpandedVerticalTabs() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        fixture.userDefaults.set("horizontal", forKey: "browser.tab-layout-mode.v1")
+        fixture.userDefaults.set(false, forKey: "browser.vertical-tab-sidebar-pinned.v1")
+        let reloaded = BrowserFeatureModel(historyStore: nil, bookmarkStore: nil, nativeSourceSearchBackend: nil, userDefaults: fixture.userDefaults)
+        #expect(reloaded.tabLayoutMode == .vertical)
         #expect(reloaded.isVerticalTabSidebarPinned)
+        #expect(fixture.userDefaults.string(forKey: "browser.tab-layout-mode.v1") == "vertical")
         reloaded.shutdown()
     }
 
