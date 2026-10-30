@@ -586,9 +586,10 @@ struct CloudKnowledgeCreatorView: View {
         case .conflict:
             actionBar {
                 Spacer()
-                Button("重新检索并继续") { store.resume() }
+                Button("重新检索并继续") { Task { await store.restartAfterConflict() } }
                     .buttonStyle(ConnorPrimaryButtonStyle())
                     .controlSize(AppButtonLayout.controlSize)
+                    .disabled(store.isWorking)
             }
         case .completed:
             // 完成态只引导发布（见 publicationFooter），不提供“重新开始/恢复/创建新的发布”等误导操作。

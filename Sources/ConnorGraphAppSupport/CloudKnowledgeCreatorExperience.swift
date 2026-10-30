@@ -506,6 +506,42 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         persist()
     }
     public func markConflict() { snapshot.stage = .conflict; persist() }
+    /// A baseline update alone retains stale revision IDs and already-processed
+    /// conversations. Restart the staging run so every source is re-evaluated.
+    public func restartAfterConflict() async {
+        guard !isWorking, let knowledgeBaseID = snapshot.knowledgeBaseID,
+              let publicationAPI, let creatorAPI else { return }
+        generationDriverID = nil
+        generationTask?.cancel()
+        await generationTask?.value
+        generationTask = nil
+        currentConversationID = nil
+        await perform {
+            if let oldRunID = self.snapshot.runID {
+                let oldRun = try await publicationAPI.publicationRun(id: oldRunID)
+                if oldRun.status == .committed {
+                    self.snapshot.stage = .completed
+                    self.persist()
+                    return
+                }
+                if oldRun.status != .abandoned { try await publicationAPI.abandon(runID: oldRunID) }
+            }
+            let detail = try await creatorAPI.knowledgeBase(id: knowledgeBaseID)
+            self.snapshot.runID = nil
+            self.snapshot.clientRunID = UUID().uuidString
+            self.snapshot.processedConversationIDs = []
+            self.snapshot.summaries = []
+            self.snapshot.validationIssues = []
+            self.snapshot.preview = nil
+            self.snapshot.latestKnowledgeBaseDetail = detail
+            self.snapshot.stage = .confirm
+            self.clearTraceEvents()
+            self.persist()
+            let run = try await publicationAPI.createPublicationRun(knowledgeBaseID: knowledgeBaseID, request: .init(clientRunID: self.snapshot.clientRunID, expectedBaseSequence: detail.currentSequence))
+            self.attachRun(id: run.id)
+            self.runRemainingGeneration()
+        }
+    }
     public func recoverConflict(using callback: @escaping CloudKnowledgeConflictRecoveryCallback) async {
         guard let runID = snapshot.runID, let publicationAPI else { return }
         await perform {
@@ -631,5 +667,16 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         publicationHistory.sort { $0.updatedAt > $1.updatedAt }
         try? publicationHistoryRepository.save(publicationHistory)
     }
-    private func perform(_ action: @escaping () async throws -> Void) async { isWorking = true; errorMessage = nil; defer { isWorking = false }; do { try await action() } catch { errorMessage = error.localizedDescription } }
+    private func perform(_ action: @escaping () async throws -> Void) async {
+        isWorking = true; errorMessage = nil
+        defer { isWorking = false }
+        do { try await action() }
+        catch {
+            errorMessage = error.localizedDescription
+            if let cloudError = error as? CloudKnowledgeError, case .publicationConflict = cloudError {
+                snapshot.stage = .conflict
+                persist()
+            }
+        }
+    }
 }

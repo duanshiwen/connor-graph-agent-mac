@@ -295,6 +295,28 @@ struct CloudKnowledgePhase5Tests {
         #expect(store.snapshot.stage == .completed)
     }
 
+    @Test @MainActor func conflictRestartReprocessesCompletedSourcesInAFreshRun() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-conflict-restart-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = CloudKnowledgeCreatorSnapshotRepository(fileURL: root.appendingPathComponent("snapshot.json"))
+        try repository.save(.init(stage: .conflict, knowledgeBaseID: "kb", selectedConversationIDs: ["source"], runID: "stale-run", clientRunID: "stale-client", processedConversationIDs: ["source"], summaries: ["stale summary"]))
+        let api = CreatorPublicationFakeAPI()
+        let store = CloudKnowledgeCreatorStore(repository: repository, creatorAPI: api, publicationAPI: api)
+        let recorder = ConflictRestartRecorder()
+        store.installGeneration { id in
+            await recorder.record(id)
+            return .init(summary: "fresh summary")
+        }
+        await store.restartAfterConflict()
+        await store.waitForGenerationCompletion()
+        #expect(await recorder.sources == ["source"])
+        #expect(store.snapshot.clientRunID != "stale-client")
+        #expect(store.snapshot.runID == "run")
+        #expect(store.snapshot.summaries == ["fresh summary"])
+        #expect(store.snapshot.stage == .completed)
+        #expect(await api.abandonedRuns == ["stale-run"])
+    }
+
     @Test @MainActor func resetRemovesPersistedWorkflowWithoutTouchingMemoryOS() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-creator-reset-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -531,7 +553,13 @@ private actor RemoteMissingCreatorAPI: CloudKnowledgeCreatorAPI {
     func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary] { [] }
 }
 
+private actor ConflictRestartRecorder {
+    var sources: [String] = []
+    func record(_ source: String) { sources.append(source) }
+}
+
 private actor CreatorPublicationFakeAPI: CloudKnowledgeAPI, CloudKnowledgeCreatorAPI {
+    var abandonedRuns: [String] = []
     var rebasedSequence: Int?; var validationCount = 0; var previewCount = 0; var commitCount = 0; var emptyValidation = false
 
     func setEmptyValidation(_ value: Bool) { emptyValidation = value }
@@ -547,7 +575,7 @@ private actor CreatorPublicationFakeAPI: CloudKnowledgeAPI, CloudKnowledgeCreato
     }
     func rebase(runID: String, request: CloudKnowledgeRebaseRequest) async throws -> CloudKnowledgePublicationRun { rebasedSequence = request.expectedBaseSequence; return .init(id: runID, knowledgeBaseID: "kb", clientRunID: "client", expectedBaseSequence: request.expectedBaseSequence) }
     func commit(runID: String) async throws -> CloudKnowledgeCommitResult { commitCount += 1; return .init(publicationRunID: runID, knowledgeSequence: 10) }
-    func abandon(runID: String) async throws {}
+    func abandon(runID: String) async throws { abandonedRuns.append(runID) }
     func search(knowledgeBaseID: String, channel: CloudKnowledgeSearchChannel, request: CloudKnowledgeSearchRequest) async throws -> CloudKnowledgeSearchResponse { .init(searchContextID: "s", channel: channel, baseSequence: 0, stagedSequence: 0) }
     func existingStableKeys(knowledgeBaseID: String) async throws -> Set<String> { [] }
     func createKnowledgeBase(_ draft: CloudKnowledgeBaseDraft) async throws -> CloudKnowledgeBaseDetail { .init(id: "kb-1", name: draft.name, slug: draft.slug, description: draft.description, visibility: draft.visibility, currentSequence: 0, lifecycleStatus: "active", publicationStatus: "unpublished") }
