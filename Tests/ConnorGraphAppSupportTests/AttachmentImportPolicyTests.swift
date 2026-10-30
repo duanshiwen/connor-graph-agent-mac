@@ -47,7 +47,8 @@ struct AttachmentImportPolicyTests {
         let accepted: [(String, AgentAttachmentKind)] = [
             ("draft.pages", .document),
             ("budget.numbers", .spreadsheet),
-            ("deck.keynote", .presentation)
+            ("deck.keynote", .presentation),
+            ("deck.key", .presentation)
         ]
         for (filename, expectedKind) in accepted {
             let ext = URL(fileURLWithPath: filename).pathExtension

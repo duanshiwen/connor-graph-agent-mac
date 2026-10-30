@@ -196,7 +196,7 @@ public struct AppSessionAttachmentStore: Sendable {
         case "pdf": return .pdf
         case "doc", "docx", "rtf", "pages", "epub": return .document
         case "xls", "xlsx", "numbers": return .spreadsheet
-        case "ppt", "pptx", "keynote": return .presentation
+        case "ppt", "pptx", "key", "keynote": return .presentation
         case "zip", "tar", "gz", "7z": return .archive
         case "mp3", "wav", "m4a", "aac": return .audio
         case "mp4", "mov", "avi", "mkv": return .video
@@ -343,7 +343,7 @@ public struct AppSessionAttachmentStore: Sendable {
             switch fileExtension?.lowercased() {
             case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
             case "ppt": return "application/vnd.ms-powerpoint"
-            case "keynote": return "application/vnd.apple.keynote"
+            case "key", "keynote": return "application/vnd.apple.keynote"
             default: return "application/presentation"
             }
         case .audio:

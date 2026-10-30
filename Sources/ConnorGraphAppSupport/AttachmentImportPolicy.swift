@@ -147,7 +147,7 @@ public struct AttachmentImportPolicy: Sendable {
         case "pdf": return .pdf
         case "doc", "docx", "rtf", "pages": return .document
         case "xls", "xlsx", "numbers": return .spreadsheet
-        case "ppt", "pptx", "keynote": return .presentation
+        case "ppt", "pptx", "key", "keynote": return .presentation
         case "mp3", "wav", "m4a", "aac": return .audio
         case "mp4", "mov", "m4v", "mkv", "avi", "webm": return .video
         default:
@@ -161,7 +161,7 @@ public struct AttachmentImportPolicy: Sendable {
         case "svg", "avif": return .unsupportedSVG
         case "flac", "ogg": return .unsupportedAudio
         case "mpg", "mpeg", "3gp", "wmv", "flv": return .unsupportedVideo
-        case "pages", "numbers", "keynote": return .unsupportedIWork
+        case "pages", "numbers", "key", "keynote": return .unsupportedIWork
         case "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz": return .unsupportedArchive
         case "sqlite", "db": return .unsupportedDatabase
         case "dmg", "pkg", "exe", "app", "bin": return .unsupportedExecutableOrBinary

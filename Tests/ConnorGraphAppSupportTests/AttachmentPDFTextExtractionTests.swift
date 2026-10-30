@@ -6,6 +6,11 @@ import Testing
 
 @Suite("Attachment PDF Text Extraction Tests")
 struct AttachmentPDFTextExtractionTests {
+    @Test func recognizesNativeKeynoteExtension() {
+        #expect(IWorkAttachmentTextExtraction.supports(fileExtension: "key"))
+        #expect(IWorkAttachmentTextExtraction.supports(fileExtension: "keynote"))
+    }
+
     @Test func extractsSelectablePDFTextAsMarkdownWithPageHeadings() throws {
         let file = try makePDF(textByPage: ["Hello from page one", "Second page contract clause"])
 

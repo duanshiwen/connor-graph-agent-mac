@@ -91,7 +91,7 @@ public enum AttachmentPDFTextExtraction {
 }
 
 public enum IWorkAttachmentTextExtraction {
-    private static let supportedExtensions: Set<String> = ["pages", "numbers", "keynote"]
+    private static let supportedExtensions: Set<String> = ["pages", "numbers", "key", "keynote"]
     private static let previewPDFRelativePaths = [
         "QuickLook/Preview.pdf",
         "QuickLook/preview.pdf",
