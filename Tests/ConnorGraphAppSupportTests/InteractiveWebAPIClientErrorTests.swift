@@ -36,6 +36,20 @@ private actor SequencedInteractiveWebTransport: ConnorBackendHTTPTransport {
 
 @Suite("Interactive Web API Client Error Tests")
 struct InteractiveWebAPIClientErrorTests {
+    @Test func publicationInstallsPolicyBeforeFinalizingAndCheckpointsIdentity() async throws {
+        let transport = PolicyOrderingInteractiveWebTransport()
+        let client = InteractiveWebAPIClient(baseURL: URL(string: "https://example.invalid")!, transport: transport, credentials: InteractiveWebTestCredential())
+        let project = LocalInteractiveWebProject(accountID: "test", name: "page", rootURL: FileManager.default.temporaryDirectory, conversationID: "conversation")
+        let manifest = InteractiveWebManifest(files: [], collections: [])
+        _ = try await client.publish(project: project, manifest: manifest, accessMode: .private, checkpoint: { updated in
+            #expect(updated.remoteProjectID == "project")
+            #expect(updated.remoteSiteID == "site")
+            await transport.recordCheckpoint()
+        })
+        let events = await transport.events
+        #expect(events.firstIndex(of: "checkpoint")! < events.firstIndex(of: "/api/v1/sites/site/access-policy")!)
+        #expect(events.firstIndex(of: "/api/v1/sites/site/access-policy")! < events.firstIndex(of: "/api/v1/deployments/deployment/finalize")!)
+    }
     @Test func nonSuccessResponseCarriesBackendMessageAndStatus() async throws {
         let client = InteractiveWebAPIClient(
             baseURL: URL(string: "https://connor.example")!,
@@ -127,5 +141,18 @@ struct InteractiveWebAPIClientErrorTests {
             #expect(message == "文件校验失败")
             #expect(error.errorDescription == "互动网页文件上传失败：文件校验失败")
         }
+    }
+}
+
+private actor PolicyOrderingInteractiveWebTransport: ConnorBackendHTTPTransport {
+    var events: [String] = []
+    func recordCheckpoint() { events.append("checkpoint") }
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let path = request.url!.path
+        events.append(path)
+        let value = path.hasSuffix("/projects") ? #"{"id":"project","siteId":"site"}"#
+            : path.hasSuffix("/access-policy") ? #"{"mode":"private"}"#
+            : path.hasSuffix("/upload-session") ? #"{"uploadUrls":{}}"# : #"{"id":"deployment"}"#
+        return (Data(("{\"code\":0,\"data\":" + value + "}").utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }

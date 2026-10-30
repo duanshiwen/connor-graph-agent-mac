@@ -465,10 +465,10 @@ public actor InteractiveWebToolRuntime {
                 )
             }
         }
-        let published = try await api.publish(project: project, manifest: manifest)
-        if let siteID = published.remoteSiteID {
-            try await api.updateAccessPolicy(siteID: siteID, mode: accessMode, password: password)
-        }
+        let store = self.store
+        let published = try await api.publish(project: project, manifest: manifest, accessMode: accessMode, password: password, checkpoint: { updated in
+            try await store.save(project: updated)
+        })
         try await store.save(project: published)
         return try status(published)
     }

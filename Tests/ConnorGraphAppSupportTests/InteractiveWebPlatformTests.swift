@@ -4,6 +4,25 @@ import ConnorGraphAgent
 @testable import ConnorGraphAppSupport
 
 struct InteractiveWebPlatformTests {
+    @Test func detachingDeletedRemoteKeepsDraftFilesAndUnrelatedProjects() async throws {
+        let fixture = try makeRuntimeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let store = InteractiveWebLocalStore(storagePaths: fixture.paths)
+        let file = fixture.root.appendingPathComponent("index.html")
+        try Data("draft-content".utf8).write(to: file)
+        let local = LocalInteractiveWebProject(id: "local", accountID: "account", name: "draft", rootURL: fixture.root, conversationID: "conversation", remoteProjectID: "remote", remoteSiteID: "site", latestDeploymentID: "deployment", publishedURL: URL(string: "https://example.invalid/s/site"))
+        try await store.save(project: local)
+        try await store.save(project: .init(id: "other", accountID: "account", name: "other", rootURL: fixture.root, conversationID: "other", remoteProjectID: "other-remote"))
+        try await store.detachDeletedRemoteProject("remote")
+        let saved = try await store.project(id: "local")
+        let restored = try #require(saved)
+        #expect(restored.remoteProjectID == nil)
+        #expect(restored.publishedURL == nil)
+        #expect(try String(contentsOf: file, encoding: .utf8) == "draft-content")
+        let other = try await store.project(id: "other")
+        #expect(other?.remoteProjectID == "other-remote")
+    }
+
     @Test func validatesChoiceBatch() throws {
         let request = InteractiveWebChoiceRequest(choiceRequestID: "cr", accountID: "account", conversationID: "conversation", contextRevision: 1, selectors: [
             .init(id: "access", prompt: "访问方式", mode: .single, options: [.init(id: "public", label: "公开")])

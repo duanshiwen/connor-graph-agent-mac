@@ -55,13 +55,22 @@ struct CraftInteractiveWebListPane: View {
                     )
                     .padding(.top, 80)
                 } else {
-                    List(model.projects, id: \.id) { project in
+                    List {
+                      ForEach(model.projects, id: \.id) { project in
                         InteractiveWebListRow(
                             project: project,
                             isSelected: project.id == model.selectedProjectID,
                             onSelect: { model.select(project) }
                         )
                         .nativeListRowStyle()
+                      }
+                      if model.hasMoreProjects {
+                          Button(model.isLoadingMore ? "正在加载…" : "加载更多项目") {
+                              Task { await model.loadMoreProjects() }
+                          }
+                          .buttonStyle(ConnorSecondaryButtonStyle())
+                          .disabled(model.isLoadingMore)
+                      }
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)

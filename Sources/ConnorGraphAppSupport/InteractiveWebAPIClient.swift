@@ -13,7 +13,7 @@ public struct InteractiveWebAPIClient: Sendable {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601; self.decoder = decoder
     }
 
-    public func publish(project: LocalInteractiveWebProject, manifest: InteractiveWebManifest) async throws -> LocalInteractiveWebProject {
+    public func publish(project: LocalInteractiveWebProject, manifest: InteractiveWebManifest, accessMode: InteractiveWebAccessMode? = nil, password: String? = nil, checkpoint: (@Sendable (LocalInteractiveWebProject) async throws -> Void)? = nil) async throws -> LocalInteractiveWebProject {
         let remoteProjectID: String
         var remoteSiteID = project.remoteSiteID
         if let existingProjectID = project.remoteProjectID {
@@ -22,6 +22,18 @@ public struct InteractiveWebAPIClient: Sendable {
             let remoteProject = try await createProject(name: project.name)
             remoteProjectID = remoteProject.id
             remoteSiteID = remoteProject.siteId
+        }
+        if accessMode != nil, remoteSiteID == nil {
+            remoteSiteID = try await self.project(id: remoteProjectID).siteId
+        }
+        var result = project
+        result.remoteProjectID = remoteProjectID
+        result.remoteSiteID = remoteSiteID
+        try await checkpoint?(result)
+        // New backend projects default to public. Install the user's approved
+        // access policy before finalizing any content, including on retries.
+        if let accessMode, let siteID = remoteSiteID {
+            try await updateAccessPolicy(siteID: siteID, mode: accessMode, password: password)
         }
         let deployment: Deployment = try await send("api/v1/projects/\(remoteProjectID)/deployments", method: "POST", body: Empty())
         let session: UploadSession = try await send("api/v1/deployments/\(deployment.id)/upload-session", method: "POST", body: UploadPaths(paths: manifest.files.map(\.path)))
@@ -39,9 +51,6 @@ public struct InteractiveWebAPIClient: Sendable {
             }
         }
         let _: Deployment = try await send("api/v1/deployments/\(deployment.id)/finalize", method: "POST", body: manifest)
-        var result = project
-        result.remoteProjectID = remoteProjectID
-        result.remoteSiteID = remoteSiteID
         result.latestDeploymentID = deployment.id
         if let siteID = result.remoteSiteID { result.publishedURL = baseURL.appendingPathComponent("s/\(siteID)") }
         return result

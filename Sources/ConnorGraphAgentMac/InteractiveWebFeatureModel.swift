@@ -25,9 +25,15 @@ final class InteractiveWebFeatureModel {
     var isPresentingDeleteConfirm = false
     var noticeMessage: String?
     var errorMessage: String?
+    var hasMoreProjects = false
+    var isLoadingMore = false
+    private var projectPage = 1
+    private var listGeneration = 0
+    private var detailGeneration = 0
 
     /// 组合根注入：在新建会话里用聊天浏览器打开互动网页（title 已含「审核互动网页：」前缀）。
     @ObservationIgnored var onOpenInNewSession: ((URL, String) -> Void)?
+    @ObservationIgnored var onProjectDeleted: ((String) async throws -> Void)?
 
     private let client: InteractiveWebAPIClient
 
@@ -43,18 +49,47 @@ final class InteractiveWebFeatureModel {
     }
 
     func reloadProjects() async {
+        listGeneration += 1
+        let generation = listGeneration
+        isLoadingMore = false
         listState = .loading
         do {
-            projects = try await client.projects(limit: 100, page: 1)
+            let values = try await client.projects(limit: 100, page: 1)
+            guard generation == listGeneration else { return }
+            projects = values
+            projectPage = 1
+            hasMoreProjects = values.count == 100
             listState = .loaded
         } catch {
+            guard generation == listGeneration else { return }
             listState = .failed(String(describing: error))
             errorMessage = "加载互动网页列表失败：\(error.localizedDescription)"
         }
     }
 
+    func loadMoreProjects() async {
+        guard hasMoreProjects, !isLoadingMore else { return }
+        let generation = listGeneration
+        let page = projectPage + 1
+        isLoadingMore = true
+        defer { if generation == listGeneration { isLoadingMore = false } }
+        do {
+            let values = try await client.projects(limit: 100, page: page)
+            guard generation == listGeneration else { return }
+            var ids = Set(projects.map(\.id))
+            projects += values.filter { ids.insert($0.id).inserted }
+            projectPage = page
+            hasMoreProjects = values.count == 100
+        } catch {
+            guard generation == listGeneration else { return }
+            errorMessage = "加载更多互动网页失败：\(error.localizedDescription)"
+        }
+    }
+
     func select(_ project: InteractiveWebRemoteProject) {
+        detailGeneration += 1
         selectedProjectID = project.id
+        detail = nil
         Task { await loadDetail() }
     }
 
@@ -63,6 +98,7 @@ final class InteractiveWebFeatureModel {
     }
 
     func clearSelection() {
+        detailGeneration += 1
         selectedProjectID = nil
         detail = nil
         detailState = .loaded
@@ -88,11 +124,16 @@ final class InteractiveWebFeatureModel {
 
     private func loadDetail() async {
         guard let id = selectedProjectID else { return }
+        detailGeneration += 1
+        let generation = detailGeneration
         detailState = .loading
         do {
-            detail = try await client.project(id: id)
+            let value = try await client.project(id: id)
+            guard id == selectedProjectID, generation == detailGeneration else { return }
+            detail = value
             detailState = .loaded
         } catch {
+            guard id == selectedProjectID, generation == detailGeneration else { return }
             detailState = .failed(String(describing: error))
             errorMessage = "加载互动网页详情失败：\(error.localizedDescription)"
         }
@@ -133,11 +174,11 @@ final class InteractiveWebFeatureModel {
         defer { isMutating = false }
         do {
             try await client.deleteProject(projectID: detail.id)
+            do { try await onProjectDeleted?(detail.id) }
+            catch { errorMessage = "线上项目已删除，但本机草稿关联更新失败：\(error.localizedDescription)" }
             isPresentingDeleteConfirm = false
             noticeMessage = "已删除「\(detail.name)」"
-            selectedProjectID = nil
-            self.detail = nil
-            detailState = .loaded
+            if selectedProjectID == detail.id { clearSelection() }
             await reloadProjects()
         } catch {
             errorMessage = "删除失败：\(error.localizedDescription)"

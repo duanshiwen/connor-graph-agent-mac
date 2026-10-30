@@ -760,7 +760,14 @@ final class AppRuntimeLifecycle {
             credentials: cloudCredentials
         )
         self.interactiveWebAPIClient = resolvedInteractiveWebAPIClient
-        self.interactiveWebFeatureModel = InteractiveWebFeatureModel(client: resolvedInteractiveWebAPIClient)
+        let resolvedInteractiveWebFeatureModel = InteractiveWebFeatureModel(client: resolvedInteractiveWebAPIClient)
+        if let storagePaths {
+            let draftStore = InteractiveWebLocalStore(storagePaths: storagePaths)
+            resolvedInteractiveWebFeatureModel.onProjectDeleted = { remoteID in
+                try await draftStore.detachDeletedRemoteProject(remoteID)
+            }
+        }
+        self.interactiveWebFeatureModel = resolvedInteractiveWebFeatureModel
         let resolvedBaseCloudAPIClient = BaseCloudAPIClient(
             baseURL: backendBaseURL,
             transport: backendTransport,
