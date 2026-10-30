@@ -6,6 +6,26 @@ import ConnorGraphStore
 
 @Suite("Account sync recovery", .serialized)
 struct AccountSyncRecoveryTests {
+    @Test @MainActor func deletedKnowledgeRecordsDoNotDecodeTombstonesAsLiveMemory() async throws {
+        let collections = ["memory_l2", "memory_l2_nodes", "memory_l3", "memory_l4_entities", "memory_l4_relations"]
+        let cipher = try AccountSyncPayloadCipher(keyData: Data(repeating: 7, count: 32))
+        let changes = try collections.enumerated().map { index, collection in
+            var deletion = try ConnorSyncChange(collection: collection, recordId: "deleted-\(index)",
+                payload: cipher.encrypt(.object(["updatedAt": .number(2_000)]), collection: collection, recordID: "deleted-\(index)"), deleted: true)
+            deletion.version = 2; deletion.sourceDeviceId = "peer"; deletion.cursor = 77
+            return deletion
+        }
+        let fixture = try await Fixture(remote: changes)
+        defer { fixture.cleanUp() }
+        let memory = try SQLiteMemoryOSStore(path: fixture.root.appendingPathComponent("memory.sqlite").path)
+        try memory.migrate()
+        try memory.execute("""
+        INSERT INTO memory_l3_beliefs(id, statement, created_at, updated_at)
+        VALUES ('deleted-2', 'must disappear', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+        """)
+        #expect(try await fixture.coordinator(memory: memory).reconcile().failureMessage == nil)
+        #expect(try memory.query(sql: "SELECT COUNT(*) FROM memory_l3_beliefs WHERE id='deleted-2'") == [["0"]])
+    }
     @Test @MainActor func receivedDialogueIsVisibleEvenWhenLocalUploadFails() async throws {
         let fixture = try await Fixture(remote: [change(session("remote", messageID: "remote-message", at: 2))], failPush: true)
         defer { fixture.cleanUp() }
@@ -160,8 +180,8 @@ struct AccountSyncRecoveryTests {
         identity = AppUserIdentityStore(baseURL: URL(string: "http://127.0.0.1:1/")!, credentials: credentials, transport: transport, networkIsAvailable: { false }, syncDefaults: defaults)
         await identity.restoreSession()
     }
-    func coordinator(onReceived: (@Sendable (AppAccountDataSyncResult) async -> Void)? = nil) -> AppAccountDataSyncCoordinator {
-        AppAccountDataSyncCoordinator(sessions: sessions, settings: AppRuntimeSettingsRepository(configDirectory: root.appendingPathComponent("config")), memory: nil, identity: identity, defaults: UserDefaults(suiteName: suite)!, onReceived: onReceived)
+    func coordinator(memory: SQLiteMemoryOSStore? = nil, onReceived: (@Sendable (AppAccountDataSyncResult) async -> Void)? = nil) -> AppAccountDataSyncCoordinator {
+        AppAccountDataSyncCoordinator(sessions: sessions, settings: AppRuntimeSettingsRepository(configDirectory: root.appendingPathComponent("config")), memory: memory, identity: identity, defaults: UserDefaults(suiteName: suite)!, onReceived: onReceived)
     }
     func cleanUp() {
         defaults.removePersistentDomain(forName: suite)

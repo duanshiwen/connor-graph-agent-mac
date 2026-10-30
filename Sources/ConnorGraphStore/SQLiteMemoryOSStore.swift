@@ -270,8 +270,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     }
 
     public func deleteProvenanceObject(id: String) throws {
-        try execute("DELETE FROM memory_l0_provenance_spans WHERE provenance_object_id = \(quote(id));")
         try execute("DELETE FROM memory_l0_derivations WHERE source_span_id IN (SELECT id FROM memory_l0_provenance_spans WHERE provenance_object_id = \(quote(id)))")
+        try execute("DELETE FROM memory_l0_provenance_spans WHERE provenance_object_id = \(quote(id));")
         try execute("DELETE FROM memory_l0_content_hashes WHERE provenance_object_id = \(quote(id));")
         try execute("DELETE FROM memory_l0_provenance_objects WHERE id = \(quote(id));")
         try execute("DELETE FROM memory_l0_provenance_fts WHERE object_id = \(quote(id));")
@@ -526,6 +526,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("DELETE FROM memory_l2_nodes_fts WHERE node_id = \(quote(id));")
         try enqueueSearchIndexChange(layer: "L2", recordID: id)
         MemoryOSQueryCache.shared.invalidateL2()
+        MemoryOSQueryCache.shared.invalidateProfile()
         onChange?()
     }
 
@@ -561,6 +562,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("DELETE FROM memory_l2_statements_fts WHERE statement_id = \(quote(id));")
         try enqueueSearchIndexChange(layer: "L2", recordID: id)
         MemoryOSQueryCache.shared.invalidateL2()
+        MemoryOSQueryCache.shared.invalidateProfile()
         onChange?()
     }
 

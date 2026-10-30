@@ -1005,26 +1005,31 @@ public actor AppAccountDataSyncCoordinator {
             return nil
         case ("memory_l2", _):
             guard let memory else { return nil }
+            if change.deleted { try memory.withForeignKeysDisabled { try memory.deleteStatement(id: change.recordId) }; return nil }
             let wire: SyncMemoryL2Statement = try decode(change.payload)
             try memory.withForeignKeysDisabled { try memory.upsert(statement: wire.makeStatement()) }
             return nil
         case ("memory_l2_nodes", _):
             guard let memory else { return nil }
+            if change.deleted { try memory.withForeignKeysDisabled { try memory.deleteNode(id: change.recordId) }; return nil }
             let wire: SyncMemoryL2Node = try decode(change.payload)
             try memory.withForeignKeysDisabled { try memory.upsert(node: wire.makeNode()) }
             return nil
         case ("memory_l3", _):
             guard let memory else { return nil }
+            if change.deleted { try memory.withForeignKeysDisabled { try memory.deleteBelief(id: change.recordId) }; return nil }
             let wire: SyncMemoryL3Belief = try decode(change.payload)
             try memory.withForeignKeysDisabled { try memory.upsert(belief: wire.makeBelief()) }
             return nil
         case ("memory_l4_entities", _):
             guard let memory else { return nil }
+            if change.deleted { try memory.withForeignKeysDisabled { try memory.deleteEntity(id: change.recordId) }; return nil }
             let wire: SyncMemoryL4Entity = try decode(change.payload)
             try memory.withForeignKeysDisabled { try memory.upsert(entity: wire.makeEntity()) }
             return nil
         case ("memory_l4_relations", _):
             guard let memory else { return nil }
+            if change.deleted { try memory.withForeignKeysDisabled { try memory.deleteEntityStatement(id: change.recordId) }; return nil }
             let wire: SyncMemoryL4Relation = try decode(change.payload)
             try memory.withForeignKeysDisabled { try memory.upsert(entityStatement: wire.makeEntityStatement()) }
             return nil
