@@ -21,6 +21,30 @@ private func mutationToolContext(toolCallID: String = UUID().uuidString) -> Agen
 
 @Suite("Skill Manager Mutation Tools Tests")
 struct SkillManagerMutationToolsTests {
+    @Test func updatePreservesPolicyMetadataAssetsAndDoesNotDuplicateManagedFooter() throws {
+        let root = temporarySkillMutationRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        let service = SkillManagerMutationService(storagePaths: paths)
+        let path = try service.createSkill(slug: "custom-skill", name: "Custom", description: "Original", instructions: "Original workflow")
+        let file = URL(fileURLWithPath: path)
+        var raw = try String(contentsOf: file, encoding: .utf8)
+        raw = raw.replacingOccurrences(of: "riskLevel: low", with: "riskLevel: high")
+            .replacingOccurrences(of: "- readSession", with: "- writeWorkspaceFile")
+            .replacingOccurrences(of: "description: \"Original\"", with: "description: \"Original\"\ncustom-extension:\n  retained: yes")
+        try raw.write(to: file, atomically: true, encoding: .utf8)
+        let asset = file.deletingLastPathComponent().appendingPathComponent("reference.txt")
+        try Data("resource".utf8).write(to: asset)
+        _ = try service.updateSkill(slug: "custom-skill", description: "Updated")
+        _ = try service.updateSkill(slug: "custom-skill", name: "Renamed")
+        let updated = try String(contentsOf: file, encoding: .utf8)
+        #expect(updated.contains("riskLevel: high"))
+        #expect(updated.contains("- writeWorkspaceFile"))
+        #expect(updated.contains("custom-extension:\n  retained: yes"))
+        #expect(updated.components(separatedBy: "Managed by Connor Skill Manager").count == 2)
+        #expect(try String(contentsOf: asset, encoding: .utf8) == "resource")
+    }
+
     @Test func createToolCreatesScannableUserSkill() async throws {
         let root = temporarySkillMutationRoot()
         defer { try? FileManager.default.removeItem(at: root) }

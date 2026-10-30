@@ -56,8 +56,8 @@ public struct SkillManagerMutationService: Sendable {
             slug: slug
         )
         _ = try parser.parse(markdown: markdown, slug: slug)
-        try clearPendingSkillDeletion(directory: directory)
         try markdown.write(to: skillURL, atomically: true, encoding: .utf8)
+        try clearPendingSkillDeletion(directory: directory)
         return skillURL.path
     }
 
@@ -76,18 +76,11 @@ public struct SkillManagerMutationService: Sendable {
         let skillURL = skillManifestURL(in: directory)
         guard FileManager.default.fileExists(atPath: skillURL.path) else { throw SkillManagerMutationToolError.missingSkill(slug) }
         let raw = try String(contentsOf: skillURL, encoding: .utf8)
-        let parsed = try parser.parse(markdown: raw, slug: slug)
-        let markdown = renderSkillMarkdown(
-            name: nonEmpty(name, fallback: parsed.manifest.name),
-            description: nonEmpty(description, fallback: parsed.manifest.description),
-            instructions: nonEmpty(instructions, fallback: parsed.instructions),
-            tags: tags ?? parsed.manifest.tags,
-            globs: globs ?? parsed.manifest.globs,
-            slug: slug
-        )
+        _ = try parser.parse(markdown: raw, slug: slug)
+        let markdown = try updateMarkdown(raw, name: name, description: description, instructions: instructions, tags: tags, globs: globs)
         _ = try parser.parse(markdown: markdown, slug: slug)
-        try clearPendingSkillDeletion(directory: directory)
         try markdown.write(to: skillURL, atomically: true, encoding: .utf8)
+        try clearPendingSkillDeletion(directory: directory)
         return skillURL.path
     }
 
@@ -126,12 +119,46 @@ public struct SkillManagerMutationService: Sendable {
         let directory = userSkillDirectory(slug: slug)
         let expected = storagePaths.skillsDirectory.appendingPathComponent(slug, isDirectory: true).standardizedFileURL.path
         guard directory.path == expected else { throw SkillManagerMutationToolError.unsafePath(directory.path) }
+        let resolvedRoot = storagePaths.skillsDirectory.resolvingSymlinksInPath().standardizedFileURL
+        let resolvedDirectory = directory.resolvingSymlinksInPath().standardizedFileURL
+        guard resolvedDirectory.path == resolvedRoot.appendingPathComponent(slug, isDirectory: true).path,
+              skillManifestURL(in: directory).resolvingSymlinksInPath().path == resolvedDirectory.appendingPathComponent(Self.skillManifestFileName).path
+        else { throw SkillManagerMutationToolError.unsafePath(directory.path) }
         return directory
     }
 
-    private func nonEmpty(_ candidate: String?, fallback: String) -> String {
-        guard let candidate, !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return fallback }
-        return candidate
+    /// Replace only requested top-level fields; keep policy/extension metadata,
+    /// resource declarations and an untouched body byte-for-byte.
+    private func updateMarkdown(_ raw: String, name: String?, description: String?, instructions: String?, tags: [String]?, globs: [String]?) throws -> String {
+        let expression = try NSRegularExpression(pattern: #"\A((?:\x{FEFF})?---[ \t]*\r?\n)([\s\S]*?)(\r?\n---[ \t]*(?:\r?\n|\z))([\s\S]*)\z"#)
+        let text = raw as NSString
+        guard let match = expression.firstMatch(in: raw, range: NSRange(location: 0, length: text.length)) else {
+            throw SkillManagerMutationToolError.invalidMarkdown("Missing skill frontmatter.")
+        }
+        let newline = raw.contains("\r\n") ? "\r\n" : "\n"
+        var replacements: [String: String] = [:]
+        if let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { replacements["name"] = "name: \"\(escapeYAML(name))\"" }
+        if let description, !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { replacements["description"] = "description: \"\(escapeYAML(description))\"" }
+        if let tags { replacements["tags"] = "tags:" + yamlArray(tags).replacingOccurrences(of: "\n", with: newline) }
+        if let globs { replacements["globs"] = "globs:" + yamlArray(globs).replacingOccurrences(of: "\n", with: newline) }
+        let lines = text.substring(with: match.range(at: 2)).replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        var result: [String] = []
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            if let first = line.first, !first.isWhitespace, let colon = line.firstIndex(of: ":"),
+               let replacement = replacements.removeValue(forKey: String(line[..<colon])) {
+                result.append(replacement)
+                while index + 1 < lines.count && (lines[index + 1].isEmpty || lines[index + 1].first?.isWhitespace == true) { index += 1 }
+            } else { result.append(line) }
+            index += 1
+        }
+        result.append(contentsOf: replacements.keys.sorted().compactMap { replacements[$0] })
+        let body: String
+        if let instructions, !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body = newline + instructions.trimmingCharacters(in: .whitespacesAndNewlines) + newline
+        } else { body = text.substring(with: match.range(at: 4)) }
+        return text.substring(with: match.range(at: 1)) + result.joined(separator: newline) + text.substring(with: match.range(at: 3)) + body
     }
 
     private func normalizedSlug(_ raw: String) -> String {
