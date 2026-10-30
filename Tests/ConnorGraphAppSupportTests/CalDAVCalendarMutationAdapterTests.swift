@@ -59,7 +59,9 @@ struct CalDAVCalendarMutationAdapterTests {
         let result = try await adapter.mutate(request, account: Self.account, collection: Self.collection, currentEvent: nil)
         let requests = await transport.recordedRequests()
         #expect(requests.first?.body.contains("RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=10") == true)
-        #expect(result.confirmedEvent?.recurrenceSummary?.ruleDescription == "FREQ=WEEKLY;INTERVAL=2;COUNT=10")
+        let rule = try #require(result.confirmedEvent?.recurrenceSummary?.ruleDescription)
+        // RRULE property ordering is not significant after parser normalization.
+        #expect(Set(rule.split(separator: ";")) == Set(["FREQ=WEEKLY", "INTERVAL=2", "COUNT=10"]))
     }
 
     @Test func updatesRecurringSeriesAndPreservesRuleWhenUnchanged() async throws {

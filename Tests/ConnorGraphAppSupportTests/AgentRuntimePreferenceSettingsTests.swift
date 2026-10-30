@@ -349,10 +349,13 @@ struct SyncUserPreferencesTests {
 
     @Test func missingCityAndCountryDoNotOverwriteLocalValues() {
         var local = AgentRuntimePreferenceSettings(city: "杭州", country: "中国")
-        let wire = SyncUserPreferences(
-            AgentRuntimePreferenceSettings(city: "", country: ""),
+        var wire = SyncUserPreferences(
+            AgentRuntimePreferenceSettings(),
             updatedAtMillis: 1_700_000_000_000
         )
+        // Legacy payloads omit these fields; explicit empty strings clear them.
+        wire.city = nil
+        wire.country = nil
 
         local = wire.applying(to: local)
 
@@ -380,7 +383,7 @@ struct SyncUserPreferencesTests {
         #expect(wire.country == nil)
     }
 
-    @Test func emptyCityAndCountryAreOmittedFromEncodedPayload() throws {
+    @Test func emptyCityAndCountryAreEncodedToClearRemoteValues() throws {
         let wire = SyncUserPreferences(
             AgentRuntimePreferenceSettings(city: "", country: ""),
             updatedAtMillis: 1_700_000_000_000
@@ -389,7 +392,7 @@ struct SyncUserPreferencesTests {
         let encoded = try JSONEncoder().encode(wire)
         let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
 
-        #expect(object?["city"] == nil)
-        #expect(object?["country"] == nil)
+        #expect(object?["city"] as? String == "")
+        #expect(object?["country"] as? String == "")
     }
 }

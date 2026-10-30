@@ -249,10 +249,15 @@ struct ChatSessionRuntimeIntegrationTests {
         defer { fixture.cleanup() }
 
         fixture.runtime.reloadChatSessions()
+        let preparingSessionID = fixture.runtime.chatFeatureModel.sessions.selectedSessionID
         fixture.runtime.selectChatSession("missing-session")
 
         #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == "missing-session")
         try await waitForLoadingToFinish(fixture.runtime)
+        // A previous session finishing preparation must not clear this failure.
+        if let preparingSessionID {
+            await fixture.runtime.waitForNewSessionPreparation(sessionID: preparingSessionID)
+        }
 
         #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == nil)
         #expect(fixture.runtime.errorMessage == "无法加载所选会话。")

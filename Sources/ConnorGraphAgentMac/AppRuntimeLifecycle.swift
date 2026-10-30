@@ -2607,9 +2607,9 @@ final class AppRuntimeLifecycle {
                     self.chatFeatureModel.sessions.selectedArtifactDirectories = artifactDirectories
                     self.chatRunCoordinator.prepareNewSession(session, manager: manager)
                     self.restoreChatInputDraft(for: session.id)
+                    self.errorMessage = nil
                 }
                 self.chatSessionCoordinator.completeNewSessionPreparation(sessionID: session.id)
-                self.errorMessage = nil
             case .failure(let message):
                 self.chatSessionCoordinator.discardPreparingNewSession(sessionID: session.id)
                 self.chatWorkspaceCoordinator.removeSession(session.id)

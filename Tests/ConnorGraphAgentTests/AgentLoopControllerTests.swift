@@ -2802,8 +2802,8 @@ func agentLoopInvalidatesFinalProfileOnlyAfterSuccessfulProfileUpdate() async th
     #expect(environment.contains("## Environment Tool Rules"))
     #expect(!environment.contains("## Workspace Tool Rules"))
 
-    let sessions = projector.project(instruction, availableToolNames: ["session_get_status"])
-    #expect(sessions.contains("## Session Status Tool Rules"))
+    let sessions = projector.project(instruction, availableToolNames: ["session_list", "session_batch_delete"])
+    #expect(sessions.contains("## Session Tool Rules"))
     #expect(!sessions.contains("## Environment Tool Rules"))
 }
 

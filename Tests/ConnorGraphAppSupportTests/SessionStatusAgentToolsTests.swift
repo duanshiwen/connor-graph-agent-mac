@@ -88,7 +88,7 @@ import ConnorGraphStore
         return (id, outcome)
     })
     #expect(object["deletedItems"] as? Int == 1)
-    #expect(object["failedItems"] as? Int == 4)
+    #expect(object["failedItems"] as? Int == 3)
     #expect(outcomes["del-a"] == "deleted")
     #expect(outcomes["del-current"] == "failed")
     #expect(outcomes["del-missing"] == "not_found")
@@ -167,8 +167,8 @@ import ConnorGraphStore
     )
 
     let object = try resultJSONObject(result)
-    #expect(object["requestedItems"] as? Int == 70)
-    #expect(object["deletedItems"] as? Int == 70)
+    #expect(object["requestedItems"] as? Int == ids.count)
+    #expect(object["deletedItems"] as? Int == ids.count)
     #expect(object["failedItems"] as? Int == 0)
 }
 

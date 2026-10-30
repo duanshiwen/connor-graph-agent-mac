@@ -25,16 +25,13 @@ struct AppRouteViewDependencyTests {
         #expect(!source.contains(".id(graph.shell.selection)"))
     }
 
-    @Test func listColumnUsesOneStableWidthAcrossRoutes() throws {
-        let shellSource = try String(contentsOf: projectSourceURL(named: "AppShellViews.swift"), encoding: .utf8)
-        let designSource = try String(contentsOf: projectSourceURL(named: "AppShellDesignSystem.swift"), encoding: .utf8)
+    @Test func workspaceNavigationAdaptsToNarrowWindows() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "AppShellViews.swift"), encoding: .utf8)
 
-        #expect(shellSource.contains("width: AppShellLayout.listColumnWidth"))
-        #expect(shellSource.contains("width: AppShellLayout.sidebarColumnWidth"))
-        #expect(!shellSource.contains("listColumnMinWidth"))
-        #expect(!shellSource.contains("listColumnMaxWidth"))
-        #expect(designSource.contains("static let sidebarColumnWidth: CGFloat = 220"))
-        #expect(designSource.contains("static let listColumnWidth: CGFloat = 280"))
+        #expect(source.contains("shellContentWidth < 720"))
+        #expect(source.contains("stackedContent"))
+        #expect(source.contains("workspaceNavigation"))
+        #expect(source.contains(".frame(width: 320)"))
     }
 
     @Test func listAndDetailSwitchesCoverEverySidebarRoute() throws {
@@ -82,7 +79,7 @@ struct AppRouteViewDependencyTests {
         let end = try #require(tail.range(of: "private var rssUnreadCount"))
         let implementation = tail[..<end.lowerBound]
 
-        #expect(implementation.contains("totalMailboxMessageCount"))
+        #expect(implementation.contains("graph.mail.totalMailCount"))
         #expect(!implementation.contains("totalMessageCount"))
         #expect(!implementation.contains("totalUnreadCount"))
     }
@@ -236,13 +233,13 @@ struct AppRouteViewDependencyTests {
         #expect(!source.contains("ForEach(store.home.sections)"))
     }
 
-    @Test func newSessionRuntimeKeepsTheEffectiveRemoteKnowledgeScope() throws {
+    @Test func newSessionRuntimeUsesAvailableRemoteKnowledgeScope() throws {
         let source = try String(contentsOf: projectSourceURL(named: "AppRuntimeLifecycle.swift"), encoding: .utf8)
         let preparationStart = try #require(source.range(of: "private func createSessionOptimistically"))
         let preparationEnd = try #require(source.range(of: "func waitForNewSessionPreparation"))
         let preparationSource = source[preparationStart.lowerBound..<preparationEnd.lowerBound]
 
-        #expect(preparationSource.contains("let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)"))
+        #expect(preparationSource.contains("let remoteKnowledgeBaseIDs = availableRemoteKnowledgeBaseIDs()"))
         #expect(preparationSource.contains("remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs"))
     }
 
@@ -256,20 +253,15 @@ struct AppRouteViewDependencyTests {
         #expect(progressSource.contains("if summary.isVisible"))
     }
 
-    @Test func remoteKnowledgeSelectorHasNoSessionStatusControl() throws {
+    @Test func composerUsesCompactControlsWithoutLegacySessionSelectors() throws {
         let optionBar = try String(contentsOf: projectSourceURL(named: "Composer/AgentComposerOptionBar.swift"), encoding: .utf8)
         let composer = try String(contentsOf: projectSourceURL(named: "AgentChatComposerView.swift"), encoding: .utf8)
 
         #expect(!optionBar.contains("sessionStatusMenu"))
-        let remote = try #require(optionBar.range(of: "RemoteKnowledgeBaseSelectionMenu("))
-        let spacer = try #require(optionBar.range(of: "Spacer(minLength: AgentChatLayout.spaceS)"))
-        #expect(remote.lowerBound < spacer.lowerBound)
-        #expect(composer.contains("style: .prominent,\n                showsBorder: false"))
-
-        let footerStart = try #require(composer.range(of: "HStack(spacing: AgentChatLayout.spaceS) {"))
-        let optionRowStart = try #require(composer.range(of: "private var optionBadgeRow"))
-        let footer = composer[footerStart.lowerBound..<optionRowStart.lowerBound]
-        #expect(!footer.contains("RemoteKnowledgeBaseSelectionMenu("))
+        #expect(!optionBar.contains("RemoteKnowledgeBaseSelectionMenu("))
+        #expect(!composer.contains("RemoteKnowledgeBaseSelectionMenu("))
+        #expect(optionBar.contains("style: .compact"))
+        #expect(composer.contains("showsBorder: false"))
     }
 
     private func routeCaseName(_ route: SidebarItem) -> String {

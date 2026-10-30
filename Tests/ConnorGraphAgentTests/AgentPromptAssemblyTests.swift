@@ -82,8 +82,8 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("session_batch_delete"))
     #expect(assembly.instruction.text.contains("Never attempt to delete the current session"))
     #expect(assembly.instruction.text.contains("at most 50 sessionIDs"))
-    #expect(assembly.instruction.text.contains("`sessions[].sessionID` unchanged"))
-    #expect(assembly.instruction.text.contains("`session_batch_set_status.updates[].sessionID`"))
+    #expect(assembly.instruction.text.contains("copy returned sessionID values unchanged"))
+    #expect(assembly.instruction.text.contains("Sessions are organized by labels"))
     #expect(assembly.instruction.text.contains("Call `get_current_environment` only when current location, weather, or other environment context can materially affect"))
     #expect(assembly.instruction.text.contains("Do not call it for ordinary requests merely because it is available"))
     #expect(assembly.instruction.text.contains("Use `refresh: false` by default"))
@@ -206,7 +206,7 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("create the scheduled task with `tasks_create_scheduled_session_message`"))
-    #expect(prompt.contains("`tasks_create_session_status_message`"))
+    #expect(!prompt.contains("`tasks_create_session_status_message`"))
     #expect(prompt.contains("`runAt` as an RFC 3339/ISO-8601 timestamp that includes a timezone"))
     #expect(prompt.contains("2026-08-15T09:00:00+08:00"))
 }

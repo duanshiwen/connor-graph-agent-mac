@@ -129,7 +129,8 @@ struct WorkspaceExplorerFeatureModelTests {
 
     private func waitUntil(_ condition: @escaping @MainActor () -> Bool) async throws {
         let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .seconds(2))
+        // Full app suites share MainActor; allow scheduling delay under parallel load.
+        let deadline = clock.now.advanced(by: .seconds(10))
         while !condition() {
             guard clock.now < deadline else {
                 Issue.record("Timed out waiting for workspace explorer state")

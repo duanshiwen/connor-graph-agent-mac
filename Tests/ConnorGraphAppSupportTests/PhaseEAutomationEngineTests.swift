@@ -27,7 +27,7 @@ struct PhaseEAutomationEngineTests {
         let run = try engine.evaluate(context: ProductOSAutomationEventContext(
             triggerKind: .sessionLabelAdded,
             sessionID: "session-1",
-            status: .needsReview
+            labelID: "important"
         ))
 
         #expect(run.matchedRules.map(\.id) == ["needs-review-plan"])
@@ -128,7 +128,7 @@ struct PhaseEAutomationEngineTests {
         let run = try engine.evaluate(context: ProductOSAutomationEventContext(
             triggerKind: .sessionLabelAdded,
             sessionID: "session-1",
-            status: .needsReview
+            labelID: "important"
         ))
 
         let result = try engine.execute(run: run, sessionRepository: sessionRepository)

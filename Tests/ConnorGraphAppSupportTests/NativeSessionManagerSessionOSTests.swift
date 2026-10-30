@@ -377,7 +377,7 @@ private func makeSessionOSStore(_ name: String = UUID().uuidString) throws -> SQ
     _ = try repository.setLabels(sessionID: session.id, labels: [AgentSessionLabel(id: "project")])
 
     let events = try repository.loadRecentJournalEvents(sessionID: session.id, limit: 20)
-    #expect(events.map(\.kind).contains(AgentEventKind.sessionStatusChanged))
+    #expect(!events.map(\.kind).contains(AgentEventKind.sessionStatusChanged))
     #expect(events.map(\.kind).contains(AgentEventKind.sessionLabelsChanged))
     #expect(!events.map(\.kind).contains(AgentEventKind.sessionArchived))
     #expect(!events.map(\.kind).contains(AgentEventKind.sessionRestored))
