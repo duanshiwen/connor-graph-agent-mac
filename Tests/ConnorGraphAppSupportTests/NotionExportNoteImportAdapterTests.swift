@@ -25,6 +25,17 @@ struct NotionExportNoteImportAdapterTests {
         #expect(note.sourceMetadata["notion_format"] == "csv")
     }
 
+    @Test("Database imports preserve rows beyond the first twenty and quoted cell boundaries")
+    func completeDatabaseRows() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let rows = (1...25).map { "Row\($0),Value\($0)" }.joined(separator: "\n")
+        try ("Name,Details\n" + rows + "\nLast,\"line one\nline two | tail\"").write(to: root.appendingPathComponent("Database.csv"), atomically: true, encoding: .utf8)
+        let note = try #require(try await collect(NotionExportNoteImportAdapter(), root: root).first)
+        #expect(note.markdownContent.contains("Row25"))
+        #expect(note.markdownContent.contains("line one<br>line two \\| tail"))
+        #expect(note.markdownContent.contains("共 26 行"))
+    }
+
     @Test("Imports HTML resources once and reports missing, unsafe, and symlink targets")
     func htmlResourcesAreSafe() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }

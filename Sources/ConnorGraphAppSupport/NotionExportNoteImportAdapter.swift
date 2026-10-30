@@ -354,9 +354,19 @@ public struct NotionExportNoteImportAdapter: NoteImportSourceAdapter {
     private static func csvSummary(_ csv: String, title: String) -> String {
         let rows = parseCSV(csv)
         guard let headers = rows.first else { return "# \(title)\n\n数据库导出，共 0 行。" }
-        let header = "| " + headers.joined(separator: " | ") + " |"
-        let separator = "| " + headers.map { _ in "---" }.joined(separator: " | ") + " |"
-        let body = rows.dropFirst().prefix(20).map { "| " + $0.joined(separator: " | ") + " |" }.joined(separator: "\n")
+        func cell(_ value: String) -> String {
+            value.replacingOccurrences(of: "|", with: "\\|")
+                .replacingOccurrences(of: "\r\n", with: "<br>")
+                .replacingOccurrences(of: "\n", with: "<br>")
+                .replacingOccurrences(of: "\r", with: "<br>")
+        }
+        let width = rows.map(\.count).max() ?? headers.count
+        func line(_ values: [String]) -> String {
+            "| " + (0..<width).map { cell($0 < values.count ? values[$0] : "") }.joined(separator: " | ") + " |"
+        }
+        let header = line(headers)
+        let separator = "| " + (0..<width).map { _ in "---" }.joined(separator: " | ") + " |"
+        let body = rows.dropFirst().map(line).joined(separator: "\n")
         return "# \(title)\n\n数据库导出，共 \(max(rows.count - 1, 0)) 行。\n\n\(header)\n\(separator)\n\(body)"
     }
 
