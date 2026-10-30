@@ -312,13 +312,14 @@ public struct AppChatSessionRepository: Sendable {
     }
 
     @discardableResult
-    public func saveSession(_ session: AgentSession, previousMessageCount: Int = 0) throws -> AgentSession {
-        try store.upsertSession(session)
+    public func saveSession(_ session: AgentSession, previousMessageCount: Int = 0, preservingTitle: Bool = false) throws -> AgentSession {
+        try store.upsertSession(session, preservingTitle: preservingTitle)
+        let saved = preservingTitle ? (try store.session(id: session.id) ?? session) : session
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
         try prewarmMarkdownRenderCacheIfNeeded(for: session, previousMessageCount: previousMessageCount)
-        synchronizeNoteBestEffort(session)
+        synchronizeNoteBestEffort(saved)
         AppAccountSyncSignal.postLocalDataDidChange()
-        return session
+        return saved
     }
 
     @discardableResult
@@ -352,11 +353,10 @@ public struct AppChatSessionRepository: Sendable {
     }
 
     @discardableResult
-    public func renameSession(sessionID: String, title: String, now: Date = Date()) throws -> AgentSession {
-        guard var session = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
-        session.title = title
-        session.updatedAt = now
-        try store.upsertSession(session)
+    public func renameSession(sessionID: String, title: String, now: Date = Date(), expectedTitle: String? = nil) throws -> AgentSession {
+        let changed = try store.updateSessionTitle(sessionID: sessionID, title: title, expectedTitle: expectedTitle, updatedAt: now)
+        guard let session = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        guard changed else { return session }
         synchronizeNoteBestEffort(session)
         try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionStatusChanged, action: "session_title_changed", message: "Session title changed", metadata: ["title": title])
         AppAccountSyncSignal.postLocalDataDidChange()

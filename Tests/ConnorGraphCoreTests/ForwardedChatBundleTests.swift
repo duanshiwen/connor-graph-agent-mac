@@ -36,4 +36,16 @@ final class ForwardedChatBundleTests: XCTestCase {
         XCTAssertTrue(encoded.contains("[2025-08-01T09:49:06.000Z] 成员6：消息6"))
         XCTAssertTrue(encoded.contains("用户对这段记录的留言或要求：请分析主要诉求"))
     }
+    func testModelEncodingDoesNotTruncateLongTextToCardPreview() throws {
+        let fullText = String(repeating: "需要完整保留的上下文。", count: 30) + "最后的关键要求"
+        let bundle = ForwardedChatBundle(title: "完整记录", sourceTitle: "测试", items: [
+            ForwardedChatItem(id: "long", senderName: "读者", createdAt: 1, text: fullText),
+            ForwardedChatItem(id: "media", senderName: "读者", createdAt: 2, kind: "image", text: "", mediaUrl: "https://example.invalid/image.png")
+        ])
+        let encoded = try ForwardedChatBundleCodec.encodeForModel(bundle)
+        XCTAssertTrue(encoded.contains(fullText))
+        XCTAssertTrue(encoded.contains("https://example.invalid/image.png"))
+        XCTAssertEqual(ForwardedChatBundleCodec.decode(encoded), bundle)
+    }
+
 }

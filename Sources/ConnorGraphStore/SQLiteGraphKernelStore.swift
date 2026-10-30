@@ -855,13 +855,13 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
 
     // MARK: - Agent Sessions
 
-    public func upsertSession(_ session: AgentSession) throws {
+    public func upsertSession(_ session: AgentSession, preservingTitle: Bool = false) throws {
         try execute("""
         INSERT INTO agent_sessions
         (id, title, messages_json, message_count, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, content_format)
         VALUES (\(quote(session.id)), \(quote(session.title)), \(quote(json(session.messages))), \(session.messages.count), \(quote(iso(session.createdAt))), \(quote(iso(session.updatedAt))), \(quote("")), \(quote(session.governance.kind.rawValue)), \(quote(json(session.governance.labels))), \(session.governance.isArchived ? 1 : 0), \(session.governance.isFlagged ? 1 : 0), \(quote(session.governance.archivedAt.map(iso))), \(quote(session.governance.deletedAt.map(iso))), \(quote(json(session.readState))), \(quote(session.governance.contentFormat.rawValue)))
         ON CONFLICT(id) DO UPDATE SET
-            title = excluded.title,
+            title = \(preservingTitle ? "agent_sessions.title" : "excluded.title"),
             messages_json = excluded.messages_json,
             message_count = excluded.message_count,
             created_at = excluded.created_at,
@@ -1080,6 +1080,19 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         let sessions = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, '' AS status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, content_format FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
         guard let labelID else { return sessions }
         return sessions.filter { session in session.governance.labels.contains { $0.id == labelID } }
+    }
+
+    /// 标题更新不重写正文或治理元数据；可比较原标题以保留生成期间的手动改名。
+    public func updateSessionTitle(sessionID: String, title: String, expectedTitle: String? = nil, updatedAt: Date = Date()) throws -> Bool {
+        try withDatabaseLock {
+            let expected = expectedTitle.map { " AND title = \(quote($0))" } ?? ""
+            try execute("""
+            UPDATE agent_sessions
+            SET title = \(quote(title)), updated_at = \(quote(iso(updatedAt)))
+            WHERE id = \(quote(sessionID)) AND deleted_at IS NULL\(expected)
+            """)
+            return sqlite3_changes(db) == 1
+        }
     }
 
     public func updateSessionGovernance(sessionID: String, governance: AgentSessionGovernanceMetadata, updatedAt: Date = Date()) throws {

@@ -78,7 +78,9 @@ public enum ForwardedChatBundleCodec {
             let timestamp = timestampFormatter.string(
                 from: Date(timeIntervalSince1970: Double(item.createdAt) / 1_000)
             )
-            return "[\(timestamp)] \(item.senderName)：\(item.previewText)"
+            let body = [item.text.isEmpty ? item.previewText : item.text, item.mediaUrl, item.thumbnailUrl]
+                .compactMap { $0 }.joined(separator: "\n")
+            return "[\(timestamp)] \(item.senderName)：\(body)"
         })
         lines.append("--- 聊天记录结束 ---")
         if bundle.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

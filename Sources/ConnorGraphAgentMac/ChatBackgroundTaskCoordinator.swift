@@ -76,7 +76,7 @@ final class ChatBackgroundTaskCoordinator {
         model.regeneratingTitleSessionIDs.remove(sessionID)
     }
 
-    func regenerateTitle(sessionID: String) {
+    func regenerateTitle(sessionID: String, expectedTitle: String? = nil) {
         guard !hasRunningTitleTask(sessionID: sessionID), titleTasksBySessionID[sessionID] == nil else { return }
         let task = enqueue(sessionID: sessionID, title: "重新生成会话标题", detail: "根据此会话中的所有用户 Prompt 生成 20 字以内标题。", kind: "title_generation")
         update(sessionID: sessionID, taskID: task.id, status: .running)
@@ -98,7 +98,11 @@ final class ChatBackgroundTaskCoordinator {
                     try Task.checkCancellation()
                     detail = "已更新为：\(title)"
                 }
-                let updated = try await self.titleWorker.renameSession(repository: repository, sessionID: sessionID, title: title)
+                if expectedTitle != nil && !ChatSessionTitleGenerationPreferences.isEnabled() {
+                    self.update(sessionID: sessionID, taskID: task.id, status: .interrupted, detail: "已关闭自动生成标题，保留当前标题。")
+                    return
+                }
+                let updated = try await self.titleWorker.renameSession(repository: repository, sessionID: sessionID, title: title, expectedTitle: expectedTitle)
                 try Task.checkCancellation()
                 guard self.generation == currentGeneration else { return }
                 self.onSessionRenamed(updated)

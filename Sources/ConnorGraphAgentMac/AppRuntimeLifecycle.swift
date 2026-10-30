@@ -2640,8 +2640,12 @@ final class AppRuntimeLifecycle {
             chatFeatureModel.sessions.allSessions[index] = updated
         }
         if chatFeatureModel.sessions.selectedSessionID == updated.id {
-            chatRunCoordinator.installManager(makeNativeSessionManager(for: updated), fallbackSession: updated)
-            replaceSelectedChatTranscript(updated.messages)
+            if chatFeatureModel.run.submittingSessionIDs.contains(updated.id) {
+                chatRunCoordinator.applyRenamedTitle(updated)
+            } else {
+                chatRunCoordinator.installManager(makeNativeSessionManager(for: updated), fallbackSession: updated)
+                replaceSelectedChatTranscript(updated.messages)
+            }
         }
     }
 
@@ -3539,7 +3543,13 @@ final class AppRuntimeLifecycle {
         let optimisticTranscript = chatFeatureModel.run.transcript
         let baselineMessageCount = manager.session.messages.count
         let baselineUserMessageCount = manager.session.messages.filter { $0.role == .user }.count
-        let shouldAutoGenerateInitialTitle = existingUserMessageID == nil && baselineUserMessageCount == 0
+        let initialTitle = manager.session.title
+        let shouldAutoGenerateInitialTitle = ChatSessionTitleGenerationPreferences.shouldGenerateInitialTitle(
+            existingUserMessageID: existingUserMessageID,
+            baselineUserMessageCount: baselineUserMessageCount,
+            title: initialTitle,
+            enabled: ChatSessionTitleGenerationPreferences.isEnabled()
+        )
         let submittedActiveSkillSlug = usesActiveSkill ? chatFeatureModel.composer.activeSkillSlug : nil
         let submittedActiveSkillDisplayName = usesActiveSkill ? chatFeatureModel.composer.activeSkillDisplayName : nil
         let submittedActiveSkillContextSnapshot: String? = {
@@ -3611,6 +3621,10 @@ final class AppRuntimeLifecycle {
                 activeSkillSlug: resolvedSkillInstructions == nil ? nil : submittedActiveSkillSlug,
                 activeSkillDisplayName: resolvedSkillInstructions == nil ? nil : submittedActiveSkillDisplayName,
                 existingUserMessageID: existingUserMessageID,
+                onUserMessagePersisted: { [weak self] _ in
+                    guard let self, shouldAutoGenerateInitialTitle else { return }
+                    self.chatBackgroundTaskCoordinator.regenerateTitle(sessionID: submittingSessionID, expectedTitle: initialTitle)
+                },
                 onRunStarted: { [weak self] runID in
                     guard let self else { return }
                     if let reason = self.chatRunCoordinator.registerRun(sessionID: submittingSessionID, runID: runID, backend: liveBackend) {
@@ -3653,9 +3667,6 @@ final class AppRuntimeLifecycle {
             chatApprovalCoordinator.reload()
             globalSearchFeatureModel.upsertSessionIndex(response.session)
             scheduleChatSessionListRefresh(reason: "chatSubmitCompleted")
-            if shouldAutoGenerateInitialTitle {
-                regenerateChatSessionTitle(submittingSessionID)
-            }
             errorMessage = nil
             let latestAssistantMessage = response.session.messages
                 .dropFirst(baselineMessageCount)

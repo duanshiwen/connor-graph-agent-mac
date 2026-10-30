@@ -208,6 +208,13 @@ final class ChatRunCoordinator {
         managerRevision &+= 1
     }
 
+    /// 仅同步标题，不替换活跃管理器、正文或运行版本。
+    func applyRenamedTitle(_ updated: AgentSession) {
+        guard !isShutdown else { return }
+        if fallbackSession.id == updated.id { fallbackSession.title = updated.title }
+        if manager?.session.id == updated.id { manager?.updateTitle(updated.title) }
+    }
+
     func updateFallbackSession(_ session: AgentSession) { guard !isShutdown else { return }; fallbackSession = session }
     func mutateManager(_ mutation: (inout NativeSessionManager) -> Void) {
         guard !isShutdown, var manager else { return }

@@ -178,6 +178,7 @@ public struct NativeSessionManager: Sendable {
         activeSkillDisplayName: String? = nil,
         existingUserMessageID: String? = nil,
         rehydratedHistoricalAttachmentIDs: Set<String> = [],
+        onUserMessagePersisted: (@MainActor @Sendable (AgentMessage) -> Void)? = nil,
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onAssistantMessageCreated: (@MainActor @Sendable (AgentMessage) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
@@ -220,6 +221,7 @@ public struct NativeSessionManager: Sendable {
                 contextSnapshot: activeSkillContextSnapshot
             )
             try persistSession()
+            if let onUserMessagePersisted { await onUserMessagePersisted(userMessage) }
             try await persistMemoryOSAfterUserMessage(userMessage, isFirstUserMessage: isFirstUserMessage)
         }
 
@@ -605,9 +607,16 @@ public struct NativeSessionManager: Sendable {
         return snapshot
     }
 
+    public mutating func updateTitle(_ title: String) {
+        session.title = title
+    }
+
     private mutating func persistSession(previousMessageCount: Int = 0) throws {
         var sessionToPersist = session
         if let persisted = try sessionRepository.loadSession(id: session.id) {
+            // 标题生成与回复流并行，后续流式保存必须保留已落库的新标题。
+            session.title = persisted.title
+            sessionToPersist.title = persisted.title
             session.governance = persisted.governance
             session.readState = persisted.readState
             sessionToPersist.governance = persisted.governance
@@ -618,7 +627,8 @@ public struct NativeSessionManager: Sendable {
                 activeRunID: runtimeState.activeRunID
             )
         }
-        try sessionRepository.saveSession(sessionToPersist, previousMessageCount: previousMessageCount)
+        let saved = try sessionRepository.saveSession(sessionToPersist, previousMessageCount: previousMessageCount, preservingTitle: true)
+        session.title = saved.title
     }
 
     /// 把本 run 内存中的会话消息与持久化版本合并。

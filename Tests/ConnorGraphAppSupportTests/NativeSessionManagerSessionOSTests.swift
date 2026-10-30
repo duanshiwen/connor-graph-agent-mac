@@ -382,3 +382,32 @@ private func makeSessionOSStore(_ name: String = UUID().uuidString) throws -> SQ
     #expect(!events.map(\.kind).contains(AgentEventKind.sessionArchived))
     #expect(!events.map(\.kind).contains(AgentEventKind.sessionRestored))
 }
+
+@Test func nativeSessionManagerNotifiesUserPersistenceBeforeReplyAndPreservesConcurrentTitle() async throws {
+    let store = try makeSessionOSStore()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "title-on-first-message", title: "新对话")
+    try repository.saveSession(session)
+    var manager = NativeSessionManager(backend: SessionOSAnswerBackend(), sessionRepository: repository, session: session)
+    let captured = SessionOSRunIDBox()
+    let response = try await manager.submit("准备读书会", sessionSummary: nil, onUserMessagePersisted: { message in
+        captured.set(message.id)
+        do {
+            let saved = try #require(try repository.loadSession(id: session.id))
+            #expect(saved.messages.count == 1)
+            #expect(saved.messages.first?.role == .user)
+            #expect(saved.messages.first?.id == message.id)
+            _ = try repository.renameSession(sessionID: session.id, title: "读书会筹备")
+        } catch { Issue.record(error) }
+    })
+    #expect(captured.value != nil)
+    #expect(response.session.title == "读书会筹备")
+    #expect(try repository.loadSession(id: session.id)?.title == "读书会筹备")
+    #expect(response.session.messages.last?.role == .assistant)
+
+    let firstID = try #require(captured.value)
+    _ = try await manager.submit("准备读书会", sessionSummary: nil, existingUserMessageID: firstID, onUserMessagePersisted: { _ in
+        captured.set("unexpected-duplicate")
+    })
+    #expect(captured.value == firstID)
+}

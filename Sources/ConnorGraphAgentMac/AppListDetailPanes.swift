@@ -2774,18 +2774,9 @@ private struct RSSItemListRow: View {
 
 struct AgentChatNoSelectionDetailView: View {
     var body: some View {
-        VStack(alignment: .center, spacing: AppShellLayout.spaceL) {
-            Spacer(minLength: 80)
-            ContentUnavailableView(
-                "未选择会话",
-                systemImage: "bubble.left.and.bubble.right",
-                description: Text("从当前会话列表选择一个会话查看详情。")
-            )
-            .frame(maxWidth: .infinity)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppShellColors.detailBackground)
+        AgentChatEmptyStateView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(AppShellColors.detailBackground)
     }
 }
 

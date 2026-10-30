@@ -282,6 +282,9 @@ struct SettingsAppSection: View {
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var messageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
 
+    @AppStorage(ChatSessionTitleGenerationPreferences.autoGenerateInitialTitleKey)
+    private var autoGenerateInitialTitle = true
+
     private var appVersionDisplay: String {
         let info = Bundle.main.infoDictionary ?? [:]
         let shortVersion = (info["CFBundleShortVersionString"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -360,6 +363,8 @@ struct SettingsAppSection: View {
             }
             SettingsGroup(title: "会话显示") {
                 SettingsChatFontSizeRow(pointSize: $messageBodyPointSize)
+                Divider()
+                SettingsToggleRow(title: "自动生成会话标题", subtitle: "发送第一条消息后，使用默认模型生成标题；保留手动命名的标题。", isOn: $autoGenerateInitialTitle)
             }
             SettingsGroup(title: "网络") {
                 SettingsToggleRow(title: "HTTP 代理", subtitle: "通过代理服务器路由网络流量。", isOn: $model.httpProxyEnabled)

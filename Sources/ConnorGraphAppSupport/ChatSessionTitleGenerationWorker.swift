@@ -37,6 +37,19 @@ public enum ChatSessionTitleGenerationPrompt {
     }
 }
 
+public enum ChatSessionTitleGenerationPreferences {
+    public static let autoGenerateInitialTitleKey = "connor.chat.autoGenerateInitialTitle"
+
+    public static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        (defaults.object(forKey: autoGenerateInitialTitleKey) as? Bool) ?? true
+    }
+
+    public static func shouldGenerateInitialTitle(existingUserMessageID: String?, baselineUserMessageCount: Int, title: String, enabled: Bool) -> Bool {
+        enabled && existingUserMessageID == nil && baselineUserMessageCount == 0 &&
+            ["", "新对话", "新会话", "新笔记"].contains(title.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+}
+
 public actor ChatSessionTitleGenerationWorker {
     public init() {}
 
@@ -48,7 +61,7 @@ public actor ChatSessionTitleGenerationWorker {
             .filter { !$0.isEmpty }
     }
 
-    public func renameSession(repository: AppChatSessionRepository, sessionID: String, title: String) throws -> AgentSession {
-        try repository.renameSession(sessionID: sessionID, title: title)
+    public func renameSession(repository: AppChatSessionRepository, sessionID: String, title: String, expectedTitle: String? = nil) throws -> AgentSession {
+        try repository.renameSession(sessionID: sessionID, title: title, expectedTitle: expectedTitle)
     }
 }
