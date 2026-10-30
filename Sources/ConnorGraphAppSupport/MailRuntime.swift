@@ -44,6 +44,7 @@ public struct MailRuntimeSearchRequest: Sendable, Equatable {
 
 
 public struct MailRuntime: Sendable {
+    private let sendGate = MailRuntimeSendGate()
     public var repository: any MailSourceRepository
     public var cache: any MailSourceCache
     public var auditLog: any MailAuditLogProtocol
@@ -461,6 +462,18 @@ public struct MailRuntime: Sendable {
     }
 
     public func sendDraft(draftID: MailDraftID, approved: Bool, runID: String? = nil, sessionID: String? = nil) async throws -> MailSendReceipt {
+        guard await sendGate.acquire(draftID.rawValue) else { throw MailRuntimeError.invalidDraftState("sending") }
+        do {
+            let receipt = try await sendDraftOnce(draftID: draftID, approved: approved, runID: runID, sessionID: sessionID)
+            await sendGate.release(draftID.rawValue)
+            return receipt
+        } catch {
+            await sendGate.release(draftID.rawValue)
+            throw error
+        }
+    }
+
+    private func sendDraftOnce(draftID: MailDraftID, approved: Bool, runID: String?, sessionID: String?) async throws -> MailSendReceipt {
         guard let draft = try await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
         guard approved else {
             try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .sendApprovalRequested, riskClass: .send, redactedSummary: "Send approval required"))
@@ -468,6 +481,11 @@ public struct MailRuntime: Sendable {
         }
         guard draft.status != .sent, draft.status != .discarded else {
             throw MailRuntimeError.invalidDraftState(draft.status.rawValue)
+        }
+        // A prior SMTP submission without a terminal receipt must be reconciled, never blindly retried.
+        let previousAttempts = try await draftStore.sendAttempts(draftID: draftID)
+        if previousAttempts.last?.status == .sending || previousAttempts.last?.errorSummary?.hasPrefix("SMTP_RESULT_UNCERTAIN:") == true || previousAttempts.contains(where: { $0.status == .sent }) {
+            throw MailRuntimeError.invalidDraftState("发送结果待核对，请先检查已发送邮件，未重复提交")
         }
         guard !draft.to.isEmpty || !draft.cc.isEmpty || !draft.bcc.isEmpty else {
             throw MailRuntimeError.missingRecipients(draftID.rawValue)
@@ -517,6 +535,7 @@ public struct MailRuntime: Sendable {
         }
 
         try await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .sending, envelopeHash: composed.envelopeHash))
+        var acknowledgedReceipt: MailSendReceipt?
         do {
             let response = try await smtpClient.send(MailSMTPSendRequest(
                 endpoint: endpoint,
@@ -528,6 +547,7 @@ public struct MailRuntime: Sendable {
                 envelopeHash: composed.envelopeHash
             ))
             let receipt = MailSendReceipt(draftID: draftID, providerMessageID: response.providerMessageID, sentAt: response.sentAt, envelopeHash: composed.envelopeHash)
+            acknowledgedReceipt = receipt
             try await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .sent, providerMessageID: response.providerMessageID, envelopeHash: composed.envelopeHash))
             _ = try await draftStore.updateStatus(id: draftID, status: .sent, sentReceiptID: receipt.providerMessageID)
             let sentMailbox = try await saveSentMessage(draft: draft, identity: identity, attachments: attachments, receipt: receipt, messageIDHeader: composed.messageID)
@@ -536,8 +556,19 @@ public struct MailRuntime: Sendable {
             try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .messageSent, riskClass: .send, redactedSummary: "Sent authorized draft to \(draft.to.map(\.email).joined(separator: ", "))", payloadHash: receipt.envelopeHash))
             return receipt
         } catch {
-            _ = try? await draftStore.updateStatus(id: draftID, status: .failed, lastSendError: String(describing: error))
-            try? await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .failed, envelopeHash: composed.envelopeHash, errorSummary: String(describing: error)))
+            if let receipt = acknowledgedReceipt {
+                // SMTP already accepted the message. Local projection/audit failures cannot turn it into a retryable draft.
+                _ = try? await draftStore.updateStatus(id: draftID, status: .sent, sentReceiptID: receipt.providerMessageID)
+                return receipt
+            }
+            let failure: String
+            if let smtpError = error as? MailSMTPClientError, case .smtpRejected = smtpError {
+                failure = String(describing: error)
+            } else {
+                failure = "SMTP_RESULT_UNCERTAIN: 发送结果待核对，未自动重试。" + String(describing: error)
+            }
+            _ = try? await draftStore.updateStatus(id: draftID, status: .failed, lastSendError: failure)
+            try? await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .failed, envelopeHash: composed.envelopeHash, errorSummary: failure))
             throw error
         }
     }
@@ -680,6 +711,12 @@ public struct MailRuntime: Sendable {
         try await auditLog.record(MailAuditRecord(accountID: detail.summary.accountID, messageID: messageID, kind: .evidenceCandidateCreated, riskClass: .read, redactedSummary: candidate.redactedSummary, payloadHash: candidate.sourceHash))
         return candidate
     }
+}
+
+private actor MailRuntimeSendGate {
+    private var active: Set<String> = []
+    func acquire(_ id: String) -> Bool { active.insert(id).inserted }
+    func release(_ id: String) { active.remove(id) }
 }
 
 public struct NativeMailReadiness: Codable, Sendable, Equatable {

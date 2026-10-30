@@ -328,6 +328,31 @@ struct MailRuntimeSendPipelineTests {
         #expect(stored.status != .sent)
     }
 
+    @Test func acknowledgedSMTPIsNotDowngradedByAuditFailureOrSentAgain() async throws {
+        let accountID = MailAccountID(rawValue: "ack-account")
+        let identityID = MailIdentityID(rawValue: "ack-identity")
+        let binding = AppMailCredentialStore.binding(accountID: accountID, email: "connor@example.com", authMode: .appPassword)
+        let account = MailAccount(id: accountID, provider: .genericIMAPSMTP, displayName: "Ack", identities: [MailIdentity(id: identityID, displayName: "Connor", address: MailAddress(email: "connor@example.com"))], outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp), credentialBinding: binding)
+        let credentials = TestMailCredentialStore()
+        try credentials.saveSecret("test", service: binding.credentialNamespace, account: binding.accountName)
+        let drafts = InMemoryMailDraftRepository()
+        let smtp = FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "acknowledged"))
+        let runtime = MailRuntime(repository: InMemoryMailSourceRepository(accounts: [account]), cache: InMemoryMailSourceCache(), auditLog: FailSentMailAudit(), draftStore: drafts, credentialStore: AppMailCredentialStore(credentialStore: credentials), smtpClient: smtp)
+        let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "to@example.com")], subject: "Ack", body: "Body")
+        let receipt = try await runtime.sendDraft(draftID: draft.id, approved: true)
+        #expect(receipt.providerMessageID == "acknowledged")
+        #expect(try await drafts.draft(id: draft.id)?.status == .sent)
+        await #expect(throws: MailRuntimeError.self) { _ = try await runtime.sendDraft(draftID: draft.id, approved: true) }
+        #expect(await smtp.requests.count == 1)
+        #expect(!(try await drafts.sendAttempts(draftID: draft.id)).contains { $0.status == .failed })
+        let interruptedSMTP = FakeMailSMTPClient(error: MailSMTPClientError.connectionFailed("ACK lost"))
+        let interruptedRuntime = MailRuntime(repository: InMemoryMailSourceRepository(accounts: [account]), cache: InMemoryMailSourceCache(), draftStore: drafts, credentialStore: AppMailCredentialStore(credentialStore: credentials), smtpClient: interruptedSMTP)
+        let uncertain = try await interruptedRuntime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "to@example.com")], subject: "Interrupted", body: "Body")
+        await #expect(throws: Error.self) { _ = try await interruptedRuntime.sendDraft(draftID: uncertain.id, approved: true) }
+        await #expect(throws: MailRuntimeError.self) { _ = try await interruptedRuntime.sendDraft(draftID: uncertain.id, approved: true) }
+        #expect(await interruptedSMTP.requests.count == 1)
+    }
+
     @Test func sendFailureMarksDraftFailedAndRecordsAttempt() async throws {
         let accountID = MailAccountID(rawValue: "account-fail")
         let identityID = MailIdentityID(rawValue: "identity-fail")
@@ -363,4 +388,11 @@ struct MailRuntimeSendPipelineTests {
         #expect(stored.lastSendError?.contains("550 rejected") == true)
         #expect(try await draftRepository.sendAttempts(draftID: draft.id).contains { $0.status == .failed })
     }
+}
+
+private actor FailSentMailAudit: MailAuditLogProtocol {
+    func record(_ record: MailAuditRecord) async throws {
+        if record.kind == .messageSent { throw CocoaError(.fileWriteOutOfSpace) }
+    }
+    func listRecords() async throws -> [MailAuditRecord] { [] }
 }
