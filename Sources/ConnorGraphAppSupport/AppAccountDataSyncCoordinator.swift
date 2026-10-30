@@ -543,7 +543,7 @@ public actor AppAccountDataSyncCoordinator {
                     continue
                 }
             }
-            let tombstoneCollections: Set<String> = ["sessions", "notes", "skills", "memory_l0", "memory_l0_spans", "memory_l1", "governance_labels", "rss_subscriptions"]
+            let tombstoneCollections: Set<String> = ["sessions", "notes", "skills", "memory_l0", "memory_l0_spans", "memory_l1", "memory_l2", "memory_l2_nodes", "memory_l3", "memory_l4_entities", "memory_l4_relations", "governance_labels", "rss_subscriptions"]
             guard !change.deleted || tombstoneCollections.contains(change.collection) else { continue }
             do {
                 var clear = try decrypted(change, using: cipher)
