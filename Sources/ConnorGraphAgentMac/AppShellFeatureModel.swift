@@ -73,7 +73,7 @@ final class AppShellFeatureModel {
         case .home, .agentChat, .graphMemory:
             select(.agentChat)
         case .browserWorkspace:
-            break
+            select(.agentChat)
         case .search:
             select(.search)
         case .graphEntities:
