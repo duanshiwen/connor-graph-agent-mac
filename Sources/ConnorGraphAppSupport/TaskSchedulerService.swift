@@ -163,10 +163,8 @@ public struct TaskSchedulerService: Sendable {
     private func nextAnchoredRunAt(task: ConnorTaskDefinition, after date: Date) -> Date? {
         let anchor = anchoredStartDate(for: task)
         if anchor > date { return anchor }
-        var candidate = anchor
-        for _ in 0..<10_000 {
-            guard let next = addOneRecurrence(to: candidate, recurrence: recurrence(for: task)) else { return nil }
-            candidate = next
+        for offset in 1...10_000 {
+            guard let candidate = anchoredOccurrence(task: task, offset: offset) else { return nil }
             if candidate > date { return candidate }
         }
         return nil
@@ -176,24 +174,28 @@ public struct TaskSchedulerService: Sendable {
         let anchor = anchoredStartDate(for: task)
         guard anchor <= date else { return nil }
         var latest = anchor
-        var candidate = anchor
-        for _ in 0..<10_000 {
-            guard let next = addOneRecurrence(to: candidate, recurrence: recurrence(for: task)) else { return latest }
+        for offset in 1...10_000 {
+            guard let next = anchoredOccurrence(task: task, offset: offset) else { return latest }
             guard next <= date else { return latest }
             latest = next
-            candidate = next
         }
         return latest
     }
 
-    private func addOneRecurrence(to date: Date, recurrence: ConnorTaskRecurrence) -> Date? {
-        switch recurrence {
+    private func anchoredOccurrence(task: ConnorTaskDefinition, offset: Int) -> Date? {
+        var taskCalendar = calendar
+        if let identifier = task.trigger.timezoneIdentifier, let timezone = TimeZone(identifier: identifier) {
+            taskCalendar.timeZone = timezone
+        }
+        let anchor = anchoredStartDate(for: task)
+        // Always add to the original anchor: Jan 31 → Feb 28 → Mar 31, without month-end drift.
+        switch recurrence(for: task) {
         case .daily:
-            return calendar.date(byAdding: .day, value: 1, to: date)
+            return taskCalendar.date(byAdding: .day, value: offset, to: anchor)
         case .weekly:
-            return calendar.date(byAdding: .day, value: 7, to: date)
+            return taskCalendar.date(byAdding: .day, value: 7 * offset, to: anchor)
         case .monthly:
-            return calendar.date(byAdding: .month, value: 1, to: date)
+            return taskCalendar.date(byAdding: .month, value: offset, to: anchor)
         case .interval, .once:
             return nil
         }

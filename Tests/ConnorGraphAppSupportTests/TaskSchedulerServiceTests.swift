@@ -6,6 +6,23 @@ import ConnorGraphAppSupport
 @Suite("Task Scheduler Service Tests")
 struct TaskSchedulerServiceTests {
 
+    @Test func monthlyScheduleKeepsOriginalMonthEndAndTaskTimezone() throws {
+        let formatter = ISO8601DateFormatter()
+        let start = try #require(formatter.date(from: "2026-01-31T09:00:00+08:00"))
+        let february = try #require(formatter.date(from: "2026-02-28T09:00:00+08:00"))
+        let march = try #require(formatter.date(from: "2026-03-31T09:00:00+08:00"))
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        let scheduler = TaskSchedulerService(calendar: calendar)
+        let task = ConnorTaskDefinition(id: "monthly.end", name: "月末", origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: start, recurrence: .monthly, timezoneIdentifier: "Asia/Shanghai"),
+            target: .createSessionAndSendMessage(message: "月末总结"),
+            lifecycle: ConnorTaskLifecycle(status: .active), metadata: ConnorTaskMetadata())
+        #expect(scheduler.computeNextRunAt(task: task, after: start) == february)
+        #expect(scheduler.computeNextRunAt(task: task, after: february) == march)
+        #expect(scheduler.dueTasks([task], now: march).count == 1)
+    }
+
     @Test func sessionMessageTaskSortsBeforeEarlierDueRefreshTasks() throws {
         let scheduler = TaskSchedulerService()
         let now = Date(timeIntervalSince1970: 1_000)
