@@ -44,10 +44,12 @@ let package = Package(
                 .product(name: "MailCore", package: "MailCoreSPM")
             ],
             resources: [
-                .copy("Resources/Skills")
+                .copy("Resources/Skills"),
+                .copy("Resources/Calendar")
             ],
             linkerSettings: [
                 .linkedFramework("EventKit"),
+                .linkedFramework("JavaScriptCore"),
                 .linkedFramework("Contacts"),
                 .linkedFramework("CoreSpotlight"),
                 .linkedLibrary("sqlite3")

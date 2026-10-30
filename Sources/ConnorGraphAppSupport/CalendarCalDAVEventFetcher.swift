@@ -15,9 +15,9 @@ public struct CalendarCalDAVEventFetcher: Sendable {
         let response = try await client.report(url: collectionURL, depth: "1", body: body, credential: credential)
         let objects = try CalendarCalDAVCalendarDataParser.calendarDataObjects(from: Data(response.body.utf8))
         return try objects.flatMap { object in
-            try parser.events(from: object.calendarData).map { event in
+            try parser.occurrences(from: object.calendarData, windowStart: windowStart, windowEnd: windowEnd).map { event in
                 CalendarEvent(
-                    id: CalendarEventID(rawValue: "caldav-\(collection.id.rawValue)-\(event.uid)"),
+                    id: CalendarEventID(rawValue: "caldav-\(collection.id.rawValue)-\(event.uid)" + (event.recurrenceIdentifier.map { "-" + $0 } ?? "")),
                     calendarID: collection.id,
                     title: event.summary,
                     start: CalendarEventDateTime(date: event.start.date, timeZoneIdentifier: event.start.timeZoneIdentifier),
@@ -41,7 +41,9 @@ public struct CalendarCalDAVEventFetcher: Sendable {
                         remoteIdentifier: event.uid,
                         resourceURL: resolvedResourceURL(href: object.href, collectionURL: collectionURL),
                         etag: object.etag,
-                        isRecurring: event.recurrenceRule != nil,
+                        recurrenceIdentifier: event.recurrenceIdentifier,
+                        isRecurring: event.recurrenceRule != nil || event.recurrenceIdentifier != nil,
+                        organizerEmail: event.organizer?.email,
                         hasAttendees: !event.attendees.isEmpty
                     ),
                     updatedAt: event.lastModified ?? Date()
@@ -54,7 +56,7 @@ public struct CalendarCalDAVEventFetcher: Sendable {
         guard let resolved = URL(string: href, relativeTo: collectionURL)?.absoluteURL,
               resolved.scheme?.lowercased() == collectionURL.scheme?.lowercased(),
               resolved.host?.lowercased() == collectionURL.host?.lowercased(),
-              resolved.path.hasPrefix(collectionURL.path) else { return nil }
+              resolved.port == collectionURL.port, resolved.user == nil, resolved.password == nil, resolved.query == nil, resolved.fragment == nil, resolved.standardized.path.hasPrefix(collectionURL.standardized.path.hasSuffix("/") ? collectionURL.standardized.path : collectionURL.standardized.path + "/") else { return nil }
         return resolved
     }
 

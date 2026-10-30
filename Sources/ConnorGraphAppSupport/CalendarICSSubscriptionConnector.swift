@@ -52,11 +52,17 @@ public struct CalendarICSSubscriptionConnector: CalendarSourceConnector {
         let url = normalizedSubscriptionURL(rawURL)
         let calendarID = calendarID(for: url)
         let ics = try await fetchICS(url)
-        let parsedEvents = try parser.events(from: ics)
+        let syncNow = now()
+        let lower = syncNow.addingTimeInterval(-Double(request.account.configuration.syncWindowPastDays) * 86400)
+        let upper = syncNow.addingTimeInterval(Double(request.account.configuration.syncWindowFutureDays) * 86400)
+        let parsedEvents = try parser.occurrences(from: ics, windowStart: lower, windowEnd: upper)
         let filteredParsedEvents = parsedEvents.filter { event in
             overlapsSyncWindow(start: event.start.date, end: event.end?.date ?? event.start.date, configuration: request.account.configuration)
         }
-        let filteredCount = max(0, parsedEvents.count - filteredParsedEvents.count)
+        let series = try ICalendarOccurrenceEvaluator.evaluate(ics, start: .distantPast, end: .distantFuture, expanded: false)
+        let filteredCount = series.filter { event in
+            event.recurrenceRule == nil && !overlapsSyncWindow(start: event.start.date, end: event.end?.date ?? event.start.date, configuration: request.account.configuration)
+        }.count
         let collection = CalendarCollection(
             id: calendarID,
             accountID: request.account.id,
@@ -67,7 +73,7 @@ public struct CalendarICSSubscriptionConnector: CalendarSourceConnector {
         )
         let events = filteredParsedEvents.map { event in
             CalendarEvent(
-                id: CalendarEventID(rawValue: "ics-\(request.account.id.rawValue)-\(event.uid)"),
+                id: CalendarEventID(rawValue: "ics-\(request.account.id.rawValue)-\(event.uid)" + (event.recurrenceIdentifier.map { "-" + $0 } ?? "")),
                 calendarID: calendarID,
                 title: event.summary,
                 start: CalendarEventDateTime(date: event.start.date, timeZoneIdentifier: event.start.timeZoneIdentifier),
@@ -86,6 +92,7 @@ public struct CalendarICSSubscriptionConnector: CalendarSourceConnector {
                     )
                 },
                 recurrenceSummary: event.recurrenceRule.map(CalendarRecurrenceSummary.init(ruleDescription:)),
+                sourceMetadata: .init(sourceKind: .icsSubscription, remoteIdentifier: event.uid, recurrenceIdentifier: event.recurrenceIdentifier, isRecurring: event.recurrenceRule != nil || event.recurrenceIdentifier != nil, organizerEmail: event.organizer?.email, hasAttendees: !event.attendees.isEmpty),
                 updatedAt: event.lastModified ?? now()
             )
         }

@@ -81,10 +81,12 @@ final class CalendarFeatureModel {
             forName: .connorCalendarCacheDidChange,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
+            let systemMutation = notification.userInfo?[CalendarCacheChangeNotificationUserInfoKey.accountID] as? String == CalendarEventKitAdapter.systemAccountID.rawValue
             Task { @MainActor [weak self] in
                 self?.startOwnedTask { [weak self] in
                     await self?.reload()
+                    if systemMutation { _ = await self?.syncSystemCalendarNow() }
                 }
             }
         }

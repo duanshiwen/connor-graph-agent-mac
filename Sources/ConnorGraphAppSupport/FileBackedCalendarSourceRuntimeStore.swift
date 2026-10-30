@@ -187,7 +187,11 @@ public actor FileBackedCalendarSourceRuntimeStore: CalendarSourceRepository {
 
     public func applyMutationResult(_ result: CalendarMutationResult, audit: CalendarMutationAuditRecord) async throws {
         var snapshot = try load()
-        if result.receipt.mutationKind == .deleteEvent, let eventID = result.receipt.eventID { snapshot.events.removeAll { $0.id == eventID } }
+        if let series = result.confirmedSeriesEvents, let remoteID = result.seriesRemoteIdentifier {
+            snapshot.events.removeAll { $0.calendarID == audit.calendarID && $0.sourceMetadata?.remoteIdentifier == remoteID }
+            snapshot.events.append(contentsOf: series)
+        }
+        else if result.receipt.mutationKind == .deleteEvent, let eventID = result.receipt.eventID { snapshot.events.removeAll { $0.id == eventID } }
         else if let event = result.confirmedEvent {
             snapshot.events.removeAll { $0.id == event.id }
             snapshot.events.append(event)

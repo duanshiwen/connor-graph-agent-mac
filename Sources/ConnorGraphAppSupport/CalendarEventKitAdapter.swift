@@ -16,8 +16,10 @@ public struct CalendarSystemEventSnapshot: Sendable, Equatable {
     public var isRecurring: Bool
     public var hasAttendees: Bool
     public var recurrenceRule: String?
+    public var attendees: [CalendarAttendee]
+    public var organizerEmail: String?
 
-    public init(identifier: String, calendarIdentifier: String, title: String, startDate: Date, endDate: Date, isAllDay: Bool, location: String? = nil, notes: String? = nil, lastModifiedDate: Date? = nil, isRecurring: Bool = false, hasAttendees: Bool = false, recurrenceRule: String? = nil) {
+    public init(identifier: String, calendarIdentifier: String, title: String, startDate: Date, endDate: Date, isAllDay: Bool, location: String? = nil, notes: String? = nil, lastModifiedDate: Date? = nil, isRecurring: Bool = false, hasAttendees: Bool = false, recurrenceRule: String? = nil, attendees: [CalendarAttendee] = [], organizerEmail: String? = nil) {
         self.identifier = identifier
         self.calendarIdentifier = calendarIdentifier
         self.title = title
@@ -30,6 +32,8 @@ public struct CalendarSystemEventSnapshot: Sendable, Equatable {
         self.isRecurring = isRecurring
         self.hasAttendees = hasAttendees
         self.recurrenceRule = recurrenceRule
+        self.attendees = attendees
+        self.organizerEmail = organizerEmail
     }
 }
 
@@ -133,7 +137,7 @@ public struct CalendarEventKitAdapter: Sendable {
 
     public static func map(snapshot: CalendarSystemEventSnapshot) -> CalendarEvent {
         CalendarEvent(
-            id: CalendarEventID(rawValue: snapshot.identifier),
+            id: CalendarEventID(rawValue: snapshot.identifier + (snapshot.isRecurring ? "-occurrence-\(Int(snapshot.startDate.timeIntervalSince1970))" : "")),
             calendarID: CalendarID(rawValue: snapshot.calendarIdentifier),
             title: snapshot.title,
             start: CalendarEventDateTime(date: snapshot.startDate),
@@ -141,8 +145,9 @@ public struct CalendarEventKitAdapter: Sendable {
             isAllDay: snapshot.isAllDay,
             location: snapshot.location,
             notes: snapshot.notes,
+            attendees: snapshot.attendees,
             recurrenceSummary: snapshot.recurrenceRule.map(CalendarRecurrenceSummary.init(ruleDescription:)),
-            sourceMetadata: CalendarEventSourceMetadata(sourceKind: .macOSEventKit, remoteIdentifier: snapshot.identifier, etag: String(snapshot.lastModifiedDate?.timeIntervalSince1970 ?? 0), isRecurring: snapshot.isRecurring, hasAttendees: snapshot.hasAttendees),
+            sourceMetadata: CalendarEventSourceMetadata(sourceKind: .macOSEventKit, remoteIdentifier: snapshot.identifier, etag: String(snapshot.lastModifiedDate?.timeIntervalSince1970 ?? 0), recurrenceIdentifier: snapshot.isRecurring ? String(snapshot.startDate.timeIntervalSince1970) : nil, isRecurring: snapshot.isRecurring, organizerEmail: snapshot.organizerEmail, hasAttendees: snapshot.hasAttendees),
             updatedAt: snapshot.lastModifiedDate ?? Date()
         )
     }
@@ -160,34 +165,30 @@ public struct CalendarEventKitAdapter: Sendable {
             lastModifiedDate: event.lastModifiedDate,
             isRecurring: event.hasRecurrenceRules,
             hasAttendees: !(event.attendees?.isEmpty ?? true),
-            recurrenceRule: event.recurrenceRules?.first.map { rule in
-                let frequency: String
-                switch rule.frequency {
-                case .daily: frequency = "DAILY"
-                case .weekly: frequency = "WEEKLY"
-                case .monthly: frequency = "MONTHLY"
-                case .yearly: frequency = "YEARLY"
-                @unknown default: frequency = "DAILY"
+            recurrenceRule: event.recurrenceRules?.first.map(SystemEventKitMutationClient.rruleString(from:)),
+            attendees: (event.attendees ?? []).enumerated().map { index, participant in
+                let role: CalendarAttendeeRole
+                switch participant.participantRole {
+                case .required, .chair: role = .required
+                case .optional: role = .optional
+                case .nonParticipant: role = .resource
+                default: role = .unknown
                 }
-                var parts = ["FREQ=\(frequency)"]
-                if rule.interval > 1 { parts.append("INTERVAL=\(rule.interval)") }
-                if let end = rule.recurrenceEnd {
-                    if let date = end.endDate {
-                        let formatter = DateFormatter()
-                        formatter.calendar = Calendar(identifier: .gregorian)
-                        formatter.locale = Locale(identifier: "en_US_POSIX")
-                        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-                        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-                        parts.append("UNTIL=\(formatter.string(from: date))")
-                    } else if end.occurrenceCount > 0 {
-                        parts.append("COUNT=\(end.occurrenceCount)")
-                    }
+                let response: CalendarAttendeeResponseStatus
+                switch participant.participantStatus {
+                case .accepted: response = .accepted
+                case .declined: response = .declined
+                case .tentative: response = .tentative
+                case .delegated: response = .delegated
+                case .pending: response = .needsAction
+                default: response = .unknown
                 }
-                return parts.joined(separator: ";")
-            }
+                return CalendarAttendee(id: .init(rawValue: "\(event.eventIdentifier ?? "event")-attendee-\(index)"), name: participant.name,
+                    email: participant.url.absoluteString.replacingOccurrences(of: "mailto:", with: ""), role: role, responseStatus: response)
+            },
+            organizerEmail: event.organizer?.url.absoluteString.replacingOccurrences(of: "mailto:", with: "")
         )
     }
-
     private static func hexColor(_ color: CGColor?) -> String? {
         guard let color else { return nil }
         guard let converted = color.converted(to: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(), intent: .defaultIntent, options: nil),

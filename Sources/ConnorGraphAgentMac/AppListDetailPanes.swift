@@ -2852,6 +2852,12 @@ private struct CalendarEventDetailPane: View {
                     }
                 }
 
+                if let organizer = event.sourceMetadata?.organizerEmail, !organizer.isEmpty {
+                    CalendarDetailSection(title: "组织者", systemImage: "person") {
+                        Text(organizer).textSelection(.enabled)
+                    }
+                }
+
                 CalendarDetailSection(title: "来源信息", systemImage: "calendar") {
                     VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                         CalendarMetadataLine(label: "日历", value: calendarName ?? event.calendarID.rawValue)

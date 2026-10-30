@@ -92,6 +92,14 @@ public actor SystemEventKitMutationClient: EventKitMutationClient {
         }
         var parts = ["FREQ=\(frequency)"]
         if rule.interval > 1 { parts.append("INTERVAL=\(rule.interval)") }
+        let weekdays = ["", "SU", "MO", "TU", "WE", "TH", "FR", "SA"]
+        if let days = rule.daysOfTheWeek, !days.isEmpty {
+            parts.append("BYDAY=" + days.map { ($0.weekNumber == 0 ? "" : String($0.weekNumber)) + weekdays[$0.dayOfTheWeek.rawValue] }.joined(separator: ","))
+        }
+        for (key, values) in [("BYMONTHDAY", rule.daysOfTheMonth), ("BYMONTH", rule.monthsOfTheYear), ("BYWEEKNO", rule.weeksOfTheYear), ("BYYEARDAY", rule.daysOfTheYear), ("BYSETPOS", rule.setPositions)] {
+            if let values, !values.isEmpty { parts.append(key + "=" + values.map { $0.stringValue }.joined(separator: ",")) }
+        }
+        if rule.firstDayOfTheWeek > 0 && rule.firstDayOfTheWeek < weekdays.count { parts.append("WKST=" + weekdays[rule.firstDayOfTheWeek]) }
         if let end = rule.recurrenceEnd {
             if let date = end.endDate {
                 parts.append("UNTIL=\(utc(date))")
@@ -125,7 +133,9 @@ public actor SystemEventKitMutationClient: EventKitMutationClient {
             case "UNTIL":
                 if let date = utcDate(pair[1]) { end = .init(end: date) }
             default:
-                break
+                // EventKit's simple initializer cannot represent extra BY* / WKST parts.
+                // Never silently replace a complex rule with a different schedule.
+                return nil
             }
         }
         guard let frequency else { return nil }
@@ -201,7 +211,7 @@ public struct EventKitCalendarMutationAdapter: CalendarMutationAdapter, Sendable
         case .futureEvents:
             return (.futureEvents, occurrenceDate)
         case .entireSeries:
-            return (.thisEvent, nil)
+            return (.futureEvents, nil)
         }
     }
     private func version(_ event: EventKitMutationEventSnapshot) -> String { String(event.lastModifiedDate?.timeIntervalSince1970 ?? 0) }

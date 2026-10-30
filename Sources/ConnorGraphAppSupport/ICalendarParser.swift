@@ -42,6 +42,7 @@ public struct ICalendarEvent: Sendable, Equatable {
     public var status: String?
     public var organizer: Person?
     public var attendees: [Person]
+    public var recurrenceIdentifier: String? = nil
 
     public init(uid: String, summary: String, start: DateTime, end: DateTime? = nil, isAllDay: Bool = false, location: String? = nil, description: String? = nil, url: URL? = nil, recurrenceRule: String? = nil, lastModified: Date? = nil, status: String? = nil, organizer: Person? = nil, attendees: [Person] = []) {
         self.uid = uid
@@ -62,6 +63,11 @@ public struct ICalendarEvent: Sendable, Equatable {
 
 public struct ICalendarParser: Sendable {
     public init() {}
+
+    /// Windowed evaluation includes exclusions, detached exceptions and VTIMEZONE.
+    public func occurrences(from ics: String, windowStart: Date, windowEnd: Date) throws -> [ICalendarEvent] {
+        try ICalendarOccurrenceEvaluator.evaluate(ics, start: windowStart, end: windowEnd)
+    }
 
     public func events(from ics: String) throws -> [ICalendarEvent] {
         let lines = unfold(ics)

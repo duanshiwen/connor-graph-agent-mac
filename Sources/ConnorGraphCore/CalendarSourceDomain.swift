@@ -839,12 +839,16 @@ public struct CalendarMutationResult: Codable, Sendable, Equatable, Hashable {
     public var confirmedEvent: CalendarEvent?
     public var remoteVersion: CalendarMutationVersion?
     public var syncStatus: CalendarMutationSyncStatus
+    public var confirmedSeriesEvents: [CalendarEvent]?
+    public var seriesRemoteIdentifier: String?
 
-    public init(receipt: CalendarWriteReceipt, confirmedEvent: CalendarEvent? = nil, remoteVersion: CalendarMutationVersion? = nil, syncStatus: CalendarMutationSyncStatus = .confirmed) {
+    public init(receipt: CalendarWriteReceipt, confirmedEvent: CalendarEvent? = nil, remoteVersion: CalendarMutationVersion? = nil, syncStatus: CalendarMutationSyncStatus = .confirmed, confirmedSeriesEvents: [CalendarEvent]? = nil, seriesRemoteIdentifier: String? = nil) {
         self.receipt = receipt
         self.confirmedEvent = confirmedEvent
         self.remoteVersion = remoteVersion
         self.syncStatus = syncStatus
+        self.confirmedSeriesEvents = confirmedSeriesEvents
+        self.seriesRemoteIdentifier = seriesRemoteIdentifier
     }
 }
 

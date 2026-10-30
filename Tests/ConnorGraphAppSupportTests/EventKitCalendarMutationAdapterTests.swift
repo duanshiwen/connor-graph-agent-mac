@@ -61,7 +61,7 @@ struct EventKitCalendarMutationAdapterTests {
         )
         #expect(result.confirmedEvent?.title == "Retro")
         #expect(await client.lastSavedRecurrence == .set("FREQ=DAILY;COUNT=5"))
-        #expect(await client.lastSavedSpan == .thisEvent)
+        #expect(await client.lastSavedSpan == .futureEvents)
         #expect(await client.lastSavedOccurrenceDate == nil)
     }
 
@@ -129,7 +129,7 @@ struct EventKitCalendarMutationAdapterTests {
 
         let seriesClient = seed()
         _ = try await EventKitCalendarMutationAdapter(client: seriesClient).mutate(.init(operation: .delete, eventID: .init(rawValue: "e"), expectedVersion: .init(value: "30.0")), account: account, collection: collection, currentEvent: event())
-        #expect(await seriesClient.lastRemovedSpan == .thisEvent)
+        #expect(await seriesClient.lastRemovedSpan == .futureEvents)
         #expect(await seriesClient.lastRemovedOccurrenceDate == nil)
     }
 }

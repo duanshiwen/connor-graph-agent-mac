@@ -1,2 +1,6 @@
 *.sqlite filter=lfs diff=lfs merge=lfs -text
 *.sqlite.gz filter=lfs diff=lfs merge=lfs -text
+Sources/ConnorGraphAppSupport/Resources/Calendar/ical.es5.min.cjs -text
+Sources/ConnorGraphAppSupport/Resources/Calendar/LICENSE -text
+Sources/ConnorGraphAppSupport/Resources/Calendar/package.json -text
+Sources/ConnorGraphAppSupport/Resources/Calendar/lib/** -text
