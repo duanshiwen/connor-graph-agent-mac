@@ -340,14 +340,19 @@ public protocol AgentSSEHTTPClient: Sendable {
 }
 
 public struct URLSessionAgentSSEHTTPClient: AgentSSEHTTPClient, Sendable, Equatable {
-    public init() {}
+    public var proxyURLString: String?
+    public init(proxyURLString: String? = nil) { self.proxyURLString = proxyURLString }
 
     public func stream(_ request: AgentHTTPRequest) async throws -> AsyncThrowingStream<String, Error> {
         var urlRequest = request.timeoutInterval.map { URLRequest(url: request.url, timeoutInterval: $0) } ?? URLRequest(url: request.url)
         urlRequest.httpMethod = request.method
         urlRequest.httpBody = request.body
         for (key, value) in request.headers { urlRequest.setValue(value, forHTTPHeaderField: key) }
-        let (bytes, response) = try await URLSession.shared.bytes(for: urlRequest)
+        let session = try AgentHTTPProxy.session(proxyURLString: proxyURLString)
+        let ownsSession = proxyURLString != nil
+        var handedOff = false
+        defer { if ownsSession && !handedOff { session.invalidateAndCancel() } }
+        let (bytes, response) = try await session.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else { throw AnthropicCompatibleProviderError.invalidResponse }
         guard (200..<300).contains(httpResponse.statusCode) else {
             var body = Data()
@@ -357,8 +362,10 @@ public struct URLSessionAgentSSEHTTPClient: AgentSSEHTTPClient, Sendable, Equata
                 message: anthropicCompatibleErrorMessage(from: body)
             )
         }
+        handedOff = true
         return AsyncThrowingStream { continuation in
             let task = Task {
+                defer { if ownsSession { session.finishTasksAndInvalidate() } }
                 do {
                     var frame = ""
                     for try await line in bytes.lines {

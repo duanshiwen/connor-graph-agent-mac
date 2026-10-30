@@ -329,7 +329,7 @@ struct SettingsAppSection: View {
             SettingsGroup(title: "输入") {
                 SettingsToggleRow(
                     title: "会话页语音转文字",
-                    subtitle: "在会话输入栏启用按住说话；关闭后置灰快捷录音入口并停止监听 Option 语音输入。",
+                    subtitle: "启用 Option 按住说话；关闭后停止监听 Option 语音输入。",
                     isOn: Binding(
                         get: { inputModel.sessionSpeechTranscriptionEnabled },
                         set: { inputModel.setSpeechTranscriptionEnabled($0) }
@@ -367,10 +367,10 @@ struct SettingsAppSection: View {
                 SettingsToggleRow(title: "自动生成会话标题", subtitle: "发送第一条消息后，使用默认模型生成标题；保留手动命名的标题。", isOn: $autoGenerateInitialTitle)
             }
             SettingsGroup(title: "网络") {
-                SettingsToggleRow(title: "HTTP 代理", subtitle: "通过代理服务器路由网络流量。", isOn: $model.httpProxyEnabled)
+                SettingsToggleRow(title: "HTTP 代理", subtitle: "代理新的 AI 模型请求（含流式回复）；不影响浏览器、账号及其他数据源。", isOn: $model.httpProxyEnabled)
                 if model.httpProxyEnabled {
                     Divider()
-                    SettingsTextFieldRow(title: "代理地址", subtitle: "例如 http://127.0.0.1:7890", text: $model.httpProxyURLString)
+                    SettingsTextFieldRow(title: "代理地址", subtitle: "例如 http://127.0.0.1:7890；使用 HTTP 代理协议，不支持内嵌账号密码。", text: $model.httpProxyURLString)
                 }
             }
             SettingsGroup(title: "关于") {
@@ -2955,7 +2955,7 @@ struct SettingsPermissionsSection: View {
             }
 
             SettingsGroup(title: "生效范围") {
-                PermissionBoundaryRow(systemImage: "checkmark.shield", title: "权限模式会影响新会话", message: "这里选择的模式会作为之后新建会话的默认权限。已有会话可以在输入框下方临时切换。")
+                PermissionBoundaryRow(systemImage: "checkmark.shield", title: "权限模式会影响新会话", message: "这里选择的模式会作为之后新建会话的默认权限。已有会话可以在输入卡内临时切换。")
                 Divider()
                 PermissionBoundaryRow(systemImage: "network", title: "网络访问默认不单独审批", message: "在“询问”和“执行”模式下，普通网络访问默认允许；只读模式会限制外部网络访问。")
                 Divider()

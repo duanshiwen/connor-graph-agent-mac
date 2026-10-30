@@ -7,6 +7,19 @@ import ConnorGraphAppSupport
 @MainActor
 @Suite("Settings Feature Models Tests")
 struct SettingsFeatureModelsTests {
+    @Test func shortcutConflictRetainsRecorderAndBinding() {
+        let model = InputSettingsFeatureModel()
+        model.apply(.default)
+        model.beginRecordingShortcut(for: .newSession)
+        let original = model.shortcut(for: .newSession)
+        let error = model.updateShortcut(.newSession, shortcut: model.shortcut(for: .toggleBrowser))
+        #expect(error != nil)
+        #expect(model.recordingShortcutAction == .newSession)
+        #expect(model.shortcut(for: .newSession) == original)
+        #expect(model.updateShortcut(.newSession, shortcut: AgentRuntimeKeyboardShortcut(key: "k", shift: true)) == nil)
+        #expect(model.recordingShortcutAction == nil)
+    }
+
     @Test func memoryClearConfirmationRequiresExactWarningText() {
         #expect(MemoryClearConfirmationPolicy.accepts("清除全部记忆"))
         #expect(MemoryClearConfirmationPolicy.accepts("  清除全部记忆\n"))

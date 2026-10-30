@@ -160,6 +160,7 @@ struct SettingsShortcutsSection: View {
                 EmptyView()
             }
 
+            if let error = model.shortcutErrorMessage { Text(error).foregroundStyle(.red).font(SettingsListTypography.rowCaption) }
             SettingsGroup(title: "全局") {
                 ForEach(generalActions.indices, id: \.self) { index in
                     if index > 0 { Divider() }
@@ -188,13 +189,13 @@ struct SettingsShortcutsSection: View {
 
             SettingsGroup(title: "语音输入") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("按住说话 · 鼠标按住或按住 Option", systemImage: "mic")
+                    Label("按住说话 · 按住 Option", systemImage: "mic")
                         .font(SettingsListTypography.rowTitleSelected)
-                    Text("在对话输入框中按住说话，录音时会显示实时识别文字，松开后直接发送当前识别内容。")
+                    Text("在会话中按住 Option，录音时会显示实时识别文字，松开后直接发送当前识别内容。")
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("目前推荐使用鼠标按住或 Option 键进行语音输入，避免和文字输入冲突。")
+                    Text("可在应用设置中关闭 Option 语音输入，避免和文字输入冲突。")
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)

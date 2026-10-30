@@ -570,6 +570,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         sessionLLMOverride: SessionLLMOverride? = nil
     ) -> AnyAgentModelProvider {
         do {
+            let appSettings = loadRuntimeSettings().app
+            let proxyURLString: String? = appSettings.httpProxyEnabled ? appSettings.httpProxyURLString : nil
+            if let proxyURLString { _ = try AgentHTTPProxy.configuration(proxyURLString: proxyURLString) }
+            let httpClient = URLSessionAgentHTTPClient(proxyURLString: proxyURLString)
+            let sseClient = URLSessionAgentSSEHTTPClient(proxyURLString: proxyURLString)
             let settings = try settingsRepository.loadSettings()
             guard let connection = settings.connection(id: sessionLLMOverride?.connectionID) else {
                 let requestedMode = sessionLLMOverride.flatMap { AppLLMProviderMode(rawValue: $0.providerMode) } ?? settings.defaultConnection?.providerMode ?? .openAICompatible
@@ -614,7 +619,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                         )
                     }
                 }
-                return AnyAgentModelProvider(OpenAIResponsesProvider(config: config))
+                return AnyAgentModelProvider(OpenAIResponsesProvider(config: config, httpClient: httpClient, sseClient: sseClient))
             case .anthropicMessages:
                 guard let config = try anthropicCompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
                     return AnyAgentModelProvider(modelID: "missing-anthropic-compatible-config") { _ in
@@ -625,7 +630,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                         )
                     }
                 }
-                return AnyAgentModelProvider(AnthropicCompatibleProvider(config: config))
+                return AnyAgentModelProvider(AnthropicCompatibleProvider(config: config, httpClient: httpClient, sseClient: sseClient))
             case .openAICompatible:
                 if effectiveConnectionKind == .anthropicCompatible {
                     guard let config = try anthropicCompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
@@ -637,7 +642,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                             )
                         }
                     }
-                    return AnyAgentModelProvider(AnthropicCompatibleProvider(config: config))
+                    return AnyAgentModelProvider(AnthropicCompatibleProvider(config: config, httpClient: httpClient, sseClient: sseClient))
                 }
                 guard let config = try openAICompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
                     return AnyAgentModelProvider(modelID: "missing-openai-compatible-config") { _ in
@@ -655,10 +660,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                         capabilities: OpenAICompatibleProvider(config: config).capabilities,
                         settingsRepository: settingsRepository,
                         modelOverride: effectiveModel,
-                        baseURLOverride: effectiveBaseURL
+                        baseURLOverride: effectiveBaseURL,
+                        makeProvider: { AnyAgentModelProvider(OpenAICompatibleProvider(config: $0, httpClient: httpClient, sseClient: sseClient)) }
                     ))
                 }
-                return AnyAgentModelProvider(OpenAICompatibleProvider(config: config))
+                return AnyAgentModelProvider(OpenAICompatibleProvider(config: config, httpClient: httpClient, sseClient: sseClient))
             }
         } catch {
             return AnyAgentModelProvider(modelID: "settings-error") { _ in throw error }

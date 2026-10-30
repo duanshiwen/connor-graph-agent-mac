@@ -216,6 +216,24 @@ public struct AgentRuntimeShortcutSettings: Codable, Sendable, Equatable {
         self.bindings = AgentRuntimeShortcutSettings.mergedWithDefaults(bindings)
     }
 
+    public func validationMessage(for action: AgentRuntimeShortcutAction, shortcut: AgentRuntimeKeyboardShortcut) -> String? {
+        guard !shortcut.key.isEmpty, shortcut.command || shortcut.control || shortcut.option else {
+            return "快捷键必须包含 ⌘、⌃ 或 ⌥，避免占用普通文字输入。"
+        }
+        if shortcut.command && !shortcut.option && !shortcut.control && !shortcut.shift && ["a", "c", "i", "v", "x", "z", "q", "h", "m"].contains(shortcut.key.lowercased()) {
+            return "请保留系统和文字编辑的标准快捷键。"
+        }
+        let conflict = AgentRuntimeShortcutAction.allCases.first { other in
+            guard other != action else { return false }
+            var assigned = self.shortcut(for: other)
+            var candidate = shortcut
+            assigned.key = assigned.key.lowercased(); candidate.key = candidate.key.lowercased()
+            return assigned == candidate
+        }
+        if conflict != nil { return "该快捷键已用于其他操作，请选择不同组合。" }
+        return nil
+    }
+
     public static let defaultBindings: [AgentRuntimeShortcutAction: AgentRuntimeKeyboardShortcut] = [
         .newSession: AgentRuntimeKeyboardShortcut(key: "n"),
         .toggleBrowser: AgentRuntimeKeyboardShortcut(key: "b"),

@@ -195,7 +195,8 @@ public protocol AgentHTTPClient: Sendable {
 }
 
 public struct URLSessionAgentHTTPClient: AgentHTTPClient, Sendable, Equatable {
-    public init() {}
+    public var proxyURLString: String?
+    public init(proxyURLString: String? = nil) { self.proxyURLString = proxyURLString }
 
     public mutating func send(_ request: AgentHTTPRequest) async throws -> AgentHTTPResponse {
         var urlRequest = request.timeoutInterval.map { URLRequest(url: request.url, timeoutInterval: $0) } ?? URLRequest(url: request.url)
@@ -204,7 +205,9 @@ public struct URLSessionAgentHTTPClient: AgentHTTPClient, Sendable, Equatable {
         for (key, value) in request.headers {
             urlRequest.setValue(value, forHTTPHeaderField: key)
         }
-        let (data, response) = try await URLSession.shared.data(for: urlRequest)
+        let session = try AgentHTTPProxy.session(proxyURLString: proxyURLString)
+        defer { if proxyURLString != nil { session.finishTasksAndInvalidate() } }
+        let (data, response) = try await session.data(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw OpenAICompatibleProviderError.invalidResponse
         }

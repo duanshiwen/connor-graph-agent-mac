@@ -8,7 +8,7 @@ struct ShortcutRecorderSheet: View {
     var title: String
     var currentShortcut: AgentRuntimeKeyboardShortcut
     var onCancel: () -> Void
-    var onSave: (AgentRuntimeKeyboardShortcut) -> Void
+    var onSave: (AgentRuntimeKeyboardShortcut) -> String?
 
     @State private var capturedShortcut: AgentRuntimeKeyboardShortcut?
     @State private var message: String = "按下新的快捷键。建议至少包含 ⌘。"
@@ -38,7 +38,7 @@ struct ShortcutRecorderSheet: View {
                 Button("恢复当前") { capturedShortcut = currentShortcut }
                 Spacer()
                 Button("取消", action: onCancel)
-                Button("保存") { onSave(capturedShortcut ?? currentShortcut) }
+                Button("保存") { if let error = onSave(capturedShortcut ?? currentShortcut) { message = error } }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(ConnorPrimaryButtonStyle())
             }

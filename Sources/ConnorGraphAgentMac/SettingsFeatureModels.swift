@@ -62,6 +62,7 @@ final class InputSettingsFeatureModel {
     var autoSaveDraftsEnabled = true { didSet { changed() } }
     var sessionSpeechTranscriptionEnabled = false
     var shortcutSettings = AgentRuntimeShortcutSettings()
+    var shortcutErrorMessage: String?
     var recordingShortcutAction: AgentRuntimeShortcutAction?
     @ObservationIgnored var onSpeechTranscriptionDisabled: () -> Void = {}
     @ObservationIgnored var onChanged: () -> Void = {}
@@ -98,14 +99,20 @@ final class InputSettingsFeatureModel {
         shortcutSettings.shortcut(for: action)
     }
 
-    func beginRecordingShortcut(for action: AgentRuntimeShortcutAction) { recordingShortcutAction = action }
-    func updateShortcut(_ action: AgentRuntimeShortcutAction, shortcut: AgentRuntimeKeyboardShortcut) {
+    func beginRecordingShortcut(for action: AgentRuntimeShortcutAction) { shortcutErrorMessage = nil; recordingShortcutAction = action }
+    @discardableResult
+    func updateShortcut(_ action: AgentRuntimeShortcutAction, shortcut: AgentRuntimeKeyboardShortcut) -> String? {
+        if let message = shortcutSettings.validationMessage(for: action, shortcut: shortcut) { shortcutErrorMessage = message; return message }
+        shortcutErrorMessage = nil
         shortcutSettings.bindings[action] = shortcut
         recordingShortcutAction = nil
         onChanged()
+        return nil
     }
     func resetShortcut(_ action: AgentRuntimeShortcutAction) {
         guard let value = AgentRuntimeShortcutSettings.defaultBindings[action] else { return }
+        if let message = shortcutSettings.validationMessage(for: action, shortcut: value) { shortcutErrorMessage = message; return }
+        shortcutErrorMessage = nil
         shortcutSettings.bindings[action] = value
         onChanged()
     }
