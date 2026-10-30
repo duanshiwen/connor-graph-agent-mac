@@ -5,6 +5,7 @@ import ConnorGraphCore
 public enum MCPClientPoolError: Error, Sendable, Equatable, CustomStringConvertible {
     case sourceNotFound(String)
     case sourceNotEnabled(String)
+    case sourceConfigurationChanged(String)
     case unsupportedTransport(String)
     case toolNotInPersistedCatalog(String)
     case toolPolicyBlocked(String)
@@ -13,6 +14,7 @@ public enum MCPClientPoolError: Error, Sendable, Equatable, CustomStringConverti
     public var description: String {
         switch self {
         case .sourceNotFound(let sourceID): "sourceNotFound: \(sourceID)"
+        case .sourceConfigurationChanged(let sourceID): "sourceConfigurationChanged: \(sourceID)"
         case .sourceNotEnabled(let sourceID): "sourceNotEnabled: \(sourceID)"
         case .unsupportedTransport(let message): "unsupportedTransport: \(message)"
         case .toolNotInPersistedCatalog(let toolName): "toolNotInPersistedCatalog: \(toolName)"
@@ -40,6 +42,8 @@ public actor MCPClientPool: MCPToolRouting {
     public var currentDirectoryURL: URL?
     public var credentialStore: MCPSourceCredentialStore
 
+    private var runtimeConfigurations: [String: MCPSourceRuntimeConfiguration] = [:]
+    private var lifecycleGeneration: UInt64 = 0
     private var stdioRuntimes: [String: MCPSourceRuntime<MCPStdioClientTransport>] = [:]
     private var httpRuntimes: [String: MCPSourceRuntime<MCPHTTPClientTransport>] = [:]
 
@@ -130,12 +134,20 @@ public actor MCPClientPool: MCPToolRouting {
         arguments: MCPJSONValue,
         context: AgentToolExecutionContext
     ) async throws -> AgentToolResult {
+        let generation = lifecycleGeneration
         let configuration = try sourceConfiguration(sourceID: sourceID)
         guard configuration.status == .enabled else { throw MCPClientPoolError.sourceNotEnabled(sourceID) }
         guard let descriptor = try persistedCatalogDescriptor(sourceID: sourceID, exposedToolName: exposedToolName, rawToolName: rawToolName) else {
             throw MCPClientPoolError.toolNotInPersistedCatalog(exposedToolName)
         }
         try await enforcePolicy(descriptor: descriptor, arguments: arguments, context: context)
+        try Self.validateExecutionConfiguration(expected: configuration, current: sourceConfiguration(sourceID: sourceID))
+        guard lifecycleGeneration == generation else { throw MCPClientPoolError.sourceConfigurationChanged(sourceID) }
+        guard let currentDescriptor = try persistedCatalogDescriptor(sourceID: sourceID, exposedToolName: exposedToolName, rawToolName: rawToolName),
+              currentDescriptor == descriptor else { throw MCPClientPoolError.toolDefinitionChanged(exposedToolName) }
+        try await prepareRuntimeConfiguration(configuration)
+        try Self.validateExecutionConfiguration(expected: configuration, current: sourceConfiguration(sourceID: sourceID))
+        guard lifecycleGeneration == generation else { throw MCPClientPoolError.sourceConfigurationChanged(sourceID) }
         switch configuration.transport {
         case .stdio:
             let runtime = try stdioRuntime(for: configuration)
@@ -161,6 +173,8 @@ public actor MCPClientPool: MCPToolRouting {
     }
 
     public func closeAll() async {
+        lifecycleGeneration &+= 1
+        runtimeConfigurations.removeAll()
         let stdio = stdioRuntimes
         let http = httpRuntimes
         stdioRuntimes.removeAll()
@@ -174,6 +188,25 @@ public actor MCPClientPool: MCPToolRouting {
             throw MCPClientPoolError.sourceNotFound(sourceID)
         }
         return configuration
+    }
+
+    nonisolated static func validateExecutionConfiguration(
+        expected: MCPSourceRuntimeConfiguration,
+        current: MCPSourceRuntimeConfiguration
+    ) throws {
+        guard current.status == .enabled else { throw MCPClientPoolError.sourceNotEnabled(current.sourceID) }
+        guard current == expected else { throw MCPClientPoolError.sourceConfigurationChanged(current.sourceID) }
+    }
+
+    private func prepareRuntimeConfiguration(_ configuration: MCPSourceRuntimeConfiguration) async throws {
+        let id = configuration.sourceID
+        guard let previous = runtimeConfigurations[id], previous != configuration else { return }
+        // Remove before awaiting shutdown so a reentrant invocation cannot reuse the obsolete transport.
+        runtimeConfigurations.removeValue(forKey: id)
+        let stdio = stdioRuntimes.removeValue(forKey: id)
+        let http = httpRuntimes.removeValue(forKey: id)
+        if let stdio { try? await stdio.shutdown() }
+        if let http { try? await http.shutdown() }
     }
 
     private func stdioRuntime(for configuration: MCPSourceRuntimeConfiguration) throws -> MCPSourceRuntime<MCPStdioClientTransport> {
@@ -190,6 +223,7 @@ public actor MCPClientPool: MCPToolRouting {
         )
         let client = MCPJSONRPCClient(transport: transport, clientName: clientName, clientVersion: clientVersion)
         let runtime = MCPSourceRuntime(configuration: configuration, client: client)
+        runtimeConfigurations[configuration.sourceID] = configuration
         stdioRuntimes[configuration.sourceID] = runtime
         return runtime
     }
@@ -203,6 +237,7 @@ public actor MCPClientPool: MCPToolRouting {
         let transport = try MCPHTTPClientTransport(endpointURL: url, headers: headers)
         let client = MCPJSONRPCClient(transport: transport, clientName: clientName, clientVersion: clientVersion)
         let runtime = MCPSourceRuntime(configuration: configuration, client: client)
+        runtimeConfigurations[configuration.sourceID] = configuration
         httpRuntimes[configuration.sourceID] = runtime
         return runtime
     }
