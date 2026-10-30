@@ -761,6 +761,15 @@ public struct AgentToolDuplicateRegistration: Sendable, Equatable {
 }
 
 public struct AgentToolRegistry: Sendable {
+    public var dynamicToolProvider: (@Sendable () async -> [any AgentTool])?
+    private var dynamicToolNames: Set<String> = []
+    public mutating func refreshDynamicTools() async {
+        guard let dynamicToolProvider else { return }
+        let current = await dynamicToolProvider()
+        for name in dynamicToolNames { tools.removeValue(forKey: name) }
+        dynamicToolNames = Set(current.map(\.name))
+        for tool in current { tools[tool.name] = tool }
+    }
     private var tools: [String: any AgentTool]
     public private(set) var duplicateRegistrations: [AgentToolDuplicateRegistration]
 

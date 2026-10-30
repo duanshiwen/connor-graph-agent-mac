@@ -1,16 +1,23 @@
 import SwiftUI
+import AppKit
 import ConnorGraphBase
 import ConnorGraphAppSupport
+import UniformTypeIdentifiers
 
 // MARK: - 小程序列表（左列）
 
 /// 「小程序」列表：本机 + 云端汇总、分页加载；筛选关键词由统一搜索注入。
 struct MiniAppListPane: View {
     @Bindable var model: MiniAppFeatureModel
+    @State private var isImporting = false
+    @State private var reviewedPackage: String?
+    @State private var importError: String?
 
     var body: some View {
         VStack(spacing: 0) {
             AppListPaneHeader(title: "小程序") {
+                Button { isImporting = true } label: { Image(systemName: "square.and.arrow.down") }
+                    .buttonStyle(.appIcon).help("导入小程序定义包")
                 Button {
                     model.reload()
                 } label: {
@@ -21,6 +28,8 @@ struct MiniAppListPane: View {
                 .help("刷新小程序列表")
                 .accessibilityLabel("刷新小程序列表")
             }
+            if let importError { Text(importError).font(.caption).foregroundStyle(.red).padding(8) }
+            if let error = model.errorMessage { Text(error).font(.caption).foregroundStyle(.orange).padding(8) }
 
             ListSearchFilterBanner(query: model.searchText, sourceTitle: "小程序") {
                 model.clearSearch()
@@ -46,6 +55,28 @@ struct MiniAppListPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear { model.loadIfNeeded() }
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
+            do {
+                let url = try result.get()
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 10_000_000 else { throw BasePackageImporter.ImportError.invalid("小程序定义包超过 10 MB。") }
+                reviewedPackage = try BasePackageImporter.review(Data(contentsOf: url))
+                importError = nil
+            } catch { importError = error.localizedDescription }
+        }
+        .sheet(isPresented: Binding(get: { reviewedPackage != nil }, set: { if !$0 { reviewedPackage = nil } })) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("导入为本机私有小程序").font(.headline)
+                ScrollView { Text(reviewedPackage ?? "").font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                if let importError { Text(importError).foregroundStyle(.red) }
+                HStack {
+                    Button("取消") { reviewedPackage = nil }
+                    Spacer()
+                    Button("确认导入") { do { try model.importReviewedPackage(reviewedPackage ?? ""); reviewedPackage = nil; importError = nil } catch { importError = error.localizedDescription } }
+                }
+            }.padding(20).frame(minWidth: 520, minHeight: 480)
+        }
     }
 
     private var list: some View {
@@ -100,17 +131,10 @@ struct MiniAppListPane: View {
                 .foregroundStyle(.tertiary)
             Text(isFiltering ? "没有找到相关的小程序" : "这里还没有小程序")
                 .font(.headline)
-            Text(isFiltering ? "换个关键词试试，或清除搜索后查看全部小程序。" : "在对话里直接告诉康纳你想做什么，它可以帮你创建一个小程序；\n云端共享的小程序也会自动出现在这里。")
+            Text(isFiltering ? "换个关键词试试，或清除搜索后查看全部小程序。" : "告诉康纳你想做什么，一起准备完整的小程序定义包，确认后导入本机。\n已有的本机小程序与云端共享的小程序也会显示在这里。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            if model.errorMessage != nil {
-                Text(model.errorMessage!)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 4)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
@@ -170,6 +194,10 @@ private struct MiniAppRowView: View {
             .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("查看详情", action: onSelect)
+            Button("复制小程序标识") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.appID, forType: .string) }
+        }
     }
 }
 

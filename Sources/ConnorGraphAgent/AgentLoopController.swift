@@ -348,29 +348,31 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     attemptedToolNames: [],
                     succeededToolNames: []
                 )
-                let availableRegisteredToolDefinitions = await toolRegistry.definitions(availableUnder: policy)
+                var dynamicRegistry = toolRegistry
+                await dynamicRegistry.refreshDynamicTools()
+                var catalogRegisteredDefinitions = await dynamicRegistry.definitions(availableUnder: policy)
                 let exposedToolDefinitions = tokenPolicy.initiallyExposedTools(
-                    from: availableRegisteredToolDefinitions,
+                    from: catalogRegisteredDefinitions,
                     request: request,
                     mode: configuration.toolExposureMode
                 ).sorted { $0.name < $1.name }
                 let assistantToolRouter = AssistantToolRouter()
                 let assistantToolRoute = assistantToolRouter.route(
                     initiallyExposedDefinitions: exposedToolDefinitions,
-                    catalogDefinitions: availableRegisteredToolDefinitions
+                    catalogDefinitions: catalogRegisteredDefinitions
                 )
-                let availableToolDefinitions: [AgentToolDefinition] = {
-                    let merged = availableRegisteredToolDefinitions + AssistantDecisionToolContract.definitions
+                var catalogAvailableDefinitions: [AgentToolDefinition] = {
+                    let merged = catalogRegisteredDefinitions + AssistantDecisionToolContract.definitions
                     return Dictionary(grouping: merged, by: \.name)
                         .compactMap { $0.value.first }
                         .sorted { $0.name < $1.name }
                 }()
-                let modelFacingToolDefinitions = assistantToolRoute.modelVisibleDefinitions
+                var catalogModelDefinitions = assistantToolRoute.modelVisibleDefinitions
                 let memoryCapabilityAvailable = true
                 let promptAssembly = await buildPromptAssembly(
                     for: request,
                     environmentSnapshot: environmentSnapshot,
-                    availableToolDefinitions: availableToolDefinitions,
+                    availableToolDefinitions: catalogAvailableDefinitions,
                     retrievalPlan: retrievalPlan,
                     runtimeContext: runtimeContext
                 )
@@ -378,7 +380,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 let toolResultGate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
                     maxResultCharacters: configuration.maxToolResultBytes
                 ))
-                var modelRequest = promptProjector.project(promptAssembly, tools: modelFacingToolDefinitions)
+                var modelRequest = promptProjector.project(promptAssembly, tools: catalogModelDefinitions)
                 let environmentText = environmentSnapshot.map(AgentEnvironmentPromptRenderer.render) ?? ""
                 let dynamicRuntime = [
                     runtimeContext.trustedPrompt,
@@ -388,15 +390,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     Every user run must complete the continuity reads in one startup `parallel_tool_query` batch: `memory_os_recent_context` and `memory_os_knowledge_context` with compact topic terms you choose from the latest actual user request, plus `memory_os_get_current_user_profile` with `purpose: "task_context"` and `pageSize: 500`, plus one `note_search`. None substitutes for another; a successful empty result or a real failure satisfies the attempt. The profile call reads one page of 500 records by default; continue through `nextPage` only when the task genuinely needs more profile evidence. You may also re-search the profile with compact topic terms through the same tool. When those continuity results are insufficient for the task — empty, partial, or lacking the specific detail the user asked about — also run one `session_search` against the raw chat-transcript index in the same or a following `parallel_tool_query` batch; `session_search` belongs to the memory search group and is encouraged whenever memory retrieval results are insufficient.
                     Shell and ApplyPatch are direct workspace tools. Other applicable native tools are supplied through the routed catalog above.
                     """,
-                    assistantToolRouter.compactCatalogSummary(definitions: availableRegisteredToolDefinitions)
+                    assistantToolRouter.compactCatalogSummary(definitions: catalogRegisteredDefinitions)
                 ].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n\n")
                 let auditEstimator = AgentModelContextGuard().estimator
                 let stablePromptEstimatedTokens = modelRequest.messages.first.map {
                     auditEstimator.estimate($0.content).estimatedTokenCount
                 } ?? 0
                 let dynamicRuntimeEstimatedTokens = auditEstimator.estimate(dynamicRuntime).estimatedTokenCount
-                let toolDefinitionEstimatedTokens = AgentModelContextGuard().estimatedInputTokens(
-                    AgentModelRequest(messages: [], tools: modelFacingToolDefinitions)
+                var catalogToolTokenEstimate = AgentModelContextGuard().estimatedInputTokens(
+                    AgentModelRequest(messages: [], tools: catalogModelDefinitions)
                 )
                 modelRequest.messages.insert(AgentModelMessage(role: .system, content: dynamicRuntime), at: min(1, modelRequest.messages.count))
                 var messages = modelRequest.messages
@@ -467,6 +469,24 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     }
 
                     while true {
+                        await dynamicRegistry.refreshDynamicTools()
+                        let refreshedDefinitions = await dynamicRegistry.definitions(availableUnder: policy)
+                        if refreshedDefinitions.map(\.name) != catalogRegisteredDefinitions.map(\.name) {
+                            catalogRegisteredDefinitions = refreshedDefinitions
+                            catalogAvailableDefinitions = Dictionary(grouping: refreshedDefinitions + AssistantDecisionToolContract.definitions, by: \.name).compactMap { $0.value.first }.sorted { $0.name < $1.name }
+                            let refreshedExposed = tokenPolicy.initiallyExposedTools(from: refreshedDefinitions, request: request, mode: configuration.toolExposureMode).sorted { $0.name < $1.name }
+                            catalogModelDefinitions = assistantToolRouter.route(initiallyExposedDefinitions: refreshedExposed, catalogDefinitions: refreshedDefinitions).modelVisibleDefinitions
+                            catalogToolTokenEstimate = AgentModelContextGuard().estimatedInputTokens(AgentModelRequest(messages: [], tools: catalogModelDefinitions))
+                            messages.append(AgentModelMessage(role: .system, content: "工具面已更新。需要新能力时请重新发现当前可用工具；使用面不能调用制作面工具。"))
+                        }
+                        let availableRegisteredToolDefinitions = catalogRegisteredDefinitions
+                        let availableToolDefinitions = catalogAvailableDefinitions
+                        let modelFacingToolDefinitions = catalogModelDefinitions
+                        let toolDefinitionEstimatedTokens = catalogToolTokenEstimate
+                        let toolRegistry = dynamicRegistry
+                        var executionController = self
+                        executionController.toolRegistry = toolRegistry
+                        let turnController = executionController
                         if iterationCount >= configuration.maxToolIterations {
                             if finalAttentionPack == nil {
                                 let pack = await AssistantAttentionCoordinator().run(
@@ -1040,7 +1060,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             providerMetadata: modelResponse.providerMetadata
                         ))
 
-                        let batchResults = try await executeToolBatch(
+                        let batchResults = try await turnController.executeToolBatch(
                             calls: calls,
                             request: request,
                             run: &run,

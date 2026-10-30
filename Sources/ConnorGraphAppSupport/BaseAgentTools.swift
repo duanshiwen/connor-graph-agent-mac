@@ -49,6 +49,10 @@ public actor BaseToolRuntime {
     public func isAuthoringMode(appID: String) -> Bool {
         authoringAppID == appID
     }
+    public func dynamicCatalogTools() -> [any AgentTool] {
+        guard authoringAppID != nil else { return [] }
+        return BaseAgentTool.Operation.allCases.filter { !BaseAgentTool.Operation.runtimeCatalog.contains($0) }.map { BaseAgentTool(operation: $0, runtime: self) }
+    }
 
     /// 属主判据：本机注册表存在该 App（子库可开）即视为本机属主。
     public func hasLocalApp(_ appID: String) -> Bool {
@@ -151,6 +155,7 @@ public actor BaseToolRuntime {
     public func deleteAppEnvelope(appID: String) -> BaseEnvelope {
         do {
             try library.deleteApp(appID: appID)
+            if authoringAppID == appID { exitAuthoring() }
             return .success(data: ["deleted": appID])
         } catch let error as BaseError {
             return .failure(error)
@@ -1175,6 +1180,7 @@ public extension AgentToolRegistry {
     /// 制作面后），会话结束/切换目标 App 用 `unregisterBaseAuthoringTools()` 收回。
     /// 硬门禁在 BaseAgentTool.execute() 内独立生效，与注册无关。
     mutating func registerBaseTools(runtime: BaseToolRuntime) {
+        dynamicToolProvider = { await runtime.dynamicCatalogTools() }
         for operation in BaseAgentTool.Operation.runtimeCatalog {
             register(BaseAgentTool(operation: operation, runtime: runtime))
         }

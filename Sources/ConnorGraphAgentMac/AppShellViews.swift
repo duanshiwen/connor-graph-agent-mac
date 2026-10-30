@@ -167,6 +167,7 @@ struct AppShellView: View {
                 openWindow(id: AppMenuPresentation.knowledgePublicationProgressWindowID)
             }
         }
+        .onChange(of: identityStore.currentUser?.id) { _, _ in graph.miniApps.reload() }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {

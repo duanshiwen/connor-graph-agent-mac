@@ -45,10 +45,12 @@ public struct BaseCloudAPIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(try await credentials.accessToken())", forHTTPHeaderField: "Authorization")
+        let token = try await credentials.accessToken()
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let body: [String: Any] = ["tool": tool, "args": args]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await transport.data(for: request)
+        guard (try await credentials.accessToken()) == token else { throw BaseCloudAPIError.rpc(code: "ACCOUNT_CHANGED", message: "账号已变化，请刷新小程序目录", hint: nil) }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw rpcFailure(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data)
         }

@@ -108,11 +108,20 @@ public final class MiniAppFeatureModel {
     private let cloudClient: BaseCloudAPIClient?
     private var allLocal: [MiniAppEntry] = []
     private var allCloud: [MiniAppEntry] = []
-    private var detailTasks: [String: Task<Void, Never>] = [:]
+    private var detailTask: Task<Void, Never>?
+    private var reloadGeneration = 0
+    private var detailGeneration = 0
+    private var loadedOnce = false
 
     public init(library: BaseLibraryStore?, cloudClient: BaseCloudAPIClient?) {
         self.library = library
         self.cloudClient = cloudClient
+    }
+    public func importReviewedPackage(_ json: String) throws {
+        guard let library else { throw BasePackageImporter.ImportError.invalid("本机小程序库不可用。") }
+        let id = try BasePackageImporter.install(json, library: library)
+        reload()
+        select(appID: id)
     }
 
     // MARK: 首次加载 / 刷新
@@ -123,6 +132,9 @@ public final class MiniAppFeatureModel {
     }
 
     public func reload() {
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        isLoadingMore = false
         let query = trimmedQuery
         isLoading = true
         errorMessage = nil
@@ -135,12 +147,16 @@ public final class MiniAppFeatureModel {
         publishMerged()
         guard let cloudClient else {
             isLoading = false
+            loadedOnce = true
+            publishMerged()
             return
         }
         Task { [weak self] in
             guard let self else { return }
-            await self.fetchCloudPage(client: cloudClient, page: 1, query: query)
+            await self.fetchCloudPage(client: cloudClient, page: 1, query: query, generation: generation)
+            guard generation == self.reloadGeneration else { return }
             self.isLoading = false
+            self.loadedOnce = true
             self.publishMerged()
         }
     }
@@ -149,10 +165,12 @@ public final class MiniAppFeatureModel {
         guard let cloudClient, cloudHasMore, !isLoading, !isLoadingMore, !hasLoadedAllCloud else { return }
         isLoadingMore = true
         let nextPage = cloudPage + 1
+        let generation = reloadGeneration
         let query = trimmedQuery
         Task { [weak self] in
             guard let self else { return }
-            await self.fetchCloudPage(client: cloudClient, page: nextPage, query: query)
+            await self.fetchCloudPage(client: cloudClient, page: nextPage, query: query, generation: generation)
+            guard generation == self.reloadGeneration else { return }
             self.isLoadingMore = false
             self.publishMerged()
         }
@@ -174,17 +192,21 @@ public final class MiniAppFeatureModel {
     // MARK: 选中 + 详情
 
     public func select(appID: String) {
-        guard selectedAppID != appID else { return }
+        guard selectedAppID != appID || selectedDetail == nil && !detailIsLoading else { return }
+        detailGeneration += 1
+        let generation = detailGeneration
+        detailTask?.cancel()
         selectedAppID = appID
         selectedDetail = nil
         detailErrorMessage = nil
         detailIsLoading = true
-        let task = Task { [weak self] in
+        detailTask = Task { [weak self] in
             guard let self else { return }
-            self.selectedDetail = await self.loadDetail(appID: appID)
+            let detail = await self.loadDetail(appID: appID, generation: generation)
+            guard generation == self.detailGeneration, self.selectedAppID == appID, !Task.isCancelled else { return }
+            self.selectedDetail = detail
             self.detailIsLoading = false
         }
-        detailTasks[appID] = task
     }
 
     // MARK: 内部实现
@@ -194,18 +216,18 @@ public final class MiniAppFeatureModel {
     }
 
     private var hasLoaded: Bool {
-        !entries.isEmpty || localCount > 0 || cloudTotal > 0 || errorMessage != nil
+        loadedOnce
     }
 
     private var hasLoadedAllCloud: Bool {
         allCloud.count >= cloudTotal
     }
 
-    private func loadLocalEntries(query: String) -> [MiniAppEntry] {
+    private func loadLocalEntries(query: String, updateCount: Bool = true) -> [MiniAppEntry] {
         guard let library else { return [] }
         do {
             let cards = try library.listApps(query: query.isEmpty ? nil : query)
-            localCount = cards.count
+            if updateCount { localCount = cards.count }
             return cards.compactMap { card in
                 guard let appID = card["appID"] as? String else { return nil }
                 let visibility = (card["visibility"] as? String) ?? "private"
@@ -239,9 +261,10 @@ public final class MiniAppFeatureModel {
         }
     }
 
-    private func fetchCloudPage(client: BaseCloudAPIClient, page: Int, query: String) async {
+    private func fetchCloudPage(client: BaseCloudAPIClient, page: Int, query: String, generation: Int) async {
         do {
             let result = try await client.listApps(query: query, page: page, limit: 20)
+            guard generation == reloadGeneration, query == trimmedQuery else { return }
             cloudPage = result.page
             cloudTotal = result.total
             cloudHasMore = result.hasMore
@@ -265,6 +288,7 @@ public final class MiniAppFeatureModel {
                 ))
             }
         } catch {
+            guard generation == reloadGeneration, query == trimmedQuery else { return }
             cloudUnavailable = true
             if errorMessage == nil {
                 errorMessage = "云端目录暂不可用：\(error.localizedDescription)"
@@ -282,13 +306,16 @@ public final class MiniAppFeatureModel {
         var seen = Set<String>()
         entries = merged.filter { seen.insert($0.appID).inserted }
         // 选中项若还在列表里则保持选中，否则清空。
-        if let selectedAppID, !entries.contains(where: { $0.appID == selectedAppID }) {
+        if !isLoading, !isLoadingMore, let selectedAppID, !entries.contains(where: { $0.appID == selectedAppID }) {
+            detailGeneration += 1
+            detailTask?.cancel()
             self.selectedAppID = nil
             selectedDetail = nil
+            detailIsLoading = false
         }
     }
 
-    private func loadDetail(appID: String) async -> MiniAppDetail? {
+    private func loadDetail(appID: String, generation: Int) async -> MiniAppDetail? {
         detailErrorMessage = nil
         let entry = entries.first { $0.appID == appID }
         if let entry, entry.source == .local, let library {
@@ -300,6 +327,7 @@ public final class MiniAppFeatureModel {
         }
         do {
             let detail = try await cloudClient.appDetail(appID: appID)
+            guard generation == detailGeneration, selectedAppID == appID, !Task.isCancelled else { return nil }
             let guideSummary = Self.guideSummary(from: detail.guide ?? [:])
             return MiniAppDetail(
                 appID: detail.appId,
@@ -323,6 +351,7 @@ public final class MiniAppFeatureModel {
                 updatedAt: detail.updatedAt
             )
         } catch {
+            guard generation == detailGeneration, selectedAppID == appID, !Task.isCancelled else { return nil }
             detailErrorMessage = "云端详情读取失败：\(error.localizedDescription)"
             return nil
         }
@@ -368,6 +397,10 @@ public final class MiniAppFeatureModel {
 
     /// 从 guide（[String: Any] 或 [String: ConnorJSONValue]）提取汇总提示。
     private static func guideSummary(from raw: [String: Any]) -> (summary: String, notes: [String]) {
+        if let usage = raw["usage"] as? [String: Any] {
+            var body = usage; body.removeValue(forKey: "notes"); body.removeValue(forKey: "tips")
+            if let data = try? JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys]) { return (String(decoding: data, as: UTF8.self), guideNotes(from: usage)) }
+        }
         let summaryKeys = ["usage", "overview", "summary", "intro", "description", "说明", "简介", "用途"]
         for key in summaryKeys {
             if let value = raw[key] as? String, !value.isEmpty {
@@ -378,6 +411,10 @@ public final class MiniAppFeatureModel {
     }
 
     private static func guideSummary(from raw: [String: ConnorJSONValue]) -> (summary: String, notes: [String]) {
+        if case .object(let usage) = raw["usage"] {
+            var body = usage; body.removeValue(forKey: "notes"); body.removeValue(forKey: "tips")
+            if let data = try? JSONEncoder().encode(body) { return (String(decoding: data, as: UTF8.self), guideNotes(from: usage)) }
+        }
         let summaryKeys = ["usage", "overview", "summary", "intro", "description", "说明", "简介", "用途"]
         for key in summaryKeys {
             if case .string(let value) = raw[key], !value.isEmpty {
@@ -395,7 +432,7 @@ public final class MiniAppFeatureModel {
         if let list = raw["tips"] as? [Any] {
             notes.append(contentsOf: list.compactMap { $0 as? String }.filter { !$0.isEmpty })
         }
-        return Array(notes.prefix(6))
+        return notes
     }
 
     private static func guideNotes(from raw: [String: ConnorJSONValue]) -> [String] {
@@ -406,7 +443,7 @@ public final class MiniAppFeatureModel {
         if case .array(let list) = raw["tips"] {
             notes.append(contentsOf: list.compactMap { value in if case .string(let s) = value { return s }; return nil }.filter { !$0.isEmpty })
         }
-        return Array(notes.prefix(6))
+        return notes
     }
 
     /// 数据快照 {tables:{name: rows}} 的表数汇总。
@@ -422,7 +459,7 @@ public final class MiniAppFeatureModel {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         var results: [GlobalSearchMiniAppResult] = []
         if library != nil {
-            for entry in loadLocalEntries(query: trimmed) {
+            for entry in loadLocalEntries(query: trimmed, updateCount: false) {
                 results.append(GlobalSearchMiniAppResult(
                     appID: entry.appID, name: entry.name, purpose: entry.purpose,
                     sourceBadge: entry.sourceBadge, scopeBadge: entry.scopeBadge, relationBadge: entry.relationBadge
