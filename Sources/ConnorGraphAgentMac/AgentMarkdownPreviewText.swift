@@ -892,7 +892,10 @@ struct AgentMarkdownLinkText: NSViewRepresentable {
         init() {
             let storage = NSTextStorage()
             let layoutManager = NSLayoutManager()
-            let container = NSTextContainer(size: .zero)
+            // The view's frame is sized by SwiftUI, but the drawing container must
+            // still have room for every wrapped line. With vertical resizing off,
+            // AppKit leaves a zero-height container unchanged as the frame grows.
+            let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
             storage.addLayoutManager(layoutManager)
             layoutManager.addTextContainer(container)
             super.init(frame: .zero, textContainer: container)
@@ -913,6 +916,7 @@ struct AgentMarkdownLinkText: NSViewRepresentable {
             container.lineFragmentPadding = 0
             container.lineBreakMode = .byWordWrapping
             container.widthTracksTextView = true
+            container.heightTracksTextView = false
             setContentHuggingPriority(.defaultLow, for: .horizontal)
             setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             linkTextAttributes = [
