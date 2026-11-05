@@ -24,7 +24,7 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(strategy == .deferredPreview)
     }
 
-    @Test func longUserMessageCanDisableDeferredPreviewRendering() {
+    @Test func longUserMessageExpansionUsesBoundedPages() {
         let strategy = AgentMarkdownPreviewRenderStrategy.strategy(
             lineLimit: nil,
             monospacedFallback: false,
@@ -32,7 +32,20 @@ struct AgentMarkdownPreviewStrategyTests {
             allowsDeferredPreview: false
         )
 
-        #expect(strategy == .compiledDocument)
+        #expect(strategy == .pagedText)
+    }
+
+    @Test func longMonospacedPreviewUsesBoundedPages() {
+        #expect(AgentMarkdownPreviewRenderStrategy.strategy(
+            lineLimit: nil, monospacedFallback: true, markdownCharacterCount: 3_000_000
+        ) == .pagedText)
+    }
+
+    @Test func largeUTF8ButSmallUTF16MarkdownCanStillUseRichExpansion() {
+        #expect(AgentMarkdownPreviewRenderStrategy.strategy(
+            lineLimit: nil, monospacedFallback: false, markdownCharacterCount: 24_000,
+            allowsDeferredPreview: false, markdownUTF16Count: 8_000
+        ) == .compiledDocument)
     }
 
     @Test func deferredPreviewOnlyCopiesABoundedMarkdownPrefix() {

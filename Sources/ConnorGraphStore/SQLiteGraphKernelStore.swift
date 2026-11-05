@@ -856,6 +856,22 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     // MARK: - Agent Sessions
 
     public func upsertSession(_ session: AgentSession, preservingTitle: Bool = false) throws {
+        // Keep metadata and paged messages in one transaction. Otherwise a
+        // forced quit (or failed insert) after DELETE leaves an empty detail
+        // view even though messages_json still contains the conversation.
+        try withDatabaseLock {
+            try execute("BEGIN IMMEDIATE;")
+            do {
+                try upsertSessionWithinTransaction(session, preservingTitle: preservingTitle)
+                try execute("COMMIT;")
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+        }
+    }
+
+    private func upsertSessionWithinTransaction(_ session: AgentSession, preservingTitle: Bool) throws {
         try execute("""
         INSERT INTO agent_sessions
         (id, title, messages_json, message_count, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, content_format)

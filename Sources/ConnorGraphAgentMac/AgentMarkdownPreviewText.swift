@@ -9,6 +9,7 @@ enum AgentMarkdownPreviewRenderStrategy: Equatable {
     case inlineOnly
     case plainText
     case deferredPreview
+    case pagedText
     case compiledDocument
 
     static let deferredPreviewCharacterThreshold = 12_000
@@ -17,9 +18,12 @@ enum AgentMarkdownPreviewRenderStrategy: Equatable {
         lineLimit: Int?,
         monospacedFallback: Bool,
         markdownCharacterCount: Int,
-        allowsDeferredPreview: Bool = true
+        allowsDeferredPreview: Bool = true,
+        markdownUTF16Count: Int? = nil
     ) -> AgentMarkdownPreviewRenderStrategy {
         if lineLimit != nil { return .inlineOnly }
+        if (markdownUTF16Count ?? markdownCharacterCount) >= AppLargeTextPage.expansionThreshold,
+           monospacedFallback || !allowsDeferredPreview { return .pagedText }
         if monospacedFallback { return .plainText }
         if allowsDeferredPreview, markdownCharacterCount >= deferredPreviewCharacterThreshold { return .deferredPreview }
         return .compiledDocument
@@ -27,15 +31,10 @@ enum AgentMarkdownPreviewRenderStrategy: Equatable {
 }
 
 enum AgentMarkdownDeferredPreviewPolicy {
-    static let characterLimit = 4_000
+    static let characterLimit = AppLargeTextPage.pageSize
 
     static func source(for markdown: String) -> String {
-        let endIndex = markdown.index(
-            markdown.startIndex,
-            offsetBy: characterLimit,
-            limitedBy: markdown.endIndex
-        ) ?? markdown.endIndex
-        return String(markdown[..<endIndex])
+        AppLargeTextPage(source: markdown).text
     }
 }
 
@@ -51,6 +50,7 @@ struct AgentMarkdownPreviewText: View {
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     @State private var loadedDocument: AgentMarkdownCompiledDocument?
     @State private var isUserExpanded = false
+    @State private var textPageIndex = 0
 
     private final class RenderCache: @unchecked Sendable {
         static let shared = RenderCache()
@@ -138,7 +138,7 @@ struct AgentMarkdownPreviewText: View {
     }
 
     private var lightweightInlineRendered: AttributedString {
-        RenderCache.shared.inlineRendered(markdown)
+        RenderCache.shared.inlineRendered(AgentMarkdownDeferredPreviewPolicy.source(for: markdown))
     }
 
     private var deferredPreviewInlineRendered: AttributedString {
@@ -150,7 +150,8 @@ struct AgentMarkdownPreviewText: View {
             lineLimit: lineLimit,
             monospacedFallback: monospacedFallback,
             markdownCharacterCount: markdown.utf8.count,
-            allowsDeferredPreview: effectiveAllowsDeferredPreview
+            allowsDeferredPreview: effectiveAllowsDeferredPreview,
+            markdownUTF16Count: markdown.utf16.count
         )
     }
 
@@ -185,6 +186,8 @@ struct AgentMarkdownPreviewText: View {
                     statusText: "内容较长，已先显示轻量预览以保持界面响应。",
                     showsExpansionControl: allowsUserExpansion
                 )
+            case .pagedText:
+                pagedTextView
             case .compiledDocument:
                 if let loadedDocument, loadedDocument.source == markdown {
                     compiledDocumentView(loadedDocument)
@@ -214,8 +217,35 @@ struct AgentMarkdownPreviewText: View {
         }
         .onChange(of: markdownContentID) {
             isUserExpanded = false
+            textPageIndex = 0
             loadedDocument = nil
         }
+    }
+
+    private var pagedTextView: some View {
+        let page = AppLargeTextPage(source: markdown, index: textPageIndex)
+        return VStack(alignment: .leading, spacing: 7) {
+            Text(page.text)
+                .font(monospacedFallback ? monospacedBodyFont : font)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Button { textPageIndex = page.index - 1 } label: {
+                    Text("上一页").frame(minWidth: 52, minHeight: 40)
+                }
+                    .disabled(page.index == 0)
+                Text("第 \(page.index + 1) / \(page.count) 页 · 长内容以纯文本分页显示")
+                    .font(secondaryFont)
+                    .foregroundStyle(.secondary)
+                Button { textPageIndex = page.index + 1 } label: {
+                    Text("下一页").frame(minWidth: 52, minHeight: 40)
+                }
+                    .disabled(page.index + 1 >= page.count)
+            }
+            .controlSize(.regular)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func deferredPreviewView(
@@ -242,7 +272,7 @@ struct AgentMarkdownPreviewText: View {
                     title: "展开完整内容",
                     systemImage: "chevron.down",
                     accessibilityLabel: "展开并显示完整文件内容",
-                    help: "加载并显示完整 Markdown 内容",
+                    help: "展开查看全部内容，超长文本按页显示",
                     action: expandFullContent
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)

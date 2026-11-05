@@ -340,6 +340,9 @@ public struct AppChatSessionRepository: Sendable {
         let cacheStore = AgentMarkdownRenderCacheStore(storagePaths: storagePaths)
         let newMessages = session.messages.dropFirst(max(0, previousMessageCount))
         for message in newMessages where message.role == .assistant {
+            // Large messages expand as bounded plain-text pages. Compiling their
+            // entire Markdown during import adds work with no rendering benefit.
+            guard message.content.utf16.count < AppLargeTextPage.expansionThreshold else { continue }
             if try cacheStore.loadBlocks(sessionID: session.id, messageID: message.id, content: message.content) != nil { continue }
             let blocks = AgentMarkdownBlockParser().parse(message.content)
             try cacheStore.saveBlocks(

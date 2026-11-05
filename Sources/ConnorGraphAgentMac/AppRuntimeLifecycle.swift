@@ -4163,7 +4163,10 @@ extension AppRuntimeLifecycle {
         // （connor_friend_* 键）随 memory_l4_entities 同步过来，本机据此把好友重新绑定到
         // 对应人物档案并把好友的自动建档档案并入目标人物，让人际关系列表跨端一致。
         if let im = graph.im, let memory = memoryOSStore {
-            let entities = (try? memory.listAllEntities()) ?? []
+            let entities = await Task.detached(priority: .utility) {
+                (try? memory.listAllEntities()) ?? []
+            }.value
+            try Task.checkCancellation()
             await im.reconcileFriendBindingsFromSync(entities: entities)
         }
         if let message = result.failureMessage {
@@ -4185,79 +4188,83 @@ extension AppRuntimeLifecycle {
             contactsFeatureModel.profiles.map { ($0.id, $0) },
             uniquingKeysWith: { a, _ in a }
         )
+        let friends = im.friends
         do {
-            let existingEntities = (try? memory.listAllEntities()) ?? []
-            let entitiesByID = Dictionary(existingEntities.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-            for action in actions {
-                if let rawProfileID = action.personProfileID {
-                    let profileID = ContactID(rawValue: rawProfileID)
-                    // 仅「好友已并入真实人物」的绑定；自动建档档案（connor-friend-<id>）不参与。
-                    guard ImFriendPersonProvisioner.profileID(for: action.userId) != profileID,
-                          let profile = profilesByID[profileID],
-                          let friend = im.friends.first(where: { $0.userId == action.userId })
-                    else { continue }
+            let projectionTask = Task.detached(priority: .utility) {
+                let existingEntities = (try? memory.listAllEntities()) ?? []
+                let entitiesByID = Dictionary(existingEntities.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+                for action in actions {
+                    if let rawProfileID = action.personProfileID {
+                        let profileID = ContactID(rawValue: rawProfileID)
+                        // 仅「好友已并入真实人物」的绑定；自动建档档案（connor-friend-<id>）不参与。
+                        guard ImFriendPersonProvisioner.profileID(for: action.userId) != profileID,
+                              let profile = profilesByID[profileID],
+                              let friend = friends.first(where: { $0.userId == action.userId })
+                        else { continue }
 
-                    let syntheticID = "l4-entity:person-profile:\(profileID.rawValue)"
-                    let syntheticStableKey = "person-profile:\(profileID.rawValue)"
-                    let existing: MemoryOSEntity? = {
-                        if let memoryEntityID = profile.memoryEntityID, !memoryEntityID.isEmpty {
-                            return entitiesByID[memoryEntityID]
+                        let syntheticID = "l4-entity:person-profile:\(profileID.rawValue)"
+                        let syntheticStableKey = "person-profile:\(profileID.rawValue)"
+                        let existing: MemoryOSEntity? = {
+                            if let memoryEntityID = profile.memoryEntityID, !memoryEntityID.isEmpty {
+                                return entitiesByID[memoryEntityID]
+                            }
+                            return entitiesByID[syntheticID] ?? existingEntities.first { $0.stableKey == syntheticStableKey }
+                        }()
+
+                        var metadata = existing?.metadata ?? [:]
+                        metadata["connor_friend_user_id"] = String(friend.userId)
+                        metadata["connor_friend_username"] = friend.username
+                        metadata["connor_friend_nickname"] = friend.nickname
+                        metadata["connor_friend_email"] = friend.email
+
+                        let name = existing?.name ?? profile.displayName
+                        if let existing, existing.entityType == "person", existing.name == name, existing.metadata == metadata {
+                            continue // 幂等：内容一致，跳过
                         }
-                        return entitiesByID[syntheticID] ?? existingEntities.first { $0.stableKey == syntheticStableKey }
-                    }()
-
-                    var metadata = existing?.metadata ?? [:]
-                    metadata["connor_friend_user_id"] = String(friend.userId)
-                    metadata["connor_friend_username"] = friend.username
-                    metadata["connor_friend_nickname"] = friend.nickname
-                    metadata["connor_friend_email"] = friend.email
-
-                    let name = existing?.name ?? profile.displayName
-                    if let existing, existing.entityType == "person", existing.name == name, existing.metadata == metadata {
-                        continue // 幂等：内容一致，跳过
-                    }
-                    let entity = MemoryOSEntity(
-                        id: existing?.id ?? syntheticID,
-                        stableKey: existing?.stableKey ?? syntheticStableKey,
-                        entityType: "person",
-                        name: name,
-                        aliases: existing?.aliases ?? profile.aliases,
-                        summary: existing?.summary ?? "",
-                        confidence: existing?.confidence ?? 0.9,
-                        createdAt: existing?.createdAt ?? Date(),
-                        updatedAt: Date(),
-                        validFrom: existing?.validFrom ?? Date(),
-                        metadata: metadata
-                    )
-                    try AppAccountSyncSignal.$suppressLocalChange.withValue(true) {
-                        try memory.upsert(entity: entity)
-                    }
-                } else {
-                    // 解绑：清除该好友在所有人物实体上的 connor_friend_* 元数据。
-                    for entity in existingEntities where entity.metadata["connor_friend_user_id"] == String(action.userId) {
-                        var metadata = entity.metadata
-                        for key in ["connor_friend_user_id", "connor_friend_username", "connor_friend_nickname", "connor_friend_email"] {
-                            metadata.removeValue(forKey: key)
-                        }
-                        let updated = MemoryOSEntity(
-                            id: entity.id,
-                            stableKey: entity.stableKey,
-                            entityType: entity.entityType,
-                            name: entity.name,
-                            aliases: entity.aliases,
-                            summary: entity.summary,
-                            confidence: entity.confidence,
-                            createdAt: entity.createdAt,
+                        let entity = MemoryOSEntity(
+                            id: existing?.id ?? syntheticID,
+                            stableKey: existing?.stableKey ?? syntheticStableKey,
+                            entityType: "person",
+                            name: name,
+                            aliases: existing?.aliases ?? profile.aliases,
+                            summary: existing?.summary ?? "",
+                            confidence: existing?.confidence ?? 0.9,
+                            createdAt: existing?.createdAt ?? Date(),
                             updatedAt: Date(),
-                            validFrom: entity.validFrom,
+                            validFrom: existing?.validFrom ?? Date(),
                             metadata: metadata
                         )
                         try AppAccountSyncSignal.$suppressLocalChange.withValue(true) {
-                            try memory.upsert(entity: updated)
+                            try memory.upsert(entity: entity)
+                        }
+                    } else {
+                        // 解绑：清除该好友在所有人物实体上的 connor_friend_* 元数据。
+                        for entity in existingEntities where entity.metadata["connor_friend_user_id"] == String(action.userId) {
+                            var metadata = entity.metadata
+                            for key in ["connor_friend_user_id", "connor_friend_username", "connor_friend_nickname", "connor_friend_email"] {
+                                metadata.removeValue(forKey: key)
+                            }
+                            let updated = MemoryOSEntity(
+                                id: entity.id,
+                                stableKey: entity.stableKey,
+                                entityType: entity.entityType,
+                                name: entity.name,
+                                aliases: entity.aliases,
+                                summary: entity.summary,
+                                confidence: entity.confidence,
+                                createdAt: entity.createdAt,
+                                updatedAt: Date(),
+                                validFrom: entity.validFrom,
+                                metadata: metadata
+                            )
+                            try AppAccountSyncSignal.$suppressLocalChange.withValue(true) {
+                                try memory.upsert(entity: updated)
+                            }
                         }
                     }
                 }
             }
+            try await projectionTask.value
         } catch {
             AppPerformanceLog.chatTurnLogger.warning("account.sync.friend-projection error=\(String(describing: error), privacy: .public)")
         }
