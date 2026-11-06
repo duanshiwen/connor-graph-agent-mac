@@ -6,3 +6,9 @@ resolver = "2"
 edition = "2021"
 license = "UNLICENSED"
 publish = false
+
+# rustc 1.97's debug-info stripping can misalign Mach-O LINKEDIT on macOS 27.
+# Proc-macros must remain loadable by rustc during Release builds.
+# https://github.com/rust-lang/rust/issues/157750
+[profile.release.build-override]
+strip = false
