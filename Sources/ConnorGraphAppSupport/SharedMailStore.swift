@@ -110,12 +110,15 @@ extension SharedMailStore {
         for account in accounts { for box in try await store.listMailboxes(accountID: account.id) { mailboxes[box.id] = box } }
         for id in try await store.allMessageIDs() {
             guard let detail = try await store.message(id: id), let account = byAccount[detail.summary.accountID],
-                  let box = mailboxes[detail.summary.mailboxID], let validity = box.status.syncCursor?.uidValidity,
-                  let uid = detail.id.rawValue.split(separator: "-").last, (UInt32(uid) ?? 0) > 0, (UInt32(validity) ?? 0) > 0,
+                  let box = mailboxes[detail.summary.mailboxID],
+                  let rawValidity = box.status.syncCursor?.uidValidity, let validity = UInt32(rawValidity), validity > 0,
                   let address = account.identities.first?.address.email else { continue }
+            let remoteMailbox = RemoteIMAPMailbox(name: box.name, path: box.path, role: box.role)
+            guard let rawUID = remoteMailbox.uid(fromMessageID: detail.id, accountID: account.id),
+                  let uid = UInt32(rawUID), uid > 0 else { continue }
             var message = SharedMailMessage()
             message.mailboxAddress = address; message.mailboxName = address; message.folder = box.path
-            message.uidValidity = String(UInt32(validity)!); message.uid = String(UInt32(uid)!); message.messageId = detail.headers.messageIDHeader ?? ""
+            message.uidValidity = String(validity); message.uid = String(uid); message.messageId = detail.headers.messageIDHeader ?? ""
             message.subject = detail.summary.subject; message.from = detail.summary.from.email
             message.to = detail.summary.to.map(\.email); message.cc = detail.summary.cc.map(\.email)
             message.sentAt = Int64(detail.summary.date.timeIntervalSince1970 * 1_000)

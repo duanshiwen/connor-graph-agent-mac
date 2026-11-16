@@ -212,6 +212,7 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
 
     public func saveMessage(_ message: MailMessageDetail) async throws {
         try saveMessageInternal(message)
+        AppAccountSyncSignal.postLocalDataDidChange()
         try await searchService?.upsert([NativeSourceSearchAdapters.mailDocument(from: message)])
     }
 
@@ -227,6 +228,7 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
             try? execute("ROLLBACK;")
             throw error
         }
+        AppAccountSyncSignal.postLocalDataDidChange()
         if let searchService {
             try await searchService.upsert(messages.map { NativeSourceSearchAdapters.mailDocument(from: $0) })
         }
@@ -388,6 +390,7 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
             try? execute("ROLLBACK;")
             throw error
         }
+        AppAccountSyncSignal.postLocalDataDidChange()
         let changed = try loadMessageByIDs(messageIDs)
         try await searchService?.upsert(changed.map(NativeSourceSearchAdapters.mailDocument(from:)))
     }

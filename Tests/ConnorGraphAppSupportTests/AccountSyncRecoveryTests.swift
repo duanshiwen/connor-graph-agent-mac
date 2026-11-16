@@ -144,6 +144,45 @@ struct AccountSyncRecoveryTests {
         #expect(await fixture.transport.pushedSessions.isEmpty)
     }
 
+    @Test @MainActor func missingMailFragmentBehindCursorTriggersOneFreshSnapshot() async throws {
+        var mail = SharedMailMessage()
+        mail.mailboxAddress = "owner@example.test"
+        mail.folder = "INBOX"
+        mail.uidValidity = "42"
+        mail.uid = "7"
+        mail.id = SharedMailStore.recordID(address: mail.mailboxAddress, folder: mail.folder, validity: mail.uidValidity, uid: mail.uid)
+        mail.bodyText = String(repeating: "正文😀", count: 75_000)
+        mail.bodyAvailable = true
+        mail.updatedAt = 100
+        let records = try SessionChunks.project(id: mail.id, payload: SharedMailStore.wire(mail), mail: true)
+        let cipher = try AccountSyncPayloadCipher(keyData: Data(repeating: 7, count: 32))
+        func change(_ id: String, _ value: ConnorJSONValue) throws -> ConnorSyncChange {
+            var result = try ConnorSyncChange(collection: "mail_messages", recordId: id,
+                payload: cipher.encrypt(value, collection: "mail_messages", recordID: id))
+            result.sourceDeviceId = "peer"
+            result.version = 1
+            return result
+        }
+        let manifest = try change(mail.id, #require(records[mail.id]))
+        let parts = try records.filter { $0.key != mail.id }.map { try change($0.key, $0.value) }
+        #expect(!parts.isEmpty)
+        let fixture = try await Fixture(remote: [manifest] + parts)
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(Data(#"{"cursor":77,"records":{},"repairVersion":4,"snapshotAfterID":100}"#.utf8), forKey: "ConnorAccountSyncState.1")
+        await fixture.transport.queueIncremental([manifest] + Array(parts.dropFirst()))
+        let first = try await fixture.coordinator().reconcile()
+        #expect(first.failureMessage != nil)
+        #expect(await fixture.transport.snapshotRequests == 0)
+        let second = try await fixture.coordinator().reconcile()
+        #expect(second.failureMessage == nil)
+        #expect(second.pushedChangeCount == 0)
+        let store = SharedMailStore(configDirectory: fixture.root.appendingPathComponent("config"))
+        #expect(try store.get(mail.id)?.bodyText == mail.bodyText)
+        #expect(await fixture.transport.snapshotAfterIDs == [0])
+        _ = try await fixture.coordinator().reconcile()
+        #expect(await fixture.transport.snapshotRequests == 1)
+    }
+
     private func session(_ id: String, messageID: String, at: Double) -> AgentSession {
         let date = Date(timeIntervalSince1970: at)
         return AgentSession(id: id, title: id, messages: [AgentMessage(id: messageID, role: .user, content: messageID, createdAt: date)], createdAt: Date(timeIntervalSince1970: 0), updatedAt: date)
@@ -194,6 +233,10 @@ private actor RecoveryTransport: ConnorBackendHTTPTransport {
     var rejectSessionOnce: Bool
     let failPush: Bool
     var snapshotRequests = 0
+    var snapshotAfterIDs: [Int64] = []
+    private var incremental: [ConnorSyncChange] = []
+
+    func queueIncremental(_ changes: [ConnorSyncChange]) { incremental = changes }
     var pushedSessions: [ConnorPortableSession] = []
     var pushedSessionDeletes: [String] = []
     var sessionUploadAttempts = 0
@@ -208,9 +251,12 @@ private actor RecoveryTransport: ConnorBackendHTTPTransport {
             payload = ["deviceId": "test", "platform": "macos", "name": "test", "appVersion": "1", "lastSeenAt": "2026-01-01T00:00:00Z"]
         } else if path.hasSuffix("/snapshot") {
             snapshotRequests += 1
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+            snapshotAfterIDs.append(Int64(query?.first { $0.name == "afterId" }?.value ?? "") ?? -1)
             payload = ["changes": try JSONSerialization.jsonObject(with: JSONEncoder().encode(remote)), "nextRecordId": remote.count, "cursor": 77, "hasMore": false]
         } else if path.hasSuffix("/pull") {
-            payload = ["changes": [], "nextCursor": 77, "hasMore": false]
+            payload = ["changes": try JSONSerialization.jsonObject(with: JSONEncoder().encode(incremental)), "nextCursor": 77, "hasMore": false]
+            incremental = []
         } else if path.hasSuffix("/push") {
             if failPush { return (Data("{}".utf8), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!) }
             let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]

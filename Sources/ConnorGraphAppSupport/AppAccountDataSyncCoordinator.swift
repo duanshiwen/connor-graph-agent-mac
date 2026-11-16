@@ -584,6 +584,12 @@ public actor AppAccountDataSyncCoordinator {
                 appliedKeys.append(key)
             } catch {
                 try Task.checkCancellation()
+                if case .incomplete? = error as? SessionChunks.Failure, !snapshot,
+                   state.pending[key]?.version != change.version {
+                    state.repairVersion = 0
+                    state.snapshotAfterID = 0
+                    state.snapshotCursor = nil
+                }
                 if (state.pending[key]?.version ?? -1) <= (change.version ?? 0) { state.pending[key] = change }
                 AppPerformanceLog.chatTurnLogger.warning("account.sync.apply-deferred collection=\(change.collection, privacy: .public) error=\(String(describing: error), privacy: .public)")
             }
@@ -623,6 +629,7 @@ public actor AppAccountDataSyncCoordinator {
                     if !hasMore {
                         state.cursor = max(state.cursor, state.snapshotCursor ?? 0)
                         state.repairVersion = 4
+                        state.snapshotAfterID = 0
                         didRepair = true
                         state.snapshotCursor = nil
                     }
@@ -772,20 +779,55 @@ public actor AppAccountDataSyncCoordinator {
                 payload: cipher.encrypt(jsonValue(SyncTombstone(updatedAt: deletedAt)), collection: parts[0], recordID: parts[1]), deleted: true))
         }
         var batches: [[ConnorSyncChange]] = []; var batch: [ConnorSyncChange] = []; var batchBytes = 0
-        for mutation in mutations {
+        let sortedMutations = mutations.filter { mutation in
+            guard let payload = projected[recordKey(mutation.collection, mutation.recordId)] else { return false }
+            return SessionChunks.parent(payload) != nil
+        }
+        let partIDs = Set(sortedMutations.map(\.mutationId))
+        for mutation in sortedMutations + mutations.filter({ !partIDs.contains($0.mutationId) }) {
             let size = try encoder.encode(mutation).count
-            if !batch.isEmpty && (batch.count >= 200 || batchBytes + size > 900 * 1024) { batches.append(batch); batch = []; batchBytes = 0 }
+            if !batch.isEmpty && (batch.count >= 200 || batchBytes + size > 900 * 1024 || partIDs.contains(batch[0].mutationId) != partIDs.contains(mutation.mutationId)) { batches.append(batch); batch = []; batchBytes = 0 }
             batch.append(mutation); batchBytes += size
         }
         if !batch.isEmpty { batches.append(batch) }
-        for batch in batches {
+        for proposed in batches {
             try Task.checkCancellation()
+            var batch: [ConnorSyncChange] = []
+            for mutation in proposed {
+                let key = recordKey(mutation.collection, mutation.recordId)
+                if !mutation.deleted, let payload = projected[key],
+                   mutation.collection == SyncCollection.mailMessages, case .object(let root) = payload,
+                   case .object(let manifest) = root[SessionChunks.manifestKey],
+                   case .array(let parts) = manifest["parts"] {
+                    let incomplete = try parts.contains { part in
+                        guard case .string(let id) = part else { return true }
+                        let partKey = recordKey(mutation.collection, id)
+                        guard let payload = projected[partKey], let receipt = state.records[partKey], receipt.encrypted else {
+                            return true
+                        }
+                        let hash = try payloadHash(payload)
+                        return receipt.deleted || receipt.hash != hash
+                    }
+                    if incomplete {
+                        state.dirtyKeys.insert(key)
+                        deferredUploadCount += 1
+                        continue
+                    }
+                }
+                batch.append(mutation)
+            }
+            guard !batch.isEmpty else { continue }
             let results = try await identity.pushSyncChanges(batch)
             for mutation in batch {
                 guard let pushResult = results.first(where: { $0.mutationId == mutation.mutationId }), pushResult.applied else {
                     state.dirtyKeys.insert(recordKey(mutation.collection, mutation.recordId))
                     deferredUploadCount += 1
-                    if mutation.collection == SyncCollection.sessions, results.contains(where: { $0.mutationId == mutation.mutationId && $0.version != nil }) { state.repairVersion = 0 }
+                    if mutation.collection == SyncCollection.sessions || mutation.collection == SyncCollection.mailMessages,
+                       results.contains(where: { $0.mutationId == mutation.mutationId && $0.version != nil }) {
+                        state.repairVersion = 0
+                        state.snapshotAfterID = 0
+                        state.snapshotCursor = nil
+                    }
                     continue
                 }
                 let clear = try cipher.decrypt(mutation.payload, collection: mutation.collection, recordID: mutation.recordId)
