@@ -728,7 +728,7 @@ public final class AppUserIdentityStore: ObservableObject {
     public var onImSocketStateChange: (@Sendable (_ connected: Bool) async -> Void)?
 
     public init(
-        baseURL: URL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "https://connor-agent.apecho.com/")!,
+        baseURL: URL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "https://connor-agent.connor.run/")!,
         credentials: AppConnorAccountCredentialStore = .init(),
         transport: any ConnorBackendHTTPTransport = URLSession.shared,
         networkIsAvailable: @escaping @MainActor () -> Bool = { true },

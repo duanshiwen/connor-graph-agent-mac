@@ -721,7 +721,7 @@ final class AppRuntimeLifecycle {
             bookmarkStore: storagePaths.map { BrowserBookmarkStore(bookmarksURL: $0.browserBookmarksURL) },
             nativeSourceSearchBackend: nativeSourceSearchBackend
         )
-        let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "https://connor-agent.apecho.com/")!
+        let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "https://connor-agent.connor.run/")!
         AppBackendConnectivity.shared.configure(baseURL: backendBaseURL)
         let backendTransport = BackendConnectivityTrackingTransport()
         let accountCredentials = AppConnorAccountCredentialStore()
