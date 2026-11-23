@@ -122,6 +122,7 @@ struct ConnorSettingsDetailView: View {
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         .task {
             graph.settingsActions.load()
+            await AppRemoteModelCatalog.shared.refreshIfNeeded()
         }
     }
 }
@@ -888,11 +889,21 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
         "tokendance", "deepseek", "xiaomi-mimo", "qwen", "doubao", "moonshot", "zhipu", "minimax", "stepfun", "stepfun-preview", "zai"
     ]
 
-    static var chinaProviderPresets: [AIConnectionProviderPreset] {
+    @MainActor static var chinaProviderPresets: [AIConnectionProviderPreset] {
         otherProviderPresets.filter { chinaProviderPresetIDs.contains($0.id) }
     }
 
-    static let otherProviderPresets: [AIConnectionProviderPreset] = [
+    @MainActor static var otherProviderPresets: [AIConnectionProviderPreset] {
+        bundledProviderPresets.map { preset in
+            guard let remote = AppRemoteModelCatalog.shared.provider(preset.id) else { return preset }
+            var updated = preset
+            updated.defaultModel = remote.default_model
+            updated.supportedModels = remote.models
+            return updated
+        }
+    }
+
+    private static let bundledProviderPresets: [AIConnectionProviderPreset] = [
         AIConnectionProviderPreset(id: "tokendance", title: "TokenDance · 词元跳动", endpoint: "https://tokendance.space/gateway/v1", defaultModel: "seed-2.1-pro", supportedModels: ["seed-2.1-pro", "seed-2.1-turbo", "seed-2.0-pro", "seed-2.0-code", "seed-2.0-lite", "seed-2.0-mini", "seed-evolving"], keyPlaceholder: "Paste your TokenDance API Key...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "openai", title: "OpenAI", endpoint: "https://api.openai.com/v1", defaultModel: "gpt-6-luna", supportedModels: ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"], keyPlaceholder: "sk-...", protocolKind: .openAIResponses, hidesEndpoint: true),
         AIConnectionProviderPreset(id: "openai-eu", title: "OpenAI EU", endpoint: "https://eu.api.openai.com/v1", defaultModel: "gpt-6-luna", supportedModels: ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"], keyPlaceholder: "sk-...", protocolKind: .openAIResponses),
@@ -1196,6 +1207,7 @@ struct AIConnectionSetupView: View {
         .onDisappear { tokenDanceTask?.cancel(); tokenDanceTask = nil; tokenDanceAuth = nil; tokenDanceCode = "" }
         .onChange(of: selectedProviderPresetID) { _, _ in if tokenDanceAuth != nil { isAuthenticating = false }; tokenDanceTask?.cancel(); tokenDanceTask = nil; tokenDanceAuth = nil; tokenDanceCode = "" }
         .onAppear(perform: initializeDrafts)
+        .task { await AppRemoteModelCatalog.shared.refreshIfNeeded() }
         .onChange(of: baseURLString) { _, _ in refreshSuggestedConnectionName() }
         .onChange(of: customProtocol) { _, _ in refreshSuggestedConnectionName() }
     }
@@ -2533,6 +2545,7 @@ struct AIConnectionSetupView: View {
             return plan.availableModels
         }
         if option.id == "deepseek" || option.id == "xiaomi-mimo" {
+            if let remote = AppRemoteModelCatalog.shared.provider(option.id) { return remote.models }
             return option.supportedModels.isEmpty ? [option.selectedModel] : option.supportedModels
         }
         if option.id == "china-provider" || (option.id == "other-provider" && selectedProviderPresetID != "custom") {

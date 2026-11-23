@@ -2,6 +2,7 @@ import Testing
 @testable import ConnorGraphAgentMac
 
 @Suite("Chinese provider subscription plan presets")
+@MainActor
 struct ChineseProviderSubscriptionPlanPresetTests {
     private func preset(_ id: String) -> AIConnectionProviderPreset {
         AIConnectionProviderPreset.chinaProviderPresets.first { $0.id == id }!

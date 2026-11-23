@@ -2,6 +2,7 @@ import Testing
 @testable import ConnorGraphAgentMac
 
 @Suite("GLM connection provider preset")
+@MainActor
 struct GLMConnectionProviderPresetTests {
     private var preset: AIConnectionProviderPreset {
         AIConnectionProviderPreset.otherProviderPresets.first { $0.id == "zhipu" }!

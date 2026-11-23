@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "revision": "2026-11-23.1",
+  "refresh_after_seconds": 21600,
+  "providers": [
+    {
+      "id": "openai",
+      "default_model": "gpt-6-luna",
+      "models": [
+        "gpt-6.2-sol",
+        "gpt-6.2-astra",
+        "gpt-6.1-terra",
+        "gpt-6-luna",
+        "gpt-6.1-sol",
+        "gpt-6-astra"
+      ],
+      "source_url": "https://developers.openai.com/api/docs/models"
+    },
+    {
+      "id": "google",
+      "default_model": "gemini-3.8-flash",
+      "models": [
+        "gemini-4-hydrogen",
+        "gemini-4-neon",
+        "gemini-4-carbon",
+        "gemini-4-argon",
+        "gemini-3.8-flash"
+      ],
+      "source_url": "https://aistudio.google.com/docs/models"
+    },
+    {
+      "id": "anthropic",
+      "default_model": "claude-sonnet-5-5",
+      "models": [
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
+        "claude-opus-5-5",
+        "claude-fable-5-2",
+        "claude-haiku-4-5-20251001"
+      ],
+      "source_url": "https://platform.claude.com/docs/en/models/overview",
+      "model_requirements": {
+        "claude-sonnet-5-5": [
+          "anthropic_signed_thinking_v1"
+        ],
+        "claude-haiku-5-5": [
+          "anthropic_signed_thinking_v1"
+        ],
+        "claude-opus-5-5": [
+          "anthropic_signed_thinking_v1"
+        ],
+        "claude-fable-5-2": [
+          "anthropic_signed_thinking_v1"
+        ]
+      }
+    },
+    {
+      "id": "qwen",
+      "default_model": "qwen3.8-flash",
+      "models": [
+        "qwen4-max",
+        "qwen3.8-flash",
+        "qwen3.8-max",
+        "qwen3-coder-plus"
+      ],
+      "source_url": "https://help.aliyun.com/en/model-studio/models"
+    },
+    {
+      "id": "deepseek",
+      "default_model": "deepseek-flash",
+      "models": [
+        "deepseek-flash",
+        "deepseek-v4-pro"
+      ],
+      "source_url": "https://api-docs.deepseek.com/quick_start/pricing/"
+    },
+    {
+      "id": "xiaomi-mimo",
+      "default_model": "mimo-v2.6-pro",
+      "models": [
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.6-pro-ultraspeed"
+      ],
+      "source_url": "https://mimo.mi.com/docs/en-US/quick-start/model"
+    },
+    {
+      "id": "moonshot",
+      "default_model": "kimi-k3",
+      "models": [
+        "kimi-k3.1-pro",
+        "kimi-k3.1-pro-highspeed",
+        "kimi-k3"
+      ],
+      "source_url": "https://platform.kimi.com/docs/guide/kimi-k3-1-pro-quickstart",
+      "model_requirements": {
+        "kimi-k3.1-pro": [
+          "openai_reasoning_replay_v1"
+        ],
+        "kimi-k3.1-pro-highspeed": [
+          "openai_reasoning_replay_v1"
+        ]
+      }
+    },
+    {
+      "id": "zhipu",
+      "default_model": "glm-5.3",
+      "models": [
+        "glm-5.3",
+        "glm-5.3-flash",
+        "glm-5.3-flashx",
+        "glm-5.2"
+      ],
+      "source_url": "https://docs.bigmodel.cn/"
+    },
+    {
+      "id": "zai",
+      "default_model": "glm-5.3",
+      "models": [
+        "glm-5.3",
+        "glm-5.3-flash",
+        "glm-5.3-flashx"
+      ],
+      "source_url": "https://docs.z.ai/guides/overview"
+    },
+    {
+      "id": "minimax",
+      "default_model": "MiniMax-M3.1-Flash",
+      "models": [
+        "MiniMax-M3.1-Flash",
+        "MiniMax-M3"
+      ],
+      "source_url": "https://platform.minimax.cn/docs/guides/models-intro"
+    },
+    {
+      "id": "stepfun",
+      "default_model": "step-3.7-flash",
+      "models": [
+        "step-3.7-flash",
+        "step-5-preview"
+      ],
+      "source_url": "https://platform.stepfun.com/"
+    },
+    {
+      "id": "stepfun-preview",
+      "default_model": "step-5-preview",
+      "models": [
+        "step-5-preview",
+        "step-3.7-flash"
+      ],
+      "source_url": "https://platform.stepfun.com/"
+    },
+    {
+      "id": "xai",
+      "default_model": "grok-4.7",
+      "models": [
+        "grok-4.7"
+      ],
+      "source_url": "https://docs.x.ai/developers/models"
+    },
+    {
+      "id": "mistral",
+      "default_model": "mistral-large-latest",
+      "models": [
+        "mistral-large-latest",
+        "mistral-large-4"
+      ],
+      "source_url": "https://docs.mistral.ai/models/mistral-large"
+    }
+  ]
+}

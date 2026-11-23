@@ -45,6 +45,7 @@ let package = Package(
             ],
             resources: [
                 .copy("Resources/Skills"),
+                .copy("Resources/ModelCatalog"),
                 .copy("Resources/Calendar")
             ],
             linkerSettings: [
