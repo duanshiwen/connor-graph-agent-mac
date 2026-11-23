@@ -109,7 +109,9 @@ final class AgentAudioPlaybackController: NSObject, AVAudioPlayerDelegate {
         progressTask?.cancel()
         progressTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(200))
+                do { try await Task.sleep(for: .milliseconds(200)) }
+                catch { return }
+                guard !Task.isCancelled else { return }
                 guard let self, let player = self.player, player.isPlaying else { return }
                 self.currentTime = player.currentTime
             }

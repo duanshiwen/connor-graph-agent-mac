@@ -108,12 +108,16 @@ final class AppMainActorStallMonitor {
     }
 
     func start() {
-        guard task == nil else { return }
+        // Continuous diagnostic sampling must be explicitly enabled, even in debug builds.
+        guard ProcessInfo.processInfo.environment["CONNOR_STALL_MONITOR"] == "1",
+              task == nil else { return }
         let configuration = configuration
         let logger = logger
         task = Task.detached(priority: .utility) {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: configuration.intervalNanoseconds)
+                do { try await Task.sleep(nanoseconds: configuration.intervalNanoseconds) }
+                catch { return }
+                guard !Task.isCancelled else { return }
                 let start = ContinuousClock.now
                 await MainActor.run {}
                 let elapsed = start.duration(to: ContinuousClock.now)

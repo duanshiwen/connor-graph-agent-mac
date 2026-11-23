@@ -80,7 +80,9 @@ final class ImVoiceRecorder: NSObject, AVAudioRecorderDelegate {
         isRecording = true
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                do { try await Task.sleep(for: .seconds(1)) }
+                catch { return }
+                guard !Task.isCancelled else { return }
                 guard let self, self.isRecording else { return }
                 self.elapsedSeconds = min(Self.maximumDuration, Int(self.recorder?.currentTime ?? 0))
                 if self.elapsedSeconds >= Self.maximumDuration {

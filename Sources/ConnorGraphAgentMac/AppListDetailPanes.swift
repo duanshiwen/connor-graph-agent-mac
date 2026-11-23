@@ -4433,6 +4433,7 @@ struct CraftSessionRow: View {
     @State private var titleDraft: String = ""
     @State private var isDeleteConfirmationPresented: Bool = false
     @State private var isAttentionPulseOn: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var isTitleFocused: Bool
 
     var body: some View {
@@ -4675,7 +4676,7 @@ struct CraftSessionRow: View {
     }
 
     private var shouldPulseAttention: Bool {
-        attentionLevel >= .emphasized
+        attentionLevel >= .emphasized && !reduceMotion && !ProcessInfo.processInfo.isLowPowerModeEnabled
     }
 
     private var attentionPulseTaskID: String {
@@ -4700,7 +4701,10 @@ struct CraftSessionRow: View {
 
         resetAttentionPulse()
 
-        while !Task.isCancelled && shouldPulseAttention {
+        // Two pulses draw attention without animating every pending session
+        // indefinitely across all workspaces. Static badges and styling remain.
+        for _ in 0..<4 {
+            guard !Task.isCancelled, shouldPulseAttention else { break }
             withAnimation(.easeInOut(duration: 0.9)) {
                 isAttentionPulseOn.toggle()
             }
@@ -4712,9 +4716,7 @@ struct CraftSessionRow: View {
             }
         }
 
-        if !shouldPulseAttention || Task.isCancelled {
-            resetAttentionPulse()
-        }
+        resetAttentionPulse()
     }
 
     private func beginTitleEdit() {

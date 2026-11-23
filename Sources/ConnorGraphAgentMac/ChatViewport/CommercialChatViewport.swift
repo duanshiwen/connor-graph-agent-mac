@@ -360,6 +360,7 @@ struct ChatViewportNativeScrollObserver: NSViewRepresentable {
         private var isDismantled = false
         private var retryAttemptsRemaining = 20
         private var lastPublishedMetrics: ChatViewportNativeScrollMetrics?
+        private var isMetricsPublicationScheduled = false
 
         private static let logger = Logger(subsystem: "ConnorGraphAgentMac", category: "ChatViewport")
         private static let retryDelay: TimeInterval = 0.05
@@ -431,12 +432,21 @@ struct ChatViewportNativeScrollObserver: NSViewRepresentable {
                     // “Modifying state during view update”与
                     // “Publishing changes from within view updates”运行时告警。
                     // 把指标发布调度到下一轮 RunLoop，等当前视图更新事务结束后再执行。
-                    DispatchQueue.main.async {
-                        self?.publishMetrics()
-                    }
+                    self?.scheduleMetricsPublication()
                 }
             }
             publishMetrics()
+        }
+
+        private func scheduleMetricsPublication() {
+            guard !isDismantled, !isMetricsPublicationScheduled else { return }
+            isMetricsPublicationScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isMetricsPublicationScheduled = false
+                guard !self.isDismantled else { return }
+                self.publishMetrics()
+            }
         }
 
         private func publishMetrics() {

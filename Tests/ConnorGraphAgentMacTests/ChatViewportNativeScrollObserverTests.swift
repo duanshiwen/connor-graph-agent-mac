@@ -84,4 +84,42 @@ struct ChatViewportNativeScrollObserverTests {
         #expect(atBottom.distanceToBottom == 0)
         #expect(atBottom.distanceToTop == 1_400)
     }
+
+    @Test func burstOfBoundsChangesPublishesFinalMetricsAndDetachStopsUpdates() async {
+        let content = NSView(frame: CGRect(x: 0, y: 0, width: 800, height: 2_000))
+        let scrollView = NSScrollView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        scrollView.documentView = content
+        let observerView = NSView(frame: .zero)
+        content.addSubview(observerView)
+        var updates: [ChatViewportNativeScrollMetrics] = []
+        let coordinator = ChatViewportNativeScrollObserver.Coordinator { updates.append($0) }
+        coordinator.attachWhenAvailable(from: observerView)
+        await drainMainQueue()
+        #expect(!updates.isEmpty)
+        updates.removeAll()
+
+        for offset in 1...100 {
+            scrollView.contentView.setBoundsOrigin(CGPoint(x: 0, y: offset))
+            NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+        }
+        await drainMainQueue()
+        let finalMetrics = ChatViewportNativeScrollMetrics.calculate(
+            documentBounds: content.bounds, visibleBounds: scrollView.contentView.bounds, isFlipped: content.isFlipped
+        )
+        #expect(updates == [finalMetrics])
+
+        scrollView.contentView.setBoundsOrigin(CGPoint(x: 0, y: 200))
+        NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+        coordinator.detach()
+        updates.removeAll()
+        await drainMainQueue()
+        #expect(updates.isEmpty)
+    }
+
+    private func drainMainQueue() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
+
 }

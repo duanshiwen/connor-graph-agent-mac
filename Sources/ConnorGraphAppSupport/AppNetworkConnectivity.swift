@@ -22,7 +22,8 @@ public final class AppNetworkConnectivity: ObservableObject {
         monitor.pathUpdateHandler = { [weak self] path in
             let isConnected = path.status == .satisfied
             Task { @MainActor [weak self] in
-                self?.isConnected = isConnected
+                guard let self, self.isConnected != isConnected else { return }
+                self.isConnected = isConnected
             }
         }
         monitor.start(queue: monitorQueue)
@@ -69,6 +70,9 @@ public final class AppBackendConnectivity: ObservableObject {
 
     private var baseURL: URL?
     private var monitoringTask: Task<Void, Never>?
+    private var configurationGeneration = 0
+
+    deinit { monitoringTask?.cancel() }
 
     public var baseURLString: String? { baseURL?.absoluteString }
     public var isReachable: Bool { state != .unreachable }
@@ -76,35 +80,42 @@ public final class AppBackendConnectivity: ObservableObject {
     public func configure(baseURL: URL) {
         guard self.baseURL != baseURL || monitoringTask == nil else { return }
         monitoringTask?.cancel()
+        configurationGeneration += 1
         self.baseURL = baseURL
+        if state != .unknown { state = .unknown }
         monitoringTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.probe()
-                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled, self != nil else { return }
+                do { try await Task.sleep(for: .seconds(10)) }
+                catch { return }
             }
         }
     }
 
     public func recordReachable() {
-        state = .reachable
+        if state != .reachable { state = .reachable }
     }
 
     public func recordFailure(_ error: Error) {
         if AppBackendConnectionFailure.isUnreachable(error) {
-            state = .unreachable
+            if state != .unreachable { state = .unreachable }
         }
     }
 
     private func probe() async {
-        guard let baseURL else { return }
+        guard !Task.isCancelled, let baseURL else { return }
+        let generation = configurationGeneration
         let healthURL = baseURL.appendingPathComponent("health")
         var request = URLRequest(url: healthURL)
         request.httpMethod = "GET"
         request.timeoutInterval = 5
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled, generation == configurationGeneration else { return }
             if response is HTTPURLResponse { recordReachable() }
         } catch {
+            guard !Task.isCancelled, generation == configurationGeneration else { return }
             recordFailure(error)
         }
     }

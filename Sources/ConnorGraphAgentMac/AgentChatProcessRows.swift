@@ -11,19 +11,27 @@ enum AgentTurnActivityEventResolver {
     }
 }
 
-private struct AgentTurnActivityEventLoadKey: Hashable {
+/// Text tokens do not change tool activity. Only rebuild activity presentation for
+/// a new activity event, process transition, or disclosure change.
+struct AgentTurnActivityLoadKey: Hashable {
     var isExpanded: Bool
     var processID: String
     var processState: AgentChatTurnProcessState
-    var eventCount: Int
-    var lastEventID: String?
-}
+    var turnNumber: Int
+    var hasInitialEvents: Bool
+    var lastActivityEventID: String?
 
-private struct AgentTurnActivitySummaryLoadKey: Hashable {
-    var processID: String
-    var processState: AgentChatTurnProcessState
-    var eventCount: Int
-    var lastEventID: String?
+    init(isExpanded: Bool, processID: String, processState: AgentChatTurnProcessState,
+         turnNumber: Int, events: [AgentEventPresentation]?) {
+        self.isExpanded = isExpanded
+        self.processID = processID
+        self.processState = processState
+        self.turnNumber = turnNumber
+        hasInitialEvents = events != nil
+        lastActivityEventID = events?.last(where: {
+            $0.kind != "textDelta" || $0.severity != .info || $0.toolActivity != nil
+        })?.id
+    }
 }
 
 struct AgentActivityHeaderDisclosurePresentation: Equatable {
@@ -84,11 +92,13 @@ private struct AgentTurnActivityDetailPresentation: Sendable {
 private enum AgentTurnActivityDetailBuilder {
     nonisolated static func build(
         process: AgentChatTurnProcessPresentation,
-        events: [AgentEventPresentation]
+        events: [AgentEventPresentation],
+        includeTools: Bool
     ) -> AgentTurnActivityDetailPresentation? {
         guard !Task.isCancelled else { return nil }
         let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
         guard !Task.isCancelled else { return nil }
+        guard includeTools else { return AgentTurnActivityDetailPresentation(summary: summary, tools: []) }
         let invocations = AgentToolInvocationAssembler().invocations(from: events)
         guard !Task.isCancelled else { return nil }
         var tools: [AgentTurnActivityPreparedTool] = []
@@ -129,8 +139,6 @@ struct AgentChatTurnProcessRow: View {
     @State private var preparedDetailProcessID: String?
     @State private var preparedSummary: AgentTurnActivitySummaryPresentation?
     @State private var preparedSummaryProcessID: String?
-    @State private var summaryBuildGeneration = 0
-    @State private var detailBuildGeneration = 0
     @State private var startedAt: Date = Date()
     @State private var isHoveringHeader = false
 
@@ -173,14 +181,13 @@ struct AgentChatTurnProcessRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: AgentTurnActivityEventLoadKey(
+        .task(id: AgentTurnActivityLoadKey(
             isExpanded: isExpanded,
             processID: process.id,
             processState: process.state,
-            eventCount: initialEvents?.count ?? 0,
-            lastEventID: initialEvents?.last?.id
+            turnNumber: process.turnNumber,
+            events: initialEvents
         )) {
-            guard isExpanded else { return }
             let events: [AgentEventPresentation]
             if let initialEvents {
                 events = initialEvents
@@ -188,45 +195,22 @@ struct AgentChatTurnProcessRow: View {
                 events = await loadEvents()
             }
             guard !Task.isCancelled else { return }
-            // 事件每 ~50ms 合并刷新一次；构建较慢（事件很多）时不能被下一次刷新取消，
-            // 否则运行中的摘要/明细会一直停留在“正在处理”。这里让每次构建自然完成，
-            // 只在“仍是最新一代”时才应用结果，保证最新一次构建一定生效。
-            detailBuildGeneration += 1
-            let generation = detailBuildGeneration
-            let preparationTask = Task.detached(priority: .userInitiated) {
-                AgentTurnActivityDetailBuilder.build(process: process, events: events)
+            let includeTools = isExpanded
+            // One build supplies both the header and expanded detail. Cancel
+            // detached work when SwiftUI replaces the task or removes the row.
+            let preparationTask = Task.detached(priority: .utility) {
+                AgentTurnActivityDetailBuilder.build(process: process, events: events, includeTools: includeTools)
             }
-            guard let detail = await preparationTask.value,
-                  generation == detailBuildGeneration,
-                  !Task.isCancelled else { return }
-            preparedDetail = detail
-            preparedDetailProcessID = process.id
+            let detail = await withTaskCancellationHandler {
+                await preparationTask.value
+            } onCancel: {
+                preparationTask.cancel()
+            }
+            guard let detail, !Task.isCancelled else { return }
             preparedSummary = detail.summary
             preparedSummaryProcessID = process.id
-        }
-        .task(id: AgentTurnActivitySummaryLoadKey(
-            processID: process.id,
-            processState: process.state,
-            eventCount: initialEvents?.count ?? 0,
-            lastEventID: initialEvents?.last?.id
-        )) {
-            let events: [AgentEventPresentation]
-            if let initialEvents {
-                events = initialEvents
-            } else {
-                events = await loadEvents()
-            }
-            guard !Task.isCancelled else { return }
-            // 同上：不取消进行中的构建，最新一代结果才应用，避免运行中表头卡在“正在处理”。
-            summaryBuildGeneration += 1
-            let generation = summaryBuildGeneration
-            let summaryTask = Task.detached(priority: .utility) {
-                AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
-            }
-            let summary = await summaryTask.value
-            guard generation == summaryBuildGeneration, !Task.isCancelled else { return }
-            preparedSummary = summary
-            preparedSummaryProcessID = process.id
+            preparedDetail = includeTools ? detail : nil
+            preparedDetailProcessID = includeTools ? process.id : nil
         }
     }
 
@@ -292,15 +276,11 @@ struct AgentChatTurnProcessRow: View {
         isLoadingSummary: Bool
     ) -> some View {
         let title = isLoadingSummary ? "读取调用记录…" : activityHeaderText(summary)
-        if summary.state == .running {
-            AgentRunningActivityShimmerText(text: title, baseColor: activityHeaderForegroundColor)
-        } else {
-            Text(title)
-                .font(AgentChatTypography.micro.weight(.medium))
-                .foregroundStyle(activityHeaderForegroundColor)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
+        Text(title)
+            .font(AgentChatTypography.micro.weight(.medium))
+            .foregroundStyle(activityHeaderForegroundColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 
     private func continuationAccentColor(for state: AgentTurnActivitySummaryState) -> Color {
@@ -355,57 +335,6 @@ struct AgentChatTurnProcessRow: View {
                     .foregroundStyle(color)
             }
         }
-    }
-}
-
-/// 运行态标题流光。性能策略（相对曾被移除的 30fps 版本）：
-/// 1) TimelineView 帧率从 30fps 降到 15fps，1.8s 周期下视觉几乎无差别，CPU 减半；
-/// 2) 流光仅作用于标题文字（小区域 + mask），不重绘整行；
-/// 3) 该视图只在 summary.state == .running 时渲染，轮次结束即销毁，动画自动停止；
-/// 4) 尊重系统"减弱动态效果"，开启时退化为静态标题。
-private struct AgentRunningActivityShimmerText: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var text: String
-    var baseColor: Color
-
-    var body: some View {
-        Text(text)
-            .font(AgentChatTypography.micro.weight(.medium))
-            .foregroundStyle(baseColor)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .overlay {
-                if !reduceMotion {
-                    GeometryReader { geometry in
-                        TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { context in
-                            let duration = 1.8
-                            let progress = context.date.timeIntervalSinceReferenceDate
-                                .truncatingRemainder(dividingBy: duration) / duration
-                            let highlightWidth = max(36, geometry.size.width * 0.24)
-                            LinearGradient(
-                                colors: [
-                                    .clear,
-                                    ConnorCraftPalette.accent.opacity(0.28),
-                                    Color.primary.opacity(0.72),
-                                    ConnorCraftPalette.accent.opacity(0.34),
-                                    .clear
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                            .frame(width: highlightWidth)
-                            .offset(x: -highlightWidth + progress * (geometry.size.width + highlightWidth))
-                        }
-                    }
-                }
-            }
-            .mask {
-                Text(text)
-                    .font(AgentChatTypography.micro.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .allowsHitTesting(false)
     }
 }
 

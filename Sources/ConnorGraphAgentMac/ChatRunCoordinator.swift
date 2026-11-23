@@ -247,17 +247,18 @@ final class ChatRunCoordinator {
     /// 全量 UI 重渲染与整轮摘要/工具明细重建（模型请求期间 CPU 高企的主因之一）。
     func appendEvent(_ presentation: AgentEventPresentation, sessionID: String) {
         guard !isShutdown else { return }
-        var timeline = timelinesBySessionID[sessionID] ?? []
-        timeline.append(presentation)
-        timelinesBySessionID[sessionID] = timeline
+        // Mutate the dictionary value in place. Copying it into a local before
+        // appending forces a full array copy for every incoming token.
+        timelinesBySessionID[sessionID, default: []].append(presentation)
         scheduleTimelineFlush(sessionID: sessionID)
     }
 
     private func scheduleTimelineFlush(sessionID: String) {
         guard pendingTimelineFlushBySession[sessionID] == nil else { return }
         let task = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: self?.timelineFlushInterval ?? .milliseconds(50))
-            guard let self, !self.isShutdown else { return }
+            do { try await Task.sleep(for: self?.timelineFlushInterval ?? .milliseconds(50)) }
+            catch { return }
+            guard !Task.isCancelled, let self, !self.isShutdown else { return }
             self.pendingTimelineFlushBySession[sessionID] = nil
             self.flushTimeline(sessionID: sessionID)
         }
@@ -272,6 +273,7 @@ final class ChatRunCoordinator {
 
     func setTimeline(_ timeline: [AgentEventPresentation], sessionID: String) {
         guard !isShutdown else { return }
+        pendingTimelineFlushBySession.removeValue(forKey: sessionID)?.cancel()
         timelinesBySessionID[sessionID] = timeline
         if selectedSessionID() == sessionID { replaceVisibleTimeline(timeline) }
         onTimelineChanged(sessionID, timeline)
@@ -342,6 +344,7 @@ final class ChatRunCoordinator {
         if let runID = runIDsBySessionID[sessionID] { backendsByRunID[runID]?.abort(runID: runID) }
         finish(sessionID: sessionID)
         pendingCancellationReasons.removeValue(forKey: sessionID)
+        pendingTimelineFlushBySession.removeValue(forKey: sessionID)?.cancel()
         timelinesBySessionID.removeValue(forKey: sessionID)
         clearProcessTimelines(sessionID: sessionID)
     }
@@ -381,6 +384,8 @@ final class ChatRunCoordinator {
         guard !isShutdown else { return }
         isShutdown = true
         generation += 1
+        for task in pendingTimelineFlushBySession.values { task.cancel() }
+        pendingTimelineFlushBySession.removeAll()
         for (sessionID, runID) in runIDsBySessionID {
             (backendsByRunID[runID] ?? backendsBySessionID[sessionID])?.abort(runID: runID)
         }
