@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CryptoKit
 import Testing
 import ConnorGraphCore
 import ConnorGraphStore
@@ -230,6 +231,100 @@ struct AccountSyncRecoveryTests {
         #expect(await fixture.transport.snapshotRequests == 1)
     }
 
+    @Test @MainActor func incrementalMemorySkipsUnchangedRowsAndPreservesDeletes() async throws {
+        let fixture = try await Fixture(remote: [])
+        defer { fixture.cleanUp() }
+        let memory = try SQLiteMemoryOSStore(path: fixture.root.appendingPathComponent("memory.sqlite").path)
+        try memory.migrate()
+        let date = Date(timeIntervalSince1970: 1_800)
+        for id in ["keep", "update", "delete"] {
+            try memory.upsert(provenance: MemoryOSProvenanceObject(id: id, sourceType: .manual, title: id, content: id, occurredAt: date))
+        }
+        let first = try await fixture.coordinator(memory: memory).reconcile()
+        #expect(first.failureMessage == nil)
+        // Poison an unchanged row's date. Incremental sync must not decode it.
+        // Capture the watermark after this intentionally invalid local edit.
+        try memory.execute("UPDATE memory_l0_provenance_objects SET occurred_at = 'invalid' WHERE id = 'keep';")
+        let snapshot = try memory.accountSyncSnapshot(storeID: nil, after: nil)
+        let key = "ConnorAccountSyncState.1"
+        var state = try JSONSerialization.jsonObject(with: fixture.defaults.data(forKey: key)!) as! [String: Any]
+        state["memoryRevision"] = snapshot.revision
+        fixture.defaults.set(try JSONSerialization.data(withJSONObject: state), forKey: key)
+        try memory.execute("UPDATE memory_l0_provenance_objects SET content = 'changed' WHERE id = 'update';")
+        try memory.deleteProvenanceObject(id: "delete")
+        let before = await fixture.transport.pushedMemoryChanges.count
+        let second = try await fixture.coordinator(memory: memory).reconcile()
+        #expect(second.failureMessage == nil)
+        let changes = Array(await fixture.transport.pushedMemoryChanges.dropFirst(before))
+        #expect(Set(changes.map(\.recordId)) == ["update", "delete"])
+        #expect(changes.first { $0.recordId == "delete" }?.deleted == true)
+        #expect(!changes.contains { $0.recordId == "keep" })
+        #expect(try await fixture.coordinator(memory: memory).reconcile().pushedChangeCount == 0)
+    }
+
+    @Test @MainActor func failedMemoryUploadsDoNotAdvanceIncrementalWatermark() async throws {
+        let fixture = try await Fixture(remote: [])
+        defer { fixture.cleanUp() }
+        let memory = try SQLiteMemoryOSStore(path: fixture.root.appendingPathComponent("memory.sqlite").path)
+        try memory.migrate()
+        try memory.upsert(provenance: MemoryOSProvenanceObject(id: "retry", sourceType: .manual, title: "retry", content: "first", occurredAt: Date()))
+        _ = try await fixture.coordinator(memory: memory).reconcile()
+        try memory.execute("UPDATE memory_l0_provenance_objects SET content = 'retry me' WHERE id = 'retry';")
+        await fixture.transport.setFailPush(true)
+        var failed = false
+        do { _ = try await fixture.coordinator(memory: memory).reconcile() } catch { failed = true }
+        #expect(failed)
+        await fixture.transport.setFailPush(false)
+        let retried = try await fixture.coordinator(memory: memory).reconcile()
+        #expect(retried.failureMessage == nil)
+        #expect(retried.pushedChangeCount == 1)
+        #expect(try await fixture.coordinator(memory: memory).reconcile().pushedChangeCount == 0)
+    }
+
+    @Test @MainActor func memoryWrittenDuringUploadRemainsEligibleForNextPass() async throws {
+        let fixture = try await Fixture(remote: [])
+        defer { fixture.cleanUp() }
+        let memory = try SQLiteMemoryOSStore(path: fixture.root.appendingPathComponent("memory.sqlite").path)
+        try memory.migrate()
+        try memory.upsert(provenance: MemoryOSProvenanceObject(id: "concurrent", sourceType: .manual, title: "concurrent", content: "first", occurredAt: Date()))
+        _ = try await fixture.coordinator(memory: memory).reconcile()
+        try memory.execute("UPDATE memory_l0_provenance_objects SET content = 'second' WHERE id = 'concurrent';")
+        await fixture.transport.setOnPush {
+            try memory.execute("UPDATE memory_l0_provenance_objects SET content = 'third' WHERE id = 'concurrent';")
+        }
+        #expect(try await fixture.coordinator(memory: memory).reconcile().pushedChangeCount == 1)
+        #expect(try await fixture.coordinator(memory: memory).reconcile().pushedChangeCount == 1)
+        #expect(try await fixture.coordinator(memory: memory).reconcile().pushedChangeCount == 0)
+    }
+
+    @Test @MainActor func payloadHashPreservesLegacyCanonicalization() async throws {
+        let fixture = try await Fixture(remote: [])
+        defer { fixture.cleanUp() }
+        let coordinator = fixture.coordinator()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var portable = ConnorPortableSession(session("canonical", messageID: "message", at: 1.234))
+        portable.labels = ["z", "a"]
+        let payload = try decoder.decode(ConnorJSONValue.self, from: encoder.encode(portable))
+        portable.labels.sort()
+        portable.updatedAt = 1_000
+        portable.messages[0].createdAt = 1_000
+        let canonical = try decoder.decode(ConnorJSONValue.self, from: encoder.encode(portable))
+        let samples: [(ConnorJSONValue, ConnorJSONValue)] = [
+            (payload, canonical),
+            (.object(["id": .string("memory"), "content": .string("中文内容")]), .object(["id": .string("memory"), "content": .string("中文内容")])),
+            (.object(["updatedAt": .number(123)]), .object(["updatedAt": .number(123)])),
+            (.array([.string("value"), .number(1)]), .array([.string("value"), .number(1)]))
+        ]
+        for (input, normalized) in samples {
+            let expected = SHA256.hash(data: try encoder.encode(normalized)).map { String(format: "%02x", $0) }.joined()
+            #expect(try await coordinator.payloadHash(input) == expected)
+        }
+    }
+
     private func session(_ id: String, messageID: String, at: Double) -> AgentSession {
         let date = Date(timeIntervalSince1970: at)
         return AgentSession(id: id, title: id, messages: [AgentMessage(id: messageID, role: .user, content: messageID, createdAt: date)], createdAt: Date(timeIntervalSince1970: 0), updatedAt: date)
@@ -290,7 +385,8 @@ struct AccountSyncRecoveryTests {
 private actor RecoveryTransport: ConnorBackendHTTPTransport {
     let remote: [ConnorSyncChange]
     var rejectSessionOnce: Bool
-    let failPush: Bool
+    var failPush: Bool
+    var onPush: (@Sendable () throws -> Void)?
     var snapshotRequests = 0
     var snapshotAfterIDs: [Int64] = []
     private var incremental: [ConnorSyncChange] = []
@@ -307,8 +403,12 @@ private actor RecoveryTransport: ConnorBackendHTTPTransport {
     func queueIncremental(_ changes: [ConnorSyncChange]) { incremental = changes }
     var pushedSessions: [ConnorPortableSession] = []
     var pushedSessionDeletes: [String] = []
+    var pushedMemoryChanges: [ConnorSyncChange] = []
     var sessionUploadAttempts = 0
     init(remote: [ConnorSyncChange], rejectSessionOnce: Bool, failPush: Bool = false) { self.remote = remote; self.rejectSessionOnce = rejectSessionOnce; self.failPush = failPush }
+
+    func setFailPush(_ value: Bool) { failPush = value }
+    func setOnPush(_ operation: @escaping @Sendable () throws -> Void) { onPush = operation }
 
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         let path = request.url!.path
@@ -336,6 +436,7 @@ private actor RecoveryTransport: ConnorBackendHTTPTransport {
             let cipher = try AccountSyncPayloadCipher(keyData: Data(repeating: 7, count: 32))
             var results: [[String: Any]] = []
             for change in changes {
+                if change.collection.hasPrefix("memory_") { pushedMemoryChanges.append(change) }
                 var applied = true
                 if change.collection == "sessions" {
                     sessionUploadAttempts += 1
@@ -348,6 +449,9 @@ private actor RecoveryTransport: ConnorBackendHTTPTransport {
                 }
                 results.append(["mutationId": change.mutationId!, "applied": applied, "cursor": 78, "version": 10])
             }
+            let operation = onPush
+            onPush = nil
+            try operation?()
             // Receipts need not be in request order.
             payload = ["results": Array(results.reversed())]
         } else {

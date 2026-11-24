@@ -5,6 +5,15 @@ import Testing
 @MainActor
 @Suite("App maintenance coordinator")
 struct AppMaintenanceCoordinatorTests {
+    @Test func maintenanceAllowsSleepWhileActiveOperationsKeepRunning() {
+        let background = AppExecutionLease.Policy.maintenance.options
+        #expect(!background.contains(.idleSystemSleepDisabled))
+        #expect(!background.contains(.suddenTerminationDisabled))
+        let active = AppExecutionLease.Policy.activeOperation.options
+        #expect(active.contains(.idleSystemSleepDisabled))
+        #expect(active.contains(.userInitiated))
+    }
+
     @Test func schedulerStartIsIdempotentAndStopCancelsFutureRuns() async throws {
         let coordinator = AppMaintenanceCoordinator()
         var runs = 0

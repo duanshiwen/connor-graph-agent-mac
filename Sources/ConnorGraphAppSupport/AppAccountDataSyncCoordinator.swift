@@ -463,17 +463,21 @@ public actor AppAccountDataSyncCoordinator {
         var receivedSessions: [String: String] = [:]
         var legacyNoteSessions: [String: String] = [:]
         var dirtyKeys: Set<String> = []
+        var memoryStoreID: String?
+        var memoryRevision: Int64?
         var repairVersion: Int = 0
         var snapshotAfterID: Int64 = 0
         var snapshotCursor: Int64?
         init() {}
-        private enum CodingKeys: String, CodingKey { case cursor, records, pending, sessionParts, receivedSessions, legacyNoteSessions, dirtyKeys, repairVersion, snapshotAfterID, snapshotCursor }
+        private enum CodingKeys: String, CodingKey { case cursor, records, pending, sessionParts, receivedSessions, legacyNoteSessions, dirtyKeys, repairVersion, snapshotAfterID, snapshotCursor, memoryStoreID, memoryRevision }
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             cursor = try values.decodeIfPresent(Int64.self, forKey: .cursor) ?? 0
             records = try values.decodeIfPresent([String: RecordState].self, forKey: .records) ?? [:]
             pending = try values.decodeIfPresent([String: ConnorSyncChange].self, forKey: .pending) ?? [:]
             dirtyKeys = try values.decodeIfPresent(Set<String>.self, forKey: .dirtyKeys) ?? []
+            memoryStoreID = try values.decodeIfPresent(String.self, forKey: .memoryStoreID)
+            memoryRevision = try values.decodeIfPresent(Int64.self, forKey: .memoryRevision)
             repairVersion = try values.decodeIfPresent(Int.self, forKey: .repairVersion) ?? 0
             legacyNoteSessions = try values.decodeIfPresent([String: String].self, forKey: .legacyNoteSessions) ?? [:]
             receivedSessions = try values.decodeIfPresent([String: String].self, forKey: .receivedSessions) ?? [:]
@@ -509,7 +513,7 @@ public actor AppAccountDataSyncCoordinator {
         // Keep local dirty records dirty across pull and process restarts.
         if !capturedLocalChanges, !changes.isEmpty {
             do {
-                for (key, payload) in try await projections() where state.records[key]?.hash != (try payloadHash(payload)) { state.dirtyKeys.insert(key) }
+                for (key, payload) in try await projections(memorySnapshot: memory?.accountSyncSnapshot(storeID: state.memoryStoreID, after: state.memoryRevision)) where state.records[key]?.hash != (try payloadHash(payload)) { state.dirtyKeys.insert(key) }
             } catch {
                 try Task.checkCancellation()
                 AppPerformanceLog.chatTurnLogger.warning("Local sync projection failed; receiving continues")
@@ -655,6 +659,7 @@ public actor AppAccountDataSyncCoordinator {
 
         if !appliedKeys.isEmpty { await onReceived?(syncResult) }
 
+        let memorySnapshot = try memory?.accountSyncSnapshot(storeID: state.memoryStoreID, after: state.memoryRevision)
         let projectionGeneration = defaults.integer(forKey: AppAccountSyncSignal.projectionGenerationKey)
         let scannedGenerationKey = "ConnorAccountSyncScannedProjectionGeneration.\(userID)"
         let hasScannedProjection = defaults.object(forKey: scannedGenerationKey) != nil
@@ -665,12 +670,22 @@ public actor AppAccountDataSyncCoordinator {
             || !state.pending.isEmpty
             || snapshotUnavailable
             || didRepair
+            || (memorySnapshot != nil && (memorySnapshot?.storeID != state.memoryStoreID || memorySnapshot?.revision != state.memoryRevision))
         guard shouldScanProjection else {
             saveState(state, key: stateKey)
             return syncResult
         }
 
-        let projected = try await projections()
+        let projected = try await projections(memorySnapshot: memorySnapshot)
+        // Cache only within this snapshot. Incoming or concurrent local writes must
+        // still be compared against fresh projections on the next pass.
+        var projectedHashes: [String: String] = [:]
+        func projectedHash(_ key: String, _ payload: ConnorJSONValue) throws -> String {
+            if let hash = projectedHashes[key] { return hash }
+            let hash = try payloadHash(payload)
+            projectedHashes[key] = hash
+            return hash
+        }
         let deletedSessions = try sessions.loadDeletedSessionMetadata()
         // 状态哈希回填为“本地重新编码后的投影”哈希，而不是远端载荷哈希：
         // 两端编码（键序/日期格式/可选字段）不同，若保存远端载荷哈希，下一次投影
@@ -678,7 +693,7 @@ public actor AppAccountDataSyncCoordinator {
         for key in appliedKeys {
             guard !key.hasPrefix("sessions|") && !key.hasPrefix("mail_messages|"), !state.dirtyKeys.contains(key) else { continue }
             guard var record = state.records[key], let payload = projected[key] else { continue }
-            record.hash = try payloadHash(payload)
+            record.hash = try projectedHash(key, payload)
             state.records[key] = record
         }
         var mutations: [ConnorSyncChange] = []
@@ -689,7 +704,8 @@ public actor AppAccountDataSyncCoordinator {
             if let parent = SessionChunks.parent(payload), let root = projected[recordKey("sessions", parent)],
                let tag = SessionChunks.tag(root), state.receivedSessions[parent] == tag, state.records[recordKey("sessions", parent)]?.hash == tag { continue }
             guard !pendingSessionDeleteKeys.contains(key) else { continue }
-            if state.records[key]?.hash == (try payloadHash(payload)), state.records[key]?.encrypted == true {
+            try Task.checkCancellation()
+            if state.records[key]?.hash == (try projectedHash(key, payload)), state.records[key]?.encrypted == true {
                 state.dirtyKeys.remove(key)
                 continue
             }
@@ -711,10 +727,12 @@ public actor AppAccountDataSyncCoordinator {
         // 会话与 RSS 订阅源不走这里：它们使用显式、持久化的删除标记，见下方单独逻辑。
         let nowMillis = Int64(Date().timeIntervalSince1970 * 1_000)
         let tombstonePrefixes = ["skills|", "memory_l0|", "memory_l0_spans|", "memory_l1|", "governance_labels|"]
+        let liveMemoryKeys = memorySnapshot?.liveKeys ?? []
         var projectedCollections = Set(projected.keys.map { String($0.split(separator: "|", maxSplits: 1)[0]) })
+        projectedCollections.formUnion(liveMemoryKeys.map { String($0.split(separator: "|", maxSplits: 1)[0]) })
         for key in state.records.keys where tombstonePrefixes.contains(where: { key.hasPrefix($0) }) {
             guard state.pending[key] == nil else { continue }
-            guard state.records[key]?.deleted != true, projected[key] == nil else { continue }
+            guard state.records[key]?.deleted != true, projected[key] == nil, !liveMemoryKeys.contains(key) else { continue }
             let collection = String(key.split(separator: "|", maxSplits: 1)[0])
             guard projectedCollections.contains(collection) else { continue }
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
@@ -801,14 +819,16 @@ public actor AppAccountDataSyncCoordinator {
                    mutation.collection == SyncCollection.mailMessages, case .object(let root) = payload,
                    case .object(let manifest) = root[SessionChunks.manifestKey],
                    case .array(let parts) = manifest["parts"] {
-                    let incomplete = try parts.contains { part in
-                        guard case .string(let id) = part else { return true }
+                    var incomplete = false
+                    for part in parts {
+                        guard case .string(let id) = part else { incomplete = true; break }
                         let partKey = recordKey(mutation.collection, id)
                         guard let payload = projected[partKey], let receipt = state.records[partKey], receipt.encrypted else {
-                            return true
+                            incomplete = true
+                            break
                         }
-                        let hash = try payloadHash(payload)
-                        return receipt.deleted || receipt.hash != hash
+                        let hash = try projectedHash(partKey, payload)
+                        if receipt.deleted || receipt.hash != hash { incomplete = true; break }
                     }
                     if incomplete {
                         state.dirtyKeys.insert(key)
@@ -834,7 +854,7 @@ public actor AppAccountDataSyncCoordinator {
                 }
                 let clear = try cipher.decrypt(mutation.payload, collection: mutation.collection, recordID: mutation.recordId)
                 let key = recordKey(mutation.collection, mutation.recordId)
-                state.records[key] = RecordState(version: pushResult.version ?? (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(clear.payload), deleted: mutation.deleted, encrypted: true)
+                state.records[key] = RecordState(version: pushResult.version ?? (mutation.baseVersion ?? 0) + 1, hash: try projectedHashes[key] ?? payloadHash(clear.payload), deleted: mutation.deleted, encrypted: true)
                 state.dirtyKeys.remove(key)
                 if mutation.deleted {
                     try AccountSyncLocalDeletions(directory: settings.configDirectory).clear(key)
@@ -845,6 +865,12 @@ public actor AppAccountDataSyncCoordinator {
                 }
             }
             saveState(state, key: stateKey)
+        }
+        // Advance only after every mutation was acknowledged. Failed uploads,
+        // conflicts and pending receives must remain eligible on the next pass.
+        if state.pending.isEmpty, deferredUploadCount == 0, let memorySnapshot {
+            state.memoryStoreID = memorySnapshot.storeID
+            state.memoryRevision = memorySnapshot.revision
         }
         // 清理历史残留（settings|profile 等不可同步记录），避免重新进入同步状态机。
         state.records = state.records.filter { entry in
@@ -864,7 +890,7 @@ public actor AppAccountDataSyncCoordinator {
         return syncResult
     }
 
-    private func projections() async throws -> [String: ConnorJSONValue] {
+    private func projections(memorySnapshot: SQLiteMemoryOSStore.AccountSyncSnapshot?) async throws -> [String: ConnorJSONValue] {
         var values: [String: ConnorJSONValue] = [:]
         for session in try sessions.loadSessions(filter: .all) {
             for (id, payload) in try SessionChunks.project(id: session.id, payload: jsonValue(ConnorPortableSession(session))) {
@@ -879,30 +905,62 @@ public actor AppAccountDataSyncCoordinator {
                 updatedAtMillis: runtimeSettings.userPreferencesUpdatedAt
             )
         )
-        if let memory {
-            for provenance in try memory.listAllProvenanceObjects() {
-                values[recordKey(SyncCollection.memoryL0, provenance.id)] = try jsonValue(SyncL0Provenance(provenance: provenance))
+        if let memory, let memorySnapshot {
+            // Decode changed records in bounded batches. Unchanged rows are
+            // represented by liveKeys for deletion checks, not full JSON payloads.
+            func batches(_ collection: String) -> [[String]] {
+                let ids = memorySnapshot.changedIDs[collection] ?? []
+                return stride(from: 0, to: ids.count, by: 128).map {
+                    Array(ids[$0..<min($0 + 128, ids.count)])
+                }
             }
-            for span in try memory.listAllProvenanceSpans() {
-                values[recordKey(SyncCollection.memoryL0Spans, span.id)] = try jsonValue(SyncL0Span(span: span))
+            for ids in batches("memory_l0") {
+                try Task.checkCancellation()
+                for provenance in try memory.listAllProvenanceObjects(ids: ids) {
+                    values[recordKey(SyncCollection.memoryL0, provenance.id)] = try jsonValue(SyncL0Provenance(provenance: provenance))
+                }
             }
-            for event in try memory.listAllCaptureEvents().filter({ $0.processingState == .pending }) {
-                values[recordKey(SyncCollection.memoryL1, event.id)] = try jsonValue(SyncL1Capture(event: event))
+            for ids in batches("memory_l0_spans") {
+                try Task.checkCancellation()
+                for span in try memory.listAllProvenanceSpans(ids: ids) {
+                    values[recordKey(SyncCollection.memoryL0Spans, span.id)] = try jsonValue(SyncL0Span(span: span))
+                }
             }
-            for statement in try memory.listAllStatements() {
-                values[recordKey(SyncCollection.memoryL2, statement.id)] = try jsonValue(SyncMemoryL2Statement(statement))
+            for ids in batches("memory_l1") {
+                try Task.checkCancellation()
+                for event in try memory.listAllCaptureEvents(ids: ids).filter({ $0.processingState == .pending }) {
+                    values[recordKey(SyncCollection.memoryL1, event.id)] = try jsonValue(SyncL1Capture(event: event))
+                }
             }
-            for node in try memory.listAllNodes() {
-                values[recordKey(SyncCollection.memoryL2Nodes, node.id)] = try jsonValue(SyncMemoryL2Node(node))
+            for ids in batches("memory_l2") {
+                try Task.checkCancellation()
+                for statement in try memory.listAllStatements(ids: ids) {
+                    values[recordKey(SyncCollection.memoryL2, statement.id)] = try jsonValue(SyncMemoryL2Statement(statement))
+                }
             }
-            for belief in try memory.listAllBeliefs() {
-                values[recordKey(SyncCollection.memoryL3, belief.id)] = try jsonValue(SyncMemoryL3Belief(belief))
+            for ids in batches("memory_l2_nodes") {
+                try Task.checkCancellation()
+                for node in try memory.listAllNodes(ids: ids) {
+                    values[recordKey(SyncCollection.memoryL2Nodes, node.id)] = try jsonValue(SyncMemoryL2Node(node))
+                }
             }
-            for entity in try memory.listAllEntities() {
-                values[recordKey(SyncCollection.memoryL4Entities, entity.id)] = try jsonValue(SyncMemoryL4Entity(entity))
+            for ids in batches("memory_l3") {
+                try Task.checkCancellation()
+                for belief in try memory.listAllBeliefs(ids: ids) {
+                    values[recordKey(SyncCollection.memoryL3, belief.id)] = try jsonValue(SyncMemoryL3Belief(belief))
+                }
             }
-            for relation in try memory.listAllEntityStatements() {
-                values[recordKey(SyncCollection.memoryL4Relations, relation.id)] = try jsonValue(SyncMemoryL4Relation(relation))
+            for ids in batches("memory_l4_entities") {
+                try Task.checkCancellation()
+                for entity in try memory.listAllEntities(ids: ids) {
+                    values[recordKey(SyncCollection.memoryL4Entities, entity.id)] = try jsonValue(SyncMemoryL4Entity(entity))
+                }
+            }
+            for ids in batches("memory_l4_relations") {
+                try Task.checkCancellation()
+                for relation in try memory.listAllEntityStatements(ids: ids) {
+                    values[recordKey(SyncCollection.memoryL4Relations, relation.id)] = try jsonValue(SyncMemoryL4Relation(relation))
+                }
             }
         }
         if let skillStore {
@@ -1175,11 +1233,17 @@ public actor AppAccountDataSyncCoordinator {
 
     private func jsonValue<T: Encodable>(_ value: T) throws -> ConnorJSONValue { try decoder.decode(ConnorJSONValue.self, from: encoder.encode(value)) }
     private func decode<T: Decodable>(_ payload: ConnorJSONValue) throws -> T { try decoder.decode(T.self, from: encoder.encode(payload)) }
-    private func payloadHash(_ payload: ConnorJSONValue) throws -> String {
+    func payloadHash(_ payload: ConnorJSONValue) throws -> String {
         if let tag = SessionChunks.tag(payload) { return tag }
         if case .object(let root) = payload, root["mailboxAddress"] != nil, root["schemaVersion"] != nil { return try SharedMailStore.semanticHash(payload) }
         var canonical = payload
-        if var session = try? decode(payload) as ConnorPortableSession {
+        // Most records are memory, settings or skills. Reject their shape before
+        // encoding the entire payload merely to attempt a session decode.
+        if case .object(let root) = payload,
+           root["id"] != nil, root["title"] != nil,
+           root["createdAt"] != nil, root["updatedAt"] != nil,
+           root["archived"] != nil, root["labels"] != nil, root["messages"] != nil,
+           var session = try? decode(payload) as ConnorPortableSession {
             // SQLite's ISO-8601 dates retain seconds, while other clients retain
             // milliseconds. Compare at local storage precision without re-uploading
             // a server-only session just because its dates or set order changed.
@@ -1195,7 +1259,15 @@ public actor AppAccountDataSyncCoordinator {
             }.sorted { $0.id < $1.id }
             canonical = try jsonValue(session)
         }
-        return SHA256.hash(data: try encoder.encode(canonical)).map { String(format: "%02x", $0) }.joined()
+        let digest = SHA256.hash(data: try encoder.encode(canonical))
+        let hex = Array("0123456789abcdef".utf8)
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(64)
+        for byte in digest {
+            bytes.append(hex[Int(byte >> 4)])
+            bytes.append(hex[Int(byte & 0x0f)])
+        }
+        return String(decoding: bytes, as: UTF8.self)
     }
     private func decrypted(_ change: ConnorSyncChange, using cipher: AccountSyncPayloadCipher) throws -> (change: ConnorSyncChange, encrypted: Bool) {
         let clear = try cipher.decrypt(change.payload, collection: change.collection, recordID: change.recordId)

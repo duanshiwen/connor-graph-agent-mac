@@ -23,10 +23,11 @@ public enum SQLiteMemoryOSStoreError: Error, Sendable, Equatable, CustomStringCo
 }
 
 public final class SQLiteMemoryOSStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 9
+    public static let currentSchemaVersion = 10
 
     public static let requiredSchemaTables: Set<String> = [
         "memory_schema_migrations", "memory_legacy_import_runs", "memory_store_health_checks", "memory_builtin_datasets",
+        "memory_account_sync_clock", "memory_account_sync_revisions",
         "memory_audit_events", "memory_processing_metrics", "memory_error_events", "memory_recovery_actions",
         "memory_discard_events", "memory_search_index_queue",
         "memory_l0_provenance_objects", "memory_l0_provenance_spans", "memory_l0_derivations", "memory_l0_content_hashes",
@@ -39,6 +40,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     ]
 
     public static let requiredSchemaIndexes: Set<String> = [
+        "idx_memory_account_sync_revision",
         "idx_memory_l0_provenance_source", "idx_memory_l0_provenance_time", "idx_memory_l0_spans_object",
         "idx_memory_l1_capture_state", "idx_memory_l1_time_blocks_status", "idx_memory_l1_queue_runnable", "idx_memory_l1_queue_idempotency",
         "idx_memory_background_runs_queue", "idx_memory_background_messages_run", "idx_memory_background_tool_calls_run",
@@ -53,6 +55,9 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     public var onChange: (@Sendable () -> Void)?
     private var db: OpaquePointer?
     private let databaseLock = NSLock()
+    // Formatting is also used outside the database lock; keep its lock independent.
+    private let dateFormatterLock = NSLock()
+    private let dateFormatter = ISO8601DateFormatter()
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -72,6 +77,92 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         databaseLock.unlock()
     }
 
+    public struct AccountSyncSnapshot: Sendable {
+        public let storeID: String
+        public let revision: Int64
+        public let changedIDs: [String: [String]]
+        public let liveKeys: Set<String>
+    }
+
+    private static let accountSyncTables: [(String, String)] = [
+        ("memory_l0", "memory_l0_provenance_objects"),
+        ("memory_l0_spans", "memory_l0_provenance_spans"),
+        ("memory_l1", "memory_l1_capture_events"),
+        ("memory_l2", "memory_l2_statements"),
+        ("memory_l2_nodes", "memory_l2_nodes"),
+        ("memory_l3", "memory_l3_beliefs"),
+        ("memory_l4_entities", "memory_l4_entities"),
+        ("memory_l4_relations", "memory_l4_entity_statements")
+    ]
+
+    private func installAccountSyncTracking() throws {
+        // Triggers cover raw SQL, remote imports and writes from other connections.
+        // Keep only the latest revision per record, rather than an unbounded log.
+        try execute("""
+        CREATE TABLE IF NOT EXISTS memory_account_sync_clock (
+            singleton INTEGER PRIMARY KEY CHECK(singleton = 1), store_id TEXT NOT NULL, revision INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO memory_account_sync_clock VALUES (1, \(quote(UUID().uuidString)), 0);
+        CREATE TABLE IF NOT EXISTS memory_account_sync_revisions (
+            collection TEXT NOT NULL, record_id TEXT NOT NULL, revision INTEGER NOT NULL,
+            PRIMARY KEY(collection, record_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_account_sync_revision ON memory_account_sync_revisions(revision);
+        """)
+        for (collection, table) in Self.accountSyncTables {
+            for (operation, row) in [("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")] {
+                try execute("""
+                CREATE TRIGGER IF NOT EXISTS \(table)_account_sync_\(operation.lowercased())
+                AFTER \(operation) ON \(table) BEGIN
+                    UPDATE memory_account_sync_clock SET revision = revision + 1 WHERE singleton = 1;
+                    INSERT INTO memory_account_sync_revisions(collection, record_id, revision)
+                    VALUES ('\(collection)', \(row).id, (SELECT revision FROM memory_account_sync_clock WHERE singleton = 1))
+                    ON CONFLICT(collection, record_id) DO UPDATE SET revision = excluded.revision;
+                END;
+                """)
+            }
+        }
+    }
+
+    public func accountSyncSnapshot(storeID: String?, after revision: Int64?) throws -> AccountSyncSnapshot {
+        // A single SQLite read transaction makes the watermark and live IDs agree
+        // even when another connection commits during the scan.
+        try withDatabaseLock {
+            try executeUnlocked("SAVEPOINT connor_account_sync_snapshot;")
+            var released = false
+            defer {
+                if !released {
+                    try? executeUnlocked("ROLLBACK TO connor_account_sync_snapshot;")
+                    try? executeUnlocked("RELEASE connor_account_sync_snapshot;")
+                }
+            }
+            let clock = try queryUnlocked(sql: "SELECT store_id, revision FROM memory_account_sync_clock WHERE singleton = 1;")
+            guard let row = clock.first, let currentRevision = Int64(row[1]) else {
+                throw SQLiteMemoryOSStoreError.missingRecord("account sync clock")
+            }
+            let incremental = storeID == row[0] && revision != nil && revision! <= currentRevision
+            let changes = incremental ? try queryUnlocked(sql: "SELECT collection, record_id FROM memory_account_sync_revisions WHERE revision > \(revision!);") : []
+            var changedIDs: [String: [String]] = [:]
+            for change in changes { changedIDs[change[0], default: []].append(change[1]) }
+            var liveKeys: Set<String> = []
+            for (collection, table) in Self.accountSyncTables {
+                let filter = collection == "memory_l1" ? " WHERE processing_state = 'pending'" : ""
+                let ids = try queryUnlocked(sql: "SELECT id FROM \(table)\(filter);").map { $0[0] }
+                for id in ids { liveKeys.insert("\(collection)|\(id)") }
+                if !incremental { changedIDs[collection] = ids }
+            }
+            try executeUnlocked("RELEASE connor_account_sync_snapshot;")
+            released = true
+            return AccountSyncSnapshot(storeID: row[0], revision: currentRevision, changedIDs: changedIDs, liveKeys: liveKeys)
+        }
+    }
+
+    private func accountSyncIDFilter(_ ids: [String]?) -> String {
+        guard let ids else { return "" }
+        guard !ids.isEmpty else { return "WHERE 0" }
+        return "WHERE id IN (\(ids.map(quote).joined(separator: ",")))"
+    }
+
     public func configurePragmas() throws {
         try execute("PRAGMA foreign_keys = ON;")
         try execute("PRAGMA journal_mode = WAL;")
@@ -88,12 +179,13 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try configurePragmas()
         try rebuildLegacyL3BeliefSchemaIfNeeded()
         try execute(Self.schemaSQL)
+        try installAccountSyncTracking()
         try execute("DROP TABLE IF EXISTS memory_profile_compaction_snapshots;")
         try addL1IntentNormalizationColumnsIfNeeded()
         try execute("PRAGMA user_version = \(Self.currentSchemaVersion);")
         try execute("""
         INSERT OR REPLACE INTO memory_schema_migrations(version, name, applied_at, metadata_json)
-        VALUES (\(Self.currentSchemaVersion), 'remove_memory_os_profile_compaction', \(quote(iso(Date()))), '{}')
+        VALUES (\(Self.currentSchemaVersion), 'incremental_account_sync', \(quote(iso(Date()))), '{}')
         """)
         // Optimize indexes after migration
         try execute("PRAGMA optimize;")
@@ -261,10 +353,11 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """).map(decodeProvenanceObject).first
     }
 
-    public func listAllProvenanceObjects() throws -> [MemoryOSProvenanceObject] {
+    public func listAllProvenanceObjects(ids: [String]? = nil) throws -> [MemoryOSProvenanceObject] {
         try query(sql: """
         SELECT id, source_type, source_id, title, content, content_hash, occurred_at, ingested_at, session_id, work_object_id, confidentiality, status, metadata_json
         FROM memory_l0_provenance_objects
+        \(accountSyncIDFilter(ids))
         ORDER BY ingested_at ASC, id ASC
         """).map(decodeProvenanceObject)
     }
@@ -287,10 +380,11 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """)
     }
 
-    public func listAllProvenanceSpans() throws -> [MemoryOSProvenanceSpan] {
+    public func listAllProvenanceSpans(ids: [String]? = nil) throws -> [MemoryOSProvenanceSpan] {
         try query(sql: """
         SELECT id, provenance_object_id, start_offset, end_offset, text, metadata_json
         FROM memory_l0_provenance_spans
+        \(accountSyncIDFilter(ids))
         ORDER BY id ASC
         """).map(decodeProvenanceSpan)
     }
@@ -317,10 +411,11 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try enqueueSearchIndexChange(layer: "L1", recordID: event.id)
     }
 
-    public func listAllCaptureEvents() throws -> [MemoryOSCaptureEvent] {
+    public func listAllCaptureEvents(ids: [String]? = nil) throws -> [MemoryOSCaptureEvent] {
         try query(sql: """
         SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, retrieval_text, normalization_status, metadata_json
         FROM memory_l1_capture_events
+        \(accountSyncIDFilter(ids))
         ORDER BY occurred_at ASC, id ASC
         """).map(decodeCaptureEvent)
     }
@@ -513,10 +608,11 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         onChange?()
     }
 
-    public func listAllNodes() throws -> [MemoryOSNode] {
+    public func listAllNodes(ids: [String]? = nil) throws -> [MemoryOSNode] {
         try query(sql: """
         SELECT id, stable_key, node_type, name, summary, created_at, updated_at, metadata_json
         FROM memory_l2_nodes
+        \(accountSyncIDFilter(ids))
         ORDER BY updated_at ASC, id ASC
         """).map(decodeNode)
     }
@@ -549,10 +645,11 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         onChange?()
     }
 
-    public func listAllStatements() throws -> [MemoryOSStatement] {
+    public func listAllStatements(ids: [String]? = nil) throws -> [MemoryOSStatement] {
         try query(sql: """
         SELECT id, subject_id, predicate, object_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
         FROM memory_l2_statements
+        \(accountSyncIDFilter(ids))
         ORDER BY committed_at ASC, id ASC
         """).map(decodeStatement)
     }
@@ -605,10 +702,11 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         onChange?()
     }
 
-    public func listAllBeliefs() throws -> [MemoryOSBelief] {
+    public func listAllBeliefs(ids: [String]? = nil) throws -> [MemoryOSBelief] {
         try query(sql: """
         SELECT id, statement, domain, related_object_names, created_at, updated_at
         FROM memory_l3_beliefs
+        \(accountSyncIDFilter(ids))
         ORDER BY created_at ASC, id ASC
         """).map(decodeBelief)
     }
@@ -662,10 +760,11 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         onChange?()
     }
 
-    public func listAllEntities() throws -> [MemoryOSEntity] {
+    public func listAllEntities(ids: [String]? = nil) throws -> [MemoryOSEntity] {
         try query(sql: """
         SELECT id, stable_key, entity_type, name, aliases_json, summary, confidence, created_at, updated_at, valid_from, metadata_json
         FROM memory_l4_entities
+        \(accountSyncIDFilter(ids))
         ORDER BY created_at ASC, id ASC
         """).map(decodeEntity)
     }
@@ -709,10 +808,11 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         onChange?()
     }
 
-    public func listAllEntityStatements() throws -> [MemoryOSEntityStatement] {
+    public func listAllEntityStatements(ids: [String]? = nil) throws -> [MemoryOSEntityStatement] {
         try query(sql: """
         SELECT id, entity_id, predicate, object_entity_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
         FROM memory_l4_entity_statements
+        \(accountSyncIDFilter(ids))
         ORDER BY committed_at ASC, id ASC
         """).map(decodeEntityStatement)
     }
@@ -880,9 +980,13 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     /// The migrated schema itself is retained so the store remains usable.
     public func clearAllMemoryData() throws {
         let dataTables = Self.requiredSchemaTables
-            .subtracting(["memory_schema_migrations"])
+            .subtracting(["memory_schema_migrations", "memory_account_sync_clock", "memory_account_sync_revisions"])
             .sorted()
-        let deletionSQL = dataTables.map { "DELETE FROM \($0);" }.joined(separator: "\n")
+        let deletionSQL = dataTables.map { "DELETE FROM \($0);" }.joined(separator: "\n") + """
+
+        DELETE FROM memory_account_sync_revisions;
+        UPDATE memory_account_sync_clock SET store_id = \(quote(UUID().uuidString)), revision = 0 WHERE singleton = 1;
+        """
 
         try withDatabaseLock {
             try executeUnlocked("PRAGMA foreign_keys = OFF;")
@@ -920,34 +1024,36 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     }
 
     public func query(sql: String) throws -> [[String]] {
-        try withDatabaseLock {
-            var statement: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-                throw SQLiteMemoryOSStoreError.prepareFailed(Self.message(db))
-            }
-            defer { sqlite3_finalize(statement) }
-            var rows: [[String]] = []
-            while true {
-                let result = sqlite3_step(statement)
-                if result == SQLITE_ROW {
-                    let count = sqlite3_column_count(statement)
-                    var row: [String] = []
-                    for index in 0..<count {
-                        if let cString = sqlite3_column_text(statement, index) {
-                            row.append(String(cString: cString))
-                        } else {
-                            row.append("")
-                        }
-                    }
-                    rows.append(row)
-                } else if result == SQLITE_DONE {
-                    break
-                } else {
-                    throw SQLiteMemoryOSStoreError.stepFailed(Self.message(db))
-                }
-            }
-            return rows
+        try withDatabaseLock { try queryUnlocked(sql: sql) }
+    }
+
+    private func queryUnlocked(sql: String) throws -> [[String]] {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw SQLiteMemoryOSStoreError.prepareFailed(Self.message(db))
         }
+        defer { sqlite3_finalize(statement) }
+        var rows: [[String]] = []
+        while true {
+            let result = sqlite3_step(statement)
+            if result == SQLITE_ROW {
+                let count = sqlite3_column_count(statement)
+                var row: [String] = []
+                for index in 0..<count {
+                    if let cString = sqlite3_column_text(statement, index) {
+                        row.append(String(cString: cString))
+                    } else {
+                        row.append("")
+                    }
+                }
+                rows.append(row)
+            } else if result == SQLITE_DONE {
+                break
+            } else {
+                throw SQLiteMemoryOSStoreError.stepFailed(Self.message(db))
+            }
+        }
+        return rows
     }
 
     public func queryStrings(sql: String) throws -> [String] {
@@ -1109,7 +1215,11 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         do { return try decoder.decode(type, from: data) } catch { throw SQLiteMemoryOSStoreError.decodeFailed(String(describing: error)) }
     }
 
-    public func iso(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
+    public func iso(_ date: Date) -> String {
+        dateFormatterLock.lock()
+        defer { dateFormatterLock.unlock() }
+        return dateFormatter.string(from: date)
+    }
 
     public func quote(_ value: String?) -> String {
         guard let value else { return "NULL" }
@@ -1117,7 +1227,9 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     }
 
     private func date(_ string: String) throws -> Date {
-        guard let date = ISO8601DateFormatter().date(from: string) else { throw SQLiteMemoryOSStoreError.decodeFailed("Invalid date: \(string)") }
+        dateFormatterLock.lock()
+        defer { dateFormatterLock.unlock() }
+        guard let date = dateFormatter.date(from: string) else { throw SQLiteMemoryOSStoreError.decodeFailed("Invalid date: \(string)") }
         return date
     }
 

@@ -73,6 +73,7 @@ final class AppMaintenanceCoordinator {
                 self?.scheduleBackgroundJobs()
             }
         }
+        schedulerTimer?.tolerance = min(interval * 0.1, 5)
     }
 
     func stopScheduler() {
@@ -122,13 +123,13 @@ final class AppMaintenanceCoordinator {
         guard !isShutdown, isSchedulerRunning, schedulerTask == nil else { return }
         let currentGeneration = generation
         let currentSchedulerGeneration = schedulerGeneration
-        schedulerTask = Task { [weak self] in
+        schedulerTask = Task(priority: .utility) { [weak self] in
             guard let self,
                   !Task.isCancelled,
                   self.isSchedulerRunning,
                   self.generation == currentGeneration,
                   self.schedulerGeneration == currentSchedulerGeneration else { return }
-            let execution = AppExecutionLease(reason: "Connor background operation")
+            let execution = AppExecutionLease(reason: "Connor scheduled task check", policy: .maintenance)
             defer { execution.release() }
             await self.runScheduledTasks()
             guard self.generation == currentGeneration,
@@ -142,12 +143,12 @@ final class AppMaintenanceCoordinator {
         if let task = reconcileTasks[scope] { return try await task.value }
         let currentGeneration = generation
         let operation = reconcileSources
-        let task = Task { [weak self] in
+        let task = Task(priority: .utility) { [weak self] in
             guard let self,
                   !Task.isCancelled,
                   self.generation == currentGeneration,
                   !self.isShutdown else { throw CancellationError() }
-            let execution = AppExecutionLease(reason: "Connor background operation")
+            let execution = AppExecutionLease(reason: "Connor source reconciliation", policy: .maintenance)
             defer { execution.release() }
             try await operation(scope)
         }
@@ -165,11 +166,11 @@ final class AppMaintenanceCoordinator {
             return
         }
         let currentGeneration = generation
-        backgroundJobsTask = Task { [weak self] in
+        backgroundJobsTask = Task(priority: .utility) { [weak self] in
             guard let self,
                   !Task.isCancelled,
                   self.generation == currentGeneration else { return }
-            let execution = AppExecutionLease(reason: "Connor background operation")
+            let execution = AppExecutionLease(reason: "Connor memory maintenance", policy: .maintenance)
             defer { execution.release() }
             await self.runBackgroundJobs()
             guard self.generation == currentGeneration else { return }
@@ -184,11 +185,11 @@ final class AppMaintenanceCoordinator {
     func scheduleDailySweep() {
         guard !isShutdown, dailySweepTask == nil else { return }
         let currentGeneration = generation
-        dailySweepTask = Task { [weak self] in
+        dailySweepTask = Task(priority: .utility) { [weak self] in
             guard let self,
                   !Task.isCancelled,
                   self.generation == currentGeneration else { return }
-            let execution = AppExecutionLease(reason: "Connor background operation")
+            let execution = AppExecutionLease(reason: "Connor daily sweep", policy: .maintenance)
             defer { execution.release() }
             await self.runDailySweep()
             guard self.generation == currentGeneration else { return }
@@ -332,21 +333,31 @@ final class AppMaintenanceCoordinator {
     }
 }
 
-/// Process activity prevents App Nap and idle system sleep; display sleep remains allowed.
+/// Active user operations prevent App Nap and idle system sleep. Resumable
+/// maintenance uses background priority and allows automatic sleep.
 /// Explicit sleep, lid closure and shutdown are still controlled by the operating system.
 final class AppExecutionLease {
     private var activity: NSObjectProtocol?
     private let end: (NSObjectProtocol) -> Void
 
+    enum Policy {
+        case activeOperation
+        case maintenance
+
+        var options: ProcessInfo.ActivityOptions {
+            switch self {
+            case .activeOperation: [.userInitiated, .idleSystemSleepDisabled]
+            case .maintenance: .background
+            }
+        }
+    }
+
     init(reason: String,
-         begin: (String) -> NSObjectProtocol = { reason in
-             ProcessInfo.processInfo.beginActivity(
-                 options: [.userInitiated, .idleSystemSleepDisabled], reason: reason
-             )
-         },
+         policy: Policy = .activeOperation,
+         begin: ((String) -> NSObjectProtocol)? = nil,
          end: @escaping (NSObjectProtocol) -> Void = { ProcessInfo.processInfo.endActivity($0) }) {
         self.end = end
-        activity = begin(reason)
+        activity = begin?(reason) ?? ProcessInfo.processInfo.beginActivity(options: policy.options, reason: reason)
     }
 
     func release() {
