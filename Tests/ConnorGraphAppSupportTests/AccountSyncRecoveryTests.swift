@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import Testing
 import ConnorGraphCore
 import ConnorGraphStore
@@ -6,6 +7,52 @@ import ConnorGraphStore
 
 @Suite("Account sync recovery", .serialized)
 struct AccountSyncRecoveryTests {
+    @Test(arguments: [true, false])
+    @MainActor func reconnectReceivesCommittedChangesEvenAfterSenderLeaves(senderOnline: Bool) async throws {
+        let original = session("shared", messageID: "original", at: 1)
+        let removed = session("removed", messageID: "old", at: 1)
+        let fixture = try await Fixture(remote: [change(original), change(removed)])
+        defer { fixture.cleanUp() }
+        #expect(try await fixture.coordinator().reconcile().failureMessage == nil)
+        #expect(fixture.defaults.integer(forKey: "ConnorAccountSyncCursor.1") == 77)
+        fixture.identity.onDeviceSyncPass = {
+            let result = try await fixture.coordinator().reconcile()
+            if let failure = result.failureMessage { throw NSError(domain: "Reconnect", code: 1, userInfo: [NSLocalizedDescriptionKey: failure]) }
+        }
+        fixture.identity.setDeviceSyncEnabled(true) // still offline
+        var update = try change(session("shared", messageID: "offline-update", at: 2))
+        update.version = 2; update.cursor = 78
+        let cipher = try AccountSyncPayloadCipher(keyData: Data(repeating: 7, count: 32))
+        var deletion = try ConnorSyncChange(collection: "sessions", recordId: "removed",
+            payload: cipher.encrypt(.object(["updatedAt": .number(3_000)]), collection: "sessions", recordID: "removed"), deleted: true)
+        deletion.version = 2; deletion.sourceDeviceId = "peer"; deletion.cursor = 79
+        await fixture.transport.publishWhileReceiverOffline([update, deletion], senderOnline: senderOnline)
+        // The availability transition is the production reconnect entry; no manual
+        // sync, local edit, peer_online or sync_changed notification is supplied.
+        fixture.connectivity.setOnline(true)
+        do {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if fixture.defaults.integer(forKey: "ConnorAccountSyncCursor.1") == 79,
+               case .upToDate = fixture.identity.deviceSyncStatus { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let received = try #require(try fixture.sessions.loadSession(id: "shared"))
+        #expect(Set(received.messages.map(\.id)) == ["original", "offline-update"])
+        #expect(try fixture.sessions.loadSession(id: "removed")?.governance.deletedAt != nil)
+        #expect(fixture.defaults.integer(forKey: "ConnorAccountSyncCursor.1") == 79)
+        #expect(await fixture.transport.incrementalRequests > 0)
+        #expect(await fixture.transport.peerPresenceRequests == 0)
+        } catch {
+            await fixture.identity.logout()
+            throw error
+        }
+        await fixture.identity.logout() // stop the live socket and lease tasks before removing the fixture
+        fixture.connectivity.setOnline(false)
+        fixture.identity.setDeviceSyncEnabled(false)
+        await Task.yield()
+    }
+
     @Test @MainActor func deletedKnowledgeRecordsDoNotDecodeTombstonesAsLiveMemory() async throws {
         let collections = ["memory_l2", "memory_l2_nodes", "memory_l3", "memory_l4_entities", "memory_l4_relations"]
         let cipher = try AccountSyncPayloadCipher(keyData: Data(repeating: 7, count: 32))
@@ -198,6 +245,7 @@ struct AccountSyncRecoveryTests {
 }
 
 @MainActor private final class Fixture {
+    let connectivity: RecoveryConnectivity
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("SyncRecovery-\(UUID())")
     let suite = "SyncRecovery-\(UUID())"
     let defaults: UserDefaults
@@ -207,6 +255,8 @@ struct AccountSyncRecoveryTests {
     let transport: RecoveryTransport
 
     init(remote: [ConnorSyncChange], rejectSessionOnce: Bool = false, failPush: Bool = false) async throws {
+        let connectivity = RecoveryConnectivity()
+        self.connectivity = connectivity
         defaults = UserDefaults(suiteName: suite)!
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let store = try SQLiteGraphKernelStore(path: root.appendingPathComponent("graph.sqlite").path)
@@ -216,16 +266,25 @@ struct AccountSyncRecoveryTests {
         try credentials.saveTokens(.init(accessToken: "access", refreshToken: "refresh"))
         try credentials.saveSyncKey(Data(repeating: 7, count: 32), userID: "1")
         transport = RecoveryTransport(remote: remote, rejectSessionOnce: rejectSessionOnce, failPush: failPush)
-        identity = AppUserIdentityStore(baseURL: URL(string: "http://127.0.0.1:1/")!, credentials: credentials, transport: transport, networkIsAvailable: { false }, syncDefaults: defaults)
+        identity = AppUserIdentityStore(baseURL: URL(string: "http://127.0.0.1:1/")!, credentials: credentials, transport: transport, networkIsAvailable: { connectivity.online }, syncAvailability: connectivity.changes.eraseToAnyPublisher(), syncDefaults: defaults)
         await identity.restoreSession()
     }
     func coordinator(memory: SQLiteMemoryOSStore? = nil, onReceived: (@Sendable (AppAccountDataSyncResult) async -> Void)? = nil) -> AppAccountDataSyncCoordinator {
         AppAccountDataSyncCoordinator(sessions: sessions, settings: AppRuntimeSettingsRepository(configDirectory: root.appendingPathComponent("config")), memory: memory, identity: identity, defaults: UserDefaults(suiteName: suite)!, onReceived: onReceived)
     }
     func cleanUp() {
+        connectivity.setOnline(false)
+        identity.onDeviceSyncPass = nil
+        identity.setDeviceSyncEnabled(false)
         defaults.removePersistentDomain(forName: suite)
         try? FileManager.default.removeItem(at: root)
     }
+}
+
+@MainActor private final class RecoveryConnectivity {
+    var online = false
+    let changes = CurrentValueSubject<Bool, Never>(false)
+    func setOnline(_ value: Bool) { online = value; changes.send(value) }
 }
 
 private actor RecoveryTransport: ConnorBackendHTTPTransport {
@@ -235,6 +294,15 @@ private actor RecoveryTransport: ConnorBackendHTTPTransport {
     var snapshotRequests = 0
     var snapshotAfterIDs: [Int64] = []
     private var incremental: [ConnorSyncChange] = []
+    private var cursor: Int64 = 77
+    private var senderOnline = true
+    var incrementalRequests = 0
+    var peerPresenceRequests = 0
+    func publishWhileReceiverOffline(_ changes: [ConnorSyncChange], senderOnline: Bool) {
+        incremental = changes
+        cursor = changes.compactMap(\.cursor).max() ?? cursor
+        self.senderOnline = senderOnline
+    }
 
     func queueIncremental(_ changes: [ConnorSyncChange]) { incremental = changes }
     var pushedSessions: [ConnorPortableSession] = []
@@ -248,15 +316,19 @@ private actor RecoveryTransport: ConnorBackendHTTPTransport {
         if path.hasSuffix("/users/auth/me") {
             payload = ["id": 1, "username": "test", "email": "test@example.com", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"]
         } else if path.hasSuffix("/devices/heartbeat") {
-            payload = ["deviceId": "test", "platform": "macos", "name": "test", "appVersion": "1", "lastSeenAt": "2026-01-01T00:00:00Z"]
+            payload = ["deviceId": "test", "platform": "macos", "name": "test", "appVersion": "1", "lastSeenAt": "2026-01-01T00:00:00Z", "syncCursor": cursor]
         } else if path.hasSuffix("/snapshot") {
             snapshotRequests += 1
             let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
             snapshotAfterIDs.append(Int64(query?.first { $0.name == "afterId" }?.value ?? "") ?? -1)
             payload = ["changes": try JSONSerialization.jsonObject(with: JSONEncoder().encode(remote)), "nextRecordId": remote.count, "cursor": 77, "hasMore": false]
         } else if path.hasSuffix("/pull") {
-            payload = ["changes": try JSONSerialization.jsonObject(with: JSONEncoder().encode(incremental)), "nextCursor": 77, "hasMore": false]
+            incrementalRequests += 1
+            payload = ["changes": try JSONSerialization.jsonObject(with: JSONEncoder().encode(incremental)), "nextCursor": cursor, "hasMore": false]
             incremental = []
+        } else if path.hasSuffix("/devices") {
+            peerPresenceRequests += 1
+            payload = ["items": senderOnline ? [["deviceId": "peer"]] : []]
         } else if path.hasSuffix("/push") {
             if failPush { return (Data("{}".utf8), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!) }
             let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]

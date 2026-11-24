@@ -1076,11 +1076,11 @@ public final class AppUserIdentityStore: ObservableObject {
                         guard !Task.isCancelled, let userID = currentUser?.id else { return }
                         let user = String(userID)
                         let cursorKey = "ConnorAccountSyncCursor.\(user)"
-                        let generation = UserDefaults.standard.integer(forKey: AppAccountSyncSignal.projectionGenerationKey)
+                        let generation = syncDefaults.integer(forKey: AppAccountSyncSignal.projectionGenerationKey)
                         let scannedKey = "ConnorAccountSyncScannedProjectionGeneration.\(user)"
-                        let hasCursor = UserDefaults.standard.object(forKey: cursorKey) != nil
-                        let localChanged = UserDefaults.standard.object(forKey: scannedKey) == nil || UserDefaults.standard.integer(forKey: scannedKey) != generation
-                        let cursor: Int64? = hasCursor ? Int64(UserDefaults.standard.integer(forKey: cursorKey)) : nil
+                        let hasCursor = syncDefaults.object(forKey: cursorKey) != nil
+                        let localChanged = syncDefaults.object(forKey: scannedKey) == nil || syncDefaults.integer(forKey: scannedKey) != generation
+                        let cursor: Int64? = hasCursor ? Int64(syncDefaults.integer(forKey: cursorKey)) : nil
                         if AccountSyncWakePolicy.needsSync(remoteCursor: heartbeat.syncCursor, durableCursor: cursor, localChanged: localChanged) { requestDeviceSyncPass() }
                         let lease = try await session.acquireL1Lease(deviceID: deviceID)
                         L1ExtractionEligibility.shared.update(granted: lease.granted, expiresAt: lease.expiresAt)
