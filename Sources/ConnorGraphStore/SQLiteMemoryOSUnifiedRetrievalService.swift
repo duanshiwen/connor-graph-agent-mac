@@ -491,13 +491,16 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         return clauses.isEmpty ? "" : " AND " + clauses.joined(separator: " AND ")
     }
 
+    // CROSS JOIN fixes traversal order: expand the record's evidence IDs first,
+    // then use span/object primary keys. Without it SQLite's MAX optimization can
+    // scan provenance by time for every derived record. Result semantics are identical.
     private func statementOccurredAtExpression(alias: String) -> String {
         """
         COALESCE(
           (SELECT MAX(o.occurred_at)
            FROM json_each(\(alias).evidence_span_ids_json) evidence
-           JOIN memory_l0_provenance_spans span ON span.id = evidence.value
-           JOIN memory_l0_provenance_objects o ON o.id = span.provenance_object_id),
+           CROSS JOIN memory_l0_provenance_spans span ON span.id = evidence.value
+           CROSS JOIN memory_l0_provenance_objects o ON o.id = span.provenance_object_id),
           NULLIF(json_extract(\(alias).metadata_json, '$.occurred_at'), '')
         )
         """
@@ -509,8 +512,8 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
          FROM memory_l3_belief_evidence belief_evidence
          JOIN memory_l2_statements source_statement ON source_statement.id = belief_evidence.statement_id
          JOIN json_each(source_statement.evidence_span_ids_json) evidence
-         JOIN memory_l0_provenance_spans span ON span.id = evidence.value
-         JOIN memory_l0_provenance_objects o ON o.id = span.provenance_object_id
+         CROSS JOIN memory_l0_provenance_spans span ON span.id = evidence.value
+         CROSS JOIN memory_l0_provenance_objects o ON o.id = span.provenance_object_id
          WHERE belief_evidence.belief_id = \(alias).id)
         """
     }
@@ -521,8 +524,8 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
           (SELECT MAX(o.occurred_at)
            FROM memory_l4_entity_statements source_statement
            JOIN json_each(source_statement.evidence_span_ids_json) evidence
-           JOIN memory_l0_provenance_spans span ON span.id = evidence.value
-           JOIN memory_l0_provenance_objects o ON o.id = span.provenance_object_id
+           CROSS JOIN memory_l0_provenance_spans span ON span.id = evidence.value
+           CROSS JOIN memory_l0_provenance_objects o ON o.id = span.provenance_object_id
            WHERE source_statement.entity_id = \(alias).id OR source_statement.object_entity_id = \(alias).id),
           NULLIF(json_extract(\(alias).metadata_json, '$.occurred_at'), '')
         )

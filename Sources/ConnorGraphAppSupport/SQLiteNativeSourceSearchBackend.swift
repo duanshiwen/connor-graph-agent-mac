@@ -5,6 +5,8 @@ import ConnorGraphCore
 public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
     public static let schemaVersion = 1
 
+    private static let ftsRows = SQLiteFTSRowLookup(table: "native_search_fts")
+
     private let databaseURL: URL
     private nonisolated(unsafe) var db: OpaquePointer?
     private let encoder: JSONEncoder
@@ -51,7 +53,7 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
         try execute("BEGIN IMMEDIATE")
         do {
             for id in documentIDs {
-                try execute("DELETE FROM native_search_fts WHERE id = ?", bindings: [.text(id)])
+                try Self.ftsRows.remove(id, db: db)
                 try execute("DELETE FROM native_search_docs WHERE id = ?", bindings: [.text(id)])
             }
             try execute("COMMIT")
@@ -72,10 +74,47 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
         do {
             let ids = try idsForSource(kind: kind, sourceInstanceID: sourceInstanceID)
             for id in ids {
-                try execute("DELETE FROM native_search_fts WHERE id = ?", bindings: [.text(id)])
+                try Self.ftsRows.remove(id, db: db)
                 try execute("DELETE FROM native_search_docs WHERE id = ?", bindings: [.text(id)])
             }
             for document in documents { try upsertOne(prepared(document)) }
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            lastError = String(describing: error)
+            throw error
+        }
+    }
+
+    public func synchronizeSource(kind: NativeSearchSourceKind, sourceInstanceID: String? = nil, documents: [NativeSearchDocument]) async throws {
+        try Task.checkCancellation()
+        try execute("BEGIN IMMEDIATE")
+        do {
+            let sourceIDs = Set(try idsForSource(kind: kind, sourceInstanceID: sourceInstanceID))
+            let incomingIDs = Set(documents.map(\.id))
+            for id in sourceIDs.subtracting(incomingIDs) {
+                try Task.checkCancellation()
+                try Self.ftsRows.remove(id, db: db)
+                try execute("DELETE FROM native_search_docs WHERE id = ?", bindings: [.text(id)])
+            }
+            for document in documents {
+                try Task.checkCancellation()
+                let indexed = prepared(document)
+                if let row = try queryRows("SELECT document_json, primary_time FROM native_search_docs WHERE id = ?", bindings: [.text(document.id)]).first,
+                   let data = row[0].blob {
+                    var previous = try decoder.decode(NativeSearchDocument.self, from: data)
+                    // Compare the same persisted date precision used by JSONEncoder.
+                    // Otherwise subsecond source dates would look changed every launch.
+                    var candidate = try decoder.decode(NativeSearchDocument.self, from: encoder.encode(indexed))
+                    // A fresh ingestion timestamp alone is not a content change.
+                    previous.temporal.indexedAt = nil
+                    candidate.temporal.indexedAt = nil
+                    // The SQL time column retains subseconds even though document
+                    // JSON uses ISO8601 seconds; preserve exact time-filter behavior.
+                    if previous == candidate, row[1].double == indexed.temporal.primaryTime?.timeIntervalSince1970 { continue }
+                }
+                try upsertOne(indexed)
+            }
             try execute("COMMIT")
         } catch {
             try? execute("ROLLBACK")
@@ -218,6 +257,7 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
         try execute("CREATE INDEX IF NOT EXISTS idx_native_search_docs_source ON native_search_docs(source_kind, source_instance_id)", db: db)
         try execute("CREATE INDEX IF NOT EXISTS idx_native_search_docs_time ON native_search_docs(primary_time)", db: db)
         try execute("CREATE INDEX IF NOT EXISTS idx_native_search_docs_state ON native_search_docs(is_hidden, is_archived)", db: db)
+        try ftsRows.migrate(db: db, identifier: "id")
     }
 
     private static func execute(_ sql: String, db: OpaquePointer?) throws {
@@ -282,7 +322,7 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
                 .blob(data)
             ]
         )
-        try execute("DELETE FROM native_search_fts WHERE id = ?", bindings: [.text(document.id)])
+        try Self.ftsRows.remove(document.id, db: db)
         try execute(
             "INSERT INTO native_search_fts(id, title, summary, participants, location, body, search_text) VALUES (?, ?, ?, ?, ?, ?, ?)",
             bindings: [
@@ -295,6 +335,7 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
                 .text(searchText)
             ]
         )
+        try Self.ftsRows.recordInsertion(document.id, db: db)
     }
 
     private func idsForSource(kind: NativeSearchSourceKind, sourceInstanceID: String?) throws -> [String] {

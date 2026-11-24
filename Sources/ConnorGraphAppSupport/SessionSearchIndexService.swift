@@ -69,6 +69,8 @@ public struct SessionSearchIndexCoverage: Sendable, Equatable {
 }
 
 public actor SessionSearchIndexService {
+    private static let ftsRows = SQLiteFTSRowLookup(table: "session_search_fts")
+
     private let databaseURL: URL
     private nonisolated(unsafe) var db: OpaquePointer?
 
@@ -150,13 +152,66 @@ public actor SessionSearchIndexService {
         )
     }
 
+    /// Compare IDs per session, including empty sessions and message removals.
+    /// Only these sessions need their full transcript loaded and tokenized.
+    public func sessionsNeedingRepair(sourceSessionMessageIDs: [String: [String]], sourceMetadata: [AgentSession] = []) throws -> [String] {
+        let rows = try queryRows("SELECT session_id, message_ids_json, title, updated_at FROM session_search_docs")
+        let metadata = Dictionary(uniqueKeysWithValues: sourceMetadata.map { ($0.id, $0) })
+        var indexed: [String: Set<String>] = [:]
+        var changedMetadata: Set<String> = []
+        let formatter = ISO8601DateFormatter()
+        for row in rows {
+            guard let id = row[0].text else { continue }
+            indexed[id] = Set(Self.decodeMessageIDs(row[1].text))
+            if let source = metadata[id] {
+                let indexedDate = Date(timeIntervalSince1970: row[3].double ?? 0)
+                // Source session timestamps are persisted as ISO8601 seconds.
+                if row[2].text != source.title || formatter.string(from: indexedDate) != formatter.string(from: source.updatedAt) {
+                    changedMetadata.insert(id)
+                }
+            }
+        }
+        return sourceSessionMessageIDs.keys.filter { id in
+            changedMetadata.contains(id) || indexed[id] != Set(sourceSessionMessageIDs[id] ?? [])
+        }.sorted()
+    }
+
+    /// Repair the affected transcripts atomically; preserve all other FTS rows
+    /// and remove documents whose source sessions were deleted while offline.
+    public func repair(sessions: [AgentSession], sourceSessionIDs: Set<String>) throws -> SessionSearchIndexSynchronizationResult {
+        try Task.checkCancellation()
+        let indexedIDs = Set(try queryRows("SELECT session_id FROM session_search_docs").compactMap { $0[0].text })
+        let removed = indexedIDs.subtracting(sourceSessionIDs)
+        guard !sessions.isEmpty || !removed.isEmpty else {
+            return SessionSearchIndexSynchronizationResult(upsertedCount: 0, removedCount: 0, unchangedCount: indexedIDs.count)
+        }
+        try execute("BEGIN IMMEDIATE")
+        do {
+            for id in removed {
+                try Task.checkCancellation()
+                try Self.ftsRows.remove(id, db: db)
+                try execute("DELETE FROM session_search_docs WHERE session_id = ?", bindings: [.text(id)])
+            }
+            for session in sessions {
+                try Task.checkCancellation()
+                try upsertOne(session)
+            }
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+        return SessionSearchIndexSynchronizationResult(upsertedCount: sessions.count, removedCount: removed.count,
+            unchangedCount: indexedIDs.subtracting(removed).subtracting(sessions.map(\.id)).count)
+    }
+
     private static func decodeMessageIDs(_ raw: String?) -> [String] {
         guard let raw, let data = raw.data(using: .utf8),
               let ids = try? JSONSerialization.jsonObject(with: data) as? [String] else { return [] }
         return ids
     }
 
-    /// Full rebuild used by the startup repair path: replaces every indexed
+    /// Explicit full rebuild: replaces every indexed
     /// document with the provided full-transcript sessions so the index covers
     /// all historical sessions and all of their messages.
     public func rebuild(sessions: [AgentSession]) async throws -> SessionSearchIndexSynchronizationResult {
@@ -164,6 +219,7 @@ public actor SessionSearchIndexService {
         try execute("BEGIN IMMEDIATE")
         do {
             try execute("DELETE FROM session_search_fts")
+            try Self.ftsRows.clear(db: db)
             try execute("DELETE FROM session_search_docs")
             for session in sessions {
                 try Task.checkCancellation()
@@ -197,7 +253,7 @@ public actor SessionSearchIndexService {
         try Task.checkCancellation()
         try execute("BEGIN IMMEDIATE")
         do {
-            try execute("DELETE FROM session_search_fts WHERE session_id = ?", bindings: [.text(sessionID)])
+            try Self.ftsRows.remove(sessionID, db: db)
             try execute("DELETE FROM session_search_docs WHERE session_id = ?", bindings: [.text(sessionID)])
             try execute("COMMIT")
         } catch {
@@ -257,8 +313,9 @@ public actor SessionSearchIndexService {
             """,
             bindings: [.text(session.id), .text(session.title), .text(recentMessages), .text(messageIDsJSON), .double(session.updatedAt.timeIntervalSince1970), .int(session.messages.count)]
         )
-        try execute("DELETE FROM session_search_fts WHERE session_id = ?", bindings: [.text(session.id)])
+        try Self.ftsRows.remove(session.id, db: db)
         try execute("INSERT INTO session_search_fts(session_id, title, recent_messages, indexed_text) VALUES (?, ?, ?, ?)", bindings: [.text(session.id), .text(session.title), .text(recentMessages), .text(indexedText)])
+        try Self.ftsRows.recordInsertion(session.id, db: db)
     }
 
     private func hasIndexedSessions() throws -> Bool {
@@ -301,6 +358,7 @@ public actor SessionSearchIndexService {
             // index so the next bootstrap rebuilds every session from scratch.
             try execute("DROP TABLE IF EXISTS session_search_docs", db: db)
             try execute("DROP TABLE IF EXISTS session_search_fts", db: db)
+            try execute("DROP TABLE IF EXISTS session_search_fts_row_lookup", db: db)
             try execute("DELETE FROM session_search_meta WHERE key = '" + indexVersionKey + "'", db: db)
         }
         try execute("""
@@ -322,6 +380,7 @@ public actor SessionSearchIndexService {
             tokenize = 'unicode61'
         )
         """, db: db)
+        try ftsRows.migrate(db: db, identifier: "session_id")
         try execute("INSERT OR REPLACE INTO session_search_meta(key, value) VALUES ('" + indexVersionKey + "', '" + String(currentIndexFormatVersion) + "')", db: db)
     }
 

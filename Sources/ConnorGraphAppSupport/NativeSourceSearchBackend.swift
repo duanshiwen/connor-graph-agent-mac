@@ -6,6 +6,7 @@ public protocol NativeSourceSearchBackend: Sendable {
     func delete(documentIDs: [String]) async throws
     func deleteBySource(kind: NativeSearchSourceKind, sourceInstanceID: String?) async throws
     func rebuildSource(kind: NativeSearchSourceKind, sourceInstanceID: String?, documents: [NativeSearchDocument]) async throws
+    func synchronizeSource(kind: NativeSearchSourceKind, sourceInstanceID: String?, documents: [NativeSearchDocument]) async throws
     func search(_ query: NativeSearchQuery) async throws -> [NativeSearchResult]
     func searchGrouped(_ query: NativeSearchQuery, limitsBySource: [NativeSearchSourceKind: Int]) async throws -> [NativeSearchSourceKind: [NativeSearchResult]]
     func searchPage(_ request: NativeSearchPageRequest) async throws -> NativeSearchPage
@@ -13,6 +14,11 @@ public protocol NativeSourceSearchBackend: Sendable {
 }
 
 public extension NativeSourceSearchBackend {
+    /// Reconcile a complete source snapshot, retaining unchanged index entries.
+    func synchronizeSource(kind: NativeSearchSourceKind, sourceInstanceID: String? = nil, documents: [NativeSearchDocument]) async throws {
+        try await rebuildSource(kind: kind, sourceInstanceID: sourceInstanceID, documents: documents)
+    }
+
     func searchGrouped(_ query: NativeSearchQuery, limitsBySource: [NativeSearchSourceKind: Int]) async throws -> [NativeSearchSourceKind: [NativeSearchResult]] {
         var grouped: [NativeSearchSourceKind: [NativeSearchResult]] = [:]
         for (kind, limit) in limitsBySource {

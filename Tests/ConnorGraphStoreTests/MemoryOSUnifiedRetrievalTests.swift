@@ -3,6 +3,31 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphStore
 
+@Test func memoryOSEvidenceTraversalPreservesMaximumTimeFallbackAndFullResults() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
+    try store.migrate()
+    let old = Date(timeIntervalSince1970: 100)
+    let recent = Date(timeIntervalSince1970: 200)
+    for (id, date) in [("older", old), ("newer", recent), ("unrelated", Date(timeIntervalSince1970: 900))] {
+        try store.upsert(provenance: MemoryOSProvenanceObject(id: id, sourceType: .manual, title: id, content: id, occurredAt: date, ingestedAt: date))
+        try store.upsert(span: MemoryOSProvenanceSpan(id: "span-\(id)", provenanceObjectID: id, text: id))
+    }
+    try store.upsert(node: MemoryOSNode(id: "time-node", stableKey: "time-node", nodeType: "concept", name: "Time"))
+    try store.upsert(statement: MemoryOSStatement(id: "multiple", subjectID: "time-node", predicate: "status", text: "Multiple sources", validAt: recent, committedAt: recent,
+        evidenceSpanIDs: ["span-older", "missing-span", "span-newer"], metadata: ["occurred_at": iso8601(Date(timeIntervalSince1970: 800))]))
+    try store.upsert(statement: MemoryOSStatement(id: "fallback", subjectID: "time-node", predicate: "status", text: "Fallback", validAt: old, committedAt: old,
+        evidenceSpanIDs: ["missing-span"], metadata: ["occurred_at": iso8601(old)]))
+    try store.upsert(statement: MemoryOSStatement(id: "no-time", subjectID: "time-node", predicate: "status", text: "No time", validAt: old, committedAt: old, evidenceSpanIDs: []))
+    let service = SQLiteMemoryOSUnifiedRetrievalService(store: store)
+    let all = try service.search(MemoryOSRetrievalQuery(text: "", layers: [.l2], limit: Int.max))
+    #expect(Set(all.map(\.recordID)) == ["multiple", "fallback", "no-time"])
+    #expect(all.first { $0.recordID == "multiple" }?.metadata["occurred_at"] == iso8601(recent))
+    #expect(all.first { $0.recordID == "fallback" }?.metadata["occurred_at"] == iso8601(old))
+    #expect(all.first { $0.recordID == "no-time" }?.metadata["occurred_at"] == "")
+    let ranged = try service.search(MemoryOSRetrievalQuery(text: "", layers: [.l2], limit: Int.max, startDate: Date(timeIntervalSince1970: 150), endDate: Date(timeIntervalSince1970: 250)))
+    #expect(ranged.map(\.recordID) == ["multiple"])
+}
+
 @Test func memoryOSRetrievalDefaultsToDepthOneAndAllowsConfiguredDepthSix() {
     #expect(MemoryOSRetrievalQuery(text: "memory").depth == 1)
     #expect(MemoryOSGraphExpansionPolicy(maxDepth: 6).maxDepth == 6)

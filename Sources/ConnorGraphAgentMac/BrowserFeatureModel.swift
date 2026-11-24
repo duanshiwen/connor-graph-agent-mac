@@ -1178,7 +1178,7 @@ final class BrowserFeatureModel {
     private func rebuildHistorySearchIndexIfNeeded() async throws {
         guard let nativeSourceSearchBackend else { return }
         guard let historyStore else {
-            try await nativeSourceSearchBackend.rebuildSource(
+            try await nativeSourceSearchBackend.synchronizeSource(
                 kind: .browserHistory,
                 sourceInstanceID: nil,
                 documents: historyRecords.map { NativeSourceSearchAdapters.browserHistoryDocument(from: $0) }
@@ -1192,7 +1192,7 @@ final class BrowserFeatureModel {
             documents.append(contentsOf: page.records.map { NativeSourceSearchAdapters.browserHistoryDocument(from: $0) })
             cursor = page.nextCursor
         } while cursor != nil
-        try await nativeSourceSearchBackend.rebuildSource(
+        try await nativeSourceSearchBackend.synchronizeSource(
             kind: .browserHistory,
             sourceInstanceID: nil,
             documents: documents

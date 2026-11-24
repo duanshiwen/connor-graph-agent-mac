@@ -59,6 +59,25 @@ public enum NativeSearchQueryNormalizer {
     private static let filterLexicon = TextFilterLexicon.default
 
     public static func normalize(_ rawText: String) -> NativeSearchNormalizedQuery {
+        normalize(rawText, tokenizer: NLTokenizer(unit: .word))
+    }
+
+    /// One local tokenizer per document, never shared across concurrent callers.
+    /// Index terms only depend on values; repeated runs cannot add new values.
+    public static func indexTermValues(cjkRuns: [String]) -> [String] {
+        let tokenizer = NLTokenizer(unit: .word)
+        var seenRuns: Set<String> = []
+        var seenTerms: Set<String> = []
+        var result: [String] = []
+        for run in cjkRuns where seenRuns.insert(run).inserted {
+            for token in normalize(run, tokenizer: tokenizer).tokens where seenTerms.insert(token.value).inserted {
+                result.append(token.value)
+            }
+        }
+        return result
+    }
+
+    private static func normalize(_ rawText: String, tokenizer: NLTokenizer) -> NativeSearchNormalizedQuery {
         let normalizedText = rawText
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -71,7 +90,7 @@ public enum NativeSearchQueryNormalizer {
         for run in runs {
             switch run.kind {
             case .cjk:
-                tokens.append(contentsOf: tokenizeCJK(run.text))
+                tokens.append(contentsOf: tokenizeCJK(run.text, tokenizer: tokenizer))
             case .word, .number, .cjkGram, .phrase:
                 let action = filterLexicon.action(for: run.text, context: .searchQuery)
                 let isStop = action != .keep
@@ -81,19 +100,18 @@ public enum NativeSearchQueryNormalizer {
         return NativeSearchNormalizedQuery(rawText: rawText, normalizedText: normalizedText, tokens: dedupe(tokens))
     }
 
-    private static func tokenizeCJK(_ text: String) -> [NativeSearchQueryToken] {
+    private static func tokenizeCJK(_ text: String, tokenizer: NLTokenizer) -> [NativeSearchQueryToken] {
         let compact = String(text.filter { !$0.isWhitespace })
         guard !compact.isEmpty else { return [] }
 
         var tokens: [NativeSearchQueryToken] = []
         tokens.append(NativeSearchQueryToken(value: compact, kind: .phrase, weight: 1.4, isSoftStopWord: false))
-        tokens.append(contentsOf: semanticCJKTokens(compact))
+        tokens.append(contentsOf: semanticCJKTokens(compact, tokenizer: tokenizer))
         tokens.append(contentsOf: fallbackCJKGrams(compact))
         return tokens
     }
 
-    private static func semanticCJKTokens(_ text: String) -> [NativeSearchQueryToken] {
-        let tokenizer = NLTokenizer(unit: .word)
+    private static func semanticCJKTokens(_ text: String, tokenizer: NLTokenizer) -> [NativeSearchQueryToken] {
         tokenizer.string = text
         var tokens: [NativeSearchQueryToken] = []
         let fullRange = text.startIndex..<text.endIndex

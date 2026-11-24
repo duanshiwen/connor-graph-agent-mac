@@ -318,8 +318,8 @@ final class GlobalSearchFeatureModel {
     /// Verifies that the persistent FTS index covers every historical session and
     /// every message in the source store. When coverage is incomplete — for example
     /// an index built before full-transcript indexing, or sessions/messages that
-    /// arrived while the app was closed — it rebuilds the index from the full
-    /// session store. Runs in the background so startup is never blocked.
+    /// arrived while the app was closed — it repairs only the affected full
+    /// transcripts. Runs in the background so startup is never blocked.
     func repairSessionIndexIfNeeded(repository: AppChatSessionRepository?) {
         guard sessionSearchIndexService != nil else { return }
         sessionIndexGeneration &+= 1
@@ -338,13 +338,18 @@ final class GlobalSearchFeatureModel {
             // Per-session, per-message-ID coverage: the index is only considered
             // complete when every message ID of every session is present in it.
             let sourceMessageIDs = try repository.store.sessionMessageIDs()
-            let coverage = try await sessionSearchIndexService.coverage(
-                sourceSessionMessageIDs: sourceMessageIDs
+            let repairIDs = try await sessionSearchIndexService.sessionsNeedingRepair(
+                sourceSessionMessageIDs: sourceMessageIDs,
+                sourceMetadata: try repository.loadSessionMetadata()
             )
-            guard !coverage.isComplete else { return }
-            // Full rebuild: load every session with its complete transcript.
-            let sessions = try repository.loadSessions(filter: .all)
-            _ = try await sessionSearchIndexService.rebuild(sessions: sessions)
+            var sessions: [AgentSession] = []
+            for id in repairIDs {
+                try Task.checkCancellation()
+                if let session = try repository.loadSession(id: id) { sessions.append(session) }
+            }
+            _ = try await sessionSearchIndexService.repair(
+                sessions: sessions, sourceSessionIDs: Set(sourceMessageIDs.keys)
+            )
         } catch {
             // Startup repair must never block or crash the app; failures are
             // logged and simply retried on the next launch.

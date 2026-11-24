@@ -29,13 +29,7 @@ public enum NativeSourceSearchIndexedTextBuilder {
     }
 
     private static func cjkIndexTerms(in text: String) -> [String] {
-        var terms: [String] = []
-        for run in cjkRuns(in: text) {
-            let normalized = NativeSearchQueryNormalizer.normalize(run)
-            terms.append(contentsOf: normalized.tokens.map(\.value))
-        }
-        var seen: Set<String> = []
-        return terms.filter { !$0.isEmpty && seen.insert($0).inserted }
+        NativeSearchQueryNormalizer.indexTermValues(cjkRuns: cjkRuns(in: text))
     }
 
     private static func cjkRuns(in text: String) -> [String] {
