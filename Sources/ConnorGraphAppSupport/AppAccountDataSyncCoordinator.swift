@@ -454,8 +454,8 @@ public actor AppAccountDataSyncCoordinator {
     }
 
     private enum AppliedChangeKind { case session(String), settings, governanceLabels, rssSubscriptions, mailMessages }
-    private struct RecordState: Codable { var version: Int64; var hash: String; var deleted: Bool; var encrypted: Bool = false }
-    private struct PersistedState: Codable {
+    private struct RecordState: Codable, Equatable { var version: Int64; var hash: String; var deleted: Bool; var encrypted: Bool = false }
+    private struct PersistedState: Codable, Equatable {
         var cursor: Int64 = 0
         var records: [String: RecordState] = [:]
         var pending: [String: ConnorSyncChange] = [:]
@@ -496,6 +496,7 @@ public actor AppAccountDataSyncCoordinator {
     private let defaults: UserDefaults
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private var cachedCheckpoint: (key: String, data: Data, state: PersistedState)?
 
     public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, governance: AppSessionGovernanceConfigRepository? = nil, memory: SQLiteMemoryOSStore?, skillStore: SkillSyncStore? = nil, rss: (any RSSSourceRepository)? = nil, mail: (any MailSourceRepository)? = nil, llm: AppLLMSettingsRepository? = nil, identity: AppUserIdentityStore, defaults: UserDefaults = .standard, onReceived: (@Sendable (AppAccountDataSyncResult) async -> Void)? = nil) {
         self.sessions = sessions; self.settings = settings; self.governance = governance; self.memory = memory; self.skillStore = skillStore; self.rss = rss; self.mail = mail; self.llm = llm; self.identity = identity; self.defaults = defaults; self.onReceived = onReceived
@@ -605,6 +606,7 @@ public actor AppAccountDataSyncCoordinator {
         var syncResult = AppAccountDataSyncResult()
         let stateKey = "ConnorAccountSyncState.\(userID)"
         var state = loadState(key: stateKey)
+        defer { cachedCheckpoint = nil } // Do not retain decoded historical fragments between rounds.
         state.records = state.records.filter { !$0.key.hasPrefix("mail_accounts|") }
         state.pending = state.pending.filter { !$0.key.hasPrefix("mail_accounts|") }
         state.dirtyKeys = state.dirtyKeys.filter { !$0.hasPrefix("mail_accounts|") }
@@ -1202,8 +1204,23 @@ public actor AppAccountDataSyncCoordinator {
         return (result, clear.encrypted)
     }
     private func recordKey(_ collection: String, _ id: String) -> String { "\(collection)|\(id)" }
-    private func loadState(key: String) -> PersistedState { defaults.data(forKey: key).flatMap { try? decoder.decode(PersistedState.self, from: $0) } ?? PersistedState() }
-    private func saveState(_ state: PersistedState, key: String) { defaults.set(try? encoder.encode(state), forKey: key) }
+    private func loadState(key: String) -> PersistedState {
+        guard let data = defaults.data(forKey: key) else { cachedCheckpoint = nil; return PersistedState() }
+        if let cachedCheckpoint, cachedCheckpoint.key == key, cachedCheckpoint.data == data { return cachedCheckpoint.state }
+        guard let state = try? decoder.decode(PersistedState.self, from: data) else { cachedCheckpoint = nil; return PersistedState() }
+        cachedCheckpoint = (key, data, state)
+        defaults.set(state.cursor, forKey: key.replacingOccurrences(of: "ConnorAccountSyncState.", with: "ConnorAccountSyncCursor."))
+        return state
+    }
+    private func saveState(_ state: PersistedState, key: String) {
+        // Compare the complete state before encoding, including pending changes,
+        // fragments and repair progress. Empty polls need no JSON work or write.
+        if let cachedCheckpoint, cachedCheckpoint.key == key, cachedCheckpoint.state == state { return }
+        guard let data = try? encoder.encode(state) else { return }
+        defaults.set(data, forKey: key)
+        defaults.set(state.cursor, forKey: key.replacingOccurrences(of: "ConnorAccountSyncState.", with: "ConnorAccountSyncCursor."))
+        cachedCheckpoint = (key, data, state)
+    }
 }
 
 private extension Array {

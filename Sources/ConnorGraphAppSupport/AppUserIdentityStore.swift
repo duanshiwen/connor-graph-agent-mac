@@ -164,6 +164,14 @@ public struct ConnorSyncDevice: Codable, Sendable, Equatable {
     public var name: String
     public var appVersion: String
     public var lastSeenAt: Date
+    public var syncCursor: Int64?
+}
+
+enum AccountSyncWakePolicy {
+    static func needsSync(remoteCursor: Int64?, durableCursor: Int64?, localChanged: Bool) -> Bool {
+        guard let remoteCursor, let durableCursor else { return true }
+        return localChanged || remoteCursor > durableCursor
+    }
 }
 
 public struct ConnorSyncChange: Codable, Sendable, Equatable {
@@ -1057,7 +1065,7 @@ public final class AppUserIdentityStore: ObservableObject {
         l1CoordinationTask = Task {
             while !Task.isCancelled {
                 do {
-                    _ = try await session.syncHeartbeat(
+                    let heartbeat = try await session.syncHeartbeat(
                         deviceID: deviceID,
                         name: Host.current().localizedName ?? "Mac",
                         appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
@@ -1065,12 +1073,18 @@ public final class AppUserIdentityStore: ObservableObject {
                     )
                     if isDeviceSyncEnabled {
                         // History sync is independent of the memory extraction lease.
-                        requestDeviceSyncPass()
+                        guard !Task.isCancelled, let userID = currentUser?.id else { return }
+                        let user = String(userID)
+                        let cursorKey = "ConnorAccountSyncCursor.\(user)"
+                        let generation = UserDefaults.standard.integer(forKey: AppAccountSyncSignal.projectionGenerationKey)
+                        let scannedKey = "ConnorAccountSyncScannedProjectionGeneration.\(user)"
+                        let hasCursor = UserDefaults.standard.object(forKey: cursorKey) != nil
+                        let localChanged = UserDefaults.standard.object(forKey: scannedKey) == nil || UserDefaults.standard.integer(forKey: scannedKey) != generation
+                        let cursor: Int64? = hasCursor ? Int64(UserDefaults.standard.integer(forKey: cursorKey)) : nil
+                        if AccountSyncWakePolicy.needsSync(remoteCursor: heartbeat.syncCursor, durableCursor: cursor, localChanged: localChanged) { requestDeviceSyncPass() }
                         let lease = try await session.acquireL1Lease(deviceID: deviceID)
                         L1ExtractionEligibility.shared.update(granted: lease.granted, expiresAt: lease.expiresAt)
-                        // 心跳周期兜底同步：WebSocket 的 sync_changed 推送在后台/弱网/掉线重连时
-                        // 可能丢失，这里保证每个心跳周期都主动触发一次 push+pull，
-                        // 让跨端（安卓↔Mac）人际关系等变更 ~45s 内完成同步（与安卓端行为一致）。
+                        // Heartbeat watermarks recover missed socket hints without an empty data pass.
                     } else {
                         // 同步关闭：不申请租约，本机始终自行提取。
                         L1ExtractionEligibility.shared.enableStandalone()

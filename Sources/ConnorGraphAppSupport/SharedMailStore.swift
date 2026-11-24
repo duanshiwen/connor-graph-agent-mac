@@ -23,6 +23,9 @@ public struct SharedMailStore: Sendable {
  static func wire(_ value: SharedMailMessage) throws -> ConnorJSONValue { try JSONDecoder().decode(ConnorJSONValue.self, from: JSONEncoder().encode(value)) }
  static func decode(_ payload: ConnorJSONValue) throws -> SharedMailMessage {
   let value = try JSONDecoder().decode(SharedMailMessage.self, from: JSONEncoder().encode(payload))
+  return try validated(value)
+ }
+ private static func validated(_ value: SharedMailMessage) throws -> SharedMailMessage {
   guard value.schemaVersion == 1, !value.mailboxAddress.isEmpty, (UInt32(value.uid) ?? 0) > 0, (UInt32(value.uidValidity) ?? 0) > 0,
         value.id == recordID(address: value.mailboxAddress, folder: value.folder, validity: value.uidValidity, uid: value.uid), value.updatedAt >= 0, value.updatedAt <= 9_007_199_254_740_991, value.sentAt >= -9_007_199_254_740_991, value.sentAt <= 9_007_199_254_740_991,
         value.attachments.allSatisfy({ $0.size >= -1 && $0.size <= 9_007_199_254_740_991 }) else { throw SessionChunks.Failure.invalid }
@@ -50,12 +53,13 @@ public struct SharedMailStore: Sendable {
   if next.attachments.isEmpty && !old.attachments.isEmpty { next.attachments = old.attachments }
   return next
  }
+ private static func sameContent(_ a: SharedMailMessage, _ b: SharedMailMessage) -> Bool { var x = a; var y = b; x.updatedAt = 0; y.updatedAt = 0; return x == y }
  private static func contentHash(_ v: SharedMailMessage) throws -> String { var copy = v; copy.updatedAt = 0; return try semanticHash(wire(copy)) }
  public func get(_ id: String) throws -> SharedMailMessage? {
   Self.gate.lock(); defer { Self.gate.unlock() }
   guard id.count == 69, id.hasPrefix("mail_"), id.dropFirst(5).allSatisfy({ $0.isHexDigit }) else { return nil }
   let url = directory.appendingPathComponent(id + ".json"); guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-  return try Self.decode(JSONDecoder().decode(ConnorJSONValue.self, from: Data(contentsOf: url)))
+  return try Self.validated(JSONDecoder().decode(SharedMailMessage.self, from: Data(contentsOf: url)))
  }
  @discardableResult public func capture(_ input: SharedMailMessage) throws -> Bool {
   Self.gate.lock(); defer { Self.gate.unlock() }
@@ -66,7 +70,7 @@ public struct SharedMailStore: Sendable {
   if old != nil, (try? String(contentsOf: baseline, encoding: .utf8)) == observed { return false }
   if let old { next = Self.preserve(next, old) }
   var changed = old == nil
-  if let old { changed = try Self.contentHash(next) != Self.contentHash(old) }
+  if let old { changed = !Self.sameContent(next, old) }
   next.updatedAt = max(Int64(Date().timeIntervalSince1970 * 1_000), (old?.updatedAt ?? 0) + 1)
   if changed { changed = try apply(Self.wire(next)) }
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -78,10 +82,12 @@ public struct SharedMailStore: Sendable {
   var next = try Self.decode(payload)
   if let old = try get(next.id) {
    let incoming = next
-   let incomingHash = try Self.contentHash(next); let oldHash = try Self.contentHash(old)
-   if next.updatedAt < old.updatedAt || next.updatedAt == old.updatedAt && incomingHash <= oldHash { next = old }
+   if next.updatedAt < old.updatedAt { next = old }
+   else if next.updatedAt == old.updatedAt {
+    if try Self.contentHash(next) <= Self.contentHash(old) { next = old }
+   }
    next = Self.preserve(next, Self.quality(incoming) > Self.quality(old) ? incoming : old)
-   if try Self.semanticHash(Self.wire(next)) == Self.semanticHash(Self.wire(old)) { return false }
+   if next == old { return false }
   }
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
   try JSONEncoder().encode(next).write(to: directory.appendingPathComponent(next.id + ".json"), options: .atomic)
@@ -91,7 +97,7 @@ public struct SharedMailStore: Sendable {
  public func all() throws -> [SharedMailMessage] {
   Self.gate.lock(); defer { Self.gate.unlock() }
   guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
-  return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" && $0.lastPathComponent.hasPrefix("mail_") }.map { try Self.decode(JSONDecoder().decode(ConnorJSONValue.self, from: Data(contentsOf: $0))) }.sorted { $0.sentAt > $1.sentAt }
+  return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" && $0.lastPathComponent.hasPrefix("mail_") }.map { try Self.validated(JSONDecoder().decode(SharedMailMessage.self, from: Data(contentsOf: $0))) }.sorted { $0.sentAt > $1.sentAt }
  }
  public func visible() throws -> [SharedMailMessage] {
   let values = try all(); let groups = Dictionary(grouping: values) { $0.mailboxAddress + "\0" + $0.folder }

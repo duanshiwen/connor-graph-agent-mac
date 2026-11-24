@@ -15,20 +15,46 @@ public actor NoteImportExecutionScheduler {
     private var cancelRequested = false
     private var activeCount = 0
     private var peakActiveCount = 0
+    private var pauseWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     public init(configuration: Configuration = .init()) { self.configuration = configuration }
     public func update(configuration: Configuration) { self.configuration = configuration }
     public func pause() { pauseRequested = true }
-    public func resume() { pauseRequested = false }
-    public func cancel() { cancelRequested = true; pauseRequested = false }
+    public func resume() { pauseRequested = false; releasePauseWaiters() }
+    public func cancel() { cancelRequested = true; pauseRequested = false; releasePauseWaiters() }
     public func resetCancellation() { cancelRequested = false }
     public func peakConcurrency() -> Int { peakActiveCount }
+
+    private func releasePauseWaiters() {
+        let waiters = pauseWaiters
+        pauseWaiters.removeAll()
+        for waiter in waiters.values { waiter.resume() }
+    }
+
+    private func releasePauseWaiter(_ id: UUID) {
+        pauseWaiters.removeValue(forKey: id)?.resume()
+    }
+
+    private func waitWhilePaused() async {
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                if !pauseRequested || cancelRequested || Task.isCancelled {
+                    continuation.resume()
+                } else {
+                    pauseWaiters[id] = continuation
+                }
+            }
+        } onCancel: {
+            Task { await self.releasePauseWaiter(id) }
+        }
+    }
 
     public func run<Element: Sendable, Result: Sendable>(
         elements: [Element],
         operation: @escaping @Sendable (Element) async throws -> Result
     ) async -> [Swift.Result<Result, Error>] {
-        guard !elements.isEmpty else { return [] }
+        guard !elements.isEmpty, !Task.isCancelled else { return [] }
         let limit = configuration.concurrency
         return await withTaskGroup(of: (Int, Swift.Result<Result, Error>).self, returning: [Swift.Result<Result, Error>].self) { group in
             var next = 0
@@ -43,9 +69,10 @@ public actor NoteImportExecutionScheduler {
             while next < min(limit, elements.count) { submit(next); next += 1; activeCount += 1; peakActiveCount = max(peakActiveCount, activeCount) }
             while let (index, result) = await group.next() {
                 activeCount -= 1; results[index] = result
-                while pauseRequested && !cancelRequested { try? await Task.sleep(for: .milliseconds(50)) }
-                if !cancelRequested, next < elements.count {
+                while pauseRequested && !cancelRequested && !Task.isCancelled { await waitWhilePaused() }
+                if !cancelRequested, !Task.isCancelled, next < elements.count {
                     await Task.yield()
+                    guard !Task.isCancelled else { group.cancelAll(); continue }
                     submit(next); next += 1; activeCount += 1; peakActiveCount = max(peakActiveCount, activeCount)
                 }
             }
