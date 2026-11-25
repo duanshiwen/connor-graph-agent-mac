@@ -50,3 +50,16 @@ Linux：`cargo test -p connor-core --test run_mailbox --test round3_agent --test
 Apple：`python3 Scripts/prepare-run-mailbox-portable-tests.py`，然后在 `.build/run-mailbox-portable` 执行 `swift test`；具备 Apple SDK 时还应在原包执行 `swift test` 和对应 Xcode 应用构建。
 
 最初移植未发布安装包。2026-11-25 已补验 macOS Apple 芯片与 Intel 双架构 Release 构建及 Ad-hoc 签名，DMG 完整性通过；版本升级至 1.0.143，并在本机替换安装后确认原账号及会话正常恢复。多设备远程运行租约、跨设备实时指令同步和发布签名不属于这次本机会话交互移植。
+
+
+## 2026-11-25 可见队列与空输入引导修复
+
+输入框上方直接展示持久化队列，按顺序显示消息预览，并提供逐条“立即引导”和“撤回”。引导直接使用队列项的原始标识与内容，不依赖当前输入框；进行中的任务只取消当前模型生成并注入该项，保留已完成工具结果与原任务上下文。停止保留剩余队列；空闲时可继续任务与队列。队列区域限高滚动，采用平台现有点击尺寸、主题与审批流程。
+
+队列接受、引导、认领、撤回和暂停后的持久化变更会通知界面更新。队列操作不清空后来输入的新草稿。
+
+审批卡片改为输入卡上方的独立区域，避免覆盖输入框与操作按钮；运行中提交在持久化确认后才清空对应草稿。Swift 生产 mailbox 的 9 项可移植测试及修改文件语法检查已通过。原生 SwiftUI/AppKit 集成仍需在 Xcode 环境运行，不能以 Linux Swift 测试替代。
+
+原生文本编辑器更新时刷新 Coordinator 的 Binding 与选区跟踪器，避免视图复用后仍写入旧草稿。新增 ComposerBindingRefreshTests 覆盖此路径，需 macOS 执行。
+
+准备阶段重新引导同一条队列消息时，认领会同时移除该标识的待注入副本；重复请求沿用原始标识，避免作为新消息再次排队。新增测试验证只接入一次。

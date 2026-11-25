@@ -30,6 +30,7 @@ public struct AgentRunSteered: Error, Sendable {}
 
 /// Commands and transcript updates share one serialized, atomic persistence boundary.
 public final class AgentRunMailbox: @unchecked Sendable {
+    public static let didChange = Notification.Name("Connor.AgentRunMailbox.didChange")
     private let lock = NSRecursiveLock()
     private var state: MailboxState
     private let file: URL
@@ -49,6 +50,7 @@ public final class AgentRunMailbox: @unchecked Sendable {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(next).write(to: file, options: .atomic)
         state = next
+        NotificationCenter.default.post(name: Self.didChange, object: self)
     }
     public var queued: [AgentRunInstruction] { withLock { state.queue } }
     public var paused: Bool { withLock { state.paused } }
@@ -93,7 +95,7 @@ public final class AgentRunMailbox: @unchecked Sendable {
                 }
                 s.preparingUser = nil
                 s.partial = ""; s.runID = runID; s.active = true; s.paused = false
-                if let claimID { s.queue.removeAll { $0.id == claimID } }
+                if let claimID { s.queue.removeAll { $0.id == claimID }; s.pending.removeAll { $0.id == claimID } }
             }
             accepting = true; claimID = nil
             return state.context
@@ -128,6 +130,13 @@ public final class AgentRunMailbox: @unchecked Sendable {
     }
     public func pause() throws { try withLock { accepting=false; try mutate { $0.paused=true } } }
     public func resumeQueue() throws { try withLock { try mutate { $0.paused=false } } }
+    @discardableResult public func promoteQueued(_ id: String) throws -> Bool {
+        try withLock {
+            guard accepting, let instruction = state.queue.first(where: { $0.id == id }) else { return false }
+            try mutate { $0.queue.removeAll { $0.id == id }; $0.pending.append(instruction) }
+            cancelGeneration?(); cancelApproval?(); return true
+        }
+    }
     public func removeQueued(_ id: String) throws { try withLock { try mutate { $0.queue.removeAll { $0.id==id } } } }
     public func result(callID: String) -> AgentToolResult? { withLock { state.results[callID] } }
 }

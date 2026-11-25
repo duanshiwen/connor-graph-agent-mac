@@ -7,6 +7,36 @@ final class AgentRunMailboxTests: XCTestCase {
         let directory=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         return (directory, try AgentRunMailbox(file: directory.appendingPathComponent("inbox.json")))
     }
+    func testPromoteQueuedMessageWithoutDraftRetainsIdentityAndStoredResult() throws {
+        let (directory, inbox) = try fixture(); defer { try? FileManager.default.removeItem(at: directory) }
+        var messages = try inbox.begin(runID: "run", initial: [.init(role: .user, content: "original")], user: .init(role: .user, content: "original"))
+        let first = AgentRunInstruction(text: "first"), selected = AgentRunInstruction(text: "selected")
+        try inbox.submit(first, steer: false); try inbox.submit(selected, steer: false)
+        let result = AgentToolResult(toolCallID: "call", toolName: "lookup", contentText: String(repeating: "x", count: 50000) + "TAIL")
+        try inbox.record(result)
+        XCTAssertTrue(try inbox.promoteQueued(selected.id))
+        XCTAssertFalse(try inbox.promoteQueued(selected.id))
+        XCTAssertEqual(inbox.queued, [first])
+        XCTAssertEqual(try inbox.apply(to: &messages), [selected])
+        XCTAssertEqual(messages.map(\.content), ["original", "selected"])
+        XCTAssertEqual(inbox.result(callID: "call")?.contentText, result.contentText)
+        try inbox.pause()
+        XCTAssertFalse(try inbox.promoteQueued(first.id))
+        let restored = try AgentRunMailbox(file: directory.appendingPathComponent("inbox.json"))
+        XCTAssertEqual(restored.queued, [first]); XCTAssertTrue(restored.paused)
+        XCTAssertEqual(restored.result(callID: "call")?.contentText, result.contentText)
+    }
+    func testGuideDuringQueuedPreparationIsClaimedOnlyOnce() throws {
+        let (directory, inbox) = try fixture(); defer { try? FileManager.default.removeItem(at: directory) }
+        let selected = AgentRunInstruction(text: "selected")
+        try inbox.submit(selected, steer: false)
+        try inbox.prepare(runID: "run", user: selected.modelMessage)
+        XCTAssertTrue(try inbox.promoteQueued(selected.id))
+        inbox.prepareClaim(selected.id)
+        var messages = try inbox.begin(runID: "run", initial: [selected.modelMessage], user: selected.modelMessage)
+        XCTAssertTrue(try inbox.apply(to: &messages).isEmpty)
+        XCTAssertEqual(messages.filter { $0.content == selected.text }.count, 1)
+    }
     func testInstructionDuringPreparationAndRecoveryKeepsGoal() throws {
         let (directory, inbox) = try fixture(); defer { try? FileManager.default.removeItem(at: directory) }
         let first = try inbox.begin(runID: "old", initial: [.init(role: .user, content: "old")], user: .init(role: .user, content: "old"))

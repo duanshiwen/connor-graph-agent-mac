@@ -1123,7 +1123,9 @@ final class AppRuntimeLifecycle {
                 steer: { [weak self] prompt, display, people in await self?.submitChat(prompt: prompt, clearComposer: true, displayPrompt: display, personReferences: people, steer: true) },
                 resume: { [weak self] in self?.resumeRunQueue() },
                 queue: { [weak self] in self?.queuedRunInstructions() ?? [] },
-                removeQueued: { [weak self] in self?.removeQueuedRunInstruction($0) }
+                removeQueued: { [weak self] in self?.removeQueuedRunInstruction($0) },
+                guideQueued: { [weak self] in self?.guideQueuedRunInstruction($0) },
+                queuePaused: { [weak self] in self?.isRunQueuePaused() ?? false }
             ),
             browser: browserFeatureModel,
             calendar: calendarFeatureModel,
@@ -3352,6 +3354,22 @@ final class AppRuntimeLifecycle {
         do { return try AgentRunMailboxRegistry.shared.mailbox(sessionID: id, directory: storagePaths.sessionsDirectory).queued }
         catch { errorMessage = "无法读取队列：\(error)"; return [] }
     }
+    func isRunQueuePaused() -> Bool {
+        guard let id = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return false }
+        return (try? AgentRunMailboxRegistry.shared.mailbox(sessionID: id, directory: storagePaths.sessionsDirectory).paused) ?? false
+    }
+    func guideQueuedRunInstruction(_ instructionID: String) {
+        guard let id = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return }
+        do {
+            let inbox = try AgentRunMailboxRegistry.shared.mailbox(sessionID: id, directory: storagePaths.sessionsDirectory)
+            if chatFeatureModel.run.submittingSessionIDs.contains(id) {
+                guard try inbox.promoteQueued(instructionID) else { errorMessage = "当前任务正在结束或停止，请稍后继续这条消息。"; return }
+            } else if let next = inbox.queued.first(where: { $0.id == instructionID }) {
+                Task { _ = await self.submitChat(prompt: next.text, attachments: next.attachments,
+                    personReferences: next.personReferences, targetSessionID: id, queuedInstruction: next) }
+            }
+        } catch { errorMessage = "消息未能引导：\(error)" }
+    }
     func removeQueuedRunInstruction(_ instructionID: String) {
         guard let id = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return }
         do { try AgentRunMailboxRegistry.shared.mailbox(sessionID: id, directory: storagePaths.sessionsDirectory).removeQueued(instructionID) }
@@ -3597,6 +3615,10 @@ final class AppRuntimeLifecycle {
             do {
                 guard let storagePaths else { throw CocoaError(.fileWriteUnknown) }
                 let inbox = try AgentRunMailboxRegistry.shared.mailbox(sessionID: submittingSessionID, directory: storagePaths.sessionsDirectory)
+                if let queuedInstruction {
+                    guard try inbox.promoteQueued(queuedInstruction.id) else { return nil }
+                    return queuedInstruction.id
+                }
                 await chatComposerCoordinator.awaitAttachmentExtraction(sessionID: submittingSessionID)
                 let plan = await buildAttachmentContextPlanOffMain(sessionID: submittingSessionID,
                     attachments: attachmentsForSubmission, preservingAttachmentIDs: Set(attachmentsForSubmission.map(\.id)), deferredMediaAttachmentIDs: [])
@@ -3606,7 +3628,10 @@ final class AppRuntimeLifecycle {
                     modelMessage: AgentModelMessage(role: .user, content: contextText, contentParts: parts),
                     attachments: attachmentsForSubmission, personReferences: personReferences)
                 try inbox.submit(instruction, steer: steer)
-                if clearComposer { chatComposerCoordinator.consumeForSubmission(sessionID: submittingSessionID) }
+                if clearComposer, chatFeatureModel.sessions.selectedSessionID == submittingSessionID,
+                   chatFeatureModel.composer.input == (rawDisplayPrompt ?? rawPrompt) {
+                    chatComposerCoordinator.consumeForSubmission(sessionID: submittingSessionID)
+                }
                 if !chatFeatureModel.run.submittingSessionIDs.contains(submittingSessionID) { scheduleNextRunInstruction(sessionID: submittingSessionID) }
                 return instruction.id
             } catch { errorMessage = "指令未发送：\(error)"; return nil }
@@ -4108,7 +4133,9 @@ extension AppRuntimeLifecycle {
                 steer: { [weak model] prompt, display, people in await model?.submitChat(prompt: prompt, clearComposer: true, displayPrompt: display, personReferences: people, steer: true) },
                 resume: { [weak model] in model?.resumeRunQueue() },
                 queue: { [weak model] in model?.queuedRunInstructions() ?? [] },
-                removeQueued: { [weak model] in model?.removeQueuedRunInstruction($0) }
+                removeQueued: { [weak model] in model?.removeQueuedRunInstruction($0) },
+                guideQueued: { [weak model] in model?.guideQueuedRunInstruction($0) },
+                queuePaused: { [weak model] in model?.isRunQueuePaused() ?? false }
         )
         let chatActions = ChatFeatureActions(
             session: session,

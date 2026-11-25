@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import AppKit
 import UniformTypeIdentifiers
 import ConnorGraphCore
@@ -49,6 +50,9 @@ struct AgentChatComposerView: View {
     @Bindable var contactsFeatureModel: ContactsFeatureModel
     var onExpandApprovalReview: ((AgentPendingApproval) -> Void)? = nil
     @State private var localChatInput: String = ""
+    @State private var queuedInstructions: [AgentRunInstruction] = []
+    @State private var queuePaused = false
+    @State private var isAcceptingInstruction = false
     @State private var isWorkspacePopoverPresented: Bool = false
     @State private var isImageImporterPresented: Bool = false
     @State private var isSkillPickerPresented: Bool = false
@@ -114,6 +118,13 @@ struct AgentChatComposerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            if let approval = chatActions.approval.activeChatPendingApprovals.first {
+                AgentChatPermissionRequestCard(approval: approval, model: model, chatActions: chatActions,
+                    onExpandReview: { onExpandApprovalReview?(approval) })
+                    .frame(maxHeight: 220)
+            }
+            instructionQueuePanel
+
             if let pickerModel = attachmentLibraryModel {
                 AttachmentLibraryPickerPanel(
                     model: pickerModel,
@@ -184,22 +195,19 @@ struct AgentChatComposerView: View {
                         .layoutPriority(2)
 
                     if composerState.isSubmitting {
-                        Button("打断") { submitLocalChatInput(steer: true) }.frame(minWidth: 36, minHeight: 36).disabled(!canSubmitLocalChat)
+                        Button("打断") { submitLocalChatInput(steer: true) }.frame(minWidth: 36, minHeight: 36).disabled(!canSubmitLocalChat || isAcceptingInstruction)
                         Button { sendComposerAction(.cancelActiveRun) } label: { Image(systemName: "stop.fill") }
                             .frame(minWidth: 36, minHeight: 36)
                             .accessibilityLabel("停止任务并暂停队列")
                     }
-                    Menu {
-                        Button("继续任务与队列") { chatActions.run.resumeRunQueue() }.disabled(composerState.isSubmitting)
-                        ForEach(chatActions.run.queuedRunInstructions()) { instruction in
-                            Menu(String(instruction.text.prefix(40))) {
-                                Button("撤回") { chatActions.run.removeQueuedRunInstruction(instruction.id) }
-                            }
-                        }
-                    } label: { Image(systemName: "list.bullet").frame(minWidth: 36, minHeight: 36) }.accessibilityLabel("待处理队列")
+                    if !composerState.isSubmitting {
+                        Button("继续") { chatActions.run.resumeRunQueue() }
+                            .frame(minWidth: 36, minHeight: 36)
+                            .accessibilityLabel("继续任务与队列")
+                    }
                     AgentSendControlButton(
                         isSubmitting: false,
-                        isDisabled: !composerState.isSubmitting && !composerState.canSubmit,
+                        isDisabled: !canSubmitLocalChat || isAcceptingInstruction,
                         action: {
                             submitLocalChatInput()
                         }
@@ -216,24 +224,7 @@ struct AgentChatComposerView: View {
                 RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
                     .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
             )
-            .overlay {
-                if let approval = chatActions.approval.activeChatPendingApprovals.first {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
-                            .fill(Color(nsColor: .controlBackgroundColor).opacity(0.96))
 
-                        AgentChatPermissionRequestCard(
-                            approval: approval,
-                            model: model,
-                            chatActions: chatActions,
-                            onExpandReview: { onExpandApprovalReview?(approval) }
-                        )
-                        .padding(AgentChatLayout.spaceM)
-                        .frame(maxHeight: 220)
-                    }
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                }
-            }
         }
         .padding(0)
         .background(Color.clear)
@@ -257,7 +248,10 @@ struct AgentChatComposerView: View {
         } message: { alert in
             Text(alert.message)
         }
+        .onReceive(NotificationCenter.default.publisher(for: AgentRunMailbox.didChange).receive(on: RunLoop.main)) { _ in refreshInstructionQueue() }
+        .onChange(of: model.run.isSubmitting) { _, _ in refreshInstructionQueue() }
         .onAppear {
+            refreshInstructionQueue()
             localChatInput = model.composer.input
             installSpeechKeyboardMonitorIfNeeded()
         }
@@ -266,6 +260,7 @@ struct AgentChatComposerView: View {
             speechKeyboardMonitor = nil
         }
         .onChange(of: model.sessions.selectedSessionID) { _, _ in
+            refreshInstructionQueue()
             localChatInput = model.composer.input
             composerPersonMentions = []
             closePersonMentionPicker()
@@ -300,6 +295,44 @@ struct AgentChatComposerView: View {
 
     private var composerStore: AgentComposerStore {
         AgentComposerStore(model: model, actions: chatActions)
+    }
+
+    private func refreshInstructionQueue() {
+        queuedInstructions = chatActions.run.queuedRunInstructions()
+        queuePaused = chatActions.run.isRunQueuePaused()
+    }
+
+    @ViewBuilder private var instructionQueuePanel: some View {
+        if !queuedInstructions.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("待处理消息 · \(queuedInstructions.count)").font(.system(size: 12, weight: .medium))
+                    Spacer()
+                    Text(queuePaused ? "已暂停" : "任务结束后依次发送").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                ScrollView(.vertical) {
+                    VStack(spacing: 2) {
+                        ForEach(Array(queuedInstructions.enumerated()), id: \.element.id) { index, instruction in
+                            HStack(spacing: 6) {
+                                Text("\(index + 1). \(instruction.text.isEmpty ? "附件消息" : instruction.text)")
+                                    .font(.system(size: 14)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                                if !instruction.attachments.isEmpty {
+                                    Label("\(instruction.attachments.count)", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Button { chatActions.run.guideQueuedRunInstruction(instruction.id); refreshInstructionQueue() } label: {
+                                    Image(systemName: "arrow.up").font(.system(size: 18)).frame(width: 36, height: 36)
+                                }.buttonStyle(.plain).accessibilityLabel("立即引导这条消息")
+                                Button { chatActions.run.removeQueuedRunInstruction(instruction.id); refreshInstructionQueue() } label: {
+                                    Image(systemName: "xmark").font(.system(size: 18)).frame(width: 36, height: 36)
+                                }.buttonStyle(.plain).accessibilityLabel("撤回这条排队消息")
+                            }
+                        }
+                    }
+                }.frame(height: min(CGFloat(queuedInstructions.count) * 40, 180))
+            }
+            .padding(10).background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+            .accessibilityElement(children: .contain).accessibilityLabel("待处理消息队列")
+        }
     }
 
     private var composerState: AgentComposerState {
@@ -643,15 +676,24 @@ struct AgentChatComposerView: View {
             }
             return
         }
-        localChatInput = ""
-        composerPersonMentions = []
-        closePersonMentionPicker()
-        chatActions.composer.updateSelectedChatInputDraft("")
+        guard canSubmitLocalChat, !isAcceptingInstruction else { return }
+        let isLiveInstruction = composerState.isSubmitting
+        if isLiveInstruction { isAcceptingInstruction = true }
+        else {
+            localChatInput = ""; composerPersonMentions = []; closePersonMentionPicker()
+            chatActions.composer.updateSelectedChatInputDraft("")
+        }
         Task {
+            defer { if isLiveInstruction { isAcceptingInstruction = false }; refreshInstructionQueue() }
             let runID: String?
             if steer { runID = await chatActions.run.steerChat(prompt: prompt, displayPrompt: displayPrompt, personReferences: personReferences) }
             else { runID = await chatActions.run.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt, personReferences: personReferences) }
-            if runID == nil, localChatInput.isEmpty {
+            if runID != nil, isLiveInstruction, model.sessions.selectedSessionID == submittingSessionID,
+               localChatInput == submittedText {
+                localChatInput = ""; composerPersonMentions = []; closePersonMentionPicker()
+                chatActions.composer.updateSelectedChatInputDraft("")
+            }
+            if runID == nil, model.sessions.selectedSessionID == submittingSessionID, localChatInput.isEmpty {
                 localChatInput = submittedText
                 composerPersonMentions = submittedMentions
                 // 回填到“发送消息的那个会话”的输入框，而不是当前选中会话——

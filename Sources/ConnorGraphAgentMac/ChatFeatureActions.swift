@@ -63,6 +63,8 @@ extension ChatComposerCommanding {
     func resumeRunQueue()
     func queuedRunInstructions() -> [AgentRunInstruction]
     func removeQueuedRunInstruction(_ id: String)
+    func guideQueuedRunInstruction(_ id: String)
+    func isRunQueuePaused() -> Bool
     func reviseNoteBody(messageID: String, expectedContent: String, content: String) async -> Bool
     func cancelActiveChatRun()
     func setAgentPermissionMode(_ mode: AgentPermissionMode)
@@ -86,6 +88,8 @@ extension ChatRunCommanding {
     func resumeRunQueue() {}
     func queuedRunInstructions() -> [AgentRunInstruction] { [] }
     func removeQueuedRunInstruction(_ id: String) {}
+    func guideQueuedRunInstruction(_ id: String) {}
+    func isRunQueuePaused() -> Bool { false }
     func submitChat(prompt: String, clearComposer: Bool = false, displayPrompt: String? = nil, attachments: [AgentMessageAttachmentRef]? = nil, personReferences: [PersonReference] = []) async -> String? {
         await submitChat(prompt: prompt, clearComposer: clearComposer, displayPrompt: displayPrompt, attachments: attachments, personReferences: personReferences)
     }
@@ -207,10 +211,14 @@ final class ClosureChatRunPort: ChatRunCommanding {
     private let resumeAction: (() -> Void)?
     private let queueAction: (() -> [AgentRunInstruction])?
     private let removeQueuedAction: ((String) -> Void)?
+    private let guideQueuedAction: ((String) -> Void)?
+    private let queuePausedAction: (() -> Bool)?
     func steerChat(prompt: String, displayPrompt: String?, personReferences: [PersonReference]) async -> String? { await steerAction?(prompt, displayPrompt, personReferences) }
     func resumeRunQueue() { resumeAction?() }
     func queuedRunInstructions() -> [AgentRunInstruction] { queueAction?() ?? [] }
     func removeQueuedRunInstruction(_ id: String) { removeQueuedAction?(id) }
+    func guideQueuedRunInstruction(_ id: String) { guideQueuedAction?(id) }
+    func isRunQueuePaused() -> Bool { queuePausedAction?() ?? false }
     let cancelAction: () -> Void
     let permissionAction: (AgentPermissionMode) -> Void
     let timelineAction: (AgentChatTurnProcessPresentation) async -> [AgentEventPresentation]
@@ -251,8 +259,10 @@ final class ClosureChatRunPort: ChatRunCommanding {
     init(backgroundTasks: @escaping () -> [AppSessionBackgroundTask], hasBackgroundTask: @escaping () -> Bool, summaryFreshness: @escaping () -> AgentSessionSummaryFreshness?, summaryContext: @escaping () -> String, submitNewChat: @escaping (String, String?) async -> String?, submit: @escaping (String, Bool, String?, [AgentMessageAttachmentRef]?, [PersonReference]) async -> String?, reviseNoteBody: @escaping (String, String, String) async -> Bool, cancel: @escaping () -> Void, permission: @escaping (AgentPermissionMode) -> Void, timeline: @escaping (AgentChatTurnProcessPresentation) async -> [AgentEventPresentation], markdown: @escaping (String) -> AgentMarkdownPersistentCacheContext?, copy: @escaping (AgentChatMessagePresentation) -> Void, export: @escaping (AgentChatMessagePresentation, Date) -> Void, speak: @escaping (AgentChatMessagePresentation) -> Void, download: @escaping (AttachmentPreviewModel) -> Void, clearOverride: @escaping () -> Void, selectModel: @escaping (String, AppLLMProviderMode, String?) -> Void, thinking: @escaping (AppLLMThinkingLevel) -> Void, defaultThinking: @escaping (AppLLMThinkingLevel) -> Void, reloadModels: @escaping () async -> Void, remoteKnowledge: @escaping ([String]?) -> Void, mcpTools: @escaping ([String]?) -> Void,
         steer: ((String, String?, [PersonReference]) async -> String?)? = nil,
         resume: (() -> Void)? = nil, queue: (() -> [AgentRunInstruction])? = nil,
-        removeQueued: ((String) -> Void)? = nil) {
-        self.steerAction = steer; self.resumeAction = resume; self.queueAction = queue; self.removeQueuedAction = removeQueued
+        removeQueued: ((String) -> Void)? = nil,
+        guideQueued: ((String) -> Void)? = nil,
+        queuePaused: (() -> Bool)? = nil) {
+        self.steerAction = steer; self.resumeAction = resume; self.queueAction = queue; self.removeQueuedAction = removeQueued; self.guideQueuedAction = guideQueued; self.queuePausedAction = queuePaused
         self.backgroundTasks = backgroundTasks; self.hasBackgroundTask = hasBackgroundTask; self.summaryFreshness = summaryFreshness; self.summaryContext = summaryContext; submitNewChatAction = submitNewChat; submitAction = submit; reviseNoteBodyAction = reviseNoteBody; cancelAction = cancel; permissionAction = permission; timelineAction = timeline; markdownAction = markdown; copyAction = copy; exportAction = export; speakAction = speak; downloadAction = download; clearOverrideAction = clearOverride; selectModelAction = selectModel; thinkingAction = thinking; defaultThinkingAction = defaultThinking; reloadModelsAction = reloadModels; remoteKnowledgeAction = remoteKnowledge; mcpToolsAction = mcpTools
     }
 }

@@ -56,6 +56,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? SubmitAwareTextView else { return }
+        context.coordinator.update(text: $text, selectionTracker: selectionTracker)
         textView.inputCommandRouter.configuration = textInputConfiguration
         textView.placeholderString = placeholder
         textView.font = isHTMLSourceMode ? AgentChatTypography.composerMonospacedNSFont : AgentChatTypography.composerNSFont
@@ -121,6 +122,10 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         init(text: Binding<String>, selectionTracker: ComposerTextSelectionTracker) {
             self._text = text
             self.selectionTracker = selectionTracker
+        }
+
+        func update(text: Binding<String>, selectionTracker: ComposerTextSelectionTracker) {
+            self._text = text; self.selectionTracker = selectionTracker
         }
 
         func textDidChange(_ notification: Notification) {
