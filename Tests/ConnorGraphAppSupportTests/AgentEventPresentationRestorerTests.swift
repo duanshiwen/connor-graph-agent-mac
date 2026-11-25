@@ -100,7 +100,7 @@ private func persisted(_ event: AgentEvent, id: String, sequence: Int?, createdA
     case .promptAssembled(let payload): payloadJSON = encode(payload, using: encoder)
     case .textDelta(let payload): payloadJSON = encode(payload, using: encoder)
     case .textComplete(let payload): payloadJSON = encode(payload, using: encoder)
-    case .assistantMessageCreated(let payload): payloadJSON = encode(payload, using: encoder)
+    case .assistantMessageCreated(let payload), .instructionApplied(let payload), .generationInterrupted(let payload): payloadJSON = encode(payload, using: encoder)
     case .toolRequested(let payload), .toolApproved(let payload), .toolStarted(let payload): payloadJSON = encode(payload, using: encoder)
     case .toolProgress(let payload): payloadJSON = encode(payload, using: encoder)
     case .toolFinished(let payload): payloadJSON = encode(payload, using: encoder)

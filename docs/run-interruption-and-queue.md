@@ -30,14 +30,14 @@ Linux 与 Apple 通过 `read_run_tool_result` 分页回读原始工具结果。�
 | Android | `:core:agent:test` 311 项通过；`:app:compileDebugKotlin` 通过 |
 | Linux | `run_mailbox` 6 项、`round3_agent` 16 项、`agent_run_persistence_parity` 6 项通过；`cargo check -p connor-linux --offline` 通过 |
 | 鸿蒙 | 22 项生产运行时/协调器行为检查通过；原生流取消、UTF-8 和资源释放检查通过；DevEco `assembleApp` 通过（未配置发布签名） |
-| macOS | 独立 Swift 6.2 容器运行 7 项收件箱/模型信封测试通过；修改的运行时和 SwiftUI 源码语法检查通过 |
+| macOS | 2026-11-25 在本机 Apple SDK 下执行 9 项相关原生回归通过：7 项收件箱测试、事件恢复测试及运行所有权测试 |
 | iOS/iPadOS | 独立 Swift 6.2 容器运行同组 7 项测试通过；修改的运行时和 SwiftUI 源码语法检查通过 |
 
 关键回归覆盖生成中打断、工具边界打断、完整 50,000 字符以上结果、失效审批、停止后部分输出恢复、FIFO/去重/领取、完成竞态、准备阶段目标保留、重启暂停与未知写操作处理。
 
-Apple 两端另外新增了 `RunInteractionOwnershipTests`，用于原生环境核对停止后必须等待旧执行者结算才能恢复，防止两个工具执行循环重叠；此原生用例已通过语法检查，尚未在 Xcode 执行。
+Apple 两端另外新增了 `RunInteractionOwnershipTests`，用于原生环境核对停止后必须等待旧执行者结算才能恢复，防止两个工具执行循环重叠。macOS 版已在本机原生 Swift 测试中通过；iOS/iPadOS 仍仅通过语法检查。macOS 原生测试首次编译发现事件恢复测试辅助编码函数遗漏 `instructionApplied` 与 `generationInterrupted` 分支，补齐后上述 9 项测试通过。
 
-Apple 的可移植测试使用真实生产收件箱与模型信封，只替换环境依赖类型；它不替代 Xcode 类型检查、完整应用构建和设备交互测试。当前 Windows 主机没有 Apple SDK，因此这些原生验收尚未执行。鸿蒙生命周期检查通过订阅者重建模拟页面切换，不等于真实设备锁屏验收。Linux 本轮执行了原生核心测试与桌面编译检查，未执行 GTK 实机交互测试。
+Apple 的可移植测试使用真实生产收件箱与模型信封，只替换环境依赖类型；它不替代 Xcode 类型检查、完整应用构建和设备交互测试。最初移植所用的 Windows 主机没有 Apple SDK；macOS 的相关原生回归现已补验，iOS/iPadOS 原生验收及真机交互仍未执行。鸿蒙生命周期检查通过订阅者重建模拟页面切换，不等于真实设备锁屏验收。Linux 本轮执行了原生核心测试与桌面编译检查，未执行 GTK 实机交互测试。
 
 ## 复现命令
 
@@ -49,4 +49,4 @@ Linux：`cargo test -p connor-core --test run_mailbox --test round3_agent --test
 
 Apple：`python3 Scripts/prepare-run-mailbox-portable-tests.py`，然后在 `.build/run-mailbox-portable` 执行 `swift test`；具备 Apple SDK 时还应在原包执行 `swift test` 和对应 Xcode 应用构建。
 
-本次未发布或推送代码。多设备远程运行租约、跨设备实时指令同步和发布签名不属于这次本机会话交互移植。
+最初移植未发布安装包。2026-11-25 已补验 macOS Apple 芯片与 Intel 双架构 Release 构建及 Ad-hoc 签名，DMG 完整性通过；版本升级至 1.0.143，并在本机替换安装后确认原账号及会话正常恢复。多设备远程运行租约、跨设备实时指令同步和发布签名不属于这次本机会话交互移植。
