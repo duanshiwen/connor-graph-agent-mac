@@ -326,7 +326,7 @@ final class ChatRunCoordinator {
         backend?.abort(runID: runID)
         if backend == nil, selectedSessionID() == sessionID { mutateManager { $0.cancel(runID: runID, reason: reason) } }
         pendingCancellationReasons.removeValue(forKey: sessionID)
-        finish(sessionID: sessionID)
+        // Keep ownership until submitChat unwinds; immediate resume must not overlap a tool still settling.
     }
 
     func pendingCancellationReason(sessionID: String) -> String? { pendingCancellationReasons[sessionID] }

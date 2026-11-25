@@ -95,6 +95,12 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                 collectedPresentations.append(presentation)
                 events.append(event)
                 eventPresentations.append(presentation)
+                if case .instructionApplied(let message) = event, !session.messages.contains(where: { $0.id == message.id }) {
+                    session.messages.append(message); transcript = session.messages
+                }
+                if case .generationInterrupted(var message) = event, !message.content.isEmpty {
+                    message.runID = nil; session.messages.append(message); transcript = session.messages
+                }
                 if case .assistantMessageCreated(let message) = event,
                    !session.messages.contains(where: { $0.id == message.id }) {
                     session.appendAssistantMessage(message)

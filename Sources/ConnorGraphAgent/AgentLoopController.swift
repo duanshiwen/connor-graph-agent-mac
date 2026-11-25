@@ -166,6 +166,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
 }
 
 public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
+    public var interactionDirectory: URL?
     public var modelProvider: Provider
     public var toolRegistry: AgentToolRegistry
     public var configuration: AgentLoopConfiguration
@@ -294,8 +295,19 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         await policyBox.updatePermissionMode(mode)
     }
 
+    private func interactionMailbox(sessionID: String) throws -> AgentRunMailbox? {
+        guard let interactionDirectory else { return nil }
+        return try AgentRunMailboxRegistry.shared.mailbox(sessionID: sessionID, directory: interactionDirectory)
+    }
     public func run(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
-        AsyncThrowingStream(AgentEvent.self, bufferingPolicy: .bufferingNewest(4_096)) { continuation in
+        let inbox: AgentRunMailbox?
+        do { inbox = try interactionMailbox(sessionID: request.sessionID) }
+        catch { return AsyncThrowingStream { $0.finish(throwing: error) } }
+        var prepared = request
+        if let saved = inbox?.recoveryRunID { prepared.runID = saved }
+        let effectiveRequest = prepared
+        return AsyncThrowingStream(AgentEvent.self, bufferingPolicy: .bufferingNewest(4_096)) { continuation in
+            let request = effectiveRequest
             let startGate = AgentLoopStartGate()
             let task = Task {
                 await startGate.wait()
@@ -311,7 +323,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     model: modelProvider.modelID,
                     metadata: ["runtime": "agent-loop-controller"]
                 )
-                defer { cancellationRegistry.unregister(runID: request.runID) }
+                defer {
+                    cancellationRegistry.unregister(runID: request.runID)
+                    if inbox?.recoveryRunID != nil { try? inbox?.pause() }
+                }
+                inbox?.installApprovalCancellation { Task { await approvalRegistry.cancel(runID: request.runID) } }
+                do { try inbox?.prepare(runID: request.runID, user: AgentModelMessage(role: .user, content: request.userMessage)) } catch { continuation.finish(throwing: error); return }
                 try? Task.checkCancellation()
                 recordRun(run)
                 yield(.runStarted(AgentRunStartedEvent(run: run)), to: continuation, recorder: eventRecorder)
@@ -402,6 +419,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 )
                 modelRequest.messages.insert(AgentModelMessage(role: .system, content: dynamicRuntime), at: min(1, modelRequest.messages.count))
                 var messages = modelRequest.messages
+                do {
+                    if let inbox {
+                        let userText = [request.userMessage, AgentAttachmentContextSection(plan: request.attachmentContextPlan).renderedText].filter { !$0.isEmpty }.joined(separator: "\n\n")
+                        let parts: [AgentModelMessageContentPart] = [.text(userText)] + request.attachmentContextPlan.imageBlocks.map { .imageDataURL($0.dataURL, mimeType: $0.mimeType) }
+                        messages = try inbox.begin(runID: request.runID, initial: messages,
+                            user: AgentModelMessage(role: .user, content: userText, contentParts: parts))
+                    }
+                } catch { continuation.finish(throwing: error); return }
                 let evidencePolicy = AgentEvidenceValidationPolicy()
                 var memoryCitations: [String] = []
                 let isPureMemoryTask = evidencePolicy.isPureMemoryTask(request.userMessage)
@@ -469,6 +494,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     }
 
                     while true {
+                        if let inbox {
+                            for instruction in try inbox.apply(to: &messages) {
+                                var message = AgentMessage(id: instruction.id, role: .user, content: instruction.text,
+                                    attachments: instruction.attachments, personReferences: instruction.personReferences)
+                                message.runID = run.id; message.sessionID = run.sessionID
+                                yield(.instructionApplied(message), to: continuation, recorder: eventRecorder)
+                            }
+                        }
                         await dynamicRegistry.refreshDynamicTools()
                         let refreshedDefinitions = await dynamicRegistry.definitions(availableUnder: policy)
                         if refreshedDefinitions.map(\.name) != catalogRegisteredDefinitions.map(\.name) {
@@ -677,6 +710,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             reservedOutputTokens: configuration.reservedOutputTokens,
                             isAfterToolExecution: iterationCount > 1
                         )
+                        try inbox?.checkpoint(messages)
                         var modelResponse: AgentModelResponse
                         do {
                             modelResponse = try await completeModelRequest(
@@ -687,6 +721,16 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 continuation: continuation
                             )
                         } catch {
+                            if error is AgentRunSteered, let inbox {
+                                let partial = inbox.takePartial()
+                                if !partial.isEmpty { messages.append(AgentModelMessage(role: .assistant, content: partial)) }
+                                try inbox.checkpoint(messages)
+                                var fragment = AgentMessage(role: .assistant, content: partial)
+                                fragment.runID = run.id; fragment.sessionID = run.sessionID
+                                yield(.generationInterrupted(fragment), to: continuation, recorder: eventRecorder)
+                                iterationCount = max(0, iterationCount - 1)
+                                continue
+                            }
                             guard Self.isProviderContextOverflow(error) else { throw error }
                             let originalEstimate = AgentModelContextGuard().estimatedInputTokens(modelRequest)
                             let recoveryTarget = max(1, originalEstimate / 2)
@@ -714,6 +758,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
                         try Task.checkCancellation()
 
+                        if inbox?.hasPending == true {
+                            if let text = modelResponse.text, !text.isEmpty { messages.append(AgentModelMessage(role: .assistant, content: text)) }
+                            try inbox?.checkpoint(messages)
+                            var fragment = AgentMessage(role: .assistant, content: modelResponse.text ?? "")
+                            fragment.runID = run.id; fragment.sessionID = run.sessionID
+                            yield(.generationInterrupted(fragment), to: continuation, recorder: eventRecorder)
+                            iterationCount = max(0, iterationCount - 1)
+                            continue
+                        }
                         // Propagate degradation warnings to the user
                         if !modelResponse.warnings.isEmpty {
                             let warningText = modelResponse.warnings.joined(separator: "\n")
@@ -842,6 +895,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 }
                             } else {
                                 publishedFinalText = pendingTruncatedOutputText
+                            }
+                            if let inbox {
+                                var finished = messages
+                                if let text = publishedFinalText { finished.append(AgentModelMessage(role: .assistant, content: text)) }
+                                if !(try inbox.complete(finished)) {
+                                    messages = finished; try inbox.checkpoint(messages)
+                                    iterationCount = max(0, iterationCount - 1); continue
+                                }
                             }
                             if let text = publishedFinalText {
                                 let webCitationsUsed = webEvidenceCitations.filter(text.contains)
@@ -1060,6 +1121,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             providerMetadata: modelResponse.providerMetadata
                         ))
 
+                        try inbox?.checkpoint(messages)
                         let batchResults = try await turnController.executeToolBatch(
                             calls: calls,
                             request: request,
@@ -1132,6 +1194,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         var deferredAttachmentContextMessages: [AgentModelMessage] = []
 
                         for (batchIndex, batchResult) in batchResults.enumerated() {
+                            try inbox?.record(batchResult.result)
                             let selectedNames = Self.selectedNativeToolNames(in: [batchResult.call])
                             var runtimeToolResultNote: String?
                             if batchResult.result.error == nil,
@@ -1242,6 +1305,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         // the whole batch of tool results so user messages never interleave
                         // between tool messages of a parallel tool batch.
                         messages.append(contentsOf: deferredAttachmentContextMessages)
+                        try inbox?.checkpoint(messages)
 
                         if calls.contains(where: {
                                $0.name == AgentPhaseToolContract.externalSearchBatchName
@@ -1346,6 +1410,20 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     }
 
     private func completeModelRequest(
+        _ request: AgentModelRequest, run: AgentRun, publishesTextDeltas: Bool,
+        continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
+    ) async throws -> AgentModelResponse {
+        let inbox = try interactionMailbox(sessionID: run.sessionID)
+        inbox?.updatePartial("")
+        let child = Task { try await completeModelRequestUncontrolled(request, run: run,
+            publishesTextDeltas: publishesTextDeltas, continuation: continuation) }
+        inbox?.attach { child.cancel() }
+        defer { inbox?.detach() }
+        do { return try await withTaskCancellationHandler { try await child.value } onCancel: { child.cancel() } }
+        catch { if !Task.isCancelled, inbox?.hasPending == true { return AgentModelResponse(text: inbox?.takePartial(), toolCalls: [], finishReason: .stop) }; throw error }
+    }
+
+    private func completeModelRequestUncontrolled(
         _ request: AgentModelRequest,
         run: AgentRun,
         publishesTextDeltas: Bool,
@@ -1414,6 +1492,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 case .textDelta(let text):
                     guard !text.isEmpty else { continue }
                     streamedText += text
+                    try interactionMailbox(sessionID: run.sessionID)?.updatePartial(streamedText)
                     guard publishesTextDeltas else { continue }
                     didPublishTextDelta = true
                     yield(.textDelta(AgentTextDeltaEvent(runID: run.id, sessionID: run.sessionID, text: text)), to: continuation, recorder: eventRecorder)
@@ -1833,6 +1912,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     ) async throws -> AgentToolResult {
         yield(.toolRequested(call), to: continuation, recorder: eventRecorder)
         yield(.toolStarted(call), to: continuation, recorder: eventRecorder)
+        if try interactionMailbox(sessionID: run.sessionID)?.hasPending == true {
+            let skipped = AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id,
+                toolName: call.name, contentText: "未执行：用户补充了新指令，请重新评估。", error: "instruction_pending")
+            yield(.toolFinished(skipped), to: continuation, recorder: eventRecorder)
+            return skipped
+        }
         let context = Self.makeToolContext(
             run: run,
             groupID: request.groupID,
@@ -1880,6 +1965,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     continuation: continuation
                 )
             }
+            try interactionMailbox(sessionID: run.sessionID)?.record(result)
             try Task.checkCancellation()
             logger.info("Tool \(call.name) completed. Result: \(result.contentText.prefix(200))")
             await auditLog.record(AgentAuditEvent(
@@ -2437,6 +2523,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         var pendingRequest = initialApprovalRequest
         var checkpointRequestID: String?
         while true {
+            if try interactionMailbox(sessionID: run.sessionID)?.hasPending == true {
+                return AgentToolResult(runID: run.id, sessionID: run.sessionID, toolCallID: call.id,
+                    toolName: call.name, contentText: "未执行：用户补充了新指令，原审批失效。", error: "instruction_pending")
+            }
             if pendingRequest == nil {
                 do {
                     let result = try await executeRegisteredTool(call, context: executionContext)
@@ -2468,6 +2558,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             ))
             checkpointRequestID = request.id
             await approvalRegistry.register(requestID: request.id, runID: run.id)
+            if try interactionMailbox(sessionID: run.sessionID)?.hasPending == true { await approvalRegistry.cancel(runID: run.id) }
             yield(.permissionRequested(request), to: continuation, recorder: eventRecorder)
             run.status = .waitingForApproval
             recordRun(run)

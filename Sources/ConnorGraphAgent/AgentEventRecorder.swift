@@ -44,7 +44,7 @@ public struct AgentEventRecorder: Sendable {
         case .promptAssembled(let payload): data = try encoder.encode(payload)
         case .textDelta(let payload): data = try encoder.encode(payload)
         case .textComplete(let payload): data = try encoder.encode(payload)
-        case .assistantMessageCreated(let payload): data = try encoder.encode(payload)
+        case .assistantMessageCreated(let payload), .instructionApplied(let payload), .generationInterrupted(let payload): data = try encoder.encode(payload)
         case .toolRequested(let payload), .toolApproved(let payload), .toolStarted(let payload): data = try encoder.encode(payload)
         case .toolProgress(let payload): data = try encoder.encode(payload)
         case .toolFinished(let payload): data = try encoder.encode(payload)

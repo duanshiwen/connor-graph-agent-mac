@@ -8,6 +8,8 @@ public enum AgentEvent: Sendable, Equatable {
     case promptAssembled(AgentPromptAssembledEvent)
     case textDelta(AgentTextDeltaEvent)
     case textComplete(AgentTextCompleteEvent)
+    case instructionApplied(AgentMessage)
+    case generationInterrupted(AgentMessage)
     case assistantMessageCreated(AgentMessage)
     case toolRequested(AgentToolCall)
     case toolApproved(AgentToolCall)
@@ -43,6 +45,8 @@ public enum AgentEvent: Sendable, Equatable {
         case .promptAssembled: return .promptAssembled
         case .textDelta: return .textDelta
         case .textComplete: return .textComplete
+        case .instructionApplied: return .instructionApplied
+        case .generationInterrupted: return .generationInterrupted
         case .assistantMessageCreated: return .assistantMessageCreated
         case .toolRequested: return .toolRequested
         case .toolApproved: return .toolApproved
@@ -80,7 +84,7 @@ public enum AgentEvent: Sendable, Equatable {
         case .promptAssembled(let event): return event.runID
         case .textDelta(let event): return event.runID
         case .textComplete(let event): return event.runID
-        case .assistantMessageCreated(let message): return message.runID
+        case .assistantMessageCreated(let message), .instructionApplied(let message), .generationInterrupted(let message): return message.runID
         case .toolRequested(let call), .toolApproved(let call), .toolStarted(let call): return call.runID
         case .toolProgress(let progress): return progress.runID
         case .toolFinished(let result): return result.runID
@@ -109,7 +113,7 @@ public enum AgentEvent: Sendable, Equatable {
         case .promptAssembled(let event): return event.sessionID
         case .textDelta(let event): return event.sessionID
         case .textComplete(let event): return event.sessionID
-        case .assistantMessageCreated(let message): return message.sessionID
+        case .assistantMessageCreated(let message), .instructionApplied(let message), .generationInterrupted(let message): return message.sessionID
         case .toolRequested(let call), .toolApproved(let call), .toolStarted(let call): return call.sessionID
         case .toolProgress(let progress): return progress.sessionID
         case .toolFinished(let result): return result.sessionID

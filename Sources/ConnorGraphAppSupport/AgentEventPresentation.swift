@@ -77,6 +77,10 @@ public struct AgentEventPresenter: Sendable {
             return item(event, title: "Assistant is writing", detail: payload.text, severity: .info)
         case .textComplete(let payload):
             return item(event, title: "Answer completed", detail: payload.text, severity: .success)
+        case .instructionApplied(let message):
+            return item(event, title: "补充已接入", detail: message.content, severity: .info)
+        case .generationInterrupted(let message):
+            return item(event, title: "已按补充调整", detail: message.content, severity: .info)
         case .assistantMessageCreated(let message):
             return item(event, title: "Assistant message saved", detail: message.content, severity: .success, assistantMessageID: message.id)
         case .toolRequested(let call):

@@ -407,6 +407,20 @@ public struct NativeSessionManager: Sendable {
                     }
                 }
 
+                if case .instructionApplied(let message) = event,
+                   !session.messages.contains(where: { $0.id == message.id }) {
+                    session.messages.append(message)
+                    try persistSession()
+                    if let onAssistantMessageCreated { await onAssistantMessageCreated(message) }
+                }
+                if case .generationInterrupted(var message) = event {
+                    if let streamedID = streamingMessageID { session.messages.removeAll { $0.id == streamedID } }
+                    streamingMessageID = nil
+                    message.runID = nil // Keep this fragment when textComplete replaces the active draft.
+                    message.sessionID = session.id
+                    if !message.content.isEmpty { session.messages.append(message) }
+                    try persistSession()
+                }
                 if case .assistantMessageCreated(var message) = event,
                    !session.messages.contains(where: { $0.id == message.id }) {
                     // 模型返回了完整文本（工具轮），流式草稿不再需要，避免同 run 出现两条 assistant 消息。

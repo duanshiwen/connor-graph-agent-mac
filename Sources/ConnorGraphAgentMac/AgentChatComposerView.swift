@@ -183,15 +183,25 @@ struct AgentChatComposerView: View {
                     modelSelectionMenu
                         .layoutPriority(2)
 
+                    if composerState.isSubmitting {
+                        Button("打断") { submitLocalChatInput(steer: true) }.frame(minWidth: 36, minHeight: 36).disabled(!canSubmitLocalChat)
+                        Button { sendComposerAction(.cancelActiveRun) } label: { Image(systemName: "stop.fill") }
+                            .frame(minWidth: 36, minHeight: 36)
+                            .accessibilityLabel("停止任务并暂停队列")
+                    }
+                    Menu {
+                        Button("继续任务与队列") { chatActions.run.resumeRunQueue() }.disabled(composerState.isSubmitting)
+                        ForEach(chatActions.run.queuedRunInstructions()) { instruction in
+                            Menu(String(instruction.text.prefix(40))) {
+                                Button("撤回") { chatActions.run.removeQueuedRunInstruction(instruction.id) }
+                            }
+                        }
+                    } label: { Image(systemName: "list.bullet").frame(minWidth: 36, minHeight: 36) }.accessibilityLabel("待处理队列")
                     AgentSendControlButton(
-                        isSubmitting: composerState.isSubmitting,
+                        isSubmitting: false,
                         isDisabled: !composerState.isSubmitting && !composerState.canSubmit,
                         action: {
-                            if composerState.isSubmitting {
-                                sendComposerAction(.cancelActiveRun)
-                            } else {
-                                submitLocalChatInput()
-                            }
+                            submitLocalChatInput()
                         }
                     )
                     .fixedSize()
@@ -603,7 +613,8 @@ struct AgentChatComposerView: View {
         }
     }
 
-    private func submitLocalChatInput() {
+    private func submitLocalChatInput() { submitLocalChatInput(steer: false) }
+    private func submitLocalChatInput(steer: Bool) {
         let prompt = localChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = localChatInput
         let submittedText = localChatInput
@@ -637,7 +648,9 @@ struct AgentChatComposerView: View {
         closePersonMentionPicker()
         chatActions.composer.updateSelectedChatInputDraft("")
         Task {
-            let runID = await chatActions.run.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt, personReferences: personReferences)
+            let runID: String?
+            if steer { runID = await chatActions.run.steerChat(prompt: prompt, displayPrompt: displayPrompt, personReferences: personReferences) }
+            else { runID = await chatActions.run.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt, personReferences: personReferences) }
             if runID == nil, localChatInput.isEmpty {
                 localChatInput = submittedText
                 composerPersonMentions = submittedMentions

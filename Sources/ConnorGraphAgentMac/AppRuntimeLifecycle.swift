@@ -1119,7 +1119,11 @@ final class AppRuntimeLifecycle {
                 defaultThinking: { [weak self] in self?.aiConnectionsRuntimeCoordinator.selectDefaultThinkingLevel($0) },
                 reloadModels: { [weak self] in await self?.aiConnectionsModel.reloadModelConnections() },
                 remoteKnowledge: { [weak self] in self?.setSessionRemoteKnowledgeBaseIDs($0) },
-                mcpTools: { [weak self] in self?.setSessionAllowedMCPToolNames($0) }
+                mcpTools: { [weak self] in self?.setSessionAllowedMCPToolNames($0) },
+                steer: { [weak self] prompt, display, people in await self?.submitChat(prompt: prompt, clearComposer: true, displayPrompt: display, personReferences: people, steer: true) },
+                resume: { [weak self] in self?.resumeRunQueue() },
+                queue: { [weak self] in self?.queuedRunInstructions() ?? [] },
+                removeQueued: { [weak self] in self?.removeQueuedRunInstruction($0) }
             ),
             browser: browserFeatureModel,
             calendar: calendarFeatureModel,
@@ -3343,6 +3347,40 @@ final class AppRuntimeLifecycle {
         }
     }
 
+    func queuedRunInstructions() -> [AgentRunInstruction] {
+        guard let id = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return [] }
+        do { return try AgentRunMailboxRegistry.shared.mailbox(sessionID: id, directory: storagePaths.sessionsDirectory).queued }
+        catch { errorMessage = "无法读取队列：\(error)"; return [] }
+    }
+    func removeQueuedRunInstruction(_ instructionID: String) {
+        guard let id = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return }
+        do { try AgentRunMailboxRegistry.shared.mailbox(sessionID: id, directory: storagePaths.sessionsDirectory).removeQueued(instructionID) }
+        catch { errorMessage = "无法撤回：\(error)" }
+    }
+    func resumeRunQueue() {
+        guard let id = chatFeatureModel.sessions.selectedSessionID, let storagePaths,
+              !chatFeatureModel.run.submittingSessionIDs.contains(id) else { return }
+        do {
+            let inbox = try AgentRunMailboxRegistry.shared.mailbox(sessionID: id, directory: storagePaths.sessionsDirectory)
+            try inbox.resumeQueue()
+            if inbox.recoveryRunID != nil {
+                Task { _ = await self.submitChat(prompt: "请基于已保存的上下文和工具结果继续未完成的任务。", targetSessionID: id) }
+            } else { scheduleNextRunInstruction(sessionID: id) }
+        } catch { errorMessage = "无法恢复：\(error)" }
+    }
+    private func scheduleNextRunInstruction(sessionID: String) {
+        guard let storagePaths else { return }
+        Task { @MainActor [weak self] in
+            guard let self, !self.chatFeatureModel.run.submittingSessionIDs.contains(sessionID) else { return }
+            do {
+                let inbox = try AgentRunMailboxRegistry.shared.mailbox(sessionID: sessionID, directory: storagePaths.sessionsDirectory)
+                guard !inbox.paused, let next = inbox.queued.first else { return }
+                _ = await self.submitChat(prompt: next.text, attachments: next.attachments, personReferences: next.personReferences,
+                    targetSessionID: sessionID, queuedInstruction: next)
+            } catch { self.errorMessage = "队列未能继续：\(error)" }
+        }
+    }
+
     func submitChat() async {
         let prompt = chatFeatureModel.composer.input.trimmingCharacters(in: .whitespacesAndNewlines)
         await submitChat(prompt: prompt, clearComposer: true)
@@ -3403,6 +3441,8 @@ final class AppRuntimeLifecycle {
 
     func cancelActiveChatRun() {
         guard let sessionID = chatFeatureModel.sessions.selectedSessionID else { return }
+        do { if let storagePaths { try AgentRunMailboxRegistry.shared.mailbox(sessionID: sessionID, directory: storagePaths.sessionsDirectory).pause() } }
+        catch { errorMessage = "队列暂停未能保存：\(error)" }
         switch chatRunCoordinator.requestCancellation(sessionID: sessionID, reason: "cancelled by user") {
         case .queued:
             appendChatCancellationPresentation(
@@ -3425,7 +3465,7 @@ final class AppRuntimeLifecycle {
             sessionID: sessionID,
             runID: runID,
             title: "Run cancelled",
-            detail: "已手动终止本轮 agent loop。"
+            detail: "已请求停止，正在结算工具状态；队列保持暂停。"
         )
     }
 
@@ -3529,21 +3569,48 @@ final class AppRuntimeLifecycle {
         personReferences: [PersonReference] = [],
         onCancellation: (() -> Void)? = nil,
         existingUserMessageID: String? = nil,
-        usesActiveSkill: Bool = true
+        usesActiveSkill: Bool = true,
+        steer: Bool = false,
+        targetSessionID: String? = nil,
+        queuedInstruction: AgentRunInstruction? = nil
     ) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let attachmentsForSubmission = explicitAttachments ?? chatFeatureModel.composer.pendingActiveAttachmentRefs
+        let attachmentsForSubmission = explicitAttachments ?? queuedInstruction?.attachments ?? chatFeatureModel.composer.pendingActiveAttachmentRefs
         guard !prompt.isEmpty || !attachmentsForSubmission.isEmpty else { return nil }
-        guard !isLoadingSelectedChatSessionDetail else { return nil }
-        guard var manager = chatRunCoordinator.manager else {
+        guard targetSessionID != nil || !isLoadingSelectedChatSessionDetail else { return nil }
+        let submissionManager: NativeSessionManager?
+        if let targetSessionID {
+            guard let targetSession = try? chatSessionRepository?.loadSession(id: targetSessionID) else {
+                errorMessage = "无法读取待继续的会话。"; return nil
+            }
+            submissionManager = makeNativeSessionManager(for: targetSession)
+        } else { submissionManager = chatRunCoordinator.manager }
+        guard var manager = submissionManager else {
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
             return nil
         }
         let submittedManagerRevision = chatRunCoordinator.managerRevision
         let submittingSessionID = manager.session.id
-        guard chatFeatureModel.sessions.selectedSessionID == nil || chatFeatureModel.sessions.selectedSessionID == submittingSessionID else { return nil }
-        guard !chatFeatureModel.run.submittingSessionIDs.contains(submittingSessionID) else { return nil }
+        guard targetSessionID != nil || chatFeatureModel.sessions.selectedSessionID == nil || chatFeatureModel.sessions.selectedSessionID == submittingSessionID else { return nil }
+        if chatFeatureModel.run.submittingSessionIDs.contains(submittingSessionID) {
+            do {
+                guard let storagePaths else { throw CocoaError(.fileWriteUnknown) }
+                let inbox = try AgentRunMailboxRegistry.shared.mailbox(sessionID: submittingSessionID, directory: storagePaths.sessionsDirectory)
+                await chatComposerCoordinator.awaitAttachmentExtraction(sessionID: submittingSessionID)
+                let plan = await buildAttachmentContextPlanOffMain(sessionID: submittingSessionID,
+                    attachments: attachmentsForSubmission, preservingAttachmentIDs: Set(attachmentsForSubmission.map(\.id)), deferredMediaAttachmentIDs: [])
+                let contextText = [prompt, AgentAttachmentContextSection(plan: plan).renderedText].filter { !$0.isEmpty }.joined(separator: "\n\n")
+                let parts: [AgentModelMessageContentPart] = [.text(contextText)] + plan.imageBlocks.map { .imageDataURL($0.dataURL, mimeType: $0.mimeType) }
+                let instruction = AgentRunInstruction(text: displayPrompt ?? prompt,
+                    modelMessage: AgentModelMessage(role: .user, content: contextText, contentParts: parts),
+                    attachments: attachmentsForSubmission, personReferences: personReferences)
+                try inbox.submit(instruction, steer: steer)
+                if clearComposer { chatComposerCoordinator.consumeForSubmission(sessionID: submittingSessionID) }
+                if !chatFeatureModel.run.submittingSessionIDs.contains(submittingSessionID) { scheduleNextRunInstruction(sessionID: submittingSessionID) }
+                return instruction.id
+            } catch { errorMessage = "指令未发送：\(error)"; return nil }
+        }
         let liveBackend = manager.backend
         guard chatRunCoordinator.begin(sessionID: submittingSessionID, backend: liveBackend) else { return nil }
         if clearComposer { chatComposerCoordinator.consumeForSubmission(sessionID: submittingSessionID) }
@@ -3576,7 +3643,14 @@ final class AppRuntimeLifecycle {
             optimisticUserMessage.map { optimisticTranscript + [$0] } ?? optimisticTranscript,
             sessionID: submittingSessionID
         )
-        defer { chatRunCoordinator.finish(sessionID: submittingSessionID) }
+        var completedSuccessfully = false
+        defer {
+            if let storagePaths {
+                try? AgentRunMailboxRegistry.shared.mailbox(sessionID: submittingSessionID, directory: storagePaths.sessionsDirectory).prepareClaim(nil)
+            }
+            chatRunCoordinator.finish(sessionID: submittingSessionID)
+            if completedSuccessfully { scheduleNextRunInstruction(sessionID: submittingSessionID) }
+        }
         do {
             if !attachmentsForSubmission.isEmpty {
                 await chatComposerCoordinator.awaitAttachmentExtraction(sessionID: submittingSessionID)
@@ -3617,6 +3691,9 @@ final class AppRuntimeLifecycle {
                 chatComposerCoordinator.clearActiveSkill()
             }
             let submitStartedAt = ContinuousClock.now
+            if let queuedInstruction, let storagePaths {
+                try AgentRunMailboxRegistry.shared.mailbox(sessionID: submittingSessionID, directory: storagePaths.sessionsDirectory).prepareClaim(queuedInstruction.id)
+            }
             let response = try await manager.submit(
                 skillAugmentation.augmentedPrompt,
                 sessionSummary: nil,
@@ -3692,6 +3769,7 @@ final class AppRuntimeLifecycle {
                !latestAssistantMessage.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 assistantSpeechController.speak(latestAssistantMessage.content, messageID: latestAssistantMessage.id)
             }
+            completedSuccessfully = true
             return latestAssistantMessage?.content
         } catch {
             let recoveredSession = (try? chatSessionRepository?.loadSession(id: submittingSessionID)) ?? manager.session
@@ -4026,7 +4104,11 @@ extension AppRuntimeLifecycle {
             defaultThinking: { [weak aiRuntime] in aiRuntime?.selectDefaultThinkingLevel($0) },
             reloadModels: { [weak aiConnections] in await aiConnections?.reloadModelConnections() },
             remoteKnowledge: { [weak model] in model?.setSessionRemoteKnowledgeBaseIDs($0) },
-            mcpTools: { [weak model] in model?.setSessionAllowedMCPToolNames($0) }
+            mcpTools: { [weak model] in model?.setSessionAllowedMCPToolNames($0) },
+                steer: { [weak model] prompt, display, people in await model?.submitChat(prompt: prompt, clearComposer: true, displayPrompt: display, personReferences: people, steer: true) },
+                resume: { [weak model] in model?.resumeRunQueue() },
+                queue: { [weak model] in model?.queuedRunInstructions() ?? [] },
+                removeQueued: { [weak model] in model?.removeQueuedRunInstruction($0) }
         )
         let chatActions = ChatFeatureActions(
             session: session,

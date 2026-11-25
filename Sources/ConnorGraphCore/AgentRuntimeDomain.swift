@@ -48,6 +48,8 @@ public enum AgentEventKind: String, Codable, Sendable, Equatable {
     case promptAssembled
     case textDelta
     case textComplete
+    case instructionApplied
+    case generationInterrupted
     case assistantMessageCreated
     case toolRequested
     case toolApproved

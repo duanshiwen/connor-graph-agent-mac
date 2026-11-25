@@ -252,6 +252,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let modelProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
         var registry = AgentToolRegistry()
         registry.registerShareProgressUpdateTool()
+        if let storagePaths { registry.register(RunToolResultReader(directory: storagePaths.sessionsDirectory)) }
         let environmentStore = environmentProvider.map { _ in AgentEnvironmentSnapshotStore() }
         let governanceConfig = storagePaths.flatMap { try? AppSessionGovernanceConfigRepository(configDirectory: $0.configDirectory).loadOrCreateDefault() } ?? .default
         let sessionRepository = AppChatSessionRepository(store: store, storagePaths: storagePaths)
@@ -529,7 +530,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             assistantCheckpointStore = InMemoryAssistantRunCheckpointStore()
             assistantEffectLedger = InMemoryAssistantEffectLedger()
         }
-        return AgentLoopController(
+        var controller = AgentLoopController(
             modelProvider: modelProvider,
             toolRegistry: registry,
             configuration: effectiveConfiguration,
@@ -546,6 +547,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             automaticallySynthesizesProgressUpdates: false,
             streamComplete: { provider, request in provider.streamComplete(request) }
         )
+        controller.interactionDirectory = storagePaths?.sessionsDirectory
+        return controller
     }
 
     public func makeAgentModelProvider(

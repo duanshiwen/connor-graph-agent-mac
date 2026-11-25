@@ -34,6 +34,10 @@ public struct AgentEventReplayer: Sendable {
             return .textDelta(try decoder.decode(AgentTextDeltaEvent.self, from: data))
         case .textComplete:
             return .textComplete(try decoder.decode(AgentTextCompleteEvent.self, from: data))
+        case .instructionApplied:
+            return .instructionApplied(try decoder.decode(AgentMessage.self, from: data))
+        case .generationInterrupted:
+            return .generationInterrupted(try decoder.decode(AgentMessage.self, from: data))
         case .assistantMessageCreated:
             return .assistantMessageCreated(try decoder.decode(AgentMessage.self, from: data))
         case .toolRequested:
