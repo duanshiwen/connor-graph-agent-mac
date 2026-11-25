@@ -3356,7 +3356,8 @@ final class AppRuntimeLifecycle {
     }
     func isRunQueuePaused() -> Bool {
         guard let id = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return false }
-        return (try? AgentRunMailboxRegistry.shared.mailbox(sessionID: id, directory: storagePaths.sessionsDirectory).paused) ?? false
+        guard let inbox = try? AgentRunMailboxRegistry.shared.mailbox(sessionID: id, directory: storagePaths.sessionsDirectory) else { return false }
+        return inbox.paused && (inbox.recoveryRunID != nil || !inbox.queued.isEmpty)
     }
     func guideQueuedRunInstruction(_ instructionID: String) {
         guard let id = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return }

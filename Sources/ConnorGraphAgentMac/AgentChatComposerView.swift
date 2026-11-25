@@ -200,11 +200,6 @@ struct AgentChatComposerView: View {
                             .frame(minWidth: 36, minHeight: 36)
                             .accessibilityLabel("停止任务并暂停队列")
                     }
-                    if !composerState.isSubmitting {
-                        Button("继续") { chatActions.run.resumeRunQueue() }
-                            .frame(minWidth: 36, minHeight: 36)
-                            .accessibilityLabel("继续任务与队列")
-                    }
                     AgentSendControlButton(
                         isSubmitting: false,
                         isDisabled: !canSubmitLocalChat || isAcceptingInstruction,
@@ -303,12 +298,16 @@ struct AgentChatComposerView: View {
     }
 
     @ViewBuilder private var instructionQueuePanel: some View {
-        if !queuedInstructions.isEmpty {
+        if !queuedInstructions.isEmpty || queuePaused {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("待处理消息 · \(queuedInstructions.count)").font(.system(size: 12, weight: .medium))
+                    Text(queuedInstructions.isEmpty ? "未完成任务" : "待处理消息 · \(queuedInstructions.count)").font(.system(size: 12, weight: .medium))
                     Spacer()
                     Text(queuePaused ? "已暂停" : "任务结束后依次发送").font(.system(size: 11)).foregroundStyle(.secondary)
+                    if queuePaused && !composerState.isSubmitting {
+                        Button("继续") { chatActions.run.resumeRunQueue() }
+                            .frame(minWidth: 36, minHeight: 36).accessibilityLabel("继续任务与队列")
+                    }
                 }
                 ScrollView(.vertical) {
                     VStack(spacing: 2) {
