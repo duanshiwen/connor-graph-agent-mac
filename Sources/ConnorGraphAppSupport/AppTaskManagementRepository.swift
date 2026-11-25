@@ -201,17 +201,18 @@ public struct AppTaskManagementRepository: Sendable {
         encoder.outputFormatting = [.sortedKeys]
         var line = String(decoding: try encoder.encode(record), as: UTF8.self)
         line.append("\n")
-        if FileManager.default.fileExists(atPath: taskRunHistoryURL.path) {
-            let handle = try FileHandle(forWritingTo: taskRunHistoryURL)
-            defer { try? handle.close() }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: Data(line.utf8))
-        } else {
-            try line.write(to: taskRunHistoryURL, atomically: true, encoding: .utf8)
-        }
+        let data = Data(line.utf8)
+        do { try TaskRunHistoryIndex.forHistory(taskRunHistoryURL).append(data) }
+        catch { try TaskRunHistoryIndex.appendAuthoritative(data, to: taskRunHistoryURL) }
     }
 
     public func loadRunHistory(taskID: String? = nil, limit: Int = 50) throws -> [ConnorTaskRunRecord] {
+        guard limit > 0 else { return [] }
+        do { return try TaskRunHistoryIndex.forHistory(taskRunHistoryURL).load(taskID: taskID, limit: limit) }
+        catch { return try loadUnindexedRunHistory(taskID: taskID, limit: limit) }
+    }
+
+    private func loadUnindexedRunHistory(taskID: String?, limit: Int) throws -> [ConnorTaskRunRecord] {
         guard FileManager.default.fileExists(atPath: taskRunHistoryURL.path) else { return [] }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
