@@ -7,7 +7,7 @@ import ConnorGraphCore
 /// message bodies, temporal metadata, and native-source search indexing share one path.
 /// Older code/tests still instantiate `FileBackedMailSourceStore`; this wrapper maps the
 /// legacy JSON-style URL to a SQLite database URL and delegates every operation.
-public final class FileBackedMailSourceStore: MailStoreProtocol, @unchecked Sendable {
+public final class FileBackedMailSourceStore: MailStoreProtocol, IncrementalMailSyncSource, @unchecked Sendable {
     private let store: SQLiteMailSourceStore
 
     public init(storeURL: URL, searchService: (any NativeSourceSearchBackend)? = nil) {
@@ -45,6 +45,10 @@ public final class FileBackedMailSourceStore: MailStoreProtocol, @unchecked Send
         return url.deletingLastPathComponent().appendingPathComponent(filename)
     }
 
+    func syncSnapshot(storeID: String?, after revision: Int64?) throws -> MailSyncSnapshot {
+        try store.syncSnapshot(storeID: storeID, after: revision)
+    }
+
     public func listAccounts() async throws -> [MailAccount] { try await store.listAccounts() }
     public func saveAccount(_ account: MailAccount) async throws { try await store.saveAccount(account) }
     public func account(id: MailAccountID) async throws -> MailAccount? { try await store.account(id: id) }
@@ -69,6 +73,7 @@ public final class FileBackedMailSourceStore: MailStoreProtocol, @unchecked Send
     public func message(id: MailMessageID) async throws -> MailMessageDetail? { try await store.message(id: id) }
     public func allMessageIDs() async throws -> [MailMessageID] { try await store.allMessageIDs() }
     public func messagesMissingBody(limit: Int) async throws -> [MailMessageDetail] { try await store.messagesMissingBody(limit: limit) }
+    func recordBackfillAttempts(_ ids: [MailMessageID], now: Date = Date()) throws { try store.recordBackfillAttempts(ids, now: now) }
     public func clearCachedMailData() async throws { try await store.clearCachedMailData() }
     public func updateFlags(messageIDs: [MailMessageID], transform: @Sendable (MailMessageFlags) -> MailMessageFlags) async throws { try await store.updateFlags(messageIDs: messageIDs, transform: transform) }
     public func presentation() async throws -> NativeMailBrowserPresentation { try await store.presentation() }

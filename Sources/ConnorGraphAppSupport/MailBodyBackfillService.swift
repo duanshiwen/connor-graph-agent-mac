@@ -81,6 +81,8 @@ public struct MailBodyBackfillService: Sendable {
                 store: store
             )
             savedCount += saved
+            try Task.checkCancellation()
+            try store.recordBackfillAttempts(pendingCandidates.map(\.id))
 
             // 本批没有任何成功时停止，避免对同一批失败邮件无限重试。
             if saved == 0 { break }
@@ -114,17 +116,17 @@ public struct MailBodyBackfillService: Sendable {
             if let mailbox,
                let fetched = try? await batchFetch(account: account, mailbox: mailbox, details: pending) {
                 var savedIDs: Set<MailMessageID> = []
+                var mergedMessages: [MailMessageDetail] = []
                 for (detail, result) in zip(pending, fetched) {
                     guard let result, MailBodyOnDemandFetchPlanner.hasDisplayableBody(result) else { continue }
                     var merged = detail
                     merged.body = result.body
                     merged.attachments = result.attachments
-                    do {
-                        try await store.saveMessage(merged)
-                        savedIDs.insert(detail.id)
-                    } catch {
-                        NSLog("[Connor.Mail] body backfill save failed: id=%@, error=%@", detail.id.rawValue, error.localizedDescription)
-                    }
+                    mergedMessages.append(merged)
+                }
+                if !mergedMessages.isEmpty {
+                    try await store.saveMessagesBatch(mergedMessages)
+                    savedIDs.formUnion(mergedMessages.map(\.id))
                 }
                 savedCount += savedIDs.count
                 pending = pending.filter { !savedIDs.contains($0.id) }
@@ -174,33 +176,33 @@ public struct MailBodyBackfillService: Sendable {
             let chunk = Array(details[chunkStart..<min(chunkStart + concurrency, details.count)])
             let fetched: [MailMessageDetail?]
             do {
-                fetched = try await withThrowingTaskGroup(of: MailMessageDetail?.self) { group in
+                fetched = try await withThrowingTaskGroup(of: (Int, MailMessageDetail?).self) { group in
                     let bodyFetcher = self.bodyFetcher
-                    for detail in chunk {
+                    for (index, detail) in chunk.enumerated() {
                         group.addTask { [bodyFetcher] in
-                            try? await bodyFetcher(account, mailbox, detail)
+                            (index, try? await bodyFetcher(account, mailbox, detail))
                         }
                     }
-                    var results: [MailMessageDetail?] = []
-                    for try await result in group {
-                        results.append(result)
-                    }
+                    // Completion order is not input order: retain identity even
+                    // when a later request completes first or another fails.
+                    var results = [MailMessageDetail?](repeating: nil, count: chunk.count)
+                    for try await (index, result) in group { results[index] = result }
                     return results
                 }
             } catch {
                 continue
             }
+            var mergedMessages: [MailMessageDetail] = []
             for (detail, result) in zip(chunk, fetched) {
                 guard let result, MailBodyOnDemandFetchPlanner.hasDisplayableBody(result) else { continue }
                 var merged = detail
                 merged.body = result.body
-                    merged.attachments = result.attachments
-                do {
-                    try await store.saveMessage(merged)
-                    savedCount += 1
-                } catch {
-                    NSLog("[Connor.Mail] body backfill save failed: id=%@, error=%@", detail.id.rawValue, error.localizedDescription)
-                }
+                merged.attachments = result.attachments
+                mergedMessages.append(merged)
+            }
+            if !mergedMessages.isEmpty {
+                try await store.saveMessagesBatch(mergedMessages)
+                savedCount += mergedMessages.count
             }
         }
         return savedCount

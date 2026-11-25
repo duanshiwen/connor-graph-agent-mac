@@ -26,6 +26,17 @@ public protocol MailStoreProtocol: MailSourceRepository, TimeAwareMailSourceCach
     func presentation() async throws -> NativeMailBrowserPresentation
 }
 
+/// Durable local revisions are independent of remote acknowledgements.
+struct MailSyncSnapshot: Sendable {
+    let storeID: String
+    let revision: Int64
+    let messageIDs: [String]
+}
+
+protocol IncrementalMailSyncSource: MailStoreProtocol {
+    func syncSnapshot(storeID: String?, after revision: Int64?) async throws -> MailSyncSnapshot
+}
+
 public enum MailBodyOnDemandFetchPlanner {
     public static func hasDisplayableBody(_ detail: MailMessageDetail) -> Bool {
         if isDisplayable(detail.body?.plainText?.text) { return true }

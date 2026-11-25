@@ -18,14 +18,23 @@ public struct MailCore2MIMEParser: Sendable, Equatable {
         }
 
         #if canImport(MailCore)
-        let parser = MCOMessageParser(data: rawData)
+        return parseMessageBody(rawData: rawData, parser: MCOMessageParser(data: rawData), fallbackString: fallbackString)
+        #else
+        return fallbackParser.parseFullMessageBody(rawData: rawData, fallbackString: fallbackString)
+        #endif
+    }
+
+    #if canImport(MailCore)
+    func parseMessageBody(rawData: Data, parser: MCOMessageParser?, fallbackString: String) -> MailMIMEBodyResult {
         let plain = (parser?.plainTextBodyRenderingAndStripWhitespace(false) ?? parser?.plainTextBodyRendering() ?? parser?.plainTextRendering() ?? fallbackString)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let html = (parser?.htmlRendering(with: nil) ?? parser?.htmlBodyRendering())?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallback = fallbackParser.parseFullMessageBody(rawData: rawData, fallbackString: fallbackString)
         let normalizedRawHeader = String(data: rawData.prefix(4096), encoding: .ascii)?.lowercased() ?? ""
         let hasPlainAlternative = normalizedRawHeader.contains("multipart/alternative") && normalizedRawHeader.contains("text/plain")
+        let fallback = hasPlainAlternative || plain.isEmpty || html?.isEmpty != false
+            ? fallbackParser.parseFullMessageBody(rawData: rawData, fallbackString: fallbackString)
+            : MailMIMEBodyResult(plainText: plain, htmlText: html)
         let preferredPlain = hasPlainAlternative && !fallback.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? fallback.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
             : plain
@@ -36,8 +45,7 @@ public struct MailCore2MIMEParser: Sendable, Equatable {
         if let html, !html.isEmpty {
             return MailMIMEBodyResult(plainText: fallback.plainText, htmlText: html)
         }
-        #endif
-
         return fallbackParser.parseFullMessageBody(rawData: rawData, fallbackString: fallbackString)
     }
+    #endif
 }

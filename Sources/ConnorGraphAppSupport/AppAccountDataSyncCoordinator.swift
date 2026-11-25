@@ -463,19 +463,23 @@ public actor AppAccountDataSyncCoordinator {
         var receivedSessions: [String: String] = [:]
         var legacyNoteSessions: [String: String] = [:]
         var dirtyKeys: Set<String> = []
+        var mailStoreID: String?
+        var mailRevision: Int64?
         var memoryStoreID: String?
         var memoryRevision: Int64?
         var repairVersion: Int = 0
         var snapshotAfterID: Int64 = 0
         var snapshotCursor: Int64?
         init() {}
-        private enum CodingKeys: String, CodingKey { case cursor, records, pending, sessionParts, receivedSessions, legacyNoteSessions, dirtyKeys, repairVersion, snapshotAfterID, snapshotCursor, memoryStoreID, memoryRevision }
+        private enum CodingKeys: String, CodingKey { case cursor, records, pending, sessionParts, receivedSessions, legacyNoteSessions, dirtyKeys, repairVersion, snapshotAfterID, snapshotCursor, memoryStoreID, memoryRevision, mailStoreID, mailRevision }
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             cursor = try values.decodeIfPresent(Int64.self, forKey: .cursor) ?? 0
             records = try values.decodeIfPresent([String: RecordState].self, forKey: .records) ?? [:]
             pending = try values.decodeIfPresent([String: ConnorSyncChange].self, forKey: .pending) ?? [:]
             dirtyKeys = try values.decodeIfPresent(Set<String>.self, forKey: .dirtyKeys) ?? []
+            mailStoreID = try values.decodeIfPresent(String.self, forKey: .mailStoreID)
+            mailRevision = try values.decodeIfPresent(Int64.self, forKey: .mailRevision)
             memoryStoreID = try values.decodeIfPresent(String.self, forKey: .memoryStoreID)
             memoryRevision = try values.decodeIfPresent(Int64.self, forKey: .memoryRevision)
             repairVersion = try values.decodeIfPresent(Int.self, forKey: .repairVersion) ?? 0
@@ -513,7 +517,8 @@ public actor AppAccountDataSyncCoordinator {
         // Keep local dirty records dirty across pull and process restarts.
         if !capturedLocalChanges, !changes.isEmpty {
             do {
-                for (key, payload) in try await projections(memorySnapshot: memory?.accountSyncSnapshot(storeID: state.memoryStoreID, after: state.memoryRevision)) where state.records[key]?.hash != (try payloadHash(payload)) { state.dirtyKeys.insert(key) }
+                let mailSnapshot = try await prepareMailSnapshot(state: state)
+                for (key, payload) in try await projections(memorySnapshot: memory?.accountSyncSnapshot(storeID: state.memoryStoreID, after: state.memoryRevision), mailSnapshot: mailSnapshot) where state.records[key]?.hash != (try payloadHash(payload)) { state.dirtyKeys.insert(key) }
             } catch {
                 try Task.checkCancellation()
                 AppPerformanceLog.chatTurnLogger.warning("Local sync projection failed; receiving continues")
@@ -660,6 +665,7 @@ public actor AppAccountDataSyncCoordinator {
         if !appliedKeys.isEmpty { await onReceived?(syncResult) }
 
         let memorySnapshot = try memory?.accountSyncSnapshot(storeID: state.memoryStoreID, after: state.memoryRevision)
+        let mailSnapshot = try await prepareMailSnapshot(state: state)
         let projectionGeneration = defaults.integer(forKey: AppAccountSyncSignal.projectionGenerationKey)
         let scannedGenerationKey = "ConnorAccountSyncScannedProjectionGeneration.\(userID)"
         let hasScannedProjection = defaults.object(forKey: scannedGenerationKey) != nil
@@ -670,13 +676,14 @@ public actor AppAccountDataSyncCoordinator {
             || !state.pending.isEmpty
             || snapshotUnavailable
             || didRepair
+            || (mailSnapshot.storeID != state.mailStoreID || mailSnapshot.revision != state.mailRevision)
             || (memorySnapshot != nil && (memorySnapshot?.storeID != state.memoryStoreID || memorySnapshot?.revision != state.memoryRevision))
         guard shouldScanProjection else {
             saveState(state, key: stateKey)
             return syncResult
         }
 
-        let projected = try await projections(memorySnapshot: memorySnapshot)
+        let projected = try await projections(memorySnapshot: memorySnapshot, mailSnapshot: mailSnapshot)
         // Cache only within this snapshot. Incoming or concurrent local writes must
         // still be compared against fresh projections on the next pass.
         var projectedHashes: [String: String] = [:]
@@ -868,6 +875,10 @@ public actor AppAccountDataSyncCoordinator {
         }
         // Advance only after every mutation was acknowledged. Failed uploads,
         // conflicts and pending receives must remain eligible on the next pass.
+        if state.pending.isEmpty, deferredUploadCount == 0 {
+            state.mailStoreID = mailSnapshot.storeID
+            state.mailRevision = mailSnapshot.revision
+        }
         if state.pending.isEmpty, deferredUploadCount == 0, let memorySnapshot {
             state.memoryStoreID = memorySnapshot.storeID
             state.memoryRevision = memorySnapshot.revision
@@ -890,7 +901,13 @@ public actor AppAccountDataSyncCoordinator {
         return syncResult
     }
 
-    private func projections(memorySnapshot: SQLiteMemoryOSStore.AccountSyncSnapshot?) async throws -> [String: ConnorJSONValue] {
+    private func prepareMailSnapshot(state: PersistedState) async throws -> MailSyncSnapshot {
+        let sharedMail = SharedMailStore(configDirectory: settings.configDirectory)
+        if let localMail = mail as? any MailStoreProtocol { try await sharedMail.capture(from: localMail) }
+        return try sharedMail.syncSnapshot(storeID: state.mailStoreID, after: state.mailRevision)
+    }
+
+    private func projections(memorySnapshot: SQLiteMemoryOSStore.AccountSyncSnapshot?, mailSnapshot: MailSyncSnapshot) async throws -> [String: ConnorJSONValue] {
         var values: [String: ConnorJSONValue] = [:]
         for session in try sessions.loadSessions(filter: .all) {
             for (id, payload) in try SessionChunks.project(id: session.id, payload: jsonValue(ConnorPortableSession(session))) {
@@ -983,8 +1000,8 @@ public actor AppAccountDataSyncCoordinator {
             }
         }
         let sharedMail = SharedMailStore(configDirectory: settings.configDirectory)
-        if let localMail = mail as? any MailStoreProtocol { try await sharedMail.capture(from: localMail) }
-        for message in try sharedMail.all() {
+        for message in try sharedMail.changedMessages(mailSnapshot) {
+            try Task.checkCancellation()
             for (id, payload) in try SessionChunks.project(id: message.id, payload: SharedMailStore.wire(message), mail: true) {
                 values[recordKey("mail_messages", id)] = payload
             }

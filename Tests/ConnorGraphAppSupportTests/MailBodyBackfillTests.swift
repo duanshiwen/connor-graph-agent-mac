@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 import ConnorGraphCore
-import ConnorGraphAppSupport
+@testable import ConnorGraphAppSupport
 
 @Suite("Mail Body Backfill Tests")
 struct MailBodyBackfillTests {
@@ -59,6 +59,10 @@ struct MailBodyBackfillTests {
             body: MailMessageBody(plainText: MailBodyPart(mimeType: "text/plain", text: "hello", byteCount: 5), redactedPreview: "hello")
         )
         try await store.saveMessage(withBody)
+        var htmlOnly = withBody
+        htmlOnly.summary.id = MailMessageID(rawValue: "html-only")
+        htmlOnly.body = MailMessageBody(htmlText: MailBodyPart(mimeType: "text/html", text: "<p>HTML body</p>", byteCount: 16), redactedPreview: "")
+        try await store.saveMessage(htmlOnly)
         try await store.saveMessage(headerOnlyDetail(id: headerOnlyID, accountID: accountID, mailboxID: inbox.id, subject: "无正文"))
 
         let missing = try await store.messagesMissingBody(limit: 100)
@@ -142,4 +146,86 @@ struct MailBodyBackfillTests {
         #expect(saved == messageCount)
         #expect(try await store.messagesMissingBody(limit: 100).isEmpty)
     }
+    @Test func concurrentFallbackKeepsBodiesWithTheirOriginalMessages() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FileBackedMailSourceStore(storeURL: root.appendingPathComponent("mail.sqlite"))
+        let account = makeAccount(id: "owner@example.test")
+        let box = MailMailbox(id: MailMailboxID(rawValue: "inbox"), accountID: account.id, name: "Inbox", path: "INBOX", role: .inbox)
+        try await store.saveAccount(account)
+        try await store.saveMailbox(box)
+        var originals: [MailMessageDetail] = []
+        for index in 1...2 {
+            var detail = headerOnlyDetail(id: MailMessageID(rawValue: "message-\(index)"), accountID: account.id, mailboxID: box.id, subject: "Test")
+            detail.summary.date = Date(timeIntervalSince1970: Double(index))
+            originals.append(detail)
+        }
+        try await store.saveMessagesBatch(originals)
+        let service = MailBodyBackfillService(maxConcurrentFetches: 2, batchBodyFetcher: { _, _, _ in [] }) { _, _, detail in
+            try await Task.sleep(for: .milliseconds(detail.id.rawValue.hasSuffix("2") ? 60 : 2))
+            var result = detail
+            result.body = MailMessageBody(plainText: MailBodyPart(mimeType: "text/plain", text: detail.id.rawValue, byteCount: 9), redactedPreview: detail.id.rawValue)
+            return result
+        }
+        #expect(try await service.backfillMissingBodies(store: store) == 2)
+        for original in originals {
+            let saved = try #require(await store.message(id: original.id))
+            #expect(saved.body?.plainText?.text == original.id.rawValue)
+        }
+    }
+
+    @Test func partialBatchSuccessOnlyRetriesMissingBodies() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FileBackedMailSourceStore(storeURL: root.appendingPathComponent("mail.sqlite"))
+        let account = makeAccount(id: "owner@example.test")
+        let box = MailMailbox(id: MailMailboxID(rawValue: "inbox"), accountID: account.id, name: "Inbox", path: "INBOX", role: .inbox)
+        try await store.saveAccount(account)
+        try await store.saveMailbox(box)
+        for index in 1...3 { try await store.saveMessage(headerOnlyDetail(id: MailMessageID(rawValue: "message-\(index)"), accountID: account.id, mailboxID: box.id, subject: "Test")) }
+        let attempts = BackfillAttemptRecorder()
+        let service = MailBodyBackfillService(batchBodyFetcher: { _, _, details in
+            details.map { detail -> MailMessageDetail? in
+                guard detail.id.rawValue != "message-2" else { return nil }
+                var result = detail
+                result.body = MailMessageBody(plainText: MailBodyPart(mimeType: "text/plain", text: detail.id.rawValue, byteCount: 9), redactedPreview: detail.id.rawValue)
+                return result
+            }
+        }) { _, _, detail in
+            await attempts.record(detail.id.rawValue)
+            var result = detail
+            result.body = MailMessageBody(plainText: MailBodyPart(mimeType: "text/plain", text: detail.id.rawValue, byteCount: 9), redactedPreview: detail.id.rawValue)
+            return result
+        }
+        #expect(try await service.backfillMissingBodies(store: store) == 3)
+        #expect(await attempts.ids == ["message-2"])
+        #expect(try await store.messagesMissingBody(limit: 100).isEmpty)
+    }
+
+    @Test func failuresBackOffDurablyAndRemainRetryable() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("mail.sqlite")
+        let store = FileBackedMailSourceStore(storeURL: url)
+        let account = makeAccount(id: "owner@example.test")
+        let box = MailMailbox(id: MailMailboxID(rawValue: "inbox"), accountID: account.id, name: "Inbox", path: "INBOX", role: .inbox)
+        try await store.saveAccount(account)
+        try await store.saveMailbox(box)
+        let id = MailMessageID(rawValue: "failed-message")
+        try await store.saveMessage(headerOnlyDetail(id: id, accountID: account.id, mailboxID: box.id, subject: "Test"))
+        let service = MailBodyBackfillService(batchBodyFetcher: { _, _, _ in [] }, bodyFetcher: { _, _, _ in nil })
+        #expect(try await service.backfillMissingBodies(store: store) == 0)
+        #expect(try await store.messagesMissingBody(limit: 100).isEmpty)
+        let reopened = FileBackedMailSourceStore(storeURL: url)
+        #expect(try await reopened.messagesMissingBody(limit: 100).isEmpty)
+        try reopened.recordBackfillAttempts([id], now: Date().addingTimeInterval(-4000))
+        #expect(try await reopened.messagesMissingBody(limit: 100).map(\.id) == [id])
+    }
+
+}
+
+
+private actor BackfillAttemptRecorder {
+    var ids: [String] = []
+    func record(_ id: String) { ids.append(id) }
 }

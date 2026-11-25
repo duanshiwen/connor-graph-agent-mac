@@ -297,6 +297,27 @@ struct AccountSyncRecoveryTests {
         #expect(try await fixture.coordinator(memory: memory).reconcile().pushedChangeCount == 0)
     }
 
+    @Test @MainActor func incrementalMailUploadsSurviveFailureAndStayIdleAfterAcknowledgement() async throws {
+        let fixture = try await Fixture(remote: [])
+        defer { fixture.cleanUp() }
+        let mail = try await IncrementalMailFixture(count: 3)
+        defer { mail.cleanUp() }
+        let first = try await fixture.coordinator(mail: mail.store).reconcile()
+        #expect(first.failureMessage == nil)
+        #expect(try await fixture.coordinator(mail: mail.store).reconcile().pushedChangeCount == 0)
+        let id = try #require(await mail.store.allMessageIDs().first)
+        try await mail.store.updateFlags(messageIDs: [id]) { value in var value = value; value.isRead.toggle(); return value }
+        await fixture.transport.setFailPush(true)
+        var failed = false
+        do { _ = try await fixture.coordinator(mail: mail.store).reconcile() } catch { failed = true }
+        #expect(failed)
+        await fixture.transport.setFailPush(false)
+        let retried = try await fixture.coordinator(mail: mail.store).reconcile()
+        #expect(retried.failureMessage == nil)
+        #expect(retried.pushedChangeCount == 1)
+        #expect(try await fixture.coordinator(mail: mail.store).reconcile().pushedChangeCount == 0)
+    }
+
     @Test @MainActor func payloadHashPreservesLegacyCanonicalization() async throws {
         let fixture = try await Fixture(remote: [])
         defer { fixture.cleanUp() }
@@ -364,8 +385,8 @@ struct AccountSyncRecoveryTests {
         identity = AppUserIdentityStore(baseURL: URL(string: "http://127.0.0.1:1/")!, credentials: credentials, transport: transport, networkIsAvailable: { connectivity.online }, syncAvailability: connectivity.changes.eraseToAnyPublisher(), syncDefaults: defaults)
         await identity.restoreSession()
     }
-    func coordinator(memory: SQLiteMemoryOSStore? = nil, onReceived: (@Sendable (AppAccountDataSyncResult) async -> Void)? = nil) -> AppAccountDataSyncCoordinator {
-        AppAccountDataSyncCoordinator(sessions: sessions, settings: AppRuntimeSettingsRepository(configDirectory: root.appendingPathComponent("config")), memory: memory, identity: identity, defaults: UserDefaults(suiteName: suite)!, onReceived: onReceived)
+    func coordinator(memory: SQLiteMemoryOSStore? = nil, mail: (any MailSourceRepository)? = nil, onReceived: (@Sendable (AppAccountDataSyncResult) async -> Void)? = nil) -> AppAccountDataSyncCoordinator {
+        AppAccountDataSyncCoordinator(sessions: sessions, settings: AppRuntimeSettingsRepository(configDirectory: root.appendingPathComponent("config")), memory: memory, mail: mail, identity: identity, defaults: UserDefaults(suiteName: suite)!, onReceived: onReceived)
     }
     func cleanUp() {
         connectivity.setOnline(false)

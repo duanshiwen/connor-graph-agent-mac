@@ -15,8 +15,9 @@ public struct SharedMailMessage: Codable, Sendable, Equatable, Identifiable {
 public struct SharedMailStore: Sendable {
  public let directory: URL
  private static let gate = NSRecursiveLock()
+ private static let indexes = SharedMailSyncIndexes()
  public init(configDirectory: URL) { directory = configDirectory.appendingPathComponent("shared-mail", isDirectory: true) }
- public static func digest(_ value: String) -> String { SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined() }
+ public static func digest(_ value: String) -> String { hex(SHA256.hash(data: Data(value.utf8))) }
  public static func recordID(address: String, folder: String, validity: String, uid: String) -> String {
   "mail_" + digest("\(address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())\0\(folder.uppercased() == "INBOX" ? "INBOX" : folder)\0\(validity)\0\(uid)")
  }
@@ -42,7 +43,13 @@ public struct SharedMailStore: Sendable {
    case .number(let n): guard n.isFinite, n.rounded() == n, abs(n) < 9_007_199_254_740_992 else { throw SessionChunks.Failure.invalid }; add("n"); add(String(Int64(n)))
    case .null: add("z")
   } }
-  try visit(value); return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+  try visit(value); return hex(SHA256.hash(data: bytes))
+ }
+ private static func hex(_ digest: SHA256.Digest) -> String {
+  let alphabet = Array("0123456789abcdef".utf8)
+  var bytes: [UInt8] = []; bytes.reserveCapacity(64)
+  for byte in digest { bytes.append(alphabet[Int(byte >> 4)]); bytes.append(alphabet[Int(byte & 15)]) }
+  return String(decoding: bytes, as: UTF8.self)
  }
  private static func quality(_ v: SharedMailMessage) -> Int { !v.bodyAvailable ? 0 : v.bodyTruncated ? 1 : 2 }
  private static func preserve(_ v: SharedMailMessage, _ old: SharedMailMessage) -> SharedMailMessage {
@@ -90,9 +97,23 @@ public struct SharedMailStore: Sendable {
    if next == old { return false }
   }
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  // Publish the durable dirty marker first. A crash before the atomic file
+  // replacement is safe: remote cursors/native capture watermarks are not yet acknowledged.
+  try syncIndex().recordSyncChange(next.id)
   try JSONEncoder().encode(next).write(to: directory.appendingPathComponent(next.id + ".json"), options: .atomic)
   NotificationCenter.default.post(name: .connorMailCacheDidChange, object: nil)
   return true
+ }
+ private func syncIndex() throws -> SQLiteMailSourceStore {
+  try Self.indexes.index(directory: directory)
+ }
+ func syncSnapshot(storeID: String?, after revision: Int64?) throws -> MailSyncSnapshot {
+  Self.gate.lock(); defer { Self.gate.unlock() }
+  return try syncIndex().syncSnapshot(storeID: storeID, after: revision)
+ }
+ func changedMessages(_ snapshot: MailSyncSnapshot) throws -> [SharedMailMessage] {
+  Self.gate.lock(); defer { Self.gate.unlock() }
+  return try snapshot.messageIDs.compactMap { try get($0) }
  }
  public func all() throws -> [SharedMailMessage] {
   Self.gate.lock(); defer { Self.gate.unlock() }
@@ -109,12 +130,32 @@ import ConnorGraphCore
 
 extension SharedMailStore {
     /// Export only content already fetched by this device; configuration never enters the wire.
-    func capture(from store: any MailStoreProtocol) async throws {
+    @discardableResult func capture(from store: any MailStoreProtocol) async throws -> Int {
+        let incremental = store as? any IncrementalMailSyncSource
+        let index = try syncIndex()
+        let snapshot: MailSyncSnapshot?
+        let ids: [MailMessageID]
+        if let incremental {
+            let initial = try await incremental.syncSnapshot(storeID: nil, after: nil)
+            let previous = try index.importedRevision(sourceID: initial.storeID)
+            let changes = try await incremental.syncSnapshot(storeID: initial.storeID, after: previous)
+            snapshot = changes
+            ids = changes.messageIDs.map { MailMessageID(rawValue: $0) }
+        } else {
+            snapshot = nil
+            ids = try await store.allMessageIDs()
+        }
+        if ids.isEmpty {
+            if let snapshot { try index.acknowledgeImport(snapshot) }
+            return 0
+        }
+        var capturedCount = 0
         let accounts = try await store.listAccounts()
         let byAccount = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
         var mailboxes: [MailMailboxID: MailMailbox] = [:]
         for account in accounts { for box in try await store.listMailboxes(accountID: account.id) { mailboxes[box.id] = box } }
-        for id in try await store.allMessageIDs() {
+        for id in ids {
+            try Task.checkCancellation()
             guard let detail = try await store.message(id: id), let account = byAccount[detail.summary.accountID],
                   let box = mailboxes[detail.summary.mailboxID],
                   let rawValidity = box.status.syncCursor?.uidValidity, let validity = UInt32(rawValidity), validity > 0,
@@ -137,6 +178,29 @@ extension SharedMailStore {
                 SharedMailAttachment(id: String(index), fileName: value.filename, mimeType: value.mimeType, size: Int64(value.byteCount), contentId: value.contentID ?? "", isInline: value.isInline)
             }
             try capture(message)
+            capturedCount += 1
         }
+        if let snapshot { try index.acknowledgeImport(snapshot) }
+        return capturedCount
+    }
+}
+
+/// Cache connections, never decoded mail bodies. Revisions remain durable across
+/// process restarts and separate connections; evicting a connection is harmless.
+private final class SharedMailSyncIndexes: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [String: SQLiteMailSourceStore] = [:]
+
+    func index(directory: URL) throws -> SQLiteMailSourceStore {
+        lock.lock(); defer { lock.unlock() }
+        if let index = entries[directory.path] { return index }
+        let index = try SQLiteMailSourceStore(databaseURL: directory.appendingPathComponent("sync-index.sqlite"))
+        let existing = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" && $0.lastPathComponent.hasPrefix("mail_") }
+            .map { $0.deletingPathExtension().lastPathComponent }
+        try index.seedSyncIDs(existing)
+        if entries.count >= 16, let key = entries.keys.first { entries.removeValue(forKey: key) }
+        entries[directory.path] = index
+        return index
     }
 }

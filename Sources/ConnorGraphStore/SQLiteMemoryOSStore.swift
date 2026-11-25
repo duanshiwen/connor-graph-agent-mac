@@ -23,7 +23,7 @@ public enum SQLiteMemoryOSStoreError: Error, Sendable, Equatable, CustomStringCo
 }
 
 public final class SQLiteMemoryOSStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 10
+    public static let currentSchemaVersion = 11
 
     public static let requiredSchemaTables: Set<String> = [
         "memory_schema_migrations", "memory_legacy_import_runs", "memory_store_health_checks", "memory_builtin_datasets",
@@ -42,7 +42,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     public static let requiredSchemaIndexes: Set<String> = [
         "idx_memory_account_sync_revision",
         "idx_memory_l0_provenance_source", "idx_memory_l0_provenance_time", "idx_memory_l0_spans_object",
-        "idx_memory_l1_capture_state", "idx_memory_l1_time_blocks_status", "idx_memory_l1_queue_runnable", "idx_memory_l1_queue_idempotency",
+        "idx_memory_l1_capture_state", "idx_memory_l1_event_type_id", "idx_memory_l1_time_blocks_status", "idx_memory_l1_queue_runnable", "idx_memory_l1_queue_idempotency",
         "idx_memory_background_runs_queue", "idx_memory_background_messages_run", "idx_memory_background_tool_calls_run",
         "idx_memory_l2_nodes_key", "idx_memory_l2_statements_subject", "idx_memory_l2_statements_temporal",
         "idx_memory_l3_beliefs_domain", "idx_memory_l3_beliefs_updated_at", "idx_memory_l3_belief_evidence_belief",
@@ -179,13 +179,14 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try configurePragmas()
         try rebuildLegacyL3BeliefSchemaIfNeeded()
         try execute(Self.schemaSQL)
+        try execute("CREATE INDEX IF NOT EXISTS idx_memory_l1_event_type_id ON memory_l1_capture_events(event_type, id);")
         try installAccountSyncTracking()
         try execute("DROP TABLE IF EXISTS memory_profile_compaction_snapshots;")
         try addL1IntentNormalizationColumnsIfNeeded()
         try execute("PRAGMA user_version = \(Self.currentSchemaVersion);")
         try execute("""
         INSERT OR REPLACE INTO memory_schema_migrations(version, name, applied_at, metadata_json)
-        VALUES (\(Self.currentSchemaVersion), 'incremental_account_sync', \(quote(iso(Date()))), '{}')
+        VALUES (\(Self.currentSchemaVersion), 'indexed_recent_context', \(quote(iso(Date()))), '{}')
         """)
         // Optimize indexes after migration
         try execute("PRAGMA optimize;")

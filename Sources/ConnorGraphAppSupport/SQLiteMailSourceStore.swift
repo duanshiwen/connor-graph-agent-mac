@@ -45,12 +45,12 @@ private struct MailSQLitePageCursor: Codable {
 
 // MARK: - SQLiteMailSourceStore
 
-public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable {
+public final class SQLiteMailSourceStore: MailStoreProtocol, IncrementalMailSyncSource, @unchecked Sendable {
 
     // MARK: Properties
 
     private let db: OpaquePointer
-    private let lock = NSLock()
+    private let lock = NSRecursiveLock()
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let searchService: (any NativeSourceSearchBackend)?
@@ -78,7 +78,7 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         self.searchService = searchService
 
         try configurePragmas()
-        try createTables()
+        try transaction { try createTables() }
     }
 
     deinit {
@@ -147,6 +147,55 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
             );
         """)
 
+        let columns = try querySQL("PRAGMA table_info(mail_messages)").map { $0[1] }
+        if !columns.contains("body_available") {
+            try execute("ALTER TABLE mail_messages ADD COLUMN body_available INTEGER NOT NULL DEFAULT 0")
+            try execute("""
+                UPDATE mail_messages SET body_available=1 WHERE length(COALESCE(body_plain,''))>0
+                  OR length(COALESCE(json_extract(raw_json,'$.body.htmlText.text'),''))>0
+                  OR length(COALESCE(json_extract(raw_json,'$.body.redactedPreview'),''))>0;
+            """)
+        }
+        try execute("CREATE INDEX IF NOT EXISTS idx_mail_backfill ON mail_messages(body_available, date DESC)")
+        try execute("CREATE TABLE IF NOT EXISTS mail_body_backfill_retry (id TEXT PRIMARY KEY, failures INTEGER NOT NULL, retry_at REAL NOT NULL)")
+        try execute("""
+            CREATE TABLE IF NOT EXISTS mail_sync_clock (singleton INTEGER PRIMARY KEY CHECK(singleton=1), store_id TEXT NOT NULL, revision INTEGER NOT NULL);
+            INSERT OR IGNORE INTO mail_sync_clock VALUES (1, '\(UUID().uuidString)', 0);
+            CREATE TABLE IF NOT EXISTS mail_sync_changes (id TEXT PRIMARY KEY, revision INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_mail_sync_revision ON mail_sync_changes(revision);
+            CREATE TABLE IF NOT EXISTS mail_sync_imports (source_id TEXT PRIMARY KEY, revision INTEGER NOT NULL);
+            INSERT OR IGNORE INTO mail_sync_changes SELECT id, (SELECT revision FROM mail_sync_clock WHERE singleton=1) FROM mail_messages;
+        """)
+        for (operation, row) in [("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")] {
+            try execute("""
+                CREATE TRIGGER IF NOT EXISTS mail_sync_\(operation.lowercased()) AFTER \(operation) ON mail_messages BEGIN
+                    UPDATE mail_sync_clock SET revision=revision+1 WHERE singleton=1;
+                    INSERT INTO mail_sync_changes VALUES (\(row).id, (SELECT revision FROM mail_sync_clock WHERE singleton=1))
+                    ON CONFLICT(id) DO UPDATE SET revision=excluded.revision;
+                END;
+            """)
+        }
+        // Mail identity depends on account address and mailbox UIDValidity/path,
+        // not the frequently updated sync-health timestamps.
+        for operation in ["INSERT", "UPDATE"] {
+            let condition = operation == "UPDATE" ? "WHEN OLD.email IS NOT NEW.email" : ""
+            try execute("""
+                CREATE TRIGGER IF NOT EXISTS mail_sync_account_\(operation.lowercased()) AFTER \(operation) ON mail_accounts \(condition) BEGIN
+                    UPDATE mail_sync_clock SET revision=revision+1 WHERE singleton=1;
+                    INSERT INTO mail_sync_changes SELECT id, (SELECT revision FROM mail_sync_clock WHERE singleton=1) FROM mail_messages WHERE account_id=NEW.id
+                    ON CONFLICT(id) DO UPDATE SET revision=excluded.revision;
+                END;
+            """)
+            let mailboxCondition = operation == "UPDATE" ? "WHEN OLD.path IS NOT NEW.path OR OLD.role IS NOT NEW.role OR OLD.account_id IS NOT NEW.account_id OR json_extract(OLD.raw_json, '$.status.syncCursor.uidValidity') IS NOT json_extract(NEW.raw_json, '$.status.syncCursor.uidValidity')" : ""
+            try execute("""
+                CREATE TRIGGER IF NOT EXISTS mail_sync_mailbox_\(operation.lowercased()) AFTER \(operation) ON mail_mailboxes \(mailboxCondition) BEGIN
+                    UPDATE mail_sync_clock SET revision=revision+1 WHERE singleton=1;
+                    INSERT INTO mail_sync_changes SELECT id, (SELECT revision FROM mail_sync_clock WHERE singleton=1) FROM mail_messages WHERE mailbox_id=NEW.id
+                    ON CONFLICT(id) DO UPDATE SET revision=excluded.revision;
+                END;
+            """)
+        }
+
         try execute("CREATE INDEX IF NOT EXISTS idx_msg_account ON mail_messages(account_id);")
         try execute("CREATE INDEX IF NOT EXISTS idx_msg_mailbox ON mail_messages(mailbox_id);")
         try execute("CREATE INDEX IF NOT EXISTS idx_msg_date ON mail_messages(date DESC);")
@@ -154,6 +203,47 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         try execute("CREATE INDEX IF NOT EXISTS idx_msg_account_page ON mail_messages(account_id, date DESC, id ASC);")
         try execute("CREATE INDEX IF NOT EXISTS idx_msg_mailbox_page ON mail_messages(mailbox_id, date DESC, id ASC);")
         try execute("CREATE INDEX IF NOT EXISTS idx_msg_uid ON mail_messages(account_id, uid);")
+    }
+
+    func syncSnapshot(storeID: String?, after revision: Int64?) throws -> MailSyncSnapshot {
+        lock.lock(); defer { lock.unlock() }
+        try executeUnlocked("SAVEPOINT mail_sync_snapshot;")
+        defer { try? executeUnlocked("RELEASE mail_sync_snapshot;") }
+        let clock = try querySQLUnlocked("SELECT store_id, revision FROM mail_sync_clock WHERE singleton=1")[0]
+        let upper = Int64(clock[1])!
+        let lower = storeID == clock[0] && revision != nil && revision! >= 0 && revision! <= upper ? revision! : -1
+        let ids = try querySQLUnlocked("SELECT id FROM mail_sync_changes WHERE revision > \(lower) AND revision <= \(upper) ORDER BY id").map { $0[0] }
+        return MailSyncSnapshot(storeID: clock[0], revision: upper, messageIDs: ids)
+    }
+
+    func seedSyncIDs(_ ids: [String]) throws {
+        guard !ids.isEmpty else { return }
+        let values = ids.map { "('\(esc($0))', (SELECT revision FROM mail_sync_clock WHERE singleton=1))" }.joined(separator: ",")
+        try execute("INSERT OR IGNORE INTO mail_sync_changes VALUES \(values)")
+    }
+
+    func recordSyncChange(_ id: String) throws {
+        lock.lock(); defer { lock.unlock() }
+        try executeUnlocked("SAVEPOINT shared_mail_change;")
+        do {
+            try executeUnlocked("""
+                UPDATE mail_sync_clock SET revision=revision+1 WHERE singleton=1;
+                INSERT INTO mail_sync_changes VALUES ('\(esc(id))', (SELECT revision FROM mail_sync_clock WHERE singleton=1))
+                ON CONFLICT(id) DO UPDATE SET revision=excluded.revision;
+            """)
+            try executeUnlocked("RELEASE shared_mail_change;")
+        } catch {
+            try? executeUnlocked("ROLLBACK TO shared_mail_change; RELEASE shared_mail_change;")
+            throw error
+        }
+    }
+
+    func importedRevision(sourceID: String) throws -> Int64? {
+        try querySQL("SELECT revision FROM mail_sync_imports WHERE source_id='\(esc(sourceID))'").first.flatMap { Int64($0[0]) }
+    }
+
+    func acknowledgeImport(_ snapshot: MailSyncSnapshot) throws {
+        try execute("INSERT INTO mail_sync_imports VALUES ('\(esc(snapshot.storeID))', \(snapshot.revision)) ON CONFLICT(source_id) DO UPDATE SET revision=excluded.revision")
     }
 
     // MARK: - MailSourceRepository
@@ -167,8 +257,9 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         let data = try encoder.encode(account)
         let json = String(data: data, encoding: .utf8) ?? "{}"
         try execute("""
-            INSERT OR REPLACE INTO mail_accounts (id, display_name, email, provider, updated_at, raw_json)
+            INSERT INTO mail_accounts (id, display_name, email, provider, updated_at, raw_json)
             VALUES ('\(esc(account.id.rawValue))', '\(esc(account.displayName))', '\(esc(account.identities.first?.address.email ?? ""))', '\(esc(account.provider.rawValue))', '\(esc(iso8601(account.updatedAt)))', '\(esc(json))')
+            ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name, email=excluded.email, provider=excluded.provider, updated_at=excluded.updated_at, raw_json=excluded.raw_json
         """)
     }
 
@@ -205,33 +296,26 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         let data = try encoder.encode(mailbox)
         let json = String(data: data, encoding: .utf8) ?? "{}"
         try execute("""
-            INSERT OR REPLACE INTO mail_mailboxes (id, account_id, name, path, role, message_count, unread_count, last_synced_at, raw_json)
+            INSERT INTO mail_mailboxes (id, account_id, name, path, role, message_count, unread_count, last_synced_at, raw_json)
             VALUES ('\(esc(mailbox.id.rawValue))', '\(esc(mailbox.accountID.rawValue))', '\(esc(mailbox.name))', '\(esc(mailbox.path))', '\(esc(mailbox.role.rawValue))', \(mailbox.status.messageCount), \(mailbox.status.unreadCount), \(mailbox.status.lastSyncedAt.map { "'\(esc(iso8601($0)))'" } ?? "NULL"), '\(esc(json))')
+            ON CONFLICT(id) DO UPDATE SET account_id=excluded.account_id, name=excluded.name, path=excluded.path, role=excluded.role, message_count=excluded.message_count, unread_count=excluded.unread_count, last_synced_at=excluded.last_synced_at, raw_json=excluded.raw_json
         """)
     }
 
     public func saveMessage(_ message: MailMessageDetail) async throws {
-        try saveMessageInternal(message)
+        guard try saveMessageInternal(message) else { return }
         AppAccountSyncSignal.postLocalDataDidChange()
         try await searchService?.upsert([NativeSourceSearchAdapters.mailDocument(from: message)])
     }
 
     public func saveMessagesBatch(_ messages: [MailMessageDetail]) async throws {
         guard !messages.isEmpty else { return }
-        try execute("BEGIN TRANSACTION;")
-        do {
-            for message in messages {
-                try saveMessageInternal(message)
-            }
-            try execute("COMMIT;")
-        } catch {
-            try? execute("ROLLBACK;")
-            throw error
+        let changed = try transaction {
+            try messages.filter { try saveMessageInternal($0) }
         }
+        guard !changed.isEmpty else { return }
         AppAccountSyncSignal.postLocalDataDidChange()
-        if let searchService {
-            try await searchService.upsert(messages.map { NativeSourceSearchAdapters.mailDocument(from: $0) })
-        }
+        try await searchService?.upsert(changed.map(NativeSourceSearchAdapters.mailDocument(from:)))
     }
 
     public func searchMessages(query: String, accountID: MailAccountID?) async throws -> [MailMessageSummary] {
@@ -358,40 +442,45 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
     /// 按时间倒序取最新 `limit` 封，避免一次性回填过多占用服务器与网络。
     public func messagesMissingBody(limit: Int) async throws -> [MailMessageDetail] {
         let capped = max(1, min(limit, 2000))
-        let rows = try querySQL("SELECT raw_json FROM mail_messages WHERE body_plain IS NULL OR body_plain = '' ORDER BY date DESC LIMIT \(capped)")
+        let rows = try querySQL("SELECT m.raw_json FROM mail_messages m LEFT JOIN mail_body_backfill_retry r ON r.id=m.id WHERE m.body_available=0 AND (m.body_plain IS NULL OR m.body_plain='') AND (r.retry_at IS NULL OR r.retry_at <= \(Date().timeIntervalSince1970)) ORDER BY m.date DESC LIMIT \(capped)")
         return try rows.map { try decoder.decode(MailMessageDetail.self, from: Data($0[0].utf8)) }
     }
 
+    func recordBackfillAttempts(_ ids: [MailMessageID], now: Date = Date()) throws {
+        guard !ids.isEmpty else { return }
+        let keys = ids.map { "'\(esc($0.rawValue))'" }.joined(separator: ",")
+        try execute("""
+            INSERT INTO mail_body_backfill_retry
+            SELECT id, 1, \(now.timeIntervalSince1970 + 60) FROM mail_messages
+            WHERE id IN (\(keys)) AND body_available=0
+            ON CONFLICT(id) DO UPDATE SET failures=failures+1,
+              retry_at=\(now.timeIntervalSince1970)+MIN(3600, 60*(1 << MIN(failures,6)));
+        """)
+    }
+
     public func clearCachedMailData() async throws {
-        try execute("BEGIN TRANSACTION;")
-        do {
+        try transaction {
             try execute("DELETE FROM mail_messages;")
             try execute("DELETE FROM mail_mailboxes;")
-            try execute("COMMIT;")
-        } catch {
-            try? execute("ROLLBACK;")
-            throw error
+            try execute("DELETE FROM mail_body_backfill_retry;")
         }
         hasPrimedSearchIndex = false
         try await searchService?.deleteBySource(kind: .mail, sourceInstanceID: nil)
     }
 
     public func updateFlags(messageIDs: [MailMessageID], transform: @Sendable (MailMessageFlags) -> MailMessageFlags) async throws {
-        try execute("BEGIN TRANSACTION;")
-        do {
+        let changed = try transaction {
+            var changed: [MailMessageDetail] = []
             for messageID in messageIDs {
                 guard let detail = try loadMessageByIDs([messageID]).first else { continue }
                 var copy = detail
                 copy.summary.flags = transform(copy.summary.flags)
-                try saveMessageInternal(copy)
+                if try saveMessageInternal(copy) { changed.append(copy) }
             }
-            try execute("COMMIT;")
-        } catch {
-            try? execute("ROLLBACK;")
-            throw error
+            return changed
         }
+        guard !changed.isEmpty else { return }
         AppAccountSyncSignal.postLocalDataDidChange()
-        let changed = try loadMessageByIDs(messageIDs)
         try await searchService?.upsert(changed.map(NativeSourceSearchAdapters.mailDocument(from:)))
     }
 
@@ -414,15 +503,21 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
 
     // MARK: - Private Helpers
 
-    private func saveMessageInternal(_ message: MailMessageDetail) throws {
+    @discardableResult private func saveMessageInternal(_ message: MailMessageDetail) throws -> Bool {
+        lock.lock(); defer { lock.unlock() }
         let data = try encoder.encode(message)
         let json = String(data: data, encoding: .utf8) ?? "{}"
         let summary = message.summary
         let bodyPlain = message.body?.plainText?.text ?? ""
         try execute("""
-            INSERT OR REPLACE INTO mail_messages (id, account_id, mailbox_id, uid, subject, from_email, from_name, date, snippet, is_read, is_flagged, is_answered, is_deleted, has_attachments, body_plain, raw_json)
-            VALUES ('\(esc(summary.id.rawValue))', '\(esc(summary.accountID.rawValue))', '\(esc(summary.mailboxID.rawValue))', '\(esc(summary.threadID?.rawValue ?? ""))', '\(esc(summary.subject))', '\(esc(summary.from.email))', \(summary.from.name.map { "'\(esc($0))'" } ?? "NULL"), '\(esc(iso8601(summary.date)))', '\(esc(summary.snippet))', \(summary.flags.isRead ? 1 : 0), \(summary.flags.isFlagged ? 1 : 0), \(summary.flags.isAnswered ? 1 : 0), \(summary.flags.isDeleted ? 1 : 0), \(summary.hasAttachments ? 1 : 0), '\(esc(bodyPlain))', '\(esc(json))')
+            INSERT INTO mail_messages (id, account_id, mailbox_id, uid, subject, from_email, from_name, date, snippet, is_read, is_flagged, is_answered, is_deleted, has_attachments, body_plain, raw_json, body_available)
+            VALUES ('\(esc(summary.id.rawValue))', '\(esc(summary.accountID.rawValue))', '\(esc(summary.mailboxID.rawValue))', '\(esc(summary.threadID?.rawValue ?? ""))', '\(esc(summary.subject))', '\(esc(summary.from.email))', \(summary.from.name.map { "'\(esc($0))'" } ?? "NULL"), '\(esc(iso8601(summary.date)))', '\(esc(summary.snippet))', \(summary.flags.isRead ? 1 : 0), \(summary.flags.isFlagged ? 1 : 0), \(summary.flags.isAnswered ? 1 : 0), \(summary.flags.isDeleted ? 1 : 0), \(summary.hasAttachments ? 1 : 0), '\(esc(bodyPlain))', '\(esc(json))', \(MailBodyOnDemandFetchPlanner.hasDisplayableBody(message) ? 1 : 0))
+            ON CONFLICT(id) DO UPDATE SET account_id=excluded.account_id, mailbox_id=excluded.mailbox_id, uid=excluded.uid, subject=excluded.subject, from_email=excluded.from_email, from_name=excluded.from_name, date=excluded.date, snippet=excluded.snippet, is_read=excluded.is_read, is_flagged=excluded.is_flagged, is_answered=excluded.is_answered, is_deleted=excluded.is_deleted, has_attachments=excluded.has_attachments, body_plain=excluded.body_plain, raw_json=excluded.raw_json, body_available=excluded.body_available
+            WHERE mail_messages.raw_json IS NOT excluded.raw_json
         """)
+        let changed = sqlite3_changes(db) > 0
+        if changed { try execute("DELETE FROM mail_body_backfill_retry WHERE id='\(esc(message.id.rawValue))'") }
+        return changed
     }
 
     private func loadMessageByIDs(_ ids: [MailMessageID]) throws -> [MailMessageDetail] {
@@ -489,9 +584,26 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
 
     // MARK: - SQLite Helpers
 
+    private func transaction<T>(_ body: () throws -> T) throws -> T {
+        lock.lock(); defer { lock.unlock() }
+        try executeUnlocked("BEGIN IMMEDIATE;")
+        do {
+            let result = try body()
+            try executeUnlocked("COMMIT;")
+            return result
+        } catch {
+            try? executeUnlocked("ROLLBACK;")
+            throw error
+        }
+    }
+
     private func execute(_ sql: String) throws {
         lock.lock()
         defer { lock.unlock() }
+        try executeUnlocked(sql)
+    }
+
+    private func executeUnlocked(_ sql: String) throws {
         if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
             throw SQLiteMailSourceStoreError.executeFailed(lastError())
         }
@@ -502,6 +614,10 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
     private func querySQL(_ sql: String) throws -> [[String]] {
         lock.lock()
         defer { lock.unlock() }
+        return try querySQLUnlocked(sql)
+    }
+
+    private func querySQLUnlocked(_ sql: String) throws -> [[String]] {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw SQLiteMailSourceStoreError.prepareFailed(lastError())

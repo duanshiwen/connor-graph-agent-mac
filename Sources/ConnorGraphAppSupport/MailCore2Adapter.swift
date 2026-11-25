@@ -214,10 +214,11 @@ public struct MailCore2MailBackend: MailProtocolBackend {
                 } catch {
                     lastError = error
                     failed = true
-                    break
+                    results.append(nil)
+                    if Task.isCancelled { throw CancellationError() }
                 }
             }
-            if !failed { return results }
+            if !failed || results.contains(where: { $0 != nil }) { return results }
         }
         if let lastError { throw lastError }
         return []
@@ -284,7 +285,7 @@ public struct MailCore2MailBackend: MailProtocolBackend {
 
     private func detail(fromRawData rawData: Data, account: MailAccount, uid: String, mailbox: RemoteIMAPMailbox, fallbackRecipient: MailAddress, snippet: String) throws -> MailMessageDetail {
         let parser = MCOMessageParser(data: rawData)
-        let bodyResult = try MailCore2MIMEParser().parseFullMessageBody(rawData: rawData, fallbackString: snippet)
+        let bodyResult = MailCore2MIMEParser().parseMessageBody(rawData: rawData, parser: parser, fallbackString: snippet)
         let header = parser?.header
         let from = Self.mailAddress(from: header?.from) ?? MailAddress(email: "unknown@example.com")
         let to = Self.mailAddresses(from: header?.to)
