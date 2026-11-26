@@ -40,12 +40,13 @@ public struct MiniAppEntry: Identifiable, Equatable, Sendable {
     public let packageVersion: Int
     public let riskLevel: String
     public let ownerName: String
+    public var publicationBadge = ""
     public let updatedAt: String
 
     public var id: String { appID }
 
     public var sourceBadge: String { source == .local ? "本机" : "云端" }
-    public var scopeBadge: String { scope.badgeText }
+    public var scopeBadge: String { source == .local ? "本机私有" : scope.badgeText }
     public var relationBadge: String { isOwned ? "我创建" : "我可用" }
     public var displayUpdatedAt: String { String(updatedAt.prefix(10)) }
 }
@@ -73,7 +74,7 @@ public struct MiniAppDetail: Equatable, Sendable {
     public let updatedAt: String
 
     public var sourceBadge: String { source == .local ? "本机" : "云端" }
-    public var scopeBadge: String { scope.badgeText }
+    public var scopeBadge: String { source == .local ? "本机私有" : scope.badgeText }
     public var relationBadge: String { isOwned ? "我创建" : "我可用" }
 }
 
@@ -144,6 +145,59 @@ public final class MiniAppFeatureModel {
         self.library = library
         self.cloudClient = cloudClient
     }
+    public private(set) var publicationStatus = "尚未读取云端发布状态"
+    public private(set) var publicationRevision:Int?
+    public private(set) var publicationAppID:String?
+    public private(set) var publicationBusy = false
+    private var publicationAuthScope:String?
+    private func publicationRequest(_ tool:String,_ args:[String:Any],scope:String) async throws -> [String:Any] {
+        guard let cloudClient else {throw BasePackageImporter.ImportError.invalid("请先登录康纳账号。")}
+        let response = try await cloudClient.request(tool:tool,arguments:JSONSerialization.data(withJSONObject:args),expectedAccountScope:scope)
+        guard let envelope = try JSONSerialization.jsonObject(with:response) as? [String:Any],envelope["ok"] as? Bool == true,let data = envelope["data"] as? [String:Any] else {
+            let envelope = (try? JSONSerialization.jsonObject(with:response)) as? [String:Any]
+            throw BasePackageImporter.ImportError.invalid((envelope?["error"] as? [String:Any])?["message"] as? String ?? "云端操作失败")
+        }
+        return data
+    }
+    public func inspectPublication(appID:String) async {
+        let generation = syncAccountGeneration
+        publicationRevision = nil;publicationAppID = appID
+        do {
+            guard let cloudClient else {throw BasePackageImporter.ImportError.invalid("请先登录康纳账号。")}
+            let authScope = try await cloudClient.accountScope()
+            let status = try await publicationRequest("base.sync.status",["appID":appID],scope:authScope)
+            guard generation == syncAccountGeneration,publicationAppID == appID else{return}
+            publicationAuthScope = authScope
+            publicationRevision = status["revision"] as? Int
+            let published = status["published"] as? Bool == true
+            publicationStatus = published ? "云端已发布 · \(MiniAppScope(rawValue:status["visibility"] as? String ?? "private")?.badgeText ?? "范围待确认") · 修订 \(publicationRevision ?? 0)" : "云端未发布 · 本机私有分支保留"
+        }catch{if generation == syncAccountGeneration,publicationAppID == appID {publicationStatus = error.localizedDescription}}
+    }
+    public func changePublication(appID:String,visibility:String,includeData:Bool,peer:String? = nil,grant:Bool = true) async {
+        guard !publicationBusy else{return}
+        let generation = syncAccountGeneration
+        guard publicationAppID == appID,let revision = publicationRevision,let authScope = publicationAuthScope else {publicationStatus = "请先刷新当前应用的发布状态。";return}
+        publicationBusy = true;defer{if generation == syncAccountGeneration {publicationBusy = false}}
+        do {
+            var args:[String:Any] = ["appID":appID,"expectedRevision":revision]
+            let tool:String
+            if let peer {
+                guard !peer.isEmpty,peer.allSatisfy({$0.isASCII && $0.isNumber}),UInt64(peer).map({$0>0}) == true else {throw BasePackageImporter.ImportError.invalid("请输入好友的数字账号 ID。")}
+                args["peer"] = peer;args["grant"] = grant;tool = "base.app.grant"
+            }else if visibility == "private" {tool = "base.unpublish"}
+            else {
+                guard let library else {throw BasePackageImporter.ImportError.invalid("本机应用库不可用。")}
+                let payload = try await Task.detached(priority:.userInitiated){try library.publicationSnapshot(appID:appID,includeData:includeData)}.value
+                guard let snapshot = try JSONSerialization.jsonObject(with:payload) as? [String:Any] else {throw BasePackageImporter.ImportError.invalid("发布快照无效。")}
+                args["visibility"] = visibility;args["package"] = snapshot["package"];args["data"] = snapshot["data"]
+                tool = "base.publish"
+            }
+            _ = try await publicationRequest(tool,args,scope:authScope)
+            guard generation == syncAccountGeneration else{return}
+            await inspectPublication(appID:appID);reload()
+        }catch{if generation == syncAccountGeneration {publicationRevision = nil;publicationStatus = "未完成："+error.localizedDescription+"；请刷新后重试。"}}
+    }
+
     public func exportBackup(appID: String) throws -> Data {
         guard let library else { throw BasePackageImporter.ImportError.invalid("本机小程序库不可用。") }
         return try BaseRecoveryArchive.export(library: library, appID: appID)
@@ -168,6 +222,7 @@ public final class MiniAppFeatureModel {
 
     public func accountDidChange() {
         syncAccountGeneration += 1;syncConflictBusy = false
+        publicationAuthScope = nil;publicationAppID = nil;publicationRevision = nil;publicationBusy = false;publicationStatus = "请刷新当前账号发布状态"
         accountSyncCoordinator = nil;syncConflicts = [];syncConflictMessage = nil
         reloadGeneration += 1; detailGeneration += 1; detailTask?.cancel()
         selectedAppID = nil; selectedDetail = nil; detailIsLoading = false; detailErrorMessage = nil
@@ -321,8 +376,7 @@ public final class MiniAppFeatureModel {
             cloudTotal = result.total
             cloudHasMore = result.hasMore
             let remoteIDs = Set(allCloud.map(\.appID))
-            let localIDs = Set(allLocal.map(\.appID))
-            for item in result.items where !remoteIDs.contains(item.appId) && !localIDs.contains(item.appId) {
+            for item in result.items where !remoteIDs.contains(item.appId) {
                 allCloud.append(MiniAppEntry(
                     appID: item.appId,
                     name: item.name.isEmpty ? item.appId : item.name,
@@ -349,7 +403,11 @@ public final class MiniAppFeatureModel {
     }
 
     private func publishMerged() {
-        var merged = allLocal
+        var merged = allLocal.map { local in
+            var entry = local
+            entry.publicationBadge = allCloud.first(where:{$0.appID == local.appID && $0.isOwned}).map{"云端已发布 · \($0.scope.badgeText)"} ?? ""
+            return entry
+        }
         let localIDs = Set(allLocal.map(\.appID))
         for cloud in allCloud where !localIDs.contains(cloud.appID) {
             merged.append(cloud)

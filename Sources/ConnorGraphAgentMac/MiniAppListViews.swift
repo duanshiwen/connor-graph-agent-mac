@@ -191,6 +191,7 @@ private struct MiniAppRowView: View {
                         MiniAppBadge(text: entry.relationBadge, color: entry.isOwned ? .green : .purple)
                         Spacer(minLength: 4)
                     }
+                    if !entry.publicationBadge.isEmpty {Text(entry.publicationBadge).font(AppListTypography.rowCaption).foregroundStyle(.secondary)}
                     if !entry.purpose.isEmpty {
                         Text(entry.purpose)
                             .font(AppListTypography.rowCaption)
@@ -249,6 +250,7 @@ struct MiniAppDetailPane: View {
                                 }.frame(minHeight: 40)
                             }
                         }
+                        if detail.source == .local {MiniAppPublicationControls(model:model,appID:detail.appID)}
                         MiniAppDetailSection(title: "功能说明", systemImage: "text.alignleft") {
                             functionContent(detail)
                         }
@@ -480,5 +482,42 @@ private struct MiniAppStatCard: View {
         .padding(.vertical, 8)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppShellColors.hairline, lineWidth: 1))
+    }
+}
+
+private struct MiniAppPublicationControls:View {
+    @Bindable var model:MiniAppFeatureModel
+    let appID:String
+    @State private var includeData = false
+    @State private var peer = ""
+    @State private var operation = "shared"
+    @State private var confirming = false
+    private func action(_ title:String,_ perform:@escaping ()->Void)->some View {
+        Button(action:perform){Text(title).frame(minHeight:40).contentShape(Rectangle())}
+    }
+    var body:some View {
+        VStack(alignment:.leading,spacing:10) {
+            Text("云端发布管理").font(.headline)
+            Text(model.publicationAppID == appID ? model.publicationStatus : "正在读取云端发布状态…").font(.caption)
+            action("刷新发布状态"){Task{await model.inspectPublication(appID:appID)}}
+            Toggle("发布时附带当前业务记录",isOn:$includeData)
+            Text("默认只发布定义。附带记录后，获准使用者可通过公开方法读取这些记录。撤回会清除云端运行数据与旧授权，本机应用保留。").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                action("发布给好友"){operation = "shared";confirming = true}
+                action("公开发布"){operation = "public";confirming = true}
+                action("撤回发布"){operation = "private";confirming = true}
+            }
+            TextField("好友数字账号 ID",text:$peer).textFieldStyle(.roundedBorder)
+            HStack {
+                action("授权好友"){operation = "grant";confirming = true}
+                action("撤销好友授权"){operation = "revoke";confirming = true}
+            }
+        }
+        .disabled(model.publicationBusy)
+        .task(id:appID){await model.inspectPublication(appID:appID)}
+        .confirmationDialog("确认云端操作",isPresented:$confirming,titleVisibility:.visible) {
+            Button("确认执行") {let selected = operation;Task{await model.changePublication(appID:appID,visibility:selected,includeData:includeData,peer:["grant","revoke"].contains(selected) ? peer : nil,grant:selected == "grant")}}
+            Button("取消",role:.cancel){}
+        }message:{Text(operation == "public" ? "应用将公开可用。请确认定义和所选业务记录适合公开。" : "将按当前选项修改云端发布或好友授权。默认不上传业务记录。")}
     }
 }
