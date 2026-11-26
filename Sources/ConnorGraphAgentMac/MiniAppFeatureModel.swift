@@ -132,6 +132,10 @@ public final class MiniAppFeatureModel {
     }
 
     public func reload() {
+        detailGeneration += 1
+        detailTask?.cancel()
+        selectedDetail = nil
+        detailIsLoading = false
         reloadGeneration += 1
         let generation = reloadGeneration
         isLoadingMore = false
@@ -162,7 +166,7 @@ public final class MiniAppFeatureModel {
     }
 
     public func loadMore() {
-        guard let cloudClient, cloudHasMore, !isLoading, !isLoadingMore, !hasLoadedAllCloud else { return }
+        guard let cloudClient, cloudHasMore, !isLoading, !isLoadingMore else { return }
         isLoadingMore = true
         let nextPage = cloudPage + 1
         let generation = reloadGeneration
