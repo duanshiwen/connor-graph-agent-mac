@@ -2,6 +2,7 @@ import Foundation
 import ConnorGraphCore
 
 public struct AgentChatRequest: Sendable, Equatable {
+    public var browserReadOnly: Bool = false
     public var runID: String
     public var sessionID: String
     public var groupID: String

@@ -105,6 +105,10 @@ final class BrowserFeatureModel {
         var sessionTitlesByID: [String: String]
     }
 
+    let taskStore: BrowserTaskStore?
+    var readOnlyQuestionSessions: Set<String> = []
+    var automationRevision = 0
+    var recentlyClosedTabs = BrowserRecentlyClosedTabs()
     var isVisible = false
     private(set) var workspaceSessionID: String?
     var targetURLString = BrowserBuiltInPage.blankURLString
@@ -181,8 +185,10 @@ final class BrowserFeatureModel {
         historyStore: BrowserHistoryStore?,
         bookmarkStore: BrowserBookmarkStore?,
         nativeSourceSearchBackend: (any NativeSourceSearchBackend)?,
+        taskStore: BrowserTaskStore? = nil,
         userDefaults: UserDefaults = .standard
     ) {
+        self.taskStore = taskStore
         self.historyStore = historyStore
         self.bookmarkStore = bookmarkStore
         self.nativeSourceSearchBackend = nativeSourceSearchBackend
@@ -202,6 +208,7 @@ final class BrowserFeatureModel {
             snapshotSaver: { [weak self] snapshot, sessionID in self?.saveWorkspaceSnapshot(snapshot, for: sessionID) },
             showWorkspace: { [weak self] sessionID in self?.showWorkspace(for: sessionID) }
         )
+        automationRuntime.onControlChanged = { [weak self] _ in self?.automationRevision += 1 }
     }
 
     func toggleDownloadsPanel() {
@@ -574,6 +581,11 @@ final class BrowserFeatureModel {
 
     // MARK: Assisted browser work
 
+    func automationPaused(_ session: String) -> Bool { _ = automationRevision; return automationRuntime.isPaused(session) }
+    func automationStatus(_ session: String) -> String { _ = automationRevision; return automationRuntime.controlReason(session) }
+    func pauseBrowser(_ session: String) { automationRuntime.pause(session, reason: "你正在操作网页，康纳已暂停") }
+    func resumeBrowser(_ session: String) async { await automationRuntime.resume(session) }
+
     func performBrowserControl(_ request: BrowserControlRequest) async throws -> BrowserControlResponse {
         guard !isShutdown else { throw BrowserAutomationRuntimeError.invalidRequest("Browser feature is shut down") }
         return try await automationRuntime.perform(request)
@@ -933,6 +945,16 @@ final class BrowserFeatureModel {
             guard let self else { return }
             try await self.rebuildHistorySearchIndexIfNeeded()
         }
+    }
+
+    func addressSuggestions(for query: String) -> [BrowserAddressSuggestion] {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        let tabs = globalTabs.map { BrowserAddressSuggestion(source: "标签", title: $0.displayTitle, url: $0.displayURL) }
+        let bookmarks = bookmarkRecords.map { BrowserAddressSuggestion(source: "收藏", title: $0.title, url: $0.url) }
+        let history = (historyStore?.loadHistoryPage(query: query, pageSize: 8).records ?? []).map {
+            BrowserAddressSuggestion(source: "历史", title: $0.title, url: $0.url)
+        }
+        return BrowserAddressSuggestion.matching(query, candidates: tabs + bookmarks + history)
     }
 
     func loadHistory() {

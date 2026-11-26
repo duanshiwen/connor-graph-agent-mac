@@ -90,6 +90,25 @@ struct BrowserAssistedWebToolTests {
         registry.register(BrowserUploadTool(handler: handler))
         registry.register(BrowserDownloadTool(handler: handler))
         registry.register(BrowserHandoffTool(handler: handler))
+        registry.register(BrowserReadTool(handler: handler))
+        registry.register(BrowserVerifyTool(handler: handler))
+        _ = try await BrowserReadTool(handler: handler).execute(arguments:AgentToolArguments(values:["scope":.string("selection"),"offset":.int(-1),"count":.int(999999)]),context:Self.context())
+        #expect(recorder.request?.operation == .readPage)
+        #expect(recorder.request?.value == "selection")
+        #expect(recorder.request?.offset == 0)
+        #expect(recorder.request?.count == 30000)
+        _ = try await BrowserVerifyTool(handler: handler).execute(arguments:AgentToolArguments(values:["condition":.string("value"),"expected":.string("draft"),"nodeRef":.string("stable-ref")]),context:Self.context())
+        #expect(recorder.request?.operation == .verifyResult)
+        #expect(recorder.request?.action == "value")
+        #expect(recorder.request?.value == "draft")
+        var readOnly = registry
+        readOnly.dynamicToolProvider = { [BrowserReadTool(handler:handler),BrowserSubmitTool(handler:handler)] }
+        readOnly.restrictToBrowserReading()
+        await readOnly.refreshDynamicTools()
+        #expect(readOnly.definition(named:"browser_submit") == nil)
+        #expect(readOnly.definition(named:"browser_navigate") == nil)
+        #expect(readOnly.definition(named:"browser_read") != nil)
+        #expect(registry.definition(named:"browser_submit") != nil)
         #expect(registry.schemaValidationIssues.isEmpty)
     }
 

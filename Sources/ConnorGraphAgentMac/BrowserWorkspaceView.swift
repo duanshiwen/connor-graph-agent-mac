@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
 import ConnorGraphCore
+import ConnorGraphAgent
 import ConnorGraphAppSupport
 
 typealias BrowserWorkspaceSnapshot = AppBrowserStateSnapshot
@@ -32,8 +33,22 @@ struct BrowserWorkspaceView: View {
     @Environment(\.windowWidthClass) private var windowWidthClass
     @State private var webViewsByTabID: [UUID: WKWebView] = [:]
     @State private var addressText: String = ""
+    @State private var addressSuggestions: [BrowserAddressSuggestion] = []
     @State private var isAddressEditing = false
     @State private var focusAddressRequestID = UUID()
+    @State private var isComparisonPresented = false
+    @State private var comparisonTabIDs: Set<UUID> = []
+    @State private var comparisonQuestion = "比较这些网页的共同点、差异和需要注意的信息"
+    @State private var comparisonAnswer = ""
+    @State private var showTaskLibrary = false
+    @State private var taskQuery = ""
+    @State private var allSessionTasks = false
+    @State private var savedTasks: [BrowserTaskCheckpoint] = []
+    @State private var activeTask: BrowserTaskCheckpoint?
+    @State private var taskDraft = ""
+    @State private var taskQuestion = ""
+    @State private var isComparing = false
+    @State private var comparisonTask: Task<Void, Never>?
     @State private var questionText = ""
     @State private var browserKeyMonitor: Any?
     @State private var privateTabIDs: Set<UUID> = []
@@ -54,15 +69,24 @@ struct BrowserWorkspaceView: View {
     var body: some View {
         VStack(spacing: 0) {
 
-            toolbar
+            toolbar.zIndex(3)
                 .padding(.horizontal, windowWidthClass.usesStackedPanes ? 8 : 12)
                 .padding(.vertical, 8)
                 .background(Color(nsColor: .windowBackgroundColor))
 
+            HStack(spacing: 8) {
+                Text(model.automationStatus(activeSessionID)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Spacer()
+                Button(model.automationPaused(activeSessionID) ? "继续（重新观察网页）" : "暂停 / 我来操作") {
+                    if model.automationPaused(activeSessionID) { Task { await model.resumeBrowser(activeSessionID) } }
+                    else { model.pauseBrowser(activeSessionID) }
+                }.frame(minHeight: 36)
+            }.padding(.horizontal,12)
             if isFindBarVisible { findBar }
 
             Divider()
 
+            if showTaskLibrary { taskLibraryWorkspace } else {
             HStack(spacing: 0) {
                 verticalTabSidebarContainer
                 Divider()
@@ -187,6 +211,9 @@ struct BrowserWorkspaceView: View {
                             },
                             onOpen: openDownloadedFile,
                             onReveal: revealDownloadedFile,
+                            onRetry: { item in
+                                if !model.liveWebViewStore.retryDownload(item) { chat.reportError("原下载页面已关闭，请重新打开原网页后下载。") }
+                            },
                             onClearCompleted: model.clearCompletedDownloads
                         )
                         .transition(AnyTransition.move(edge: Edge.trailing).combined(with: AnyTransition.opacity))
@@ -195,6 +222,8 @@ struct BrowserWorkspaceView: View {
                 }
             }
         }
+        }
+        .sheet(isPresented: $isComparisonPresented) { comparisonPanel }
         .onAppear {
             ensureInitialTab()
             model.loadBookmarks()
@@ -216,6 +245,7 @@ struct BrowserWorkspaceView: View {
             navigate(to: newValue)
         }
         .onChange(of: activeSessionID) { _, _ in
+            activeTask=nil;taskDraft="";taskQuestion="";savedTasks=[];showTaskLibrary=false
             pauseAllBrowserMedia()
             ensureInitialTab()
             isAddressEditing = false
@@ -591,6 +621,36 @@ struct BrowserWorkspaceView: View {
                 fontSize: windowWidthClass.usesStackedPanes ? 12 : 13
             )
             .frame(height: AppButtonLayout.height)
+            .task(id: addressText) {
+                do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+                guard !Task.isCancelled else { return }
+                addressSuggestions = isAddressEditing ? model.addressSuggestions(for: addressText) : []
+            }
+            .overlay(alignment: .topLeading) {
+                if isAddressEditing && !addressSuggestions.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(addressSuggestions) { suggestion in
+                            Button {
+                                isAddressEditing = false
+                                addressSuggestions = []
+                                if suggestion.source == "标签", let tab = globalTabs.first(where: { $0.displayURL == suggestion.url }) {
+                                    selectGlobalTab(tab.reference)
+                                } else { navigate(to: suggestion.url) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(suggestion.source) · \(suggestion.title)").lineLimit(1)
+                                    Text(suggestion.url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }.frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    .padding(8)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .shadow(radius: 5)
+                    .offset(y: AppButtonLayout.height + 4)
+                }
+            }
+            .zIndex(2)
 
             // 极窄模式下：收藏/历史/下载/分享/问 AI/返回对话 全部收进「更多」菜单。
             if !windowWidthClass.usesStackedPanes {
@@ -724,6 +784,12 @@ struct BrowserWorkspaceView: View {
                 Button("返回对话", systemImage: "bubble.left.and.bubble.right") { model.returnFromWorkspace() }
                 Divider()
             }
+            Button("浏览任务", systemImage:"tray.full") { reloadTaskLibrary();showTaskLibrary=true }
+            Button("保存当前网页为任务", systemImage:"square.and.arrow.down") { saveCurrentPageTask() }
+            Button("导入任务文件…",systemImage:"square.and.arrow.down.on.square") { importBrowserTask() }
+            Button("比较网页…", systemImage: "square.on.square") { isComparisonPresented = true }
+            Button("恢复关闭的标签页", systemImage: "arrow.uturn.backward") { reopenClosedTab() }
+                .disabled(!model.recentlyClosedTabs.hasPages(in: activeSessionID))
             Button("在页面中查找…", systemImage: "magnifyingglass") { showFindBar() }
             Button("新建私密标签页", systemImage: "hand.raised.fill") { openPrivateTab() }
             Divider()
@@ -1046,6 +1112,7 @@ struct BrowserWorkspaceView: View {
         }
         let closingTab = model.workspaceSnapshotsBySessionID[reference.sessionID]?
             .tabs.first(where: { $0.id == reference.tabID })
+        if let closingTab { model.recentlyClosedTabs.remember(closingTab.currentURLString.isEmpty ? closingTab.initialURLString : closingTab.currentURLString, sessionID: reference.sessionID, isPrivate: privateTabIDs.contains(reference.tabID)) }
         let key = BrowserLiveWebViewKey(sessionID: reference.sessionID, tabID: reference.tabID)
         prepareWebViewForTabClose(webViewsByTabID[reference.tabID])
         model.liveWebViewStore.remove(key)
@@ -1084,6 +1151,7 @@ struct BrowserWorkspaceView: View {
         let closingReference = BrowserGlobalTabReference(sessionID: activeSessionID, tabID: id)
         let replacementReference = model.replacementGlobalTab(afterClosing: closingReference)
         let wasPrivate = privateTabIDs.contains(id)
+        if let closingTab { model.recentlyClosedTabs.remember(closingTab.restoredURLString, sessionID: activeSessionID, isPrivate: wasPrivate) }
         let closingWebView = webViewsByTabID[id]
         prepareWebViewForTabClose(closingWebView)
         model.liveWebViewStore.remove(liveWebViewKey(for: id))
@@ -1122,6 +1190,12 @@ struct BrowserWorkspaceView: View {
             isAddressEditing = false
             syncAddressTextWithActiveTab()
         }
+    }
+
+    private func reopenClosedTab() {
+        guard let url = model.recentlyClosedTabs.takeLast(in: activeSessionID) else { return }
+        openNewTab(urlString: url, select: true)
+        model.showWorkspace(for: activeSessionID)
     }
 
     private func setWebView(_ webView: WKWebView, for tabID: BrowserTabState.ID) {
@@ -1318,6 +1392,9 @@ struct BrowserWorkspaceView: View {
                 semantic: semantic,
                 quickTasks: tasks
             )
+            if !payload.sensitive,!privateTabIDs.contains(tabID),let task=activeTask,task.mode=="form",!task.draft.isEmpty,task.sources.contains(where:{$0.url==payload.pageURL}),var state=formAssistant {
+                state.candidates=[BrowserFormCandidate(text:task.draft,label:"上次任务草稿")];formAssistant=state
+            }
             formAssistantQuestion = ""
             closeSelectionPopover(policy: .explicitClose)
         }
@@ -1352,6 +1429,7 @@ struct BrowserWorkspaceView: View {
 
     private func requestFormCandidates(_ request: String, displayRequest: String) {
         guard var state = formAssistant,
+              !privateTabIDs.contains(state.tabID),
               !state.field.sensitive,
               isFormAssistantSiteEnabled(state.field.pageURL),
               !state.isGenerating
@@ -1390,11 +1468,16 @@ struct BrowserWorkspaceView: View {
         )
 
         formGenerationTask?.cancel()
+        let taskSession=activeSessionID
+        let previousProgress=(try? activeTask?.resumeContext(currentURLs:[state.field.pageURL])) ?? ""
+        let checkpoint:BrowserTaskCheckpoint
+        do { checkpoint=try beginTask(question:request,mode:"form",sources:[taskSource(url:state.field.pageURL,title:state.field.pageTitle,text:state.field.nearbyText)]) } catch { chat.reportError(error.localizedDescription);return }
         formGenerationTask = Task {
-            let prompt = BrowserFormAssistantPromptBuilder.prompt(state: state, request: request)
+            let prompt = BrowserFormAssistantPromptBuilder.prompt(state: state, request: request)+previousProgress
             guard !Task.isCancelled else { return }
             let displayPrompt = "网页输入助手\n字段：\(state.semantic.displayName)\n要求：\(displayRequest)"
             let answer = await chat.submit(prompt, displayPrompt)
+            finishTask(checkpoint,session:taskSession,answer:Task.isCancelled ? nil:answer,draft:answer)
             guard !Task.isCancelled else { return }
             let candidates = await Task.detached(priority: .userInitiated) {
                 BrowserFormCandidateParser.parse(answer ?? "")
@@ -1440,13 +1523,16 @@ struct BrowserWorkspaceView: View {
     }
 
     private func insertFormCandidate(_ text: String, mode: BrowserFormInsertionMode) {
-        guard let state = formAssistant, let webView = activeWebView else { return }
+        guard let state = formAssistant, state.tabID == activeSelectedTabID, !model.automationPaused(activeSessionID), let webView = activeWebView else { return }
+        if var task=activeTask,task.mode=="form" {
+            do { task.draft=text;activeTask=try model.taskStore?.save(session:activeSessionID,task:task);taskDraft=text } catch { chat.reportError(error.localizedDescription);return }
+        }
         mutateEditableField(
             webView: webView,
             token: state.field.token,
             text: text,
             mode: mode,
-            expectedCurrentValue: nil
+            expectedCurrentValue: state.field.currentValue
         ) { receipt in
             guard var current = formAssistant, current.field.token == state.field.token else { return }
             if receipt.ok {
@@ -1539,7 +1625,8 @@ struct BrowserWorkspaceView: View {
     }
 
     private func showPageQuestionPopover() {
-        guard let webView = activeWebView, let tabID = activeSelectedTabID else { return }
+        guard let webView = activeWebView, let tabID = activeSelectedTabID, !privateTabIDs.contains(tabID) else { return }
+        if questionText.isEmpty,let task=activeTask,task.sources.contains(where:{$0.url==activeTab?.restoredURLString}) { questionText=taskQuestion.isEmpty ? task.question:taskQuestion }
         webView.evaluateJavaScript(Self.pageContextScript) { result, error in
             if let error {
                 DispatchQueue.main.async { chat.reportError(error.localizedDescription) }
@@ -1588,6 +1675,156 @@ struct BrowserWorkspaceView: View {
         if !policy.shouldPreserveDraftQuestion { questionText = "" }
     }
 
+    private func taskSource(url:String,title:String,text:String,scope:String="page",total:Int?=nil,truncated:Bool=false)->BrowserTaskSource {
+        let body=String(text.prefix(6000))
+        return BrowserTaskSource(url:url,title:String(title.prefix(120)),text:body,scope:scope,totalCharacters:total ?? text.utf16.count,truncated:truncated || body != text,capturedAt:ISO8601DateFormatter().string(from:Date()))
+    }
+    private func beginTask(question:String,mode:String,sources:[BrowserTaskSource]) throws -> BrowserTaskCheckpoint {
+        guard let store=model.taskStore else { throw BrowserTaskError("任务保存暂不可用。") }
+        let task=try store.save(session:activeSessionID,task:BrowserTaskCheckpoint(question:question,mode:mode,sources:sources));activeTask=task;return task
+    }
+    private func finishTask(_ checkpoint:BrowserTaskCheckpoint,session:String,answer:String?,draft:String?=nil) {
+        do {
+            guard let store=model.taskStore else { return }
+            guard try store.search(session:session).contains(where:{$0.id==checkpoint.id}) else { return }
+            var task=activeTask?.id==checkpoint.id ? activeTask! : checkpoint;let locallyEdited=task.revision != checkpoint.revision;task.answer=String((answer ?? "").prefix(16000));task.state=answer == nil ? "interrupted":"completed";if !locallyEdited { task.draft=String((draft ?? "").prefix(8000)) }
+            let saved=try store.save(session:session,task:task)
+            if activeTask?.id==task.id { activeTask=saved;taskDraft=saved.draft;taskQuestion=saved.question }
+        } catch { chat.reportError("回复已生成，但任务保存失败："+error.localizedDescription) }
+    }
+    private func reloadTaskLibrary() { do { savedTasks=try model.taskStore?.search(session:allSessionTasks ? nil:activeSessionID,query:taskQuery) ?? [] } catch { chat.reportError(error.localizedDescription) } }
+    private var taskLibraryWorkspace: some View {
+        HStack(spacing:0) {
+            if !windowWidthClass.usesStackedPanes || activeTask == nil {
+                VStack(alignment:.leading,spacing:8) {
+                    Button("返回网页") { showTaskLibrary=false }.frame(minHeight:40)
+                    Toggle("搜索全部会话任务",isOn:$allSessionTasks).onChange(of:allSessionTasks){_,_ in reloadTaskLibrary()}
+                    TextField("搜索任务、回复或来源",text:$taskQuery).textFieldStyle(.roundedBorder).onChange(of:taskQuery){_,_ in reloadTaskLibrary()}
+                    ScrollView { LazyVStack(alignment:.leading,spacing:6) { ForEach(savedTasks) { task in
+                        Button { openTaskMaterial(task) } label: { VStack(alignment:.leading){Text(task.title).lineLimit(2);Text(task.updatedAt).font(.caption).foregroundStyle(.secondary)}.frame(maxWidth:.infinity,alignment:.leading).frame(minHeight:48) }
+                    } } }
+                    Button("导入任务文件…") { importBrowserTask() }.frame(minHeight:40)
+                }.padding(10).frame(maxWidth:windowWidthClass.usesStackedPanes ? .infinity:260)
+            }
+            if !windowWidthClass.usesStackedPanes || activeTask != nil {
+                Divider()
+                ScrollView { if let task=activeTask { VStack(alignment:.leading,spacing:12) {
+                    Button("返回任务列表") { activeTask=nil }.frame(minHeight:40)
+                    Text(task.title).font(.headline)
+                    Text("保存于 "+task.updatedAt+" · "+(task.state=="completed" ? "已有回复":"待继续")).font(.caption)
+                    TextField("继续处理的问题",text:$taskQuestion).textFieldStyle(.roundedBorder)
+                    Text(task.answer).textSelection(.enabled)
+                    Text("草稿（需重新选择网页字段，不自动填写）").font(.caption)
+                    TextEditor(text:$taskDraft).frame(minHeight:100,maxHeight:180)
+                    HStack { Button("保存进度") { saveTaskProgress() };Button("恢复任务网页") { restoreBrowserTask(task) };Button("导出任务…") { exportBrowserTask() } }.frame(minHeight:40)
+                    Button("复制草稿") { NSPasteboard.general.clearContents();NSPasteboard.general.setString(taskDraft,forType:.string) }
+                    Text("来源（保存时的资料）").font(.headline)
+                    ForEach(Array(task.sources.enumerated()),id:\.offset) { _,source in VStack(alignment:.leading){Text(source.title);Text(source.url).textSelection(.enabled);Text(source.capturedAt+(source.truncated ? " · 已截断":"")).font(.caption);Text(source.text).lineLimit(8).textSelection(.enabled)} }
+                    Button("删除本机任务",role:.destructive) { let alert=NSAlert();alert.messageText="删除本机的这份任务资料？";alert.addButton(withTitle:"删除");alert.addButton(withTitle:"取消");if alert.runModal() == .alertFirstButtonReturn { do { try model.taskStore?.delete(session:activeSessionID,task:task);activeTask=nil;reloadTaskLibrary() } catch { chat.reportError(error.localizedDescription) } } }
+                }.padding(16) } else { Text("选择一个任务找回资料与草稿。要继续工作，请恢复网页并核对当前状态。").padding(20) } }.frame(maxWidth:.infinity,maxHeight:.infinity)
+            }
+        }.onAppear { reloadTaskLibrary() }
+    }
+    private func openTaskMaterial(_ task:BrowserTaskCheckpoint) {
+        do {
+            guard let store=model.taskStore else { throw BrowserTaskError("任务保存暂不可用。") }
+            let local=try store.search(session:activeSessionID).first{$0.id==task.id}
+            let selected:BrowserTaskCheckpoint
+            if let local { guard local.revision==task.revision else { throw BrowserTaskError("任务已更新，请刷新列表后重新打开。") };selected=local }
+            else { guard let origin=try store.search(session:nil).first(where:{$0.id==task.id}) else { throw BrowserTaskError("任务已删除，请刷新列表。") };selected=try store.importTask(session:activeSessionID,data:origin.encode()) }
+            activeTask=selected;taskDraft=selected.draft;taskQuestion=selected.question;model.pauseBrowser(activeSessionID)
+        } catch { chat.reportError(error.localizedDescription) }
+    }
+    @discardableResult private func saveTaskProgress() -> Bool {
+        guard var task=activeTask else { return false };task.question=taskQuestion;task.draft=taskDraft
+        do { guard let store=model.taskStore else { return false };activeTask=try store.save(session:activeSessionID,task:task);reloadTaskLibrary();return true } catch { chat.reportError(error.localizedDescription);return false }
+    }
+    private func restoreBrowserTask(_ selected:BrowserTaskCheckpoint) {
+        guard !chat.isSubmitting,!isComparing,formAssistant?.isGenerating != true else { chat.reportError("请先停止当前提问，再恢复任务。");return }
+        guard activeTask?.id==selected.id,saveTaskProgress(),let task=activeTask else { return }
+        do { try task.validate() } catch { chat.reportError(error.localizedDescription);return }
+        model.pauseBrowser(activeSessionID);closeFormAssistant();var opened=Set<String>();var ids=Set<UUID>()
+        for source in task.sources where opened.insert(source.url).inserted {
+            if let existing=activeTabs.first(where:{$0.restoredURLString==source.url && !privateTabIDs.contains($0.id)}) { selectTab(existing.id);ids.insert(existing.id) }
+            else { ids.insert(openNewTab(urlString:source.url,select:true)) }
+        }
+        questionText=taskQuestion;comparisonQuestion=taskQuestion;comparisonTabIDs=ids;showTaskLibrary=false
+    }
+    private func saveCurrentPageTask() {
+        guard let tab=activeTab,!privateTabIDs.contains(tab.id),!chat.isSubmitting else { chat.reportError("请在普通网页中保存任务。");return }
+        let session=activeSessionID
+        Task { @MainActor in do {
+            let response=try await model.performBrowserControl(BrowserControlRequest(operation:.readPage,sessionID:session,tabID:tab.id.uuidString,value:"page"))
+            guard session==activeSessionID,let data=response.contentJSON?.data(using:.utf8),let page=try JSONSerialization.jsonObject(with:data) as? [String:Any],let text=page["text"] as? String else { throw BrowserTaskError("网页尚不可读取。") }
+            let task=try beginTask(question:tab.navigationState.title,mode:"page",sources:[taskSource(url:page["url"] as? String ?? tab.restoredURLString,title:page["title"] as? String ?? tab.navigationState.title,text:text,total:page["totalCharacters"] as? Int,truncated:page["truncated"] as? Bool ?? false)])
+            taskDraft=task.draft;taskQuestion=task.question;showTaskLibrary=true
+        } catch { chat.reportError(error.localizedDescription) } }
+    }
+    private func importBrowserTask() {
+        guard !chat.isSubmitting,!isComparing else { chat.reportError("请先停止当前提问。");return }
+        let panel=NSOpenPanel();panel.allowedContentTypes=[.json];panel.allowsMultipleSelection=false
+        guard panel.runModal() == .OK,let url=panel.url else { return }
+        do { guard (try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0)<=BrowserTaskStore.maxBytes else { throw BrowserTaskError("任务文件超过 512 KB。") };guard let task=try model.taskStore?.importTask(session:activeSessionID,data:Data(contentsOf:url)) else { throw BrowserTaskError("任务保存暂不可用。") };activeTask=task;taskQuestion=task.question;taskDraft=task.draft;model.pauseBrowser(activeSessionID);showTaskLibrary=true;reloadTaskLibrary() } catch { chat.reportError(error.localizedDescription) }
+    }
+    private func exportBrowserTask() {
+        guard saveTaskProgress(),let task=activeTask else { return };let panel=NSSavePanel();panel.allowedContentTypes=[.json];panel.nameFieldStringValue="connor-browser-task.json";panel.message="包含问题、回复、草稿及网页资料；不包含登录状态。"
+        guard panel.runModal() == .OK,let url=panel.url else { return };do { try task.encode().write(to:url,options:.atomic) } catch { chat.reportError(error.localizedDescription) }
+    }
+
+    private var comparisonPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack { Text("和康纳比较网页").font(.headline); Spacer(); Button("关闭") { isComparisonPresented=false } }
+            ScrollView {
+                VStack(alignment:.leading,spacing:8) {
+                    ForEach(activeTabs.filter { !privateTabIDs.contains($0.id) && $0.restoredURLString.hasPrefix("http") }) { tab in
+                        Toggle(isOn:Binding(get:{comparisonTabIDs.contains(tab.id)},set:{selected in if selected { comparisonTabIDs.insert(tab.id) } else { comparisonTabIDs.remove(tab.id) }})) {
+                            VStack(alignment:.leading) { Text(tab.navigationState.title).lineLimit(1);Text(tab.restoredURLString).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                        }.toggleStyle(.checkbox).frame(minHeight:40)
+                    }
+                }
+            }.frame(maxHeight:220)
+            TextField("你希望比较什么？",text:$comparisonQuestion).textFieldStyle(.roundedBorder)
+            HStack {
+                Button(isComparing ? "康纳正在比较…" : "比较所选网页") { compareSelectedPages() }.disabled(isComparing || comparisonTabIDs.count<2 || comparisonTabIDs.count>8 || chat.isSubmitting)
+                Button("停止生成") { comparisonTask?.cancel();chat.cancelActiveRun();model.pauseBrowser(activeSessionID) }.disabled(!isComparing)
+                Text("选择 2–8 个普通标签；保留来源与截断信息。").font(.caption).foregroundStyle(.secondary)
+            }
+            ScrollView { Text(comparisonAnswer).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }.frame(minHeight:120,maxHeight:300)
+        }.padding(20).frame(minWidth:520,idealWidth:640)
+    }
+    private func compareSelectedPages() {
+        guard !isComparing, !chat.isSubmitting else { return }
+        let session=activeSessionID
+        let question=comparisonQuestion.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard !question.isEmpty else { comparisonAnswer="请先写下你的问题。";return }
+        let tabs=activeTabs.filter { comparisonTabIDs.contains($0.id) && !privateTabIDs.contains($0.id) }
+        guard (2...8).contains(tabs.count) else { comparisonAnswer="请选择 2 到 8 个普通网页。";return }
+        isComparing=true;comparisonAnswer="康纳正在阅读所选资料…"
+        comparisonTask = Task { @MainActor in
+            defer { isComparing=false;comparisonTask=nil }
+            do {
+                var pages:[BrowserComparisonSource]=[]
+                for tab in tabs {
+                    try Task.checkCancellation()
+                    let response=try await model.performBrowserControl(BrowserControlRequest(operation:.readPage,sessionID:session,tabID:tab.id.uuidString,value:"page"))
+                    guard let data=response.contentJSON?.data(using:.utf8),let object=try JSONSerialization.jsonObject(with:data) as? [String:Any],let body=object["text"] as? String,!body.isEmpty else {throw NSError(domain:"ConnorBrowser",code:2,userInfo:[NSLocalizedDescriptionKey:"网页尚不可读取，请加载完成后重试。"])}
+                    guard object["url"] as? String == tab.restoredURLString else { throw NSError(domain:"ConnorBrowser",code:3,userInfo:[NSLocalizedDescriptionKey:"网页已发生跳转，请重新选择资料。"]) }
+                    pages.append(BrowserComparisonSource(tabID:tab.id.uuidString,url:object["url"] as? String ?? tab.restoredURLString,title:object["title"] as? String ?? tab.navigationState.title,text:body,totalCharacters:object["totalCharacters"] as? Int ?? body.count,truncated:object["truncated"] as? Bool ?? false))
+                }
+                try Task.checkCancellation()
+                guard session == activeSessionID, chat.selectedSessionID == session else { throw NSError(domain:"ConnorBrowser",code:4,userInfo:[NSLocalizedDescriptionKey:"会话已切换，请在原会话重新发起比较。"]) }
+                let previousProgress=try activeTask?.resumeContext(currentURLs:pages.map(\.url)) ?? ""
+                let checkpoint=try beginTask(question:question,mode:"compare",sources:pages.map{taskSource(url:$0.url,title:$0.title,text:$0.text,total:$0.totalCharacters,truncated:$0.truncated)})
+                let prompt=try BrowserComparisonPrompt.make(question:question,pages:pages)+previousProgress
+                let answer=await chat.submit(prompt,"比较网页："+question)
+                finishTask(checkpoint,session:session,answer:Task.isCancelled ? nil:answer)
+                try Task.checkCancellation()
+                comparisonAnswer=answer ?? chat.currentErrorMessage() ?? "未能获取回复。"
+            } catch is CancellationError { comparisonAnswer="已停止生成，请核对网页状态。" }
+            catch { comparisonAnswer=error.localizedDescription }
+        }
+    }
+
     private func installBrowserKeyMonitorIfNeeded() {
         guard browserKeyMonitor == nil else { return }
         browserKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -1595,12 +1832,24 @@ struct BrowserWorkspaceView: View {
             let commandOnly = event.modifierFlags.contains(.command)
                 && !event.modifierFlags.contains(.control)
                 && !event.modifierFlags.contains(.option)
+            if event.keyCode == 53, !addressSuggestions.isEmpty {
+                addressSuggestions = []
+                isAddressEditing = false
+                return nil
+            }
             if event.keyCode == 53, isFindBarVisible {
                 closeFindBar()
                 return nil
             }
             if event.keyCode == 53, formAssistant != nil {
                 closeFormAssistant()
+                return nil
+            }
+            if commandOnly, event.modifierFlags.contains(.shift), characters == "t",
+               !chat.shortcutSettings.bindings.values.contains(where: {
+                   $0.matches(character: "t", isCommandDown: true, isShiftDown: true, isControlDown: false, isOptionDown: false)
+               }) {
+                reopenClosedTab()
                 return nil
             }
             if commandOnly, characters == "f" {
@@ -1682,7 +1931,7 @@ struct BrowserWorkspaceView: View {
 
     private func sendSelectionQuestion(_ popover: BrowserSelectionPopoverState, questionOverride: String? = nil) {
         let question = (questionOverride ?? questionText).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty else { return }
+        guard !question.isEmpty, !privateTabIDs.contains(popover.tabID) else { return }
         appendThreadMessage(threadID: popover.threadID, role: .user, text: question)
         let pendingMessageID = appendThreadMessage(threadID: popover.threadID, role: .assistant, text: "", isPending: true)
         let isPageQuestion = popover.context.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1699,11 +1948,16 @@ struct BrowserWorkspaceView: View {
             ],
             activeSessionID
         )
-        let prompt = BrowserLLMContextBuilder().makePrompt(selection: popover.context, question: question)
+        let prompt = BrowserLLMContextBuilder().makePrompt(selection: popover.context, question: question)+((try? activeTask?.resumeContext(currentURLs:[popover.context.page.url])) ?? "")
         let displayPrompt = makeSelectionDisplayPrompt(selection: popover.context, question: question)
         questionText = ""
+        let session=activeSessionID
+        let checkpoint:BrowserTaskCheckpoint
+        do { checkpoint=try beginTask(question:question,mode:isPageQuestion ? "page":"selection",sources:[taskSource(url:popover.context.page.url,title:popover.context.page.title,text:isPageQuestion ? popover.context.page.text:popover.context.selectedText,scope:isPageQuestion ? "page":"selection")]) } catch { chat.reportError(error.localizedDescription);return }
         Task {
+            guard session==activeSessionID else { return }
             let answer = await chat.submit(prompt, displayPrompt)
+            finishTask(checkpoint,session:session,answer:answer)
             await MainActor.run {
                 replaceThreadMessage(
                     threadID: popover.threadID,

@@ -719,7 +719,8 @@ final class AppRuntimeLifecycle {
         self.browserFeatureModel = BrowserFeatureModel(
             historyStore: storagePaths.map { BrowserHistoryStore(historyURL: $0.browserHistoryURL) },
             bookmarkStore: storagePaths.map { BrowserBookmarkStore(bookmarksURL: $0.browserBookmarksURL) },
-            nativeSourceSearchBackend: nativeSourceSearchBackend
+            nativeSourceSearchBackend: nativeSourceSearchBackend,
+            taskStore: storagePaths.map { BrowserTaskStore(root:$0.browserDirectory.appendingPathComponent("tasks",isDirectory:true)) }
         )
         let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "https://connor-agent.connor.run/")!
         AppBackendConnectivity.shared.configure(baseURL: backendBaseURL)
@@ -3609,6 +3610,7 @@ final class AppRuntimeLifecycle {
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
             return nil
         }
+        manager.browserReadOnly = browserFeatureModel.readOnlyQuestionSessions.contains(manager.session.id)
         let submittedManagerRevision = chatRunCoordinator.managerRevision
         let submittingSessionID = manager.session.id
         guard targetSessionID != nil || chatFeatureModel.sessions.selectedSessionID == nil || chatFeatureModel.sessions.selectedSessionID == submittingSessionID else { return nil }

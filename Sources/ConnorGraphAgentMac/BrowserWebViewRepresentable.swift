@@ -207,12 +207,12 @@ struct EmbeddedWebView: NSViewRepresentable {
     var registry = window.__connorEditableRegistry;
     var entry = registry && registry.get(token);
     var element = entry && entry.element;
-    if (!element || !element.isConnected || element.disabled || element.readOnly) {
+    if (!element || !element.isConnected || element.disabled || element.readOnly || /^(password|hidden|file)$/i.test(element.type || '') || /^(current-password|new-password|one-time-code|cc-)/i.test(element.autocomplete || '')) {
       return { ok: false, reason: '输入框已失效，请重新选择。', token: token };
     }
     var previous = element.isContentEditable ? (element.innerText || '') : (element.value || '');
     if (expectedCurrentValue !== null && previous !== expectedCurrentValue) {
-      return { ok: false, reason: '内容已发生变化，为避免覆盖你的输入，未执行撤销。', token: token };
+      return { ok: false, reason: '内容已发生变化，为避免覆盖你的输入，未执行修改。', token: token };
     }
     var next = text;
     if (mode === 'insert' || mode === 'replaceSelection') {
@@ -236,6 +236,9 @@ struct EmbeddedWebView: NSViewRepresentable {
     }
     element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
     element.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 250));
+    var actual = element.isContentEditable ? (element.innerText || '') : (element.value || '');
+    if (!element.isConnected || actual !== next) return { ok: false, reason: '字段未保持预期值，可能被页面校验或框架回退。', token: token };
     return { ok: true, previousValue: previous, insertedValue: next, token: token };
     """#
 

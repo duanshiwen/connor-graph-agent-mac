@@ -62,6 +62,7 @@ public struct NativeSessionRuntimeState: Codable, Sendable, Equatable {
 }
 
 public struct NativeSessionManager: Sendable {
+    public var browserReadOnly: Bool = false
     public var backend: AnyAgentBackend
     public var sessionRepository: AppChatSessionRepository
     public private(set) var session: AgentSession
@@ -225,7 +226,7 @@ public struct NativeSessionManager: Sendable {
             try await persistMemoryOSAfterUserMessage(userMessage, isFirstUserMessage: isFirstUserMessage)
         }
 
-        let request = AgentChatRequest(
+        var request = AgentChatRequest(
             sessionID: session.id,
             groupID: groupID,
             userMessage: prompt,
@@ -242,6 +243,8 @@ public struct NativeSessionManager: Sendable {
             activeSkillDisplayName: activeSkillDisplayName,
             personReferences: personReferences
         )
+        request.browserReadOnly = browserReadOnly
+        browserReadOnly = false
         let now = Date()
         var runMetadata = [
             "user_message_id": userMessage.id,

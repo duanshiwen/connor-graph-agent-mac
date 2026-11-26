@@ -423,6 +423,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(NativeImageSearchTool())
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         if let browserControlHandler {
+            registry.register(BrowserReadTool(handler: browserControlHandler))
+            registry.register(BrowserVerifyTool(handler: browserControlHandler))
             registry.register(BrowserTabsTool(handler: browserControlHandler))
             registry.register(BrowserSnapshotTool(handler: browserControlHandler))
             registry.register(BrowserNavigateTool(handler: browserControlHandler))

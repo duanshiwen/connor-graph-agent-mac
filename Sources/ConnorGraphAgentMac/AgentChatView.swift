@@ -50,7 +50,11 @@ struct AgentChatView: View {
                                 chatActions.workspace.appendSessionRecord(kind: kind, title: title, body: body, metadata: metadata, sessionID: sessionID)
                             },
                             submit: { prompt, displayPrompt in
-                                await chatActions.run.submitChat(prompt: prompt, displayPrompt: displayPrompt)
+                                guard !model.run.isSubmitting, let sessionID = chatActions.dependencies.browser.workspaceSessionID ?? model.sessions.selectedSessionID else { return nil }
+                                guard model.sessions.selectedSessionID == sessionID else { return nil }
+                                chatActions.dependencies.browser.readOnlyQuestionSessions.insert(sessionID)
+                                defer { chatActions.dependencies.browser.readOnlyQuestionSessions.remove(sessionID) }
+                                return await chatActions.run.submitChat(prompt: prompt, displayPrompt: displayPrompt)
                             },
                             currentErrorMessage: { chatActions.errors.errorMessage },
                             reportError: { chatActions.errors.errorMessage = $0 }

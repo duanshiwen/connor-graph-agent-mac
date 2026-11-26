@@ -704,6 +704,7 @@ struct BrowserDownloadsPanelView: View {
     var onCancel: (UUID) -> Void
     var onOpen: (BrowserDownloadItem) -> Void
     var onReveal: (BrowserDownloadItem) -> Void
+    var onRetry: (BrowserDownloadItem) -> Void = { _ in }
     var onClearCompleted: () -> Void
     @Environment(\.windowWidthClass) private var windowWidthClass
 
@@ -778,9 +779,13 @@ struct BrowserDownloadsPanelView: View {
             if item.status == .preparing || item.status == .downloading {
                 Button(action: { onCancel(item.id) }) {
                     Image(systemName: "xmark.circle")
-                        .frame(width: 28, height: 28)
+                        .frame(width: 36, height: 36)
                 }
                     .buttonStyle(.plain).help("取消下载")
+            } else if item.status == .failed || item.status == .cancelled {
+                Button("重新下载") { onRetry(item) }
+                    .buttonStyle(.plain).frame(minWidth: 36, minHeight: 36)
+                    .disabled(item.sourceURL == nil)
             } else if item.status == .finished {
                 Menu {
                     Button("打开", systemImage: "arrow.up.forward.app") { onOpen(item) }

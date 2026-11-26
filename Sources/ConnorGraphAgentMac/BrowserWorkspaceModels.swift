@@ -91,6 +91,7 @@ enum BrowserDownloadStatus: String, Equatable {
 struct BrowserDownloadItem: Identifiable, Equatable {
     var id: UUID
     var sourceURL: URL?
+    var origin: BrowserLiveWebViewKey? = nil
     var filename: String
     var destinationURL: URL?
     var progress: Double

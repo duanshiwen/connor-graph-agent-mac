@@ -82,6 +82,52 @@ struct BrowserAutomationQualityAuditTests {
         #expect(image.dataURL?.hasPrefix("data:image/png;base64,") == true)
     }
 
+    @Test func collaborationVerifiesFieldsAndRequiresFreshObservationAfterTakeover() async throws {
+        let session = "collaboration"
+        let tab = AppBrowserTabSnapshot(initialURLString:BrowserBuiltInPage.blankURLString,currentURLString:BrowserBuiltInPage.blankURLString)
+        var state = AppBrowserStateSnapshot(tabs:[tab],selectedTabID:tab.id)
+        let runtime = BrowserAutomationRuntime(liveStore:BrowserLiveWebViewStore(),snapshotProvider:{ $0 == session ? state : nil },snapshotSaver:{ updated,_ in state=updated },showWorkspace:{ _ in })
+        defer { runtime.shutdown() }
+        let view = runtime.ensureWebView(sessionID:session,tabID:tab.id,initialURLString:BrowserBuiltInPage.blankURLString).webView
+        view.frame = CGRect(x:0,y:0,width:900,height:700)
+        view.loadHTMLString("<title>Quality audit fixture</title><h1>Collaboration</h1><input aria-label='Name' id='name'><input aria-label='Revert' oninput=\"this.value=''\"><input type='password' value='SECRET_FIXTURE'><button type='submit'>Submit</button>",baseURL:URL(string:"http://localhost/collaboration"))
+        try await waitUntilLoaded(view)
+        func request(_ operation:BrowserControlOperation,_ action:String?=nil,_ ref:String?=nil,_ value:String?=nil)->BrowserControlRequest { BrowserControlRequest(operation:operation,sessionID:session,tabID:tab.id.uuidString,action:action,nodeReference:ref,value:value) }
+        func snapshot() async throws -> [[String:Any]] {
+            let response = try await runtime.perform(request(.snapshot))
+            let data = try #require(response.contentJSON?.data(using:.utf8))
+            let object = try #require(JSONSerialization.jsonObject(with:data) as? [String:Any])
+            #expect(!String(decoding:data,as:UTF8.self).contains("SECRET_FIXTURE"))
+            return try #require(object["nodes"] as? [[String:Any]])
+        }
+        func rejects(_ request:BrowserControlRequest) async -> Bool { do { _ = try await runtime.perform(request);return false } catch { return true } }
+        var nodes = try await snapshot()
+        let field = try #require(nodes.first { $0["name"] as? String == "Name" }?["nodeRef"] as? String)
+        let filled = try await runtime.perform(request(.interact,"fill",field,"draft"))
+        #expect(filled.contentJSON?.contains("verified") == true)
+        _ = try await runtime.perform(request(.verifyResult,"value",field,"draft"))
+        _ = try await view.callAsyncJavaScript("document.querySelector('#name').value='user edit';return true",arguments:[:],in:nil,contentWorld:.page)
+        #expect(await rejects(request(.interact,"fill",field,"overwrite")))
+        nodes = try await snapshot()
+        let newField = try #require(nodes.first { $0["name"] as? String == "Name" }?["nodeRef"] as? String)
+        #expect(field != newField)
+        #expect(await rejects(request(.interact,"fill",field,"stale")))
+        let revert = try #require(nodes.first { $0["name"] as? String == "Revert" }?["nodeRef"] as? String)
+        #expect(await rejects(request(.interact,"fill",revert,"rejected")))
+        let submit = try #require(nodes.first { $0["name"] as? String == "Submit" }?["nodeRef"] as? String)
+        #expect(await rejects(request(.interact,"click",submit)))
+        runtime.pause(session,reason:"human takeover")
+        #expect(runtime.isPaused(session))
+        #expect(!runtime.isPaused("another-session"))
+        #expect(await rejects(request(.interact,"fill",newField,"blocked")))
+        _ = try await runtime.perform(request(.readPage,nil,nil,"page"))
+        await runtime.resume(session)
+        #expect(!runtime.isPaused(session))
+        #expect(await rejects(request(.interact,"fill",newField,"stale")))
+        _ = try await runtime.perform(request(.handoff,nil,nil,"manual verification"))
+        #expect(runtime.isPaused(session))
+    }
+
     private func waitUntilLoaded(_ webView: WKWebView) async throws {
         for _ in 0..<100 {
             if !webView.isLoading,

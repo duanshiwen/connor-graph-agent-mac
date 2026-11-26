@@ -1,0 +1,33 @@
+{
+  "format": "connor.browser-task",
+  "version": 1,
+  "id": "e07cf770-94ce-4b25-984f-1159c782d7e1",
+  "revision": 1,
+  "title": "比较供应商",
+  "question": "报价和交期有什么差异？",
+  "answer": "供应商 A 报价 100 元 [1](https://example.com/a)。",
+  "draft": "请确认交期。",
+  "mode": "compare",
+  "state": "completed",
+  "updatedAt": "2026-11-26T07:00:00.1234567+00:00",
+  "sources": [
+    {
+      "url": "https://example.com/a",
+      "title": "供应商 A",
+      "text": "报价 100 元，交期一周。",
+      "scope": "page",
+      "totalCharacters": 15,
+      "truncated": false,
+      "capturedAt": "2026-11-26T06:58:00.000Z"
+    },
+    {
+      "url": "https://example.com/b",
+      "title": "供应商 B",
+      "text": "报价 120 元，交期待确认。",
+      "scope": "page",
+      "totalCharacters": 16,
+      "truncated": true,
+      "capturedAt": "2026-11-26T06:59:00Z"
+    }
+  ]
+}

@@ -54,6 +54,22 @@ final class BrowserAutomationRuntime {
     private let snapshotSaver: SnapshotSaver
     private let showWorkspace: (String) -> Void
     private var navigationWaiters: [UUID: NavigationWaiter] = [:]
+    private var pausedSessions: [String: String] = [:]
+    private var epochs: [String: Int] = [:]
+    var onControlChanged: ((String) -> Void)?
+    func isPaused(_ session: String) -> Bool { pausedSessions[session] != nil }
+    func controlReason(_ session: String) -> String { pausedSessions[session] ?? "康纳可协助当前会话的网页" }
+    func pause(_ session: String, reason: String) { pausedSessions[session] = reason; epochs[session, default: 0] += 1; onControlChanged?(session) }
+    func resume(_ session: String) async {
+        let epoch = epochs[session, default: 0]
+        for tab in snapshotProvider(session)?.tabs ?? [] {
+            if let view = liveStore.webView(for: BrowserLiveWebViewKey(sessionID: session, tabID: tab.id)) {
+                _ = try? await Self.callPageJavaScript(view, script: "globalThis.__connorBrowserNodeMap = new Map(); return 'ok';", arguments: [:], timeoutSeconds: 3)
+            }
+        }
+        guard epochs[session, default: 0] == epoch else { return }
+        pausedSessions[session] = nil; epochs[session, default: 0] += 1; onControlChanged?(session)
+    }
     private var operationTails: [String: OperationTail] = [:]
 
     init(
@@ -69,9 +85,15 @@ final class BrowserAutomationRuntime {
     }
 
     func perform(_ request: BrowserControlRequest) async throws -> BrowserControlResponse {
+        let epoch = epochs[request.sessionID, default: 0]
+        let writes: [BrowserControlOperation] = [.navigate,.interact,.submit,.upload,.download,.qualityAudit]
+        let mutates = writes.contains(request.operation)
         let key = operationQueueKey(for: request)
         return try await serialized(key: key) { [self] in
+            if mutates && (isPaused(request.sessionID) || epochs[request.sessionID, default: 0] != epoch) { throw BrowserAutomationRuntimeError.pageRejected("浏览器已暂停或由用户接管。等待用户点击继续，再重新读取页面。") }
             switch request.operation {
+            case .readPage: return try await readPage(request)
+            case .verifyResult: return try await verifyResult(request)
             case .listTabs: return try listTabs(sessionID: request.sessionID)
             case .snapshot: return try await snapshot(request)
             case .navigate: return try navigate(request)
@@ -209,13 +231,7 @@ final class BrowserAutomationRuntime {
             tabID: resolved.tab.id,
             initialURLString: resolved.tab.restoredURLString
         ).webView
-        let token = UUID().uuidString
-        let value = try await Self.callPageJavaScript(
-            webView,
-            script: Self.snapshotScript,
-            arguments: ["maxNodes": request.maxNodes, "snapshotToken": token],
-            timeoutSeconds: Self.pageJSTimeoutSeconds(request)
-        )
+        let value = try await Self.callPageJavaScript(webView, script: Self.collaborationScript + "\nreturn JSON.stringify(globalThis.__connorCollaboration.snapshot(maxNodes));", arguments: ["maxNodes":request.maxNodes], timeoutSeconds: Self.pageJSTimeoutSeconds(request))
         guard let json = value else {
             throw BrowserAutomationRuntimeError.pageRejected("The page did not return a semantic browser snapshot.")
         }
@@ -457,21 +473,32 @@ final class BrowserAutomationRuntime {
         let webView = ensureWebView(sessionID: request.sessionID, tabID: resolved.tab.id, initialURLString: resolved.tab.restoredURLString).webView
         if uploadOnly { showWorkspace(request.sessionID) }
         let action = allowSubmit ? "submit" : (uploadOnly ? "upload" : (downloadOnly ? "download" : request.action?.lowercased() ?? ""))
-        let value = try await Self.callPageJavaScript(
-            webView,
-            script: Self.interactionScript,
-            arguments: ["nodeRef": nodeReference, "action": action, "actionValue": request.value ?? ""],
-            timeoutSeconds: Self.pageJSTimeoutSeconds(request)
-        )
-        guard let json = value, let object = Self.jsonObject(json) else {
-            throw BrowserAutomationRuntimeError.pageRejected("The page did not return a browser interaction result.")
+        let epoch = epochs[request.sessionID, default: 0]
+        if uploadOnly { return try await handoff(request) }
+        var json = try await Self.callPageJavaScript(webView, script: Self.collaborationScript + "\nreturn JSON.stringify(globalThis.__connorCollaboration.act(action,nodeRef,actionValue));", arguments:["nodeRef":nodeReference,"action":action,"actionValue":request.value ?? ""], timeoutSeconds:Self.pageJSTimeoutSeconds(request))
+        if let object = json.flatMap(Self.jsonObject), let receipt = object["receipt"] as? String {
+            try await Task.sleep(for:.milliseconds(250))
+            guard !isPaused(request.sessionID), epochs[request.sessionID, default:0] == epoch else {throw BrowserAutomationRuntimeError.pageRejected("操作可能已发出，浏览器已暂停，请核对页面。")}
+            json = try await Self.callPageJavaScript(webView,script:Self.collaborationScript + "\nreturn JSON.stringify(globalThis.__connorCollaboration.result(receipt));",arguments:["receipt":receipt],timeoutSeconds:Self.pageJSTimeoutSeconds(request))
         }
-        if object["stale"] as? Bool == true { throw BrowserAutomationRuntimeError.staleNode }
-        if object["ok"] as? Bool != true {
-            throw BrowserAutomationRuntimeError.pageRejected(object["error"] as? String ?? "The page rejected the browser interaction.")
+        guard let json, let object=Self.jsonObject(json) else {throw BrowserAutomationRuntimeError.pageRejected("页面未返回可核对的结果。")}
+        guard object["ok"] as? Bool == true else {throw BrowserAutomationRuntimeError.pageRejected(object["message"] as? String ?? "页面拒绝了操作。")}
+        return BrowserControlResponse(contentText:object["message"] as? String ?? "请核对页面结果",contentJSON:json,citations:webView.url.map{[$0.absoluteString]} ?? [])
+    }
+
+    private func readPage(_ request: BrowserControlRequest) async throws -> BrowserControlResponse {
+        let resolved=try resolveTab(request);let view=ensureWebView(sessionID:request.sessionID,tabID:resolved.tab.id,initialURLString:resolved.tab.restoredURLString).webView
+        let json=try await Self.callPageJavaScript(view,script:Self.collaborationScript + "\nreturn JSON.stringify(globalThis.__connorCollaboration.read(scope,offset,count));",arguments:["scope":request.value ?? "page","offset":request.offset,"count":request.count],timeoutSeconds:Self.pageJSTimeoutSeconds(request))
+        return BrowserControlResponse(contentText:json ?? "页面不可读取",contentJSON:json,citations:view.url.map{[$0.absoluteString]} ?? [])
+    }
+    private func verifyResult(_ request: BrowserControlRequest) async throws -> BrowserControlResponse {
+        let resolved=try resolveTab(request);let view=ensureWebView(sessionID:request.sessionID,tabID:resolved.tab.id,initialURLString:resolved.tab.restoredURLString).webView
+        var json:String?;for _ in 0..<10 {
+            json=try await Self.callPageJavaScript(view,script:Self.collaborationScript + "\nreturn JSON.stringify(globalThis.__connorCollaboration.verify(condition,expected,nodeRef));",arguments:["condition":request.action ?? "text","expected":request.value ?? "","nodeRef":request.nodeReference ?? ""],timeoutSeconds:Self.pageJSTimeoutSeconds(request))
+            if json.flatMap(Self.jsonObject)?["ok"] as? Bool == true {return BrowserControlResponse(contentText:"已观察到指定页面结果",contentJSON:json,citations:view.url.map{[$0.absoluteString]} ?? [])}
+            try await Task.sleep(for:.milliseconds(150))
         }
-        let label = uploadOnly ? "Upload control revealed for trusted user handoff." : "Browser action completed: \(action)."
-        return BrowserControlResponse(contentText: label, contentJSON: json, citations: webView.url.map { [$0.absoluteString] } ?? [])
+        throw BrowserAutomationRuntimeError.pageRejected("尚未观察到指定结果，请勿声称任务完成。")
     }
 
     private func handoff(_ request: BrowserControlRequest) async throws -> BrowserControlResponse {
@@ -488,6 +515,7 @@ final class BrowserAutomationRuntime {
                 throw BrowserAutomationRuntimeError.staleNode
             }
         }
+        pause(request.sessionID, reason: request.value ?? "请完成网页操作后点击继续")
         showWorkspace(request.sessionID)
         let reason = request.value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return BrowserControlResponse(
@@ -634,6 +662,115 @@ final class BrowserAutomationRuntime {
             truncated: object["truncated"] as? Bool ?? false
         )
     }
+
+    private static let collaborationScript = #"""
+    // Shared browser collaboration protocol. Page text is data, never authority.
+    (() => {
+      if (globalThis.__connorCollaboration?.version === 2) return;
+      const receipts = new Map();
+      let fingerprints=new Map(), capturedValues=new Map();
+      const fingerprint=el=>JSON.stringify([el.tagName,el.type||'',el.getAttribute('href')||'',label(el)]);
+      const uid = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const visible = el => { const r=el.getBoundingClientRect(), s=getComputedStyle(el); return r.width>0 && r.height>0 && s.display!=='none' && s.visibility!=='hidden'; };
+      const sensitive = el => /^(password|hidden|file)$/i.test(el.type || '') || /^(current-password|new-password|one-time-code|cc-)/i.test(el.autocomplete || '');
+      const label = el => el.getAttribute('aria-label') || Array.from(el.labels || []).map(x=>x.innerText).join(' ') || el.innerText || el.placeholder || el.title || el.tagName.toLowerCase();
+      const text = () => (document.querySelector('article,main,[role=main]') || document.body)?.innerText || '';
+      const node = ref => globalThis.__connorBrowserNodeMap?.get(ref);
+      const fail = message => ({ok:false, verification:'failed', message});
+      function snapshot(limit=200) {
+        const token=uid(), nodes=[], map=new Map();fingerprints=new Map();capturedValues=new Map();
+        document.querySelectorAll('[data-connor-ref]').forEach(el=>el.removeAttribute('data-connor-ref'));
+        for (const el of document.querySelectorAll('a[href],button,input,textarea,select,summary,[role],[contenteditable=true],[tabindex]')) {
+          if (nodes.length>=limit) break;
+          if (!visible(el)) continue;
+          const ref=token+':'+nodes.length, type=(el.type || '').toLowerCase(), tag=el.tagName.toLowerCase();
+          map.set(ref,el);fingerprints.set(ref,fingerprint(el));if(!sensitive(el))capturedValues.set(ref,el.isContentEditable?el.innerText:el.value); el.setAttribute('data-connor-ref',ref);
+          const role=el.getAttribute('role') || ({a:'link',button:'button',input:['checkbox','radio'].includes(type)?type:(['button','submit','reset','file'].includes(type)?'button':'textbox'),textarea:'textbox',select:'combobox'})[tag] || (el.isContentEditable?'textbox':tag);
+          nodes.push({nodeRef:ref,role,name:String(label(el)).slice(0,240),tag,type,
+            value:sensitive(el)?null:(el.isContentEditable?el.innerText.slice(0,500):('value' in el?String(el.value).slice(0,500):null)),
+            enabled:!el.disabled && el.getAttribute('aria-disabled')!=='true',
+            editable:!sensitive(el) && !el.disabled && el.getAttribute('aria-disabled')!=='true' && !el.readOnly && (el.isContentEditable || ['input','textarea','select'].includes(tag)),
+            sensitive:sensitive(el),checked:typeof el.checked==='boolean'?el.checked:null,
+            submit:type==='submit'||(tag==='button'&&type!=='button'&&type!=='reset'),
+            upload:type==='file',download:el.hasAttribute('download')});
+        }
+        globalThis.__connorBrowserNodeMap=map; globalThis.__connorBrowserSnapshotToken=token;
+        return {url:location.href,title:document.title,token,nodes,text:text().slice(0,4000),truncated:nodes.length>=limit};
+      }
+      function read(scope='page',offset=0,count=16000) {
+        const focused=document.activeElement;
+        const body=scope==='selection' ? (focused && sensitive(focused)?'':String(getSelection())) : text();
+        offset=Math.max(0,Number(offset)||0); count=Math.max(1,Math.min(30000,Number(count)||16000));
+        return {url:location.href,title:document.title,scope,offset,text:body.slice(offset,offset+count),totalCharacters:body.length,truncated:offset+count<body.length};
+      }
+      function act(action,ref,value='') {
+        if (action==='scroll') { const before=scrollY;scrollBy(0,Number(value)||600);return {ok:true,verification:scrollY!==before?'verified':'unverified',message:scrollY!==before?'已验证滚动位置变化':'未观察到滚动位置变化'}; }
+        const el=node(ref);
+        if (!el?.isConnected) return fail('节点已失效，请重新读取页面快照。');
+        if(fingerprints.get(ref)!==fingerprint(el))return fail('目标的名称或链接已改变，请重新读取页面。');
+        if(['fill','select'].includes(action)&&capturedValues.get(ref)!==(el.isContentEditable?el.innerText:el.value))return fail('字段已被修改，请重新读取页面，避免覆盖用户编辑。');
+        if (sensitive(el)) return fail('密码、验证码、支付和文件字段需要用户接管。');
+        if (el.disabled || el.readOnly && action==='fill' || el.getAttribute('aria-disabled')==='true' || !visible(el)) return fail('目标不可见、禁用或只读。');
+        const type=(el.type||'').toLowerCase(), tag=el.tagName.toLowerCase();
+        const submit=type==='submit'||(tag==='button'&&type!=='button'&&type!=='reset');
+        if (action==='submit' && !submit) return fail('请使用显式提交按钮。');
+        if (action==='download' && !el.hasAttribute('download')) return fail('请使用显式下载控件。');
+        if (action!=='submit' && submit) return fail('提交需要 browser_submit 和现有审批流程。');
+        if (action!=='download' && el.hasAttribute('download')) return fail('下载需要 browser_download。');
+        if (action==='press' && ['Enter',' '].includes(value)) return fail('激活控件请用 click；提交请用 browser_submit。');
+        el.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
+        const r=el.getBoundingClientRect(), x=r.left+r.width/2,y=r.top+r.height/2, hit=document.elementFromPoint(x,y);
+        if (x<0||y<0||x>=innerWidth||y>=innerHeight||!hit||hit!==el&&!el.contains(hit)) return fail('目标被遮挡或位于视口之外。');
+        const before={url:location.href,title:document.title,text:text().slice(0,12000),value:el.isContentEditable?el.innerText:el.value,checked:el.checked};
+        if (action==='fill') {
+          if (el.isContentEditable) el.innerText=value;
+          else {
+            if (!['input','textarea'].includes(tag)) return fail('目标不是可编辑文本字段。');
+            const proto=tag==='textarea'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
+            Object.getOwnPropertyDescriptor(proto,'value').set.call(el,value);
+          }
+          el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}));el.dispatchEvent(new Event('change',{bubbles:true}));
+        } else if (action==='select') {
+          if (tag!=='select') return fail('目标不是下拉框。');
+          const option=Array.from(el.options).find(o=>o.value===value||o.text===value);
+          if (!option) return fail('找不到该选项。');value=option.value;el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
+        } else if (['check','uncheck'].includes(action)) {
+          if (!['checkbox','radio'].includes(type)) return fail('目标不是复选框或单选框。');
+          el.checked=action==='check';el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
+        } else if (['click','submit','download'].includes(action)) el.click();
+        else if (action==='press') {el.dispatchEvent(new KeyboardEvent('keydown',{key:value,bubbles:true}));el.dispatchEvent(new KeyboardEvent('keyup',{key:value,bubbles:true}));}
+        else return fail('不支持此操作。');
+        const id=uid();receipts.set(id,{el,action,value,before,ref,at:Date.now()});
+        if(receipts.size>50) receipts.delete(receipts.keys().next().value);
+        return {ok:true,verification:'pending',receipt:id,message:'已发出操作，正在检查页面结果。'};
+      }
+      function result(id) {
+        const item=receipts.get(id);if(!item)return fail('操作记录已过期，请核对当前页面。');
+        const {el,action,value,before}=item;
+        let verified=false;
+        if (['fill','select'].includes(action)) verified=el.isConnected && (el.isContentEditable?el.innerText:el.value)===value;
+        else if (['check','uncheck'].includes(action)) verified=el.isConnected&&el.checked===(action==='check');
+        else {const changed=location.href!==before.url||document.title!==before.title||text().slice(0,12000)!==before.text;
+          return {ok:true,receipt:id,verification:changed?'observed':'unverified',message:changed?'观察到页面变化；业务结果仍需 browser_verify 核对。':'操作已发出，尚未观察到结果；不能据此声称任务完成。'};}
+        if(Date.now()-item.at<200)return {ok:true,receipt:id,verification:'pending',message:'正在检查字段是否保持预期值。'};
+        if(verified)capturedValues.set(item.ref,el.isContentEditable?el.innerText:el.value);
+        return {ok:verified,receipt:id,verification:verified?'verified':'failed',message:verified?'已验证字段值；尚未提交表单。':'字段未保持预期值，可能被页面校验或框架回退。'};
+      }
+      function verify(condition,expected,ref) {
+        const el=ref?node(ref):null;
+        if (['value','checked'].includes(condition) && (!el?.isConnected || sensitive(el))) return fail('字段已失效或属于敏感字段，不能验证。');
+        let ok=false;
+        if (condition==='text') ok=Boolean(expected)&&text().includes(expected);
+        else if(condition==='url')ok=Boolean(expected)&&location.href.includes(expected);
+        else if(condition==='title')ok=Boolean(expected)&&document.title.includes(expected);
+        else if(condition==='value')ok=(el.isContentEditable?el.innerText:el.value)===expected;
+        else if(condition==='checked')ok=typeof el.checked==='boolean'&&el.checked===(expected==='true');
+        else return fail('不支持此验证条件。');
+        return {ok,verification:ok?'verified':'unverified',url:location.href,title:document.title,message:ok?'已观察到指定的页面结果。':'尚未观察到指定结果；请勿声称完成。'};
+      }
+      globalThis.__connorCollaboration={version:2,snapshot,read,act,result,verify};
+    })();
+    """#
 
     private static let snapshotScript = #"""
     const limit = Math.max(20, Math.min(Number(maxNodes) || 200, 500));

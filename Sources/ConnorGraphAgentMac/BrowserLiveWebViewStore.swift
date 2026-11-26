@@ -178,6 +178,10 @@ final class BrowserLiveWebViewStore {
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { onContentProcessTerminated?(webView) }
 
+        func retryDownload(in webView: WKWebView, url: URL) {
+            webView.startDownload(using: URLRequest(url: url)) { [weak self] download in self?.start(download) }
+        }
+
         private func start(_ download: WKDownload) {
             let id = UUID()
             let coordinator = BrowserDownloadCoordinator(
@@ -370,7 +374,7 @@ final class BrowserLiveWebViewStore {
             entry.coordinator.onNavigationStateChanged = onNavigationStateChanged
             entry.coordinator.onFaviconURLChanged = onFaviconURLChanged
             entry.coordinator.onOpenInNewTab = onOpenInNewTab
-            configure(entry.coordinator, onPopupCreated: onPopupCreated, onCloseRequested: onCloseRequested, onDownloadChanged: onDownloadChanged, onMediaPermissionRequest: onMediaPermissionRequest, onContentProcessTerminated: onContentProcessTerminated)
+            configure(entry.coordinator, key: key, onPopupCreated: onPopupCreated, onCloseRequested: onCloseRequested, onDownloadChanged: onDownloadChanged, onMediaPermissionRequest: onMediaPermissionRequest, onContentProcessTerminated: onContentProcessTerminated)
             entry.coordinator.onSelectionChanged = onSelectionChanged
             entry.coordinator.onEditableFieldChanged = onEditableFieldChanged
             entry.coordinator.onRestorationReady = onRestorationReady
@@ -382,7 +386,7 @@ final class BrowserLiveWebViewStore {
         coordinator.onNavigationStateChanged = onNavigationStateChanged
         coordinator.onFaviconURLChanged = onFaviconURLChanged
         coordinator.onOpenInNewTab = onOpenInNewTab
-        configure(coordinator, onPopupCreated: onPopupCreated, onCloseRequested: onCloseRequested, onDownloadChanged: onDownloadChanged, onMediaPermissionRequest: onMediaPermissionRequest, onContentProcessTerminated: onContentProcessTerminated)
+        configure(coordinator, key: key, onPopupCreated: onPopupCreated, onCloseRequested: onCloseRequested, onDownloadChanged: onDownloadChanged, onMediaPermissionRequest: onMediaPermissionRequest, onContentProcessTerminated: onContentProcessTerminated)
         coordinator.onSelectionChanged = onSelectionChanged
         coordinator.onEditableFieldChanged = onEditableFieldChanged
         coordinator.onRestorationReady = onRestorationReady
@@ -464,6 +468,14 @@ final class BrowserLiveWebViewStore {
         activeAutomationKeys.remove(key)
     }
 
+    func retryDownload(_ item: BrowserDownloadItem) -> Bool {
+        guard item.status == .failed || item.status == .cancelled,
+              let url = item.sourceURL, ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              let origin = item.origin, let entry = entries[origin] else { return false }
+        entry.coordinator.retryDownload(in: entry.webView, url: url)
+        return true
+    }
+
     func cancelDownload(_ id: UUID) {
         activeDownloads[id]?.cancel { [weak self] _ in self?.activeDownloads[id] = nil }
     }
@@ -475,6 +487,7 @@ final class BrowserLiveWebViewStore {
 
     private func configure(
         _ coordinator: WebViewCoordinator,
+        key: BrowserLiveWebViewKey,
         onPopupCreated: @escaping (WKWebView, WebViewCoordinator, URL?) -> Void,
         onCloseRequested: @escaping (WKWebView) -> Void,
         onDownloadChanged: @escaping (BrowserDownloadItem) -> Void,
@@ -483,7 +496,11 @@ final class BrowserLiveWebViewStore {
     ) {
         coordinator.onPopupCreated = onPopupCreated
         coordinator.onCloseRequested = onCloseRequested
-        coordinator.onDownloadChanged = onDownloadChanged
+        coordinator.onDownloadChanged = { item in
+            var item = item
+            item.origin = key
+            onDownloadChanged(item)
+        }
         coordinator.onDownloadStarted = { [weak self] id, download in self?.activeDownloads[id] = download }
         coordinator.onDownloadEnded = { [weak self] id in self?.activeDownloads[id] = nil }
         coordinator.onMediaPermissionRequest = onMediaPermissionRequest

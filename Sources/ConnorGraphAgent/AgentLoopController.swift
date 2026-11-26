@@ -366,6 +366,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     succeededToolNames: []
                 )
                 var dynamicRegistry = toolRegistry
+                if request.browserReadOnly { dynamicRegistry.restrictToBrowserReading() }
                 await dynamicRegistry.refreshDynamicTools()
                 var catalogRegisteredDefinitions = await dynamicRegistry.definitions(availableUnder: policy)
                 let exposedToolDefinitions = tokenPolicy.initiallyExposedTools(

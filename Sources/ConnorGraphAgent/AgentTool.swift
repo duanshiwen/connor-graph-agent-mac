@@ -770,6 +770,11 @@ public struct AgentToolRegistry: Sendable {
         dynamicToolNames = Set(current.map(\.name))
         for tool in current { tools[tool.name] = tool }
     }
+    public mutating func restrictToBrowserReading() {
+        let allowed: Set<AgentPermissionCapability> = [.readGraph,.readSession,.modelCall,.readWorkspaceFile,.listWorkspaceFiles,.searchWorkspaceFiles,.readMail,.readMailBody,.readContacts,.readCalendar,.readRSS,.readRSSContent,.readBrowserPage,.baseRead]
+        tools = tools.filter { allowed.contains($0.value.permission) }
+        if let provider = dynamicToolProvider { dynamicToolProvider = { (await provider()).filter { allowed.contains($0.permission) } } }
+    }
     private var tools: [String: any AgentTool]
     public private(set) var duplicateRegistrations: [AgentToolDuplicateRegistration]
 
