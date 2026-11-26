@@ -38,6 +38,7 @@ public actor BaseToolRuntime {
         } catch { return .failure(BaseError(code:.internal,message:"云端请求失败",hint:error.localizedDescription)) }
     }
     private func remoteUsageGuide(_ id: String) async -> BaseEnvelope {
+        exitAuthoring()
         let envelope = await remoteEnvelope(tool:"base.app.get",arguments:["appID":id])
         guard envelope.ok, case .object(let card) = envelope.data else { return envelope }
         let guide = card["guide"]
@@ -221,21 +222,21 @@ public actor BaseToolRuntime {
         }
     }
 
-    public func listAppsEnvelope(scope: String?, query: String?) async -> BaseEnvelope {
+    public func listAppsEnvelope(scope: String?, query: String?, page: Int = 1) async -> BaseEnvelope {
         do {
             var apps = try library.listApps(scope: scope, query: query)
             var cloudError: String?
             var hasMore = false
             if let cloudClient {
                 do {
-                    let remote = try await cloudClient.listApps(query: query ?? "")
+                    let remote = try await cloudClient.listApps(query: query ?? "", page: max(1, page))
                     hasMore = remote.hasMore
                     for item in remote.items where !apps.contains(where: { $0["appID"] as? String == item.appId }) && (scope == nil || scope == "all" || scope == item.visibility) {
                         apps.append(["appID":item.appId,"name":item.name,"purpose":item.purpose,"visibility":item.visibility,"source":"cloud","methodCount":item.methodCount])
                     }
                 } catch { cloudError = error.localizedDescription }
             }
-            var result: [String:Any] = ["apps":apps,"count":apps.count,"hasMore":hasMore,"page":1]
+            var result: [String:Any] = ["apps":apps,"count":apps.count,"hasMore":hasMore,"page":max(1, page)]
             if let cloudError { result["cloudError"] = cloudError }
             return .success(data: result)
         } catch let error as BaseError {
@@ -864,7 +865,8 @@ public struct BaseAgentTool: AgentTool {
         case .appList:
             return .closedObject(properties: [
                 "scope": .stringEnumeration(values: ["all", "private", "shared", "public"], description: "按三态过滤，默认 all"),
-                "query": .string(description: "按名称/领域/appID 检索")
+                "query": .string(description: "按名称/领域/appID 检索"),
+                "page": .integer(description: "云端页码，从 1 开始")
             ], required: [])
         case .appGet:
             return .closedObject(properties: [
@@ -1063,7 +1065,7 @@ public struct BaseAgentTool: AgentTool {
             )
             return makeResult(envelope, text: grant ? "已授权（授权状态随包 E2EE 同步，新设备免重新授权）。" : "已回收授权。", context: context)
         case .appList:
-            let envelope = await runtime.listAppsEnvelope(scope: arguments.string("scope"), query: arguments.string("query"))
+            let envelope = await runtime.listAppsEnvelope(scope: arguments.string("scope"), query: arguments.string("query"), page: arguments.int("page") ?? 1)
             return makeResult(envelope, text: "App 列表已返回。", context: context)
         case .appGet:
             // M7：读 App Card 即回到使用面（制作面会话结束，硬门禁重新关上）。
