@@ -174,4 +174,15 @@ final class BaseRecordsSyncTests: XCTestCase {
         XCTAssertEqual(try a.digest(), try b.digest())
         XCTAssertEqual(a.packageVersion, 1)
     }
+    func testOfflineRecoveryPreservesRecordsAndRejectsOverwrite() throws {
+        let src = try BaseLibraryStore(directory: tmpDir.appendingPathComponent("backup-source"))
+        let dst = try BaseLibraryStore(directory: tmpDir.appendingPathComponent("backup-target"))
+        defer { src.close(); dst.close() }
+        _ = try src.createApp(manifest: manifest("ledger"), schemaObject: schema(), guide: guide("ledger"), methods: methods())
+        try seedRows(src, appID: "ledger")
+        let archive = try BaseRecoveryArchive.export(library: src, appID: "ledger")
+        XCTAssertEqual(try BaseRecoveryArchive.restore(archive, library: dst), "ledger")
+        XCTAssertEqual(try src.exportRecords(appID: "ledger").digest(), try dst.exportRecords(appID: "ledger").digest())
+        XCTAssertThrowsError(try BaseRecoveryArchive.restore(archive, library: dst))
+    }
 }
