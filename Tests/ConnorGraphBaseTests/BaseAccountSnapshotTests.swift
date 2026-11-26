@@ -13,6 +13,13 @@ final class BaseAccountSnapshotTests:XCTestCase {
         try rows.insert(id:"rec_7",table:"entries",values:["body":.string("中文😀"),"done":.bool(true)],meta:["version":1])
         let key = try a.syncAppKey(appID:"demo")
         let first = try XCTUnwrap(a.accountSnapshots(account:"owner")["demo"])
+        let orphan = try BaseLibraryStore(directory:root.appendingPathComponent("orphan"));defer{orphan.close()}
+        let orphanFile = try BaseSubLibraryStore(appID:"demo",directory:root.appendingPathComponent("orphan/libraries"));defer{orphanFile.close()}
+        try orphanFile.executeVoid("CREATE TABLE precious(value TEXT)");try orphanFile.executeVoid("INSERT INTO precious VALUES('keep')")
+        XCTAssertThrowsError(try orphan.applyAccountSnapshot(first,account:"owner",expectedFingerprint:nil))
+        XCTAssertEqual(try orphanFile.execute("SELECT value FROM precious").first?["value"] as? String,"keep")
+        XCTAssertFalse(try orphan.appExists("demo"))
+
         try b.applyAccountSnapshot(first,account:"owner",expectedFingerprint:nil)
         XCTAssertEqual(try b.syncKeyPayload(kind:"app",appID:"demo"),key)
         XCTAssertEqual(try BaseLibraryStore.snapshotFingerprint(first),try BaseLibraryStore.snapshotFingerprint(b.accountSnapshot(appID:"demo")))

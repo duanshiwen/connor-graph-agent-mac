@@ -90,6 +90,13 @@ extension BaseLibraryStore {
         guard snapshot["format"] as? String == "connor-base-sync-v1", let id = snapshot["appID"] as? String, BaseSchemaValidator.isValidAppID(id), !account.isEmpty else { throw BaseError.internal("同步包标识无效") }
         let deleted = snapshot["deleted"] as? Bool == true
         if let bound = try registryExecute("SELECT account_id FROM base_sync_owners WHERE app_id=?1",parameters:[id]).first?["account_id"] as? String, bound != account { throw BaseError.internal("本机同标识应用属于另一账号") }
+        if try !recovering && !appExists(id) && FileManager.default.fileExists(atPath:librariesDirectory.appendingPathComponent("base_\(id).db").path) {
+            guard try !registryExecute("SELECT 1 FROM base_sync_owners WHERE app_id=?1 AND account_id=?2",parameters:[id,account]).isEmpty,
+                  let generation = try registryExecute("SELECT generation FROM base_sync_applied WHERE app_id=?1",parameters:[id]).first?["generation"] as? String else { throw BaseError.internal("同标识数据库尚未登记，已保留本机文件") }
+            let retired = try BaseSubLibraryStore(appID:id,directory:librariesDirectory); defer { retired.close() }
+            let names = try retired.execute("SELECT name FROM sqlite_master WHERE type='table'").compactMap{$0["name"] as? String}
+            guard try retired.userTableNames().isEmpty, names.contains("base_sync_marker"), try retired.execute("SELECT generation FROM base_sync_marker WHERE id=1").first?["generation"] as? String == generation else { throw BaseError.internal("未登记数据库包含未确认的数据，已保留本机文件") }
+        }
         let stageURL = rootDirectory.appendingPathComponent(".sync-stage-"+UUID().uuidString,isDirectory:true)
         defer { try? FileManager.default.removeItem(at:stageURL) }
         let staged = try BaseLibraryStore(directory:stageURL)
