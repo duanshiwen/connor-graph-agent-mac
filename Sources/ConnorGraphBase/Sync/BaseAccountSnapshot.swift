@@ -16,7 +16,7 @@ private final class BaseSnapshotLocks: @unchecked Sendable {
 /// Whole-app account snapshots. The account transport seals these before upload.
 /// An intent and a generation in both SQLite files recover interrupted WAL commits.
 extension BaseLibraryStore {
-    private var snapshotLock: NSRecursiveLock { BaseSnapshotLocks.shared.lock(rootDirectory) }
+    var accountSnapshotLock: NSRecursiveLock { BaseSnapshotLocks.shared.lock(rootDirectory) }
     private static let snapshotSystemTables: Set<String> = ["base_pkg_state", "schema_migrations", "base_schema_cache", "base_idempotency", "base_record_seq", "base_audit_log", "base_sync_marker"]
     public func ensureAccountSnapshotTables() throws {
         for sql in [
@@ -32,7 +32,7 @@ extension BaseLibraryStore {
         SHA256.hash(data: try JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys, .withoutEscapingSlashes])).map { String(format: "%02x", $0) }.joined()
     }
     public func accountSnapshots(account: String) throws -> [String: [String: Any]] {
-        snapshotLock.lock(); defer { snapshotLock.unlock() }
+        accountSnapshotLock.lock(); defer { accountSnapshotLock.unlock() }
         var result: [String: [String: Any]] = [:]
         for app in try listApps() {
             guard let id = app["appID"] as? String else { continue }
@@ -42,7 +42,7 @@ extension BaseLibraryStore {
         return result
     }
     public func accountSnapshot(appID: String) throws -> [String: Any] {
-        snapshotLock.lock(); defer { snapshotLock.unlock() }
+        accountSnapshotLock.lock(); defer { accountSnapshotLock.unlock() }
         guard try appExists(appID) else { throw BaseError.notFound(appID) }
         let store = try openStore(appID: appID); store.close()
         try registryExecuteVoid("ATTACH DATABASE ?1 AS base_sync_target", parameters: [store.dbURL.path])
@@ -74,7 +74,7 @@ extension BaseLibraryStore {
         return ["format":"connor-base-sync-v1","appID":id,"sourcePackageVersion":try packageVersion(appID:id),"guideVersion":guideVersion,"package":package,"data":["tables":tables],"keys":keys]
     }
     public func recoverAccountSnapshots() throws {
-        snapshotLock.lock(); defer { snapshotLock.unlock() }
+        accountSnapshotLock.lock(); defer { accountSnapshotLock.unlock() }
         for row in try registryExecute("SELECT * FROM base_sync_journal") {
             guard let id = row["app_id"] as? String, let account = row["account_id"] as? String, let generation = row["generation"] as? String, let text = row["snapshot_json"] as? String, let data = text.data(using:.utf8), let snapshot = try JSONSerialization.jsonObject(with:data) as? [String:Any] else { throw BaseError.internal("同步恢复日志格式无效") }
             let store = try BaseSubLibraryStore(appID:id,directory:librariesDirectory); defer { store.close() }
@@ -86,7 +86,7 @@ extension BaseLibraryStore {
         }
     }
     public func applyAccountSnapshot(_ snapshot:[String:Any], account:String, expectedFingerprint:String?, recovering:Bool = false) throws {
-        snapshotLock.lock(); defer { snapshotLock.unlock() }
+        accountSnapshotLock.lock(); defer { accountSnapshotLock.unlock() }
         guard snapshot["format"] as? String == "connor-base-sync-v1", let id = snapshot["appID"] as? String, BaseSchemaValidator.isValidAppID(id), !account.isEmpty else { throw BaseError.internal("同步包标识无效") }
         let deleted = snapshot["deleted"] as? Bool == true
         if let bound = try registryExecute("SELECT account_id FROM base_sync_owners WHERE app_id=?1",parameters:[id]).first?["account_id"] as? String, bound != account { throw BaseError.internal("本机同标识应用属于另一账号") }

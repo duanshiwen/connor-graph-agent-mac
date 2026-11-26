@@ -662,6 +662,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
 
     @discardableResult
     private func execute(_ sql: String, parameters: [Any] = []) throws -> [[String: Any]] {
+        accountSnapshotLock.lock();defer{accountSnapshotLock.unlock()}
         guard let db else { throw BaseError(code: .internal, message: "Base 注册库未打开", hint: "") }
         var stmt: OpaquePointer?
         let rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)
@@ -686,6 +687,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
 
     @discardableResult
     private func executeVoid(_ sql: String, parameters: [Any] = []) throws -> Int {
+        accountSnapshotLock.lock();defer{accountSnapshotLock.unlock()}
         guard let db else { throw BaseError(code: .internal, message: "Base 注册库未打开", hint: "") }
         var stmt: OpaquePointer?
         let rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)
@@ -698,11 +700,12 @@ public final class BaseLibraryStore: @unchecked Sendable {
         guard step == SQLITE_DONE || step == SQLITE_ROW else {
             throw BaseError(code: .internal, message: "SQL 执行失败：\(lastMessage(db))", hint: "")
         }
-        if sqlite3_changes(db)>0,sqlite3_get_autocommit(db) != 0,sql.range(of:"^\\s*(?:INSERT(?: OR [A-Z]+)? INTO|UPDATE|DELETE FROM)\\s+base_apps\\b",options:[.regularExpression,.caseInsensitive]) != nil {BaseLocalChange.post()}
+        if sqlite3_changes(db)>0,sqlite3_get_autocommit(db) != 0,sql.range(of:"^\\s*(?:INSERT(?: OR [A-Z]+)? INTO|UPDATE|DELETE FROM)\\s+(?:base_apps|base_keys)\\b",options:[.regularExpression,.caseInsensitive]) != nil {BaseLocalChange.post()}
         return Int(sqlite3_changes(db))
     }
 
     private func withTransaction<T>(_ body: () throws -> T) throws -> T {
+        accountSnapshotLock.lock();defer{accountSnapshotLock.unlock()}
         guard let db else { throw BaseError(code: .internal, message: "Base 注册库未打开", hint: "") }
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
         do {
