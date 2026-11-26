@@ -777,6 +777,8 @@ public final class AppUserIdentityStore: ObservableObject {
             }
     }
 
+    public var accountSyncOrigin:String {baseURL.absoluteString}
+
     public var currentUser: ConnorRemoteUserIdentity? {
         if case let .signedIn(user) = authenticationState { return user }
         return nil
@@ -1075,7 +1077,7 @@ public final class AppUserIdentityStore: ObservableObject {
                     if isDeviceSyncEnabled {
                         // History sync is independent of the memory extraction lease.
                         guard !Task.isCancelled, let userID = currentUser?.id else { return }
-                        let user = String(userID)
+                        let user = AccountSyncScope.key(server:baseURL.absoluteString,userID:String(userID))
                         let cursorKey = "ConnorAccountSyncCursor.\(user)"
                         let generation = syncDefaults.integer(forKey: AppAccountSyncSignal.projectionGenerationKey)
                         let scannedKey = "ConnorAccountSyncScannedProjectionGeneration.\(user)"
