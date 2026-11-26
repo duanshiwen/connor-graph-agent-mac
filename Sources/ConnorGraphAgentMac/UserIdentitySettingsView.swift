@@ -374,6 +374,7 @@ struct IdentityAvatarView: View {
     var user: ConnorRemoteUserIdentity
     var size: CGFloat
     var revision: UInt = 0
+    var showsBorder: Bool = true
 
     var body: some View {
         ZStack {
@@ -382,7 +383,9 @@ struct IdentityAvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .overlay(Circle().stroke(.quaternary))
+        .overlay {
+            if showsBorder { Circle().stroke(.quaternary) }
+        }
         .accessibilityLabel("\(user.displayName)的头像")
     }
 

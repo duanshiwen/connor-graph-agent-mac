@@ -829,11 +829,10 @@ struct BrowserDownloadsPanelView: View {
 struct BrowserToolbarIconButtonLabel: View {
     var systemImage: String
     var isActive: Bool = false
-    var iconFont: Font = BrowserFloatingTypography.toolbarIcon
 
     var body: some View {
         Image(systemName: systemImage)
-            .font(iconFont)
+            .font(.system(size: AppButtonLayout.iconSize, weight: .semibold))
             .symbolRenderingMode(.monochrome)
             .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
             .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
@@ -859,7 +858,7 @@ struct BrowserAskAIButtonLabel: View {
         }
         .foregroundStyle(ConnorCraftPalette.accent)
         .padding(.horizontal, 11)
-        .padding(.vertical, 6)
+        .frame(height: AppButtonLayout.iconButtonSize)
         .background(
             LinearGradient(
                 colors: [ConnorCraftPalette.accent.opacity(0.18), ConnorCraftPalette.accentSubtleFill],

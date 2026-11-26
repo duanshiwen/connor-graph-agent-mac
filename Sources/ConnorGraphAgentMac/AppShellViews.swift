@@ -234,24 +234,12 @@ struct AppShellView: View {
                         openWindow(id: AppMenuPresentation.noteImportCenterWindowID)
                     }
                 }
+            }
 
-                Button { isIdentityPopoverPresented.toggle() } label: {
-                    if let user = identityStore.currentUser {
-                        IdentityAvatarView(user: user, size: 24, revision: identityStore.avatarRevision)
-                    } else {
-                        Image(systemName: "person.crop.circle")
-                            .font(.system(size: 20))
-                    }
-                }
-                .buttonStyle(.appIcon)
-                .help(identityButtonHelp)
-                .accessibilityLabel(identityButtonHelp)
-                .popover(isPresented: $isIdentityPopoverPresented, arrowEdge: .bottom) {
-                    UserIdentityPopoverView(identityStore: identityStore) {
-                        isIdentityPopoverPresented = false
-                        graph.shell.selectSettingsSection(.identity)
-                    }
-                }
+            if #available(macOS 26.0, *) {
+                identityToolbarItem.sharedBackgroundVisibility(.hidden)
+            } else {
+                identityToolbarItem
             }
         }
         .overlay(alignment: .topLeading) {
@@ -317,6 +305,40 @@ struct AppShellView: View {
         .sheet(isPresented: addFriendPresented) {
             if let im = graph.im {
                 ImAddFriendSheet(model: im, isPresented: addFriendPresented)
+            }
+        }
+    }
+
+    private var identityToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button { isIdentityPopoverPresented.toggle() } label: {
+                Group {
+                    if let user = identityStore.currentUser {
+                        IdentityAvatarView(
+                            user: user,
+                            size: 28,
+                            revision: identityStore.avatarRevision,
+                            showsBorder: false
+                        )
+                    } else {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 28, height: 28)
+                            .background(Color.accentColor.opacity(0.16), in: Circle())
+                    }
+                }
+                .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(identityButtonHelp)
+            .accessibilityLabel(identityButtonHelp)
+            .popover(isPresented: $isIdentityPopoverPresented, arrowEdge: .bottom) {
+                UserIdentityPopoverView(identityStore: identityStore) {
+                    isIdentityPopoverPresented = false
+                    graph.shell.selectSettingsSection(.identity)
+                }
             }
         }
     }

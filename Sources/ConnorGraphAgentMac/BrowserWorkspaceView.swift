@@ -620,7 +620,7 @@ struct BrowserWorkspaceView: View {
                 onSubmit: navigateFromAddressBar,
                 fontSize: windowWidthClass.usesStackedPanes ? 12 : 13
             )
-            .frame(height: AppButtonLayout.height)
+            .frame(height: AppButtonLayout.iconButtonSize)
             .task(id: addressText) {
                 do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
                 guard !Task.isCancelled else { return }
@@ -647,7 +647,7 @@ struct BrowserWorkspaceView: View {
                     .padding(8)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
                     .shadow(radius: 5)
-                    .offset(y: AppButtonLayout.height + 4)
+                    .offset(y: AppButtonLayout.iconButtonSize + 4)
                 }
             }
             .zIndex(2)
@@ -657,8 +657,7 @@ struct BrowserWorkspaceView: View {
                 Button(action: { model.toggleBookmarksPanel() }) {
                     BrowserToolbarIconButtonLabel(
                         systemImage: activeURLIsBookmarked ? "star.fill" : "star",
-                        isActive: model.isBookmarksPanelVisible || activeURLIsBookmarked,
-                        iconFont: .system(size: 16, weight: .semibold)
+                        isActive: model.isBookmarksPanelVisible || activeURLIsBookmarked
                     )
                 }
                 .buttonStyle(.plain)
@@ -668,8 +667,7 @@ struct BrowserWorkspaceView: View {
                 Button(action: { model.toggleHistoryPanel() }) {
                     BrowserToolbarIconButtonLabel(
                         systemImage: model.isHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
-                        isActive: model.isHistoryPanelVisible,
-                        iconFont: .system(size: 16, weight: .semibold)
+                        isActive: model.isHistoryPanelVisible
                     )
                 }
                 .buttonStyle(.plain)
@@ -679,8 +677,7 @@ struct BrowserWorkspaceView: View {
                 Button(action: { model.toggleDownloadsPanel() }) {
                     BrowserToolbarIconButtonLabel(
                         systemImage: activeDownloadCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle",
-                        isActive: model.isDownloadsPanelVisible || activeDownloadCount > 0,
-                        iconFont: .system(size: 16, weight: .semibold)
+                        isActive: model.isDownloadsPanelVisible || activeDownloadCount > 0
                     )
                 }
                 .buttonStyle(.plain)
@@ -689,8 +686,7 @@ struct BrowserWorkspaceView: View {
 
                 Button(action: shareCurrentURL) {
                     BrowserToolbarIconButtonLabel(
-                        systemImage: "square.and.arrow.up",
-                        iconFont: .system(size: 16, weight: .semibold)
+                        systemImage: "square.and.arrow.up"
                     )
                 }
                 .buttonStyle(.plain)
@@ -717,7 +713,8 @@ struct BrowserWorkspaceView: View {
                         systemImage: "bubble.left.and.bubble.right",
                         fillsWidth: false,
                         titleFont: BrowserFloatingTypography.askButton,
-                        iconFont: BrowserFloatingTypography.askButtonIcon
+                        iconFont: BrowserFloatingTypography.askButtonIcon,
+                        minHeight: AppButtonLayout.iconButtonSize
                     )
                 }
                 .buttonStyle(SidebarActionButtonStyle())
@@ -759,13 +756,14 @@ struct BrowserWorkspaceView: View {
         } label: {
             BrowserToolbarIconButtonLabel(
                 systemImage: activeWebView?.url?.scheme == "https" ? "lock.fill" : "exclamationmark.triangle",
-                isActive: activeWebView?.url?.scheme == "https",
-                iconFont: .system(size: 13, weight: .semibold)
+                isActive: activeWebView?.url?.scheme == "https"
             )
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
+        .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
         .help("网站信息与权限")
         .accessibilityLabel("网站信息与权限")
     }
@@ -810,11 +808,13 @@ struct BrowserWorkspaceView: View {
             Button("清除全部网站数据…", systemImage: "trash") { confirmClearAllWebsiteData() }
             Label("Web 检查器已启用", systemImage: "hammer")
         } label: {
-            BrowserToolbarIconButtonLabel(systemImage: "ellipsis.circle", iconFont: .system(size: 16, weight: .semibold))
+            BrowserToolbarIconButtonLabel(systemImage: "ellipsis")
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
+        .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
         .help("更多浏览工具")
         .accessibilityLabel("更多浏览工具")
     }
