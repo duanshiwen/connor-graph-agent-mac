@@ -114,6 +114,7 @@ extension BaseLibraryStore {
     /// 应用墓碑（对端）：持久化墓碑并一体删除本地已装 App。返回是否实际删除（幂等：已删则 false）。
     @discardableResult
     public func applyTombstone(_ tombstone: BaseTombstone) throws -> Bool {
+        accountSnapshotLock.lock();defer{accountSnapshotLock.unlock()}
         try recordTombstone(
             appID: tombstone.appID,
             packageVersion: tombstone.packageVersion,

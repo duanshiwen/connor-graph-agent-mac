@@ -587,6 +587,10 @@ public actor AppAccountDataSyncCoordinator {
                         clear.change.payload = try decoder.decode(ConnorJSONValue.self,from:complete)
                     }
                     let apps = try BaseLibraryStore(directory:miniAppDirectory);defer{apps.close()}
+                    if !change.deleted,try apps.pendingAccountDeletions(account)[change.recordId] != nil {
+                        state.records[key] = RecordState(version:change.version ?? 0,hash:"",deleted:false,encrypted:clear.encrypted)
+                        state.pending.removeValue(forKey:key);state.dirtyKeys.insert(key);continue
+                    }
                     if change.deleted,try apps.appExists(change.recordId),try apps.isAccountRestore(change.recordId,account:account) {
                         state.records[key] = RecordState(version:change.version ?? 0,hash:"",deleted:true,encrypted:clear.encrypted)
                         state.pending.removeValue(forKey:key);state.dirtyKeys.insert(key);continue

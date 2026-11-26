@@ -118,6 +118,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
         guide: [String: Any],
         methods: [[String: Any]] = []
     ) throws -> [String: Any] {
+        accountSnapshotLock.lock();defer{accountSnapshotLock.unlock()}
         let appID = manifest["appID"] as? String ?? ""
         guard BaseSchemaValidator.isValidAppID(appID) else {
             throw BaseError(code: .validationFailed, message: "appID 不合法", hint: "appID 须匹配 ^[a-z0-9_-]{1,48}$")
@@ -180,6 +181,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
     /// 产墓碑同步记录（被删时 latest 包版本 + 指纹）→ 删子库文件（含 WAL/SHM）→ 删注册行 →
     /// 删包版本链表（不留「数据没了壳还在」）；能力搜索为派生查 base_apps，删注册行即移出搜索面。
     public func deleteApp(appID: String) throws {
+        accountSnapshotLock.lock();defer{accountSnapshotLock.unlock()}
         guard try appExists(appID) else {
             throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
         }
