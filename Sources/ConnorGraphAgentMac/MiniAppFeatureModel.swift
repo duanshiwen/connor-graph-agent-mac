@@ -87,6 +87,33 @@ public struct MiniAppDetail: Equatable, Sendable {
 @MainActor
 @Observable
 public final class MiniAppFeatureModel {
+    public var accountSyncCoordinator:AppAccountDataSyncCoordinator?
+    public var syncConflicts:[BaseAccountConflict] = []
+    public var syncConflictMessage:String?
+    public var syncConflictBusy = false
+    private var syncAccountGeneration = 0
+    public func inspectSyncConflicts() async {
+        guard !syncConflictBusy else{return}
+        let generation = syncAccountGeneration
+        guard let accountSyncCoordinator else {syncConflictMessage = "请先登录账号并完成一次同步。";return}
+        syncConflictBusy = true;defer{if generation == syncAccountGeneration {syncConflictBusy = false}}
+        do {let received = try await accountSyncCoordinator.miniAppConflicts();guard generation == syncAccountGeneration else{return};syncConflicts = received;syncConflictMessage = syncConflicts.isEmpty ? "没有待处理的小程序接收记录。" : nil}
+        catch{if generation == syncAccountGeneration {syncConflictMessage = error.localizedDescription}}
+    }
+    public func resolveSyncConflict(_ item:BaseAccountConflict,keepLocal:Bool) async {
+        guard !syncConflictBusy else{return}
+        let generation = syncAccountGeneration
+        guard let accountSyncCoordinator else {return}
+        syncConflictBusy = true;defer{if generation == syncAccountGeneration {syncConflictBusy = false}}
+        do {
+            try await accountSyncCoordinator.resolveMiniAppConflict(item,keepLocal:keepLocal)
+            guard generation == syncAccountGeneration else{return}
+            syncConflicts.removeAll{$0.id == item.id}
+            syncConflictMessage = "选择已保存，两份原始版本已加密归档，将自动同步。"
+            reload()
+        }catch{if generation == syncAccountGeneration {syncConflictMessage = error.localizedDescription}}
+    }
+
     public private(set) var entries: [MiniAppEntry] = []
     public private(set) var isLoading = false
     public private(set) var isLoadingMore = false
@@ -140,6 +167,8 @@ public final class MiniAppFeatureModel {
     // MARK: 首次加载 / 刷新
 
     public func accountDidChange() {
+        syncAccountGeneration += 1;syncConflictBusy = false
+        accountSyncCoordinator = nil;syncConflicts = [];syncConflictMessage = nil
         reloadGeneration += 1; detailGeneration += 1; detailTask?.cancel()
         selectedAppID = nil; selectedDetail = nil; detailIsLoading = false; detailErrorMessage = nil
         allCloud = []; cloudTotal = 0; cloudHasMore = false; loadedOnce = false

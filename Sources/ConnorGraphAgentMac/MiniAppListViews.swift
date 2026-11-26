@@ -12,10 +12,13 @@ struct MiniAppListPane: View {
     @State private var isImporting = false
     @State private var reviewedPackage: String?
     @State private var importError: String?
+    @State private var showSyncConflicts = false
 
     var body: some View {
         VStack(spacing: 0) {
             AppListPaneHeader(title: "小程序") {
+                Button {showSyncConflicts = true;Task{await model.inspectSyncConflicts()}} label: {Image(systemName:"arrow.triangle.2.circlepath")}
+                    .buttonStyle(.appIcon).help("处理小程序同步冲突")
                 Button { isImporting = true } label: { Image(systemName: "square.and.arrow.down") }
                     .buttonStyle(.appIcon).help("导入小程序定义包")
                 Button {
@@ -55,6 +58,27 @@ struct MiniAppListPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear { model.loadIfNeeded() }
+        .sheet(isPresented:$showSyncConflicts){
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment:.leading,spacing:12){
+                        Text("同时修改的版本会保留，选择前会重新核对版本。两份原始内容将加密归档。")
+                        if let message = model.syncConflictMessage {Text(message).font(.caption)}
+                        ForEach(model.syncConflicts){item in
+                            VStack(alignment:.leading,spacing:8){
+                                Text("\(item.appID) · 云端版本 \(item.remoteVersion)"+(item.remoteDeleted ? "（已删除）" : ""))
+                                Button("保留本机版本"){Task{await model.resolveSyncConflict(item,keepLocal:true)}}.frame(minHeight:40).disabled(model.syncConflictBusy || item.localFingerprint == nil)
+                                Button(item.remoteDeleted ? "采用云端删除" : "采用云端版本"){Task{await model.resolveSyncConflict(item,keepLocal:false)}}.frame(minHeight:40).disabled(model.syncConflictBusy)
+                            }
+                            Divider()
+                        }
+                        Button("刷新"){Task{await model.inspectSyncConflicts()}}.frame(minHeight:40).disabled(model.syncConflictBusy)
+                    }.padding()
+                }
+                .navigationTitle("小程序同步")
+                .toolbar{ToolbarItem(placement:.confirmationAction){Button("完成"){showSyncConflicts = false}}}
+            }.frame(minWidth:440,minHeight:360)
+        }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
             do {
                 let url = try result.get()

@@ -4227,6 +4227,7 @@ extension AppRuntimeLifecycle {
 
     private func applyReceivedAccountSync(_ result: AppAccountDataSyncResult) async {
         guard let storagePaths else { return }
+        if result.miniAppsChanged {miniAppFeatureModel.reload()}
         if result.settingsChanged { loadRuntimeSettings() }
         if result.governanceLabelsChanged,
            let config = try? AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory).loadOrCreateDefault() {
@@ -4258,8 +4259,10 @@ extension AppRuntimeLifecycle {
             mail: mailFeatureModel.sourceRepository,
             llm: llmSettingsRepository,
             identity: identityStore,
+            miniAppDirectory: storagePaths.artifactsDirectory.appendingPathComponent("base",isDirectory:true),
             onReceived: { [weak self] result in await self?.applyReceivedAccountSync(result) }
         )
+        miniAppFeatureModel.accountSyncCoordinator = coordinator
         // 消费本机「好友并入/解绑」动作：写入或清除 L4 实体的 connor_friend_* 元数据，
         // 让本轮 reconcile 的投影把它上推给安卓端。动作驱动，不做全量镜像，避免与
         // 安卓端的解绑互相“打架”（Mac 每轮把本地绑定写回、覆盖安卓刚清除的解绑）。
