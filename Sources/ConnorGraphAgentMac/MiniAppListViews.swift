@@ -60,8 +60,8 @@ struct MiniAppListPane: View {
                 let url = try result.get()
                 let scoped = url.startAccessingSecurityScopedResource()
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 10_000_000 else { throw BasePackageImporter.ImportError.invalid("小程序定义包超过 10 MB。") }
-                reviewedPackage = try BasePackageImporter.review(Data(contentsOf: url))
+                guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 64_000_000 else { throw BasePackageImporter.ImportError.invalid("小程序定义包超过 64 MB。") }
+                reviewedPackage = try MiniAppFeatureModel.reviewImport(Data(contentsOf: url))
                 importError = nil
             } catch { importError = error.localizedDescription }
         }
@@ -206,6 +206,7 @@ private struct MiniAppRowView: View {
 /// 「小程序」详情：Hero 卡片 + 分节卡片，宽度/样式/分割方式对齐 RSS、邮件详情页。
 struct MiniAppDetailPane: View {
     @Bindable var model: MiniAppFeatureModel
+    var useInChat: (String, Bool) -> Void
 
     var body: some View {
         Group {
@@ -213,6 +214,17 @@ struct MiniAppDetailPane: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
                         MiniAppHeroCard(detail: detail)
+                        HStack {
+                            Button("在会话中使用", systemImage: "bubble.left") { useInChat(detail.appID, false) }.frame(minHeight: 40)
+                            if detail.source == .local {
+                                Button("修改小程序", systemImage: "pencil") { useInChat(detail.appID, true) }.frame(minHeight: 40)
+                                Button("备份定义与记录…") {
+                                    let panel = NSSavePanel(); panel.allowedContentTypes = [.json]; panel.nameFieldStringValue = "\(detail.appID)-backup.json"
+                                    panel.message = "备份包含业务记录，保存为本机 JSON 文件；请妥善保管。恢复不会覆盖已有应用。"
+                                    if panel.runModal() == .OK, let url = panel.url { do { try model.exportBackup(appID: detail.appID).write(to: url, options: .atomic) } catch { NSAlert(error: error).runModal() } }
+                                }.frame(minHeight: 40)
+                            }
+                        }
                         MiniAppDetailSection(title: "功能说明", systemImage: "text.alignleft") {
                             functionContent(detail)
                         }

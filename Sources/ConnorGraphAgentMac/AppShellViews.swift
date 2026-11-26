@@ -159,6 +159,7 @@ struct AppShellView: View {
                 }
         }
         }
+        .onChange(of: identityStore.currentUser?.id) { _, _ in graph.miniApps.accountDidChange() }
         .onChange(of: graph.knowledgeCreator.snapshot.stage) { oldStage, newStage in
             // LLM 生成结束（进入预览/完成/冲突）时自动弹出后台“知识库发布进度”窗口；
             // 用户可提前关闭创作窗口，发布任务继续在后台执行。

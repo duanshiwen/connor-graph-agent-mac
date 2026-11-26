@@ -144,7 +144,11 @@ struct CraftDetailPaneView: View {
             case .interactiveWeb:
                 InteractiveWebDetailRouteView(model: graph.interactiveWeb, forwarding: makeListItemForwarding(graph: graph))
             case .miniApps:
-                MiniAppDetailRouteView(model: graph.miniApps)
+                MiniAppDetailRouteView(model: graph.miniApps) { id, editing in
+                    graph.chatActions.session.newChatSession()
+                    graph.chatActions.composer.updateSelectedChatInputDraft("请调用 base.guide，appID 为 \(id)，mode 为 \(editing ? "authoring" : "usage")，然后\(editing ? "帮我修改" : "使用")这个小程序。")
+                    _ = graph.shell.select(.agentChat)
+                }
             case .sources:
                 SourceRuntimePanelView(model: graph.sources)
             case .skills:

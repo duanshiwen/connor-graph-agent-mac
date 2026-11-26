@@ -117,15 +117,34 @@ public final class MiniAppFeatureModel {
         self.library = library
         self.cloudClient = cloudClient
     }
+    public func exportBackup(appID: String) throws -> Data {
+        guard let library else { throw BasePackageImporter.ImportError.invalid("本机小程序库不可用。") }
+        return try BaseRecoveryArchive.export(library: library, appID: appID)
+    }
+    public static func reviewImport(_ data: Data) throws -> String {
+        guard data.count <= 64_000_000 else { throw BasePackageImporter.ImportError.invalid("文件超过 64 MB。") }
+        if let object = try JSONSerialization.jsonObject(with: data) as? [String: Any], object["format"] as? String == BaseRecoveryArchive.format {
+            return String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]), as: UTF8.self)
+        }
+        return try BasePackageImporter.review(data)
+    }
     public func importReviewedPackage(_ json: String) throws {
         guard let library else { throw BasePackageImporter.ImportError.invalid("本机小程序库不可用。") }
-        let id = try BasePackageImporter.install(json, library: library)
+        let raw = Data(json.utf8)
+        let object = try JSONSerialization.jsonObject(with: raw) as? [String: Any]
+        let id = object?["format"] as? String == BaseRecoveryArchive.format ? try BaseRecoveryArchive.restore(raw, library: library) : try BasePackageImporter.install(json, library: library)
         reload()
         select(appID: id)
     }
 
     // MARK: 首次加载 / 刷新
 
+    public func accountDidChange() {
+        reloadGeneration += 1; detailGeneration += 1; detailTask?.cancel()
+        selectedAppID = nil; selectedDetail = nil; detailIsLoading = false; detailErrorMessage = nil
+        allCloud = []; cloudTotal = 0; cloudHasMore = false; loadedOnce = false
+        isLoading = false; isLoadingMore = false; publishMerged(); reload()
+    }
     public func loadIfNeeded() {
         guard !isLoading, !hasLoaded else { return }
         reload()

@@ -100,8 +100,9 @@ struct MiniAppListRouteView: View {
 
 struct MiniAppDetailRouteView: View {
     @Bindable var model: MiniAppFeatureModel
+    var useInChat: (String, Bool) -> Void
 
     var body: some View {
-        MiniAppDetailPane(model: model)
+        MiniAppDetailPane(model: model, useInChat: useInChat)
     }
 }
