@@ -904,7 +904,31 @@
           },
           "methodACL": {
             "type": "object",
-            "description": "方法级可见性映射。"
+            "description": "Replaces method policies for a published public app; missing methods inherit app visibility. Every invocation hop enforces the policy. Normal package updates preserve these restrictions.",
+            "additionalProperties": {
+              "type": "object",
+              "required": [
+                "visibility"
+              ],
+              "properties": {
+                "visibility": {
+                  "type": "string",
+                  "enum": [
+                    "private",
+                    "shared",
+                    "public"
+                  ]
+                },
+                "peers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Account IDs allowed for a shared method."
+                }
+              },
+              "additionalProperties": false
+            }
           }
         },
         "additionalProperties": false

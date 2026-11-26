@@ -46,6 +46,16 @@ public actor BaseToolRuntime {
         if case .object(let modes) = guide { usage = modes["usage"] ?? guide } else { usage = guide }
         return BaseEnvelope(ok:true,data:.object(["appID":.string(id),"mode":.string("usage"),"guide":usage ?? .object([:])]),site:"remote")
     }
+    public func assetUploadEnvelope(appID: String, fileName: String, data: String) async -> BaseEnvelope {
+        guard isAuthoringMode(appID:appID) else { return .failure(BaseError(code:.permissionDenied,message:"请先进入该应用制作面",hint:"base.guide mode:authoring")) }
+        return await remoteEnvelope(tool:"base.asset.upload",arguments:["appID":appID,"fileName":fileName,"data":data])
+    }
+    public func methodACLEnvelope(appID: String, acl: [String:Any]) async -> BaseEnvelope {
+        guard isAuthoringMode(appID:appID) else { return .failure(BaseError(code:.permissionDenied,message:"请先进入该应用制作面",hint:"base.guide mode:authoring")) }
+        let status=await remoteEnvelope(tool:"base.sync.status",arguments:["appID":appID])
+        guard status.ok,case .object(let values)=status.data else{return status}
+        return await remoteEnvelope(tool:"base.acl.set",arguments:["appID":appID,"methodACL":acl,"expectedRevision":values["revision"]?.jsonObject ?? 0])
+    }
     public func publicationEnvelope(tool: String, appID: String, visibility: String, includeData: Bool) async -> BaseEnvelope {
         guard isAuthoringMode(appID:appID) else { return .failure(BaseError(code:.permissionDenied,message:"请先进入该应用制作面",hint:"base.guide mode:authoring")) }
         let status = await remoteEnvelope(tool:"base.sync.status",arguments:["appID":appID])
@@ -88,7 +98,7 @@ public actor BaseToolRuntime {
     public func dynamicCatalogTools() -> [any AgentTool] {
         guard authoringAppID != nil else { return [] }
         let local: [any AgentTool] = BaseAgentTool.Operation.allCases.filter { !BaseAgentTool.Operation.runtimeCatalog.contains($0) }.map { BaseAgentTool(operation: $0, runtime: self) }
-        return local + (cloudClient == nil ? [] : ["base.publish","base.share","base.unpublish","base.sync.status"].map { BaseRemoteTool(name:$0,runtime:self) })
+        return local + (cloudClient == nil ? [] : ["base.publish","base.share","base.unpublish","base.sync.status","base.acl.set","base.asset.upload"].map { BaseRemoteTool(name:$0,runtime:self) })
     }
 
     /// 属主判据：本机注册表存在该 App（子库可开）即视为本机属主。
@@ -1274,10 +1284,19 @@ public struct BaseRemoteTool: AgentTool {
     public let runtime: BaseToolRuntime
     public var permission: AgentPermissionCapability { .baseManageApps }
     public var description: String { "云端发布/撤回/状态。默认仅发布定义；includeData=true 才包含当前数据。服务端版本冲突需刷新后重试。" }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties:["appID":.string(description:"本机属主应用"),"visibility":.stringEnumeration(values:["private","shared","public"],description:"发布范围"),"includeData":.boolean(description:"明确包含当前数据，默认 false")],required:["appID"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties:["appID":.string(description:"本机属主应用"),"visibility":.stringEnumeration(values:["private","shared","public"],description:"发布范围"),"includeData":.boolean(description:"明确包含当前数据，默认 false"),"methodACL":.object(properties:[:],required:[]),"fileName":.string(description:"附件名称"),"data":.string(description:"Base64 编码的 SDK AES-GCM 密文信封；不能上传明文")],required:["appID"]) }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let id = arguments.string("appID") else { throw AgentToolError.invalidArguments("appID required") }
-        let envelope = await runtime.publicationEnvelope(tool:name,appID:id,visibility:name == "base.share" ? "shared" : arguments.string("visibility") ?? "shared",includeData:arguments.bool("includeData") ?? false)
+        let envelope: BaseEnvelope
+        if name == "base.asset.upload" {
+            guard let fileName=arguments.string("fileName"),let sealed=arguments.string("data") else {throw AgentToolError.invalidArguments("fileName and encrypted data required")}
+            envelope=await runtime.assetUploadEnvelope(appID:id,fileName:fileName,data:sealed)
+        } else if name == "base.acl.set" {
+            guard case .object(let policies)?=arguments.values["methodACL"] else { throw AgentToolError.invalidArguments("methodACL required") }
+            envelope=await runtime.methodACLEnvelope(appID:id,acl:policies.mapValues { $0.jsonCompatibleObject })
+        } else {
+        envelope = await runtime.publicationEnvelope(tool:name,appID:id,visibility:name == "base.share" ? "shared" : arguments.string("visibility") ?? "shared",includeData:arguments.bool("includeData") ?? false)
+        }
         let data = try JSONEncoder().encode(envelope)
         return AgentToolResult(toolCallID:context.toolCallID,toolName:name,contentText:envelope.ok ? "云端操作已确认。" : "云端操作失败。",contentJSON:String(decoding:data,as:UTF8.self))
     }
