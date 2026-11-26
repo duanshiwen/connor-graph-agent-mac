@@ -148,6 +148,9 @@ extension BaseLibraryStore {
                         throw BaseError(code: .validationFailed, message: "记录缺 id", hint: "导出行必须含 id")
                     }
                     try store.insert(id: id, table: table.table, values: values, meta: meta)
+                    if id.hasPrefix("rec_"), let sequence = Int64(id.dropFirst(4)), sequence > 0, sequence < 9_007_199_254_740_991 {
+                        try store.executeVoid("UPDATE base_record_seq SET seq = MAX(seq, ?1) WHERE id = 1", parameters: [sequence])
+                    }
                 }
             }
         }

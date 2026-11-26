@@ -184,5 +184,8 @@ final class BaseRecordsSyncTests: XCTestCase {
         XCTAssertEqual(try BaseRecoveryArchive.restore(archive, library: dst), "ledger")
         XCTAssertEqual(try src.exportRecords(appID: "ledger").digest(), try dst.exportRecords(appID: "ledger").digest())
         XCTAssertThrowsError(try BaseRecoveryArchive.restore(archive, library: dst))
+        let store = try dst.openStore(appID: "ledger"); defer { store.close() }
+        let next = try store.nextRecordID()
+        XCTAssertFalse(try store.execute("SELECT id FROM expenses WHERE id = ?1", parameters: [next]).contains { !$0.isEmpty })
     }
 }
