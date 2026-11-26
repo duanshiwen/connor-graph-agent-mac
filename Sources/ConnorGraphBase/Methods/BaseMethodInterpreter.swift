@@ -180,13 +180,16 @@ public struct BaseMethodInterpreter {
         trace: BaseMethodTraceContext? = nil
     ) throws -> BaseMethodResult {
         try validateArgs(method: method, args: args)
+        if let schema = method.inputSchema { try BaseInputSchema.validate(schema, value: args) }
 
         let context = trace ?? BaseMethodTraceContext(traceId: BaseEnvelope.newTraceID(), methodName: method.name)
-        var vars: [String: JSONValue] = [:]
+        var vars: [String: JSONValue] = ["input": JSONValue(json: args) ?? .object([:])]
         var signals: [BaseMethodSignal] = []
         var lastData: JSONValue = .object([:])
 
-        for step in method.steps {
+        for definition in method.steps {
+            let step = [.query, .aggregate, .mutate, .exportCSV].contains(definition.type)
+                ? BaseMethodStep(type: definition.type, raw: resolveArgs(definition.raw, vars: vars)) : definition
             let stepStartData = lastData
             switch step.type {
             case .query:
@@ -205,7 +208,7 @@ public struct BaseMethodInterpreter {
             case .assert:
                 try runAssert(step, vars: vars, signals: &signals)
             case .call:
-                lastData = try runCall(step, appID: appID, method: method, args: args, vars: vars, resolver: resolver, callDepth: callDepth, trace: context)
+                lastData = try runCall(step, appID: appID, method: method, args: args, vars: vars, signals: &signals, resolver: resolver, callDepth: callDepth, trace: context)
             case .reply:
                 lastData = try runReply(step, vars: vars)
                 auditStep(method: method, step: step, table: step.raw["table"] as? String, result: lastData, previous: stepStartData, trace: context)
@@ -384,6 +387,7 @@ public struct BaseMethodInterpreter {
         method: BaseMethodDef,
         args: [String: Any],
         vars: [String: JSONValue],
+        signals: inout [BaseMethodSignal],
         resolver: (String) throws -> BaseMethodTarget?,
         callDepth: Int,
         trace: BaseMethodTraceContext
@@ -395,11 +399,13 @@ public struct BaseMethodInterpreter {
                 hint: "检查方法 DAG 的 call 步骤链路"
             )
         }
-        guard let target = step.raw["method"] as? String, !target.isEmpty else {
+        guard let methodName = step.raw["method"] as? String, !methodName.isEmpty else {
             throw BaseError(code: .validationFailed, message: "call 步骤缺 method", hint: "call 步骤必须指定方法名")
         }
+        let explicitApp = (step.raw["appID"] as? String) ?? (step.raw["app"] as? String)
+        let target = explicitApp.map { $0 == appID ? methodName : $0 + "." + methodName } ?? methodName
         let callArgs: [String: Any]
-        if let staticArgs = step.raw["args"] as? [String: Any] {
+        if let staticArgs = (step.raw["args"] ?? step.raw["input"]) as? [String: Any] {
             callArgs = resolveArgs(staticArgs, vars: vars)
         } else {
             callArgs = args
@@ -408,7 +414,7 @@ public struct BaseMethodInterpreter {
             throw BaseError(code: .notFound, message: "方法不存在", hint: target)
         }
         // M2-K2 跨 App 门禁：目标 app 不同于当前 app 时，方法必须 exported。
-        if t.appID != appID && !t.method.exports {
+        if t.appID != appID && (!t.method.exports || !t.method.isReadOnly) {
             throw BaseError(
                 code: .permissionDenied,
                 message: "方法 \(t.method.name) 未导出，无法被跨 App 调用",
@@ -427,6 +433,7 @@ public struct BaseMethodInterpreter {
             callDepth: callDepth + 1,
             trace: childTrace
         )
+        signals.append(contentsOf: result.signals)
         return result.data
     }
 
@@ -571,23 +578,73 @@ public struct BaseMethodInterpreter {
 
     /// call 步骤的静态 args 中 `$path` 引用替换。
     private func resolveArgs(_ args: [String: Any], vars: [String: JSONValue]) -> [String: Any] {
-        var out: [String: Any] = [:]
-        for (k, v) in args {
-            if let s = v as? String, s.hasPrefix("$") {
-                out[k] = resolvePath(s, in: vars)?.jsonObject ?? NSNull()
-            } else if let dict = v as? [String: Any] {
-                out[k] = resolveArgs(dict, vars: vars)
-            } else if let arr = v as? [Any] {
-                out[k] = arr.map { item -> Any in
-                    if let s = item as? String, s.hasPrefix("$") {
-                        return resolvePath(s, in: vars)?.jsonObject ?? NSNull()
-                    }
-                    return item
-                }
-            } else {
-                out[k] = v
+        func resolve(_ value: Any) -> Any {
+            if let text = value as? String {
+                if text.hasPrefix("$$") { return String(text.dropFirst()) }
+                if text.hasPrefix("$") { return resolvePath(text, in: vars)?.jsonObject ?? NSNull() }
+                return text
+            }
+            if let object = value as? [String: Any] { return object.mapValues(resolve) }
+            if let array = value as? [Any] { return array.map(resolve) }
+            return value
+        }
+        return args.mapValues(resolve)
+    }
+}
+
+/// Portable input validation runs before method side effects.
+public enum BaseInputSchema {
+    private static let keywords = Set("$schema title description default examples type properties required additionalProperties items enum const minimum maximum exclusiveMinimum exclusiveMaximum minLength maxLength pattern minItems maxItems".split(separator: " ").map(String.init))
+    public static func validate(_ schema: [String: Any], value: Any) throws {
+        guard let spec = JSONValue(json: schema), let input = JSONValue(json: value) else {
+            throw BaseError(code: .validationFailed, message: "inputSchema 或输入不是 JSON", hint: "核对方法输入")
+        }
+        try check(spec, input, "$input", 0)
+    }
+    private static func check(_ schema: JSONValue, _ value: JSONValue, _ path: String, _ depth: Int) throws {
+        func fail(_ message: String) throws -> Never { throw BaseError(code: .validationFailed, message: path + ": " + message, hint: "核对方法 inputSchema") }
+        guard depth <= 32, case .object(let spec) = schema else { try fail("Schema 无效或嵌套超过上限") }
+        for key in spec.keys where !keywords.contains(key) { try fail("不支持的 Schema 关键字 " + key) }
+        func matches(_ kind: String) -> Bool {
+            switch (kind, value) {
+            case ("object", .object), ("array", .array), ("string", .string), ("boolean", .bool), ("null", .null): return true
+            case ("number", .number(let n)): return n.isFinite
+            case ("integer", .number(let n)): return n.isFinite && n.rounded(.towardZero) == n
+            default: return false
             }
         }
-        return out
+        if case .string(let kind) = spec["type"], !matches(kind) { try fail("类型须为 " + kind) }
+        if case .array(let kinds) = spec["type"], !kinds.contains(where: { if case .string(let kind) = $0 { return matches(kind) }; return false }) { try fail("类型不匹配") }
+        if case .array(let choices) = spec["enum"], !choices.contains(value) { try fail("值不在 enum 内") }
+        if let expected = spec["const"], expected != value { try fail("值不匹配 const") }
+        if case .object(let object) = value {
+            if case .array(let required) = spec["required"] { for key in required { if case .string(let key) = key, object[key] == nil { try fail("缺必填入参 " + key) } } }
+            let properties: [String: JSONValue]
+            if case .object(let props) = spec["properties"] { properties = props } else { properties = [:] }
+            for (key, child) in object {
+                if let childSchema = properties[key] { try check(childSchema, child, path + "." + key, depth + 1) }
+                else if spec["additionalProperties"] == .bool(false) { try fail("未知属性 " + key) }
+                else if case .object = spec["additionalProperties"], let extra = spec["additionalProperties"] { try check(extra, child, path + "." + key, depth + 1) }
+            }
+        }
+        func bounds(_ n: Double, _ minKey: String, _ maxKey: String) throws {
+            if case .number(let min) = spec[minKey], n < min { try fail(minKey + " 不满足") }
+            if case .number(let max) = spec[maxKey], n > max { try fail(maxKey + " 不满足") }
+        }
+        if case .array(let array) = value {
+            try bounds(Double(array.count), "minItems", "maxItems")
+            if let itemSchema = spec["items"] { for (index, child) in array.enumerated() { try check(itemSchema, child, "\(path)[\(index)]", depth + 1) } }
+        }
+        if case .string(let text) = value {
+            try bounds(Double(text.unicodeScalars.count), "minLength", "maxLength")
+            if case .string(let pattern) = spec["pattern"] {
+                guard let regex = try? NSRegularExpression(pattern: pattern), regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil else { try fail("pattern 不匹配或无效") }
+            }
+        }
+        if case .number(let n) = value {
+            try bounds(n, "minimum", "maximum")
+            if case .number(let min) = spec["exclusiveMinimum"], n <= min { try fail("exclusiveMinimum 不满足") }
+            if case .number(let max) = spec["exclusiveMaximum"], n >= max { try fail("exclusiveMaximum 不满足") }
+        }
     }
 }

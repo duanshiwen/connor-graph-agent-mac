@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "contractId": "base.sdk.v1",
-  "contractVersion": "1.0.0",
+  "contractVersion": "1.1.0",
   "sdkVersion": "1",
   "title": "Connor Base · 平台 SDK 契约 v1",
   "description": "Connor Base 小应用平台三端共用的机器可读契约事实源：25 个工具目录（含 inputSchema/outputSchema）、结构化查询规范、错误码 taxonomy、统一返回信封、配额常量、能力点清单（v0.11 跨库单路径口径）、应用取舍决策段（v0.9/v0.12 口径）、交互富集规范段（v0.10）。三端从此文件加载，禁止各端手抄工具名/参数/错误码。",
@@ -23,13 +23,27 @@
       "group": "contract",
       "milestone": "M1",
       "permission": "none",
-      "description": "平台契约工具：一次取回本契约全文（能力清单、工具目录、信封/错误码、结构化查询规范、方法 DAG 语义、权限四步、应用取舍决策段、交互富集规范段、同步语义、配额、能力搜索协议）。创建/修改小应用前必须先读。",
+      "description": "平台契约工具：一次取回本契约全文（能力清单、工具目录、信封/错误码、结构化查询规范、方法 DAG 语义、权限四步、应用取舍决策段、交互富集规范段、同步语义、配额、能力搜索协议）。创建/修改小应用前必须先读。 Call mode=create with a new appID before creating; authoring requires an existing local app. Authoring is scoped to this session and app.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "section": {
             "type": "string",
             "description": "可选：只返回指定段（tools/query/errorCodes/envelope/quotas/capabilities/appDecision/enrichment），缺省返回全文。"
+          },
+          "appID": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]{1,48}$",
+            "description": "Existing application to edit/use, or the reserved ID for a new private application."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "create",
+              "authoring",
+              "usage"
+            ],
+            "description": "create reserves a new private app in this session; authoring edits an existing owned app; usage closes authoring."
           }
         },
         "additionalProperties": false
@@ -124,6 +138,11 @@
           "query": {
             "type": "string",
             "description": "可选关键词过滤（领域/名称/用途）。"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Cloud catalogue page, defaults to 1."
           }
         },
         "additionalProperties": false
@@ -802,6 +821,11 @@
               "shared",
               "public"
             ]
+          },
+          "includeData": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly include current data in the published snapshot. Omitted/false publishes only the definition."
           }
         },
         "additionalProperties": false
@@ -825,6 +849,11 @@
         "properties": {
           "appID": {
             "type": "string"
+          },
+          "includeData": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly include current data in the published snapshot. Omitted/false publishes only the definition."
           }
         },
         "additionalProperties": false
@@ -1340,5 +1369,35 @@
       },
       "additionalProperties": false
     }
+  },
+  "executionABI": {
+    "version": 1,
+    "inputVariable": "$input",
+    "referenceEscape": "$$",
+    "call": {
+      "method": "appID.methodName or same-app methodName",
+      "args": "recursive input references; defaults to current input",
+      "crossApp": "exported and readOnly, with caller authorization at every hop"
+    },
+    "signals": "child warnings propagate to the top-level result",
+    "inputSchemaKeywords": [
+      "type",
+      "properties",
+      "required",
+      "additionalProperties",
+      "items",
+      "enum",
+      "const",
+      "minimum",
+      "maximum",
+      "exclusiveMinimum",
+      "exclusiveMaximum",
+      "minLength",
+      "maxLength",
+      "pattern",
+      "minItems",
+      "maxItems"
+    ],
+    "collections": "empty collections are arrays, never null"
   }
 }
