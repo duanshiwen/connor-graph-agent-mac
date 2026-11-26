@@ -14,16 +14,51 @@ import ConnorGraphBase
 public actor BaseToolRuntime {
 
     private let library: BaseLibraryStore
+    private let cloudClient: BaseCloudAPIClient?
 
     /// 产品入口：根目录为 artifactsDirectory/base。
-    public init(storagePaths: AppStoragePaths) throws {
+    public init(storagePaths: AppStoragePaths, cloudClient: BaseCloudAPIClient? = nil) throws {
+        self.cloudClient = cloudClient
         let root = storagePaths.artifactsDirectory.appendingPathComponent("base", isDirectory: true)
         self.library = try BaseLibraryStore(directory: root)
     }
 
     /// 测试入口：指定根目录。
-    public init(directory: URL) throws {
+    public init(directory: URL, cloudClient: BaseCloudAPIClient? = nil) throws {
+        self.cloudClient = cloudClient
         self.library = try BaseLibraryStore(directory: directory)
+    }
+
+    public func remoteEnvelope(tool: String, arguments: [String:Any]) async -> BaseEnvelope {
+        guard let cloudClient else { return .failure(BaseError(code:.notFound,message:"请先登录并连接云端",hint:"检查账号")) }
+        do {
+            let request = try JSONSerialization.data(withJSONObject: arguments)
+            let data = try await cloudClient.request(tool:tool,arguments:request)
+            return try JSONDecoder().decode(BaseEnvelope.self,from:data)
+        } catch { return .failure(BaseError(code:.internal,message:"云端请求失败",hint:error.localizedDescription)) }
+    }
+    private func remoteUsageGuide(_ id: String) async -> BaseEnvelope {
+        let envelope = await remoteEnvelope(tool:"base.app.get",arguments:["appID":id])
+        guard envelope.ok, case .object(let card) = envelope.data else { return envelope }
+        let guide = card["guide"]
+        let usage: JSONValue?
+        if case .object(let modes) = guide { usage = modes["usage"] ?? guide } else { usage = guide }
+        return BaseEnvelope(ok:true,data:.object(["appID":.string(id),"mode":.string("usage"),"guide":usage ?? .object([:])]),site:"remote")
+    }
+    public func publicationEnvelope(tool: String, appID: String, visibility: String, includeData: Bool) async -> BaseEnvelope {
+        guard isAuthoringMode(appID:appID) else { return .failure(BaseError(code:.permissionDenied,message:"请先进入该应用制作面",hint:"base.guide mode:authoring")) }
+        let status = await remoteEnvelope(tool:"base.sync.status",arguments:["appID":appID])
+        if tool == "base.sync.status" { return status }
+        guard status.ok, case .object(let values) = status.data else { return status }
+        let revision = values["revision"]?.jsonObject ?? 0
+        if tool == "base.unpublish" || visibility == "private" { return await remoteEnvelope(tool:"base.unpublish",arguments:["appID":appID,"expectedRevision":revision]) }
+        do {
+            guard let package = try library.packageDictionary(appID:appID) else { throw BaseError.notFound(appID) }
+            if try library.isGuideOutOfSync(appID:appID) { throw BaseError(code:.guideOutOfSync,message:"指南与包签名不同步",hint:"同批更新指南") }
+            var tables: [String:Any] = [:]
+            if includeData { for table in try library.exportRecords(appID:appID).tables { tables[table.table] = table.rows.map { $0.mapValues(\.jsonObject) } } }
+            return await remoteEnvelope(tool:"base.publish",arguments:["appID":appID,"visibility":visibility,"expectedRevision":revision,"package":package,"data":["tables":tables]])
+        } catch { return .failure(BaseError(code:.validationFailed,message:"发布准备失败",hint:error.localizedDescription)) }
     }
 
     public func close() {
@@ -51,7 +86,8 @@ public actor BaseToolRuntime {
     }
     public func dynamicCatalogTools() -> [any AgentTool] {
         guard authoringAppID != nil else { return [] }
-        return BaseAgentTool.Operation.allCases.filter { !BaseAgentTool.Operation.runtimeCatalog.contains($0) }.map { BaseAgentTool(operation: $0, runtime: self) }
+        let local: [any AgentTool] = BaseAgentTool.Operation.allCases.filter { !BaseAgentTool.Operation.runtimeCatalog.contains($0) }.map { BaseAgentTool(operation: $0, runtime: self) }
+        return local + (cloudClient == nil ? [] : ["base.publish","base.share","base.unpublish","base.sync.status"].map { BaseRemoteTool(name:$0,runtime:self) })
     }
 
     /// 属主判据：本机注册表存在该 App（子库可开）即视为本机属主。
@@ -85,8 +121,16 @@ public actor BaseToolRuntime {
     ///   返回 guide.authoring 态 + 平台制作面前言（契约派生）；
     /// - 带 appID（mode:"usage" 或缺省）→ 退回使用面，返回 guide.usage 态；
     /// - 不带 appID → legacy 平台契约全文或指定章节（保持不变）。
-    public func guideEnvelope(appID: String?, mode: String?, section: String?) -> BaseEnvelope {
+    public func guideEnvelope(appID: String?, mode: String?, section: String?) async -> BaseEnvelope {
+        if let appID, mode != "create", mode != "authoring", !hasLocalApp(appID), cloudClient != nil { return await remoteUsageGuide(appID) }
         do {
+            if mode == "create" {
+                guard let appID, appID.range(of: "^[a-z0-9_-]{1,48}$", options: .regularExpression) != nil, !hasLocalApp(appID) else {
+                    throw BaseError(code: .validationFailed, message: "新应用标识无效或已存在", hint: "使用新的 appID")
+                }
+                enterAuthoring(appID: appID)
+                return .success(data: ["appID": appID, "mode": "create", "preamble": try SDKContractLoader.authoringPreambleText()])
+            }
             if let appID, !appID.isEmpty {
                 if mode == "authoring" {
                     // 属主硬校验：本机无该 App 子库即非属主，制作面不可开（属主身份以本机注册表为准）。
@@ -165,7 +209,8 @@ public actor BaseToolRuntime {
     }
 
     /// base.app.grant：shared 态授权/回收（M4）。授权状态随包 E2EE 同步，新设备免重新授权。
-    public func grantAccessEnvelope(appID: String, peer: String, grant: Bool) -> BaseEnvelope {
+    public func grantAccessEnvelope(appID: String, peer: String, grant: Bool) async -> BaseEnvelope {
+        if cloudClient != nil { return await remoteEnvelope(tool:"base.app.grant",arguments:["appID":appID,"peer":peer,"grant":grant]) }
         do {
             let nextVersion = try library.grantAccess(appID: appID, peer: peer, grant: grant)
             return .success(data: ["appID": appID, "peer": peer, "grant": grant, "packageVersion": nextVersion])
@@ -176,10 +221,23 @@ public actor BaseToolRuntime {
         }
     }
 
-    public func listAppsEnvelope(scope: String?, query: String?) -> BaseEnvelope {
+    public func listAppsEnvelope(scope: String?, query: String?) async -> BaseEnvelope {
         do {
-            let apps = try library.listApps(scope: scope, query: query)
-            return .success(data: ["apps": apps, "count": apps.count])
+            var apps = try library.listApps(scope: scope, query: query)
+            var cloudError: String?
+            var hasMore = false
+            if let cloudClient {
+                do {
+                    let remote = try await cloudClient.listApps(query: query ?? "")
+                    hasMore = remote.hasMore
+                    for item in remote.items where !apps.contains(where: { $0["appID"] as? String == item.appId }) && (scope == nil || scope == "all" || scope == item.visibility) {
+                        apps.append(["appID":item.appId,"name":item.name,"purpose":item.purpose,"visibility":item.visibility,"source":"cloud","methodCount":item.methodCount])
+                    }
+                } catch { cloudError = error.localizedDescription }
+            }
+            var result: [String:Any] = ["apps":apps,"count":apps.count,"hasMore":hasMore,"page":1]
+            if let cloudError { result["cloudError"] = cloudError }
+            return .success(data: result)
         } catch let error as BaseError {
             return .failure(error)
         } catch {
@@ -187,7 +245,8 @@ public actor BaseToolRuntime {
         }
     }
 
-    public func appCardEnvelope(appID: String, includeGuide: Bool) -> BaseEnvelope {
+    public func appCardEnvelope(appID: String, includeGuide: Bool) async -> BaseEnvelope {
+        if (try? library.appExists(appID: appID)) != true, cloudClient != nil { return await remoteEnvelope(tool: "base.app.get", arguments: ["appID":appID]) }
         do {
             guard let card = try library.appCard(appID: appID, includeGuide: includeGuide) else {
                 throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
@@ -463,7 +522,8 @@ public actor BaseToolRuntime {
         try library.isGuideOutOfSync(appID: appID)
     }
 
-    public func methodInvokeEnvelope(appID: String, method: String, input: [String: Any]) -> BaseEnvelope {
+    public func methodInvokeEnvelope(appID: String, method: String, input: [String: Any]) async -> BaseEnvelope {
+        if (try? library.appExists(appID: appID)) != true, cloudClient != nil { return await remoteEnvelope(tool:"base.method.invoke",arguments:["appID":appID,"method":method,"input":input]) }
         // M7：每次 invoke 铸造一个 traceId——贯穿全部 method.step 审计行，并随信封返回。
         let traceId = BaseEnvelope.newTraceID()
         do {
@@ -686,7 +746,7 @@ public struct BaseAgentTool: AgentTool {
         case .guide:
             "base.guide：双态口径。不带 appID → 返回 Connor Base 平台契约全文（或指定章节）；带 appID + mode:\"authoring\" → 属主校验（本机存在该 App）后进入制作面，返回 guide.authoring + 制作面前言（制作面底层工具解锁）；带 appID（mode:\"usage\" 或缺省）→ 退回使用面，返回该 App 的 guide.usage。创建或修改小应用之前必须先读契约。"
         case .appCreate:
-            "base.app.create：创建正式小应用（AppPackage 四件套同批：manifest + schema + guide + methods）。不设工作台/散表/转正中间态——需要表（会重复写入、要按数值时间统计、数字错了有代价）就经用户确认后直接建正式私有小应用（私有态起步、结构可 app.update 演进、日后可切 shared/public）。创建前先读 base.guide 契约。"
+            "base.app.create：创建正式小应用（AppPackage 四件套同批：manifest + schema + guide + methods）。不设工作台/散表/转正中间态——需要表（会重复写入、要按数值时间统计、数字错了有代价）就经用户确认后直接建正式私有小应用（私有态起步、结构可 app.update 演进、日后可切 shared/public）。创建前先读 base.guide 契约，再调用 base.guide(appID:新标识, mode:\"create\") 进入新建会话。"
         case .appDelete:
             "base.app.delete：删除小应用（注册行 + 独立子库文件一并清除，不留数据残壳）。"
         case .appGrant:
@@ -745,7 +805,7 @@ public struct BaseAgentTool: AgentTool {
         case .guide:
             return .closedObject(properties: [
                 "mode": .stringEnumeration(
-                    values: ["usage", "authoring"],
+                    values: ["create", "usage", "authoring"],
                     description: "指南态：usage=使用面指南（缺省）/ authoring=制作面（属主专用，须带 appID；进入后制作面底层工具解锁）"
                 ),
                 "appID": .string(description: "目标 appID（提供时返回该 App 双态指南的对应态，并切换使用/制作面；缺省返回平台契约全文）"),
@@ -1206,3 +1266,17 @@ public extension AgentToolRegistry {
     }
 }
 
+
+public struct BaseRemoteTool: AgentTool {
+    public let name: String
+    public let runtime: BaseToolRuntime
+    public var permission: AgentPermissionCapability { .baseManageApps }
+    public var description: String { "云端发布/撤回/状态。默认仅发布定义；includeData=true 才包含当前数据。服务端版本冲突需刷新后重试。" }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties:["appID":.string(description:"本机属主应用"),"visibility":.stringEnumeration(values:["private","shared","public"],description:"发布范围"),"includeData":.boolean(description:"明确包含当前数据，默认 false")],required:["appID"]) }
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let id = arguments.string("appID") else { throw AgentToolError.invalidArguments("appID required") }
+        let envelope = await runtime.publicationEnvelope(tool:name,appID:id,visibility:name == "base.share" ? "shared" : arguments.string("visibility") ?? "shared",includeData:arguments.bool("includeData") ?? false)
+        let data = try JSONEncoder().encode(envelope)
+        return AgentToolResult(toolCallID:context.toolCallID,toolName:name,contentText:envelope.ok ? "云端操作已确认。" : "云端操作失败。",contentJSON:String(decoding:data,as:UTF8.self))
+    }
+}

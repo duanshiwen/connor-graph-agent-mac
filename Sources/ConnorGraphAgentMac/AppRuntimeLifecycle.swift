@@ -954,6 +954,7 @@ final class AppRuntimeLifecycle {
                 rssRuntime: rssFeatureModel.agentRuntime,
                 cloudKnowledgeConsumptionClient: cloudKnowledgeConsumptionClient,
                 interactiveWebAPIClient: interactiveWebAPIClient,
+                baseCloudAPIClient: BaseCloudAPIClient(baseURL: backendBaseURL, transport: backendTransport, credentials: cloudCredentials),
                 browserAssistedSearchHandler: { [weak self] request in
                     await MainActor.run {
                         guard let self else { return nil }

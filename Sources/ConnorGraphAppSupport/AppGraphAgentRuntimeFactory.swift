@@ -58,6 +58,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var mailRuntime: MailRuntime?
     public var rssRuntime: RSSRuntime?
     public var cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient?
+    public var baseCloudAPIClient: BaseCloudAPIClient?
     public var interactiveWebAPIClient: InteractiveWebAPIClient?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
@@ -82,6 +83,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         rssRuntime: RSSRuntime? = nil,
         cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient? = nil,
         interactiveWebAPIClient: InteractiveWebAPIClient? = nil,
+        baseCloudAPIClient: BaseCloudAPIClient? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
         browserControlHandler: BrowserControlHandler? = nil,
@@ -102,6 +104,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.mailRuntime = mailRuntime
         self.rssRuntime = rssRuntime
         self.cloudKnowledgeConsumptionClient = cloudKnowledgeConsumptionClient
+        self.baseCloudAPIClient = baseCloudAPIClient
         self.interactiveWebAPIClient = interactiveWebAPIClient
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
@@ -339,7 +342,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 accountID: groupID,
                 api: interactiveWebAPIClient
             ))
-            if let baseToolRuntime = try? BaseToolRuntime(storagePaths: storagePaths) {
+            if let baseToolRuntime = try? BaseToolRuntime(storagePaths: storagePaths, cloudClient: baseCloudAPIClient) {
                 registry.registerBaseTools(runtime: baseToolRuntime)
             }
         }

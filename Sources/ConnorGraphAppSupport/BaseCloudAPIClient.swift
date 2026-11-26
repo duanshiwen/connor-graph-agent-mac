@@ -35,24 +35,33 @@ public struct BaseCloudAPIClient: Sendable {
 
     /// 云端小程序详情（功能说明 + 汇总提示）。
     public func appDetail(appID: String) async throws -> BaseCloudAppDetail {
-        try await rpc(tool: "base.app.get", args: ["appID": appID])
+        let detail: BaseCloudAppDetail = try await rpc(tool: "base.app.get", args: ["appID": appID])
+        guard detail.appId == appID else { throw BaseCloudAPIError.invalidResponse }
+        return detail
     }
 
     // MARK: - 请求内核
 
-    private func rpc<T: Decodable>(tool: String, args: [String: Any]) async throws -> T {
-        let url = baseURL.appendingPathComponent("api/v1/base/rpc")
-        var request = URLRequest(url: url)
+    public func request(tool: String, arguments: Data) async throws -> Data {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/v1/base/rpc"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let token = try await credentials.accessToken()
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let body: [String: Any] = ["tool": tool, "args": args]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await transport.data(for: request)
-        guard (try await credentials.accessToken()) == token else { throw BaseCloudAPIError.rpc(code: "ACCOUNT_CHANGED", message: "账号已变化，请刷新小程序目录", hint: nil) }
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw rpcFailure(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["tool": tool, "args": JSONSerialization.jsonObject(with: arguments)])
+        let (data,response) = try await transport.data(for: request)
+        guard (try await credentials.accessToken()) == token else { throw BaseCloudAPIError.rpc(code: "ACCOUNT_CHANGED", message: "账号已变化，请刷新目录", hint: nil) }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw rpcFailure(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data) }
+        guard data.count <= 16_000_000 else { throw BaseCloudAPIError.invalidResponse }
+        return data
+    }
+
+    private func rpc<T: Decodable>(tool: String, args: [String: Any]) async throws -> T {
+        var data = try await request(tool: tool, arguments: JSONSerialization.data(withJSONObject: args))
+        if tool == "base.app.get", var root = try JSONSerialization.jsonObject(with: data) as? [String: Any], var detail = root["data"] as? [String: Any] {
+            for key in ["methods", "capabilities"] where detail[key] is NSNull { detail[key] = [] }
+            root["data"] = detail
+            data = try JSONSerialization.data(withJSONObject: root)
         }
         let envelope: BaseRPCEnvelope<T>
         do {
