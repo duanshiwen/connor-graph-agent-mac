@@ -789,7 +789,7 @@
           },
           "data": {
             "type": "string",
-            "description": "Base64 或密文信封载荷。"
+            "description": "Base64 编码的 AES-GCM 密文信封（SDK algorithm=AES-256-GCM 或账号 _connorE2EE 信封）。须先在客户端加密；不接受原始文件明文的 Base64。"
           }
         },
         "additionalProperties": false
@@ -1422,6 +1422,19 @@
       "minItems",
       "maxItems"
     ],
-    "collections": "empty collections are arrays, never null"
+    "collections": "empty collections are arrays, never null",
+    "reservedTableNames": [
+      "base_pkg_state",
+      "schema_migrations",
+      "base_schema_cache",
+      "base_idempotency",
+      "base_record_seq",
+      "base_audit_log",
+      "base_sync_marker",
+      "android_metadata"
+    ],
+    "reservedTablePrefixes": [
+      "sqlite_"
+    ]
   }
 }

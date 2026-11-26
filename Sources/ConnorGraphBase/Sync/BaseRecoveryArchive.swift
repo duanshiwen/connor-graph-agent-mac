@@ -4,13 +4,16 @@ import Foundation
 public enum BaseRecoveryArchive {
     public static let format = "connor-base-recovery-v1"
     public static func export(library: BaseLibraryStore, appID: String) throws -> Data {
+        return try library.withLocalOperation {
         guard let package = try library.packageDictionary(appID: appID) else { throw BaseError.notFound(appID) }
         let records = try library.exportRecords(appID: appID)
         var tables: [String: Any] = [:]
         for table in records.tables { tables[table.table] = table.rows.map { $0.mapValues { $0.jsonObject } } }
         return try JSONSerialization.data(withJSONObject: ["format": format, "appID": appID, "sourcePackageVersion": records.packageVersion, "package": package, "data": ["tables": tables]], options: [.sortedKeys])
+        }
     }
     public static func restore(_ data: Data, library: BaseLibraryStore) throws -> String {
+        return try library.withLocalOperation {
         guard data.count <= 64_000_000, let archive = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               archive["format"] as? String == format, let id = archive["appID"] as? String,
               let package = archive["package"] as? [String: Any], var manifest = package["manifest"] as? [String: Any],
@@ -35,5 +38,6 @@ public enum BaseRecoveryArchive {
             _ = try library.applyRecordsExport(BaseRecordsExport(appID: id, packageVersion: try library.packageVersion(appID: id), tables: tables))
             return id
         } catch { try? library.deleteApp(appID: id); throw error }
+        }
     }
 }

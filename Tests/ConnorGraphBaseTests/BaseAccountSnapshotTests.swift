@@ -3,6 +3,27 @@ import XCTest
 @testable import ConnorGraphBase
 
 final class BaseAccountSnapshotTests:XCTestCase {
+    func testDefinitionOnlyPublicationDoesNotReadBusinessTables() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString);defer{try? FileManager.default.removeItem(at:root)}
+        let library=try BaseLibraryStore(directory:root);defer{library.close()}
+        _ = try library.createApp(manifest:["appID":"demo","name":"Demo"],schemaObject:["tables":[["name":"entries","fields":[]]]],guide:["authoring":["summary":"make"],"usage":["summary":"use"]])
+        let store=try library.openStore(appID:"demo");try store.executeVoid("DROP TABLE entries");store.close()
+        let payload=try XCTUnwrap(JSONSerialization.jsonObject(with:library.publicationSnapshot(appID:"demo",includeData:false)) as? [String:Any])
+        XCTAssertNil(payload["keys"]);let data=try XCTUnwrap(payload["data"] as? [String:Any]);XCTAssertTrue((data["tables"] as? [String:Any])?.isEmpty == true)
+        XCTAssertThrowsError(try library.publicationSnapshot(appID:"demo",includeData:true))
+    }
+
+    func testImportsTheSnapshotExportedByTheHarmonyAdapter() throws {
+        guard let path = ProcessInfo.processInfo.environment["CONNOR_BASE_INTEROP_FIXTURE"] else {return}
+        let snapshot = try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:path))) as? [String:Any])
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString);defer{try? FileManager.default.removeItem(at:root)}
+        let library = try BaseLibraryStore(directory:root);defer{library.close()}
+        try library.applyAccountSnapshot(snapshot,account:"matrix",expectedFingerprint:nil)
+        let copy = try library.accountSnapshot(appID:"demo")
+        let data = try XCTUnwrap(copy["data"] as? [String:Any]);let tables = try XCTUnwrap(data["tables"] as? [String:Any]);let rows = try XCTUnwrap(tables["entries"] as? [[String:Any]])
+        XCTAssertEqual(rows.count,2);XCTAssertEqual(rows[0]["body"] as? String,"中文😀");XCTAssertEqual(rows[0]["done"] as? Bool,true);XCTAssertTrue(rows[1]["body"] is NSNull);XCTAssertEqual(copy["keys"] as? NSArray,snapshot["keys"] as? NSArray)
+    }
+
     func testApplyPreservesKeysVersionsAndRecordsAndRejectsConcurrentEdits() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer {try? FileManager.default.removeItem(at:root)}

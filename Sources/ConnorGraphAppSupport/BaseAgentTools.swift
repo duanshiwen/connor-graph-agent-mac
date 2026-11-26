@@ -29,11 +29,11 @@ public actor BaseToolRuntime {
         self.library = try BaseLibraryStore(directory: directory)
     }
 
-    public func remoteEnvelope(tool: String, arguments: [String:Any]) async -> BaseEnvelope {
+    public func remoteEnvelope(tool: String, arguments: [String:Any], expectedAccountScope:String? = nil) async -> BaseEnvelope {
         guard let cloudClient else { return .failure(BaseError(code:.notFound,message:"请先登录并连接云端",hint:"检查账号")) }
         do {
             let request = try JSONSerialization.data(withJSONObject: arguments)
-            let data = try await cloudClient.request(tool:tool,arguments:request)
+            let data = try await cloudClient.request(tool:tool,arguments:request,expectedAccountScope:expectedAccountScope)
             return try JSONDecoder().decode(BaseEnvelope.self,from:data)
         } catch { return .failure(BaseError(code:.internal,message:"云端请求失败",hint:error.localizedDescription)) }
     }
@@ -52,23 +52,29 @@ public actor BaseToolRuntime {
     }
     public func methodACLEnvelope(appID: String, acl: [String:Any]) async -> BaseEnvelope {
         guard isAuthoringMode(appID:appID) else { return .failure(BaseError(code:.permissionDenied,message:"请先进入该应用制作面",hint:"base.guide mode:authoring")) }
-        let status=await remoteEnvelope(tool:"base.sync.status",arguments:["appID":appID])
+        let scope:String
+        do {guard let cloudClient else {throw BaseError.notFound("请先登录康纳账号")};scope = try await cloudClient.accountScope()}
+        catch{return .failure(BaseError(code:.permissionDenied,message:"账号不可用",hint:error.localizedDescription))}
+        let status=await remoteEnvelope(tool:"base.sync.status",arguments:["appID":appID],expectedAccountScope:scope)
         guard status.ok,case .object(let values)=status.data else{return status}
-        return await remoteEnvelope(tool:"base.acl.set",arguments:["appID":appID,"methodACL":acl,"expectedRevision":values["revision"]?.jsonObject ?? 0])
+        return await remoteEnvelope(tool:"base.acl.set",arguments:["appID":appID,"methodACL":acl,"expectedRevision":values["revision"]?.jsonObject ?? 0],expectedAccountScope:scope)
     }
     public func publicationEnvelope(tool: String, appID: String, visibility: String, includeData: Bool) async -> BaseEnvelope {
         guard isAuthoringMode(appID:appID) else { return .failure(BaseError(code:.permissionDenied,message:"请先进入该应用制作面",hint:"base.guide mode:authoring")) }
-        let status = await remoteEnvelope(tool:"base.sync.status",arguments:["appID":appID])
+        let scope:String
+        do {guard let cloudClient else {throw BaseError.notFound("请先登录康纳账号")};scope = try await cloudClient.accountScope()}
+        catch{return .failure(BaseError(code:.permissionDenied,message:"账号不可用",hint:error.localizedDescription))}
+        let status = await remoteEnvelope(tool:"base.sync.status",arguments:["appID":appID],expectedAccountScope:scope)
         if tool == "base.sync.status" { return status }
         guard status.ok, case .object(let values) = status.data else { return status }
         let revision = values["revision"]?.jsonObject ?? 0
-        if tool == "base.unpublish" || visibility == "private" { return await remoteEnvelope(tool:"base.unpublish",arguments:["appID":appID,"expectedRevision":revision]) }
+        if tool == "base.unpublish" || visibility == "private" { return await remoteEnvelope(tool:"base.unpublish",arguments:["appID":appID,"expectedRevision":revision],expectedAccountScope:scope) }
         do {
-            guard let package = try library.packageDictionary(appID:appID) else { throw BaseError.notFound(appID) }
-            if try library.isGuideOutOfSync(appID:appID) { throw BaseError(code:.guideOutOfSync,message:"指南与包签名不同步",hint:"同批更新指南") }
-            var tables: [String:Any] = [:]
-            if includeData { for table in try library.exportRecords(appID:appID).tables { tables[table.table] = table.rows.map { $0.mapValues(\.jsonObject) } } }
-            return await remoteEnvelope(tool:"base.publish",arguments:["appID":appID,"visibility":visibility,"expectedRevision":revision,"package":package,"data":["tables":tables]])
+            let payload=try library.publicationSnapshot(appID:appID,includeData:includeData)
+            guard let snapshot=try JSONSerialization.jsonObject(with:payload) as? [String:Any] else {throw BaseError.internal("发布快照无效")}
+            let package=snapshot["package"] ?? [:]
+            let tables=(snapshot["data"] as? [String:Any])?["tables"] ?? [:]
+            return await remoteEnvelope(tool:"base.publish",arguments:["appID":appID,"visibility":visibility,"expectedRevision":revision,"package":package,"data":["tables":tables]],expectedAccountScope:scope)
         } catch { return .failure(BaseError(code:.validationFailed,message:"发布准备失败",hint:error.localizedDescription)) }
     }
 
@@ -257,7 +263,7 @@ public actor BaseToolRuntime {
     }
 
     public func appCardEnvelope(appID: String, includeGuide: Bool) async -> BaseEnvelope {
-        if (try? library.appExists(appID: appID)) != true, cloudClient != nil { return await remoteEnvelope(tool: "base.app.get", arguments: ["appID":appID]) }
+        if (try? library.appExists(appID)) != true, cloudClient != nil { return await remoteEnvelope(tool: "base.app.get", arguments: ["appID":appID]) }
         do {
             guard let card = try library.appCard(appID: appID, includeGuide: includeGuide) else {
                 throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
@@ -273,6 +279,8 @@ public actor BaseToolRuntime {
     // MARK: - 结构
 
     public func tableCreateEnvelope(appID: String, table: [String: Any]) -> BaseEnvelope {
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         do {
             let store = try library.openStore(appID: appID)
             defer { store.close() }
@@ -297,6 +305,8 @@ public actor BaseToolRuntime {
     }
 
     public func tableAlterEnvelope(appID: String, tableName: String, changes: [String: Any]) -> BaseEnvelope {
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         do {
             let store = try library.openStore(appID: appID)
             defer { store.close() }
@@ -339,6 +349,8 @@ public actor BaseToolRuntime {
     // MARK: - 数据读写
 
     public func recordGetEnvelope(appID: String, table: String, id: String) -> BaseEnvelope {
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         do {
             let store = try library.openStore(appID: appID)
             defer { store.close() }
@@ -363,6 +375,8 @@ public actor BaseToolRuntime {
     }
 
     public func querySelectEnvelope(appID: String, table: String, filter: [String: Any]?, sort: [[String: Any]]?, page: [String: Any]?, lookup: [String]?) -> BaseEnvelope {
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         do {
             let store = try library.openStore(appID: appID)
             defer { store.close() }
@@ -378,6 +392,8 @@ public actor BaseToolRuntime {
     }
 
     public func queryAggregateEnvelope(appID: String, table: String, aggregations: [[String: Any]], filter: [String: Any]?, groupBy: [String]?, timeSeries: [String: Any]?) -> BaseEnvelope {
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         do {
             let store = try library.openStore(appID: appID)
             defer { store.close() }
@@ -393,6 +409,8 @@ public actor BaseToolRuntime {
     }
 
     public func recordMutateEnvelope(appID: String, table: String, ops: [[String: Any]], dryRun: Bool, idempotencyKey: String?) -> BaseEnvelope {
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         do {
             let store = try library.openStore(appID: appID)
             defer { store.close() }
@@ -410,6 +428,8 @@ public actor BaseToolRuntime {
     // MARK: - CSV 外部文件通道
 
     public func importCSVEnvelope(appID: String, table: String, rows: [[String: Any]], dryRun: Bool) -> BaseEnvelope {
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         do {
             let store = try library.openStore(appID: appID)
             defer { store.close() }
@@ -434,6 +454,8 @@ public actor BaseToolRuntime {
     }
 
     public func exportCSVEnvelope(appID: String, table: String, filter: [String: Any]?) -> BaseEnvelope {
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         do {
             let store = try library.openStore(appID: appID)
             defer { store.close() }
@@ -463,6 +485,8 @@ public actor BaseToolRuntime {
         guide: [String: Any]?,
         basePackageVersion: Int?
     ) -> BaseEnvelope {
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         do {
             // 签名级变更（schema/methods）必须同批改指南，漂移即拒（v0.12 §6.4）。
             let hasSignatureChange = schema != nil || methods != nil
@@ -507,6 +531,8 @@ public actor BaseToolRuntime {
     }
 
     public func methodDefineEnvelope(appID: String, method: [String: Any], guide: [String: Any]?) -> BaseEnvelope {
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         do {
             let def = try BaseMethodDef(json: method)
             try library.defineMethod(appID: appID, method: method)
@@ -534,7 +560,9 @@ public actor BaseToolRuntime {
     }
 
     public func methodInvokeEnvelope(appID: String, method: String, input: [String: Any]) async -> BaseEnvelope {
-        if (try? library.appExists(appID: appID)) != true, cloudClient != nil { return await remoteEnvelope(tool:"base.method.invoke",arguments:["appID":appID,"method":method,"input":input]) }
+        if (try? library.appExists(appID)) != true, cloudClient != nil { return await remoteEnvelope(tool:"base.method.invoke",arguments:["appID":appID,"method":method,"input":input]) }
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         // M7：每次 invoke 铸造一个 traceId——贯穿全部 method.step 审计行，并随信封返回。
         let traceId = BaseEnvelope.newTraceID()
         do {
@@ -590,6 +618,8 @@ public actor BaseToolRuntime {
     }
 
     public func methodRemoveEnvelope(appID: String, methodName: String, basePackageVersion: Int?) -> BaseEnvelope {
+        let operation = library.beginLocalOperation()
+        defer{operation.finish()}
         do {
             if let baseVersion = basePackageVersion {
                 let current = try library.packageVersion(appID: appID)

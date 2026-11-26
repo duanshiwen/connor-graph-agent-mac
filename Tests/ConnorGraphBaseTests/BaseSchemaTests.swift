@@ -4,6 +4,11 @@ import Foundation
 
 /// M1-K1：schema 模型与校验器（对齐 golden 01–05 的 message/hint）。
 final class BaseSchemaTests: XCTestCase {
+    func testKernelTableNamesCannotBeDeclaredByPackages() throws {
+        for name in ["base_pkg_state", "schema_migrations", "base_schema_cache", "base_idempotency", "base_record_seq", "base_audit_log", "base_sync_marker", "android_metadata", "sqlite_stat1"] {XCTAssertThrowsError(try BaseSchemaValidator.parseTable(["name":name,"fields":[]]))}
+        XCTAssertEqual(try BaseSchemaValidator.parseTable(["name":"base_customer_data","fields":[]]).name,"base_customer_data")
+    }
+
 
     // MARK: 字段类型
 

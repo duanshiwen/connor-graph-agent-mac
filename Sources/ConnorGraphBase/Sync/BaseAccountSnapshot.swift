@@ -1,6 +1,15 @@
 import Foundation
 import CryptoKit
 
+/// A same-thread lease for a synchronous local operation; finish before any suspension point.
+public final class BaseLocalOperationLease {
+    private let lock:NSRecursiveLock
+    private var finished=false
+    init(_ lock:NSRecursiveLock){self.lock=lock;lock.lock()}
+    public func finish(){if !finished{finished=true;lock.unlock()}}
+    deinit{if !finished{lock.unlock()}}
+}
+
 private final class BaseSnapshotLocks: @unchecked Sendable {
     static let shared = BaseSnapshotLocks()
     private let gate = NSLock()
@@ -16,6 +25,10 @@ private final class BaseSnapshotLocks: @unchecked Sendable {
 /// Whole-app account snapshots. The account transport seals these before upload.
 /// An intent and a generation in both SQLite files recover interrupted WAL commits.
 extension BaseLibraryStore {
+    public func beginLocalOperation() -> BaseLocalOperationLease {BaseLocalOperationLease(accountSnapshotLock)}
+    public func withLocalOperation<T>(_ body:() throws -> T) rethrows -> T {
+        accountSnapshotLock.lock();defer{accountSnapshotLock.unlock()};return try body()
+    }
     var accountSnapshotLock: NSRecursiveLock { BaseSnapshotLocks.shared.lock(rootDirectory) }
     private static let snapshotSystemTables: Set<String> = ["base_pkg_state", "schema_migrations", "base_schema_cache", "base_idempotency", "base_record_seq", "base_audit_log", "base_sync_marker"]
     public func ensureAccountSnapshotTables() throws {

@@ -258,7 +258,7 @@ public enum BaseSchemaValidator {
         guard let name = object["name"] as? String else {
             throw ValidationError.invalid(.invalidTableName(""))
         }
-        guard isValidName(name) else {
+        guard isValidName(name), !name.hasPrefix("sqlite_"), !["base_pkg_state","schema_migrations","base_schema_cache","base_idempotency","base_record_seq","base_audit_log","base_sync_marker","android_metadata"].contains(name) else {
             throw ValidationError.invalid(.invalidTableName(name))
         }
         guard let rawFields = object["fields"] as? [[String: Any]] else {

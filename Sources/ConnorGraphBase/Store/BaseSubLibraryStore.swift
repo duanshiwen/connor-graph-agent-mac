@@ -342,7 +342,7 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
             "base_idempotency", "base_record_seq", "base_audit_log", "sqlite_sequence", "base_sync_marker"
         ]
         let rows = try execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name", parameters: [])
-        return rows.compactMap { $0["name"] as? String }.filter { !system.contains($0) }
+        return rows.compactMap { $0["name"] as? String }.filter { !system.contains($0) && !$0.hasPrefix("sqlite_") }
     }
 
     /// 表内行数（M3-K3 空库门禁）。

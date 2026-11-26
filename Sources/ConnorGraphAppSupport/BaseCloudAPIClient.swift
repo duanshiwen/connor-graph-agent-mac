@@ -42,11 +42,13 @@ public struct BaseCloudAPIClient: Sendable {
 
     // MARK: - 请求内核
 
-    public func request(tool: String, arguments: Data) async throws -> Data {
+    public func accountScope() async throws -> String {baseURL.absoluteString+"\u{0}"+(try await credentials.accessToken())}
+    public func request(tool: String, arguments: Data, expectedAccountScope:String? = nil) async throws -> Data {
         var request = URLRequest(url: baseURL.appendingPathComponent("api/v1/base/rpc"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let token = try await credentials.accessToken()
+        if let expectedAccountScope,expectedAccountScope != baseURL.absoluteString+"\u{0}"+token {throw BaseCloudAPIError.rpc(code:"ACCOUNT_CHANGED",message:"账号已变化，请刷新发布状态",hint:nil)}
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["tool": tool, "args": JSONSerialization.jsonObject(with: arguments)])
         let (data,response) = try await transport.data(for: request)
