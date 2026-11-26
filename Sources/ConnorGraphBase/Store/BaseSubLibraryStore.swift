@@ -339,7 +339,7 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
     public func userTableNames() throws -> [String] {
         let system: Set<String> = [
             "base_pkg_state", "schema_migrations", "base_schema_cache",
-            "base_idempotency", "base_record_seq", "base_audit_log", "sqlite_sequence"
+            "base_idempotency", "base_record_seq", "base_audit_log", "sqlite_sequence", "base_sync_marker"
         ]
         let rows = try execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name", parameters: [])
         return rows.compactMap { $0["name"] as? String }.filter { !system.contains($0) }
@@ -427,6 +427,7 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
         guard step == SQLITE_DONE || step == SQLITE_ROW else {
             throw BaseError.internal("SQL 执行失败：\(lastMessage(db))")
         }
+        if sqlite3_changes(db)>0,sqlite3_get_autocommit(db) != 0,BaseLocalChange.isUserWrite(sql) {BaseLocalChange.post()}
         return Int(sqlite3_changes(db))
     }
 
@@ -448,6 +449,7 @@ public final class BaseSubLibraryStore: @unchecked Sendable {
                 throw BaseError.internal("子库事务提交失败：\(lastMessage(db))")
             }
             inTransaction = false
+            BaseLocalChange.post()
             return result
         } catch {
             sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)

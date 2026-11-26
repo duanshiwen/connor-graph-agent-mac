@@ -27,6 +27,8 @@ public final class BaseLibraryStore: @unchecked Sendable {
         try FileManager.default.createDirectory(at: librariesDirectory, withIntermediateDirectories: true)
         try openRegistry()
         try ensureRegistryTables()
+        try ensureAccountSnapshotTables()
+        try recoverAccountSnapshots()
     }
 
     deinit { close() }
@@ -170,6 +172,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
         let pkgSnapshot = try packageSnapshot(appID: appID)
         try ensurePackageVersionTable(appID: appID)
         try writePackageVersion(appID: appID, snapshot: pkgSnapshot, migrations: [])
+        try requestAccountRestore(appID)
         return try appCard(appID: appID) ?? [:]
     }
 
@@ -181,6 +184,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
             throw BaseError(code: .notFound, message: "App 不存在", hint: "appID \(appID)")
         }
         // M3-K7 一体墓碑：捕获被删时 latest 包版本与指纹（版本链表删除前先取）。
+        try recordAccountDeletion(appID)
         let fingerprints = try allPackageVersionFingerprints(appID: appID)
         let latest = fingerprints.keys.max() ?? 1
         try recordTombstone(appID: appID, packageVersion: latest,
@@ -694,6 +698,7 @@ public final class BaseLibraryStore: @unchecked Sendable {
         guard step == SQLITE_DONE || step == SQLITE_ROW else {
             throw BaseError(code: .internal, message: "SQL 执行失败：\(lastMessage(db))", hint: "")
         }
+        if sqlite3_changes(db)>0,sqlite3_get_autocommit(db) != 0,sql.range(of:"^\\s*(?:INSERT(?: OR [A-Z]+)? INTO|UPDATE|DELETE FROM)\\s+base_apps\\b",options:[.regularExpression,.caseInsensitive]) != nil {BaseLocalChange.post()}
         return Int(sqlite3_changes(db))
     }
 
