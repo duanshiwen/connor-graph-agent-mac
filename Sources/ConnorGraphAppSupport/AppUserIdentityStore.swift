@@ -762,6 +762,7 @@ public final class AppUserIdentityStore: ObservableObject {
             // 同步关闭：本机独立提取（不参与后端 L1 租约竞争），始终保有提取资格。
             L1ExtractionEligibility.shared.enableStandalone()
         }
+        AppAccountSyncSignal.observeMiniAppChanges()
         localChangeObserver = NotificationCenter.default.addObserver(
             forName: AppAccountSyncSignal.localDataDidChange,
             object: nil,

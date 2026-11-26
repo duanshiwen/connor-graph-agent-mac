@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphBase
 import CryptoKit
 import ConnorGraphCore
 import ConnorGraphStore
@@ -6,6 +7,13 @@ import ConnorGraphStore
 public enum AppAccountSyncSignal {
     @TaskLocal public static var suppressLocalChange = false
     public static let localDataDidChange = Notification.Name("ConnorAccountSyncLocalDataDidChange")
+    private final class MiniAppObserver: @unchecked Sendable {
+        let token:NSObjectProtocol
+        init(){token = NotificationCenter.default.addObserver(forName:BaseLocalChange.notification,object:nil,queue:nil){_ in AppAccountSyncSignal.postLocalDataDidChange()}}
+    }
+    private static let miniAppObserver = MiniAppObserver()
+    public static func observeMiniAppChanges(){_ = miniAppObserver}
+
     static let projectionGenerationKey = "ConnorAccountSyncProjectionGeneration"
 
     public static func postLocalDataDidChange() {
@@ -393,6 +401,7 @@ public struct AppAccountDataSyncResult: Sendable, Equatable {
     public var appliedGovernanceLabelChangeCount: Int
     public var appliedRSSChangeCount: Int
     public var appliedMailMessageChangeCount: Int
+    public var miniAppsChanged = false
     public var pushedChangeCount: Int
     public var appliedSessionIDs: Set<String>
 
@@ -441,6 +450,7 @@ public actor AppAccountDataSyncCoordinator {
     /// 历史残留也不会再触发 tombstone。
     private func isSyncableRecord(_ collection: String, _ recordId: String) -> Bool {
         switch collection {
+        case "base_apps": return true
         case SyncCollection.sessions, "notes": return true
         case SyncCollection.settings: return recordId == "personality" || recordId == "user_preferences" || recordId == "ai_connections"
         case SyncCollection.governanceLabels: return true
@@ -459,6 +469,7 @@ public actor AppAccountDataSyncCoordinator {
         var cursor: Int64 = 0
         var records: [String: RecordState] = [:]
         var pending: [String: ConnorSyncChange] = [:]
+        var baseParts: [String: Data] = [:]
         var sessionParts: [String: ConnorJSONValue] = [:]
         var receivedSessions: [String: String] = [:]
         var legacyNoteSessions: [String: String] = [:]
@@ -471,12 +482,13 @@ public actor AppAccountDataSyncCoordinator {
         var snapshotAfterID: Int64 = 0
         var snapshotCursor: Int64?
         init() {}
-        private enum CodingKeys: String, CodingKey { case cursor, records, pending, sessionParts, receivedSessions, legacyNoteSessions, dirtyKeys, repairVersion, snapshotAfterID, snapshotCursor, memoryStoreID, memoryRevision, mailStoreID, mailRevision }
+        private enum CodingKeys: String, CodingKey { case baseParts, cursor, records, pending, sessionParts, receivedSessions, legacyNoteSessions, dirtyKeys, repairVersion, snapshotAfterID, snapshotCursor, memoryStoreID, memoryRevision, mailStoreID, mailRevision }
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             cursor = try values.decodeIfPresent(Int64.self, forKey: .cursor) ?? 0
             records = try values.decodeIfPresent([String: RecordState].self, forKey: .records) ?? [:]
             pending = try values.decodeIfPresent([String: ConnorSyncChange].self, forKey: .pending) ?? [:]
+            baseParts = try values.decodeIfPresent([String: Data].self, forKey: .baseParts) ?? [:]
             dirtyKeys = try values.decodeIfPresent(Set<String>.self, forKey: .dirtyKeys) ?? []
             mailStoreID = try values.decodeIfPresent(String.self, forKey: .mailStoreID)
             mailRevision = try values.decodeIfPresent(Int64.self, forKey: .mailRevision)
@@ -499,6 +511,7 @@ public actor AppAccountDataSyncCoordinator {
     private let rss: (any RSSSourceRepository)?
     private let mail: (any MailSourceRepository)?
     private let llm: AppLLMSettingsRepository?
+    private let miniAppDirectory: URL
     private let identity: AppUserIdentityStore
     private let onReceived: (@Sendable (AppAccountDataSyncResult) async -> Void)?
     private let defaults: UserDefaults
@@ -506,19 +519,20 @@ public actor AppAccountDataSyncCoordinator {
     private let decoder: JSONDecoder
     private var cachedCheckpoint: (key: String, data: Data, state: PersistedState)?
 
-    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, governance: AppSessionGovernanceConfigRepository? = nil, memory: SQLiteMemoryOSStore?, skillStore: SkillSyncStore? = nil, rss: (any RSSSourceRepository)? = nil, mail: (any MailSourceRepository)? = nil, llm: AppLLMSettingsRepository? = nil, identity: AppUserIdentityStore, defaults: UserDefaults = .standard, onReceived: (@Sendable (AppAccountDataSyncResult) async -> Void)? = nil) {
+    public init(sessions: AppChatSessionRepository, settings: AppRuntimeSettingsRepository, governance: AppSessionGovernanceConfigRepository? = nil, memory: SQLiteMemoryOSStore?, skillStore: SkillSyncStore? = nil, rss: (any RSSSourceRepository)? = nil, mail: (any MailSourceRepository)? = nil, llm: AppLLMSettingsRepository? = nil, identity: AppUserIdentityStore, miniAppDirectory: URL? = nil, defaults: UserDefaults = .standard, onReceived: (@Sendable (AppAccountDataSyncResult) async -> Void)? = nil) {
+        self.miniAppDirectory = miniAppDirectory ?? settings.configDirectory.deletingLastPathComponent().appendingPathComponent("artifacts/base",isDirectory:true)
         self.sessions = sessions; self.settings = settings; self.governance = governance; self.memory = memory; self.skillStore = skillStore; self.rss = rss; self.mail = mail; self.llm = llm; self.identity = identity; self.defaults = defaults; self.onReceived = onReceived
         encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
         decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
     }
 
-    private func consume(_ changes: [ConnorSyncChange], snapshot: Bool = false, cipher: AccountSyncPayloadCipher, deviceID: String, state: inout PersistedState, syncResult: inout AppAccountDataSyncResult, appliedKeys: inout [String], capturedLocalChanges: inout Bool) async throws {
+    private func consume(_ changes: [ConnorSyncChange], snapshot: Bool = false, cipher: AccountSyncPayloadCipher, account: String, deviceID: String, state: inout PersistedState, syncResult: inout AppAccountDataSyncResult, appliedKeys: inout [String], capturedLocalChanges: inout Bool) async throws {
         try Task.checkCancellation()
         // Keep local dirty records dirty across pull and process restarts.
         if !capturedLocalChanges, !changes.isEmpty {
             do {
                 let mailSnapshot = try await prepareMailSnapshot(state: state)
-                for (key, payload) in try await projections(memorySnapshot: memory?.accountSyncSnapshot(storeID: state.memoryStoreID, after: state.memoryRevision), mailSnapshot: mailSnapshot) where state.records[key]?.hash != (try payloadHash(payload)) { state.dirtyKeys.insert(key) }
+                for (key, payload) in try await projections(memorySnapshot: memory?.accountSyncSnapshot(storeID: state.memoryStoreID, after: state.memoryRevision), mailSnapshot: mailSnapshot, baseAccount: account) where state.records[key]?.hash != (try payloadHash(payload)) { state.dirtyKeys.insert(key) }
             } catch {
                 try Task.checkCancellation()
                 AppPerformanceLog.chatTurnLogger.warning("Local sync projection failed; receiving continues")
@@ -553,11 +567,50 @@ public actor AppAccountDataSyncCoordinator {
                     continue
                 }
             }
-            let tombstoneCollections: Set<String> = ["sessions", "notes", "skills", "memory_l0", "memory_l0_spans", "memory_l1", "memory_l2", "memory_l2_nodes", "memory_l3", "memory_l4_entities", "memory_l4_relations", "governance_labels", "rss_subscriptions"]
+            let tombstoneCollections: Set<String> = ["base_apps", "sessions", "notes", "skills", "memory_l0", "memory_l0_spans", "memory_l1", "memory_l2", "memory_l2_nodes", "memory_l3", "memory_l4_entities", "memory_l4_relations", "governance_labels", "rss_subscriptions"]
             guard !change.deleted || tombstoneCollections.contains(change.collection) else { continue }
             do {
                 var clear = try decrypted(change, using: cipher)
                 let transport = clear.change.payload
+                if change.collection == "base_apps" {
+                    guard let active = await identity.currentUser, String(active.id) == account else { throw CancellationError() }
+                    if change.deleted && BaseAccountTransport.isPartID(change.recordId) {
+                        state.baseParts.removeValue(forKey:change.recordId)
+                        state.records[key] = RecordState(version:change.version ?? 0,hash:"",deleted:true,encrypted:clear.encrypted)
+                        state.pending.removeValue(forKey:key);state.dirtyKeys.remove(key);continue
+                    }
+                    if !change.deleted {
+                        guard let complete = try BaseAccountTransport.resolve(id:change.recordId,payload:encoder.encode(transport),cache:&state.baseParts) else {
+                            state.records[key] = RecordState(version:change.version ?? 0,hash:try payloadHash(transport),deleted:false,encrypted:clear.encrypted)
+                            state.pending.removeValue(forKey:key);state.dirtyKeys.remove(key);continue
+                        }
+                        clear.change.payload = try decoder.decode(ConnorJSONValue.self,from:complete)
+                    }
+                    let apps = try BaseLibraryStore(directory:miniAppDirectory);defer{apps.close()}
+                    if change.deleted,try apps.appExists(change.recordId),try apps.isAccountRestore(change.recordId,account:account) {
+                        state.records[key] = RecordState(version:change.version ?? 0,hash:"",deleted:true,encrypted:clear.encrypted)
+                        state.pending.removeValue(forKey:key);state.dirtyKeys.insert(key);continue
+                    }
+                    if snapshot || change.sourceDeviceId != deviceID {
+                        var expected:String? = nil
+                        if try apps.appExists(change.recordId) {
+                            expected = try BaseLibraryStore.snapshotFingerprint(apps.accountSnapshot(appID:change.recordId))
+                            if state.dirtyKeys.contains(key) {
+                                let remote = try JSONSerialization.jsonObject(with:encoder.encode(clear.change.payload)) as? [String:Any]
+                                guard !change.deleted,let remote,try BaseLibraryStore.snapshotFingerprint(remote) == expected else {throw BaseError.internal("本机与云端小程序均有修改，已保留冲突版本")}
+                            }
+                        }
+                        let value = change.deleted ? ["format":"connor-base-sync-v1","appID":change.recordId,"deleted":true] as [String:Any] : try JSONSerialization.jsonObject(with:encoder.encode(clear.change.payload)) as! [String:Any]
+                        try AppAccountSyncSignal.$suppressLocalChange.withValue(true){try apps.applyAccountSnapshot(value,account:account,expectedFingerprint:expected)}
+                        state.dirtyKeys.remove(key)
+                        syncResult.miniAppsChanged = true
+                    }
+                    state.records[key] = RecordState(version:change.version ?? 0,hash:"",deleted:change.deleted,encrypted:clear.encrypted)
+                    state.pending.removeValue(forKey:key);appliedKeys.append(key)
+                    for id in try BaseAccountTransport.partIDs(encoder.encode(transport)) {state.baseParts.removeValue(forKey:id)}
+                    continue
+                }
+
                 if (change.collection == "sessions" || change.collection == "mail_messages"), !change.deleted {
                     guard let resolved = try SessionChunks.resolve(id: change.recordId, payload: transport, parts: &state.sessionParts, mail: change.collection == "mail_messages") else {
                         state.records[key] = RecordState(version: change.version ?? 0, hash: try payloadHash(transport), deleted: false, encrypted: clear.encrypted)
@@ -593,7 +646,9 @@ public actor AppAccountDataSyncCoordinator {
                 state.pending.removeValue(forKey: key)
                 appliedKeys.append(key)
             } catch {
+                if error is CancellationError {throw error}
                 try Task.checkCancellation()
+                if case .missingParts? = error as? BaseAccountTransport.Failure {state.repairVersion = 0;state.snapshotAfterID = 0;state.snapshotCursor = nil}
                 if case .incomplete? = error as? SessionChunks.Failure, !snapshot,
                    state.pending[key]?.version != change.version {
                     state.repairVersion = 0
@@ -606,7 +661,69 @@ public actor AppAccountDataSyncCoordinator {
         }
     }
 
+
+    public func miniAppConflicts() async throws -> [BaseAccountConflict] {
+        await AccountSyncPassGate.shared.acquire();defer{Task{await AccountSyncPassGate.shared.release()}}
+        guard let user = await identity.currentUser else {return []}
+        let account = String(user.id)
+        let state = loadState(key:"ConnorAccountSyncState.\(account)")
+        defer{cachedCheckpoint = nil}
+        let apps = try BaseLibraryStore(directory:miniAppDirectory);defer{apps.close()}
+        return try state.pending.values.filter{$0.collection == "base_apps" && !BaseAccountTransport.isPartID($0.recordId)}.map{change in
+            BaseAccountConflict(accountID:account,appID:change.recordId,remoteVersion:change.version ?? 0,remoteDeleted:change.deleted,localFingerprint:try apps.appExists(change.recordId) ? BaseLibraryStore.snapshotFingerprint(apps.accountSnapshot(appID:change.recordId)) : nil)
+        }
+    }
+    @discardableResult public func resolveMiniAppConflict(_ reviewed:BaseAccountConflict,keepLocal:Bool) async throws -> URL {
+        await AccountSyncPassGate.shared.acquire();defer{Task{await AccountSyncPassGate.shared.release()}}
+        guard let user = await identity.currentUser,String(user.id) == reviewed.accountID else {throw BaseError.internal("账号已变化，请刷新冲突列表")}
+        let account = reviewed.accountID
+        let cipher = try await AccountSyncPayloadCipher(keyData:identity.accountSyncKey(userID:account))
+        guard let active = await identity.currentUser,String(active.id) == account else {throw CancellationError()}
+        let stateKey = "ConnorAccountSyncState.\(account)"
+        var state = loadState(key:stateKey);defer{cachedCheckpoint = nil}
+        let key = recordKey("base_apps",reviewed.appID)
+        guard let remote = state.pending[key],(remote.version ?? 0) == reviewed.remoteVersion else {throw BaseError.internal("云端版本已变化，请刷新后重新选择")}
+        let apps = try BaseLibraryStore(directory:miniAppDirectory);defer{apps.close()}
+        let local = try apps.appExists(reviewed.appID) ? apps.accountSnapshot(appID:reviewed.appID) : nil
+        let fingerprint = try local.map{try BaseLibraryStore.snapshotFingerprint($0)}
+        guard fingerprint == reviewed.localFingerprint else {throw BaseError.internal("本机内容已变化，请刷新后重新选择")}
+        if keepLocal && local == nil {throw BaseError.internal("本机没有可保留的版本，请采用云端版本")}
+        let clear = try cipher.decrypt(remote.payload,collection:"base_apps",recordID:reviewed.appID).payload
+        let snapshot:[String:Any]
+        if remote.deleted {snapshot = ["format":"connor-base-sync-v1","appID":reviewed.appID,"deleted":true]}
+        else {
+            guard let bytes = try BaseAccountTransport.resolve(id:reviewed.appID,payload:encoder.encode(clear),cache:&state.baseParts),let value = try JSONSerialization.jsonObject(with:bytes) as? [String:Any] else {throw BaseError.internal("同步包尚未完整，请先重新同步")}
+            snapshot = value
+        }
+        let archive = try JSONSerialization.data(withJSONObject:["local":local.map{$0 as Any} ?? NSNull(),"remote":snapshot,"remoteVersion":reviewed.remoteVersion],options:[.sortedKeys])
+        let sealed = try cipher.encrypt(decoder.decode(ConnorJSONValue.self,from:archive),collection:"base_apps",recordID:reviewed.appID)
+        let folder = settings.configDirectory.appendingPathComponent("base-sync-conflicts/\(account)",isDirectory:true)
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        let url = folder.appendingPathComponent("\(reviewed.appID)-\(UUID().uuidString).json")
+        let envelope:ConnorJSONValue = .object(["collection":.string("base_apps"),"recordID":.string(reviewed.appID),"payload":sealed])
+        try encoder.encode(envelope).write(to:url,options:.atomic)
+        if keepLocal {
+            if remote.deleted {try apps.requestAccountRestore(reviewed.appID,account:account)}
+            state.dirtyKeys.insert(key)
+        }else {
+            try AppAccountSyncSignal.$suppressLocalChange.withValue(true){try apps.applyAccountSnapshot(snapshot,account:account,expectedFingerprint:fingerprint)}
+            state.dirtyKeys.remove(key)
+        }
+        var baseline = ""
+        if !keepLocal && !remote.deleted {
+            let data = try JSONSerialization.data(withJSONObject:apps.accountSnapshot(appID:reviewed.appID),options:[.sortedKeys,.withoutEscapingSlashes])
+            let root = try BaseAccountTransport.project(appID:reviewed.appID,snapshot:data)[reviewed.appID]!
+            baseline = try payloadHash(decoder.decode(ConnorJSONValue.self,from:root))
+        }
+        state.records[key] = RecordState(version:reviewed.remoteVersion,hash:baseline,deleted:remote.deleted,encrypted:true)
+        state.pending.removeValue(forKey:key)
+        saveState(state,key:stateKey)
+        AppAccountSyncSignal.postLocalDataDidChange()
+        return url
+    }
+
     public func reconcile() async throws -> AppAccountDataSyncResult {
+        await AccountSyncPassGate.shared.acquire();defer{Task{await AccountSyncPassGate.shared.release()}}
         try Task.checkCancellation()
         guard let userID = await identity.currentUser?.id else { return AppAccountDataSyncResult() }
         let cipher = try await AccountSyncPayloadCipher(keyData: identity.accountSyncKey(userID: String(userID)))
@@ -628,18 +745,18 @@ public actor AppAccountDataSyncCoordinator {
 
         // One upgrade repair reads current records, not hundreds of thousands of
         // obsolete log entries. Persist the page position to resume after a restart.
-        if state.repairVersion < 4 {
+        if state.repairVersion < 5 {
             do {
                 repeat {
                     let page = try await identity.syncSnapshot(afterID: state.snapshotAfterID)
                     if state.snapshotCursor == nil { state.snapshotCursor = page.cursor }
-                    try await consume(page.changes, snapshot: true, cipher: cipher, deviceID: deviceID, state: &state, syncResult: &syncResult, appliedKeys: &appliedKeys, capturedLocalChanges: &capturedLocalChanges)
+                    try await consume(page.changes, snapshot: true, cipher: cipher, account: String(userID), deviceID: deviceID, state: &state, syncResult: &syncResult, appliedKeys: &appliedKeys, capturedLocalChanges: &capturedLocalChanges)
                     guard !page.hasMore || page.nextRecordId > state.snapshotAfterID else { throw ConnorBackendAPIError.invalidResponse }
                     state.snapshotAfterID = page.nextRecordId
                     hasMore = page.hasMore
                     if !hasMore {
                         state.cursor = max(state.cursor, state.snapshotCursor ?? 0)
-                        state.repairVersion = 4
+                        state.repairVersion = 5
                         state.snapshotAfterID = 0
                         didRepair = true
                         state.snapshotCursor = nil
@@ -654,12 +771,12 @@ public actor AppAccountDataSyncCoordinator {
 
         repeat {
             let page = try await identity.pullSyncChanges(cursor: state.cursor)
-            try await consume(page.changes, cipher: cipher, deviceID: deviceID, state: &state, syncResult: &syncResult, appliedKeys: &appliedKeys, capturedLocalChanges: &capturedLocalChanges)
+            try await consume(page.changes, cipher: cipher, account: String(userID), deviceID: deviceID, state: &state, syncResult: &syncResult, appliedKeys: &appliedKeys, capturedLocalChanges: &capturedLocalChanges)
             guard page.nextCursor >= state.cursor, !page.hasMore || page.nextCursor > state.cursor else { throw ConnorBackendAPIError.invalidResponse }
             state.cursor = page.nextCursor; hasMore = page.hasMore
             saveState(state, key: stateKey)
         } while hasMore
-        try await consume(Array(state.pending.values), cipher: cipher, deviceID: deviceID, state: &state, syncResult: &syncResult, appliedKeys: &appliedKeys, capturedLocalChanges: &capturedLocalChanges)
+        try await consume(Array(state.pending.values), cipher: cipher, account: String(userID), deviceID: deviceID, state: &state, syncResult: &syncResult, appliedKeys: &appliedKeys, capturedLocalChanges: &capturedLocalChanges)
         saveState(state, key: stateKey)
 
         if !appliedKeys.isEmpty { await onReceived?(syncResult) }
@@ -683,7 +800,10 @@ public actor AppAccountDataSyncCoordinator {
             return syncResult
         }
 
-        let projected = try await projections(memorySnapshot: memorySnapshot, mailSnapshot: mailSnapshot)
+        let projected = try await projections(memorySnapshot: memorySnapshot, mailSnapshot: mailSnapshot, baseAccount: String(userID))
+        state.dirtyKeys = state.dirtyKeys.filter{key in
+            !key.hasPrefix("base_apps|") || !BaseAccountTransport.isPartID(String(key.dropFirst(10))) || projected[key] != nil
+        }
         // Cache only within this snapshot. Incoming or concurrent local writes must
         // still be compared against fresh projections on the next pass.
         var projectedHashes: [String: String] = [:]
@@ -707,6 +827,8 @@ public actor AppAccountDataSyncCoordinator {
         let pendingSessionDeleteKeys = Set(deletedSessions.map { recordKey(SyncCollection.sessions, $0.id) })
         for (key, payload) in projected {
             guard state.pending[key] == nil else { continue }
+            if key.hasPrefix("base_apps|"),case .object(let root) = payload,case .object(let part) = root["_connorBaseChunk"],case .string(let parent) = part["appID"],let projectedRoot = projected[recordKey("base_apps",parent)],let known = state.records[recordKey("base_apps",parent)],known.encrypted,!known.deleted,known.hash == (try payloadHash(projectedRoot)) {state.dirtyKeys.remove(key);continue}
+
             if key.hasPrefix("mail_messages|"), let parent = SessionChunks.parent(payload), let root = projected[recordKey("mail_messages", parent)], let tag = SessionChunks.tag(root), state.records[recordKey("mail_messages", parent)]?.hash == tag { continue }
             if let parent = SessionChunks.parent(payload), let root = projected[recordKey("sessions", parent)],
                let tag = SessionChunks.tag(root), state.receivedSessions[parent] == tag, state.records[recordKey("sessions", parent)]?.hash == tag { continue }
@@ -726,7 +848,7 @@ public actor AppAccountDataSyncCoordinator {
                 deferredUploadCount += 1
                 continue
             }
-            mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: encrypted, restore: parts[0] == SyncCollection.sessions && state.records[key]?.deleted == true))
+            mutations.append(try ConnorSyncChange(collection: parts[0], recordId: parts[1], baseVersion: state.records[key]?.version ?? 0, payload: encrypted, restore: (parts[0] == SyncCollection.sessions && state.records[key]?.deleted == true) || (parts[0] == "base_apps" && (try BaseLibraryStore(directory:miniAppDirectory).isAccountRestore(parts[1],account:String(userID))))))
         }
         // 技能包、L0/L1/标签按“最新操作优先”：本地已删除且此前同步过的记录回推 tombstone（载荷带删除时间）。
         // 集合级防护：本机该集合投影完全为空时不回推 tombstone——空列表更可能是本地数据
@@ -772,7 +894,15 @@ public actor AppAccountDataSyncCoordinator {
         // RSS 订阅源：只对“本机显式删除”（用户在 RSS 列表里删除）回推 tombstone，
         // 删除时间取标记时间而不是当前时间。本地列表被清空/文件丢失时不产生标记，
         // 因此不会把“我这边空了”当成“全都删了”传播到其它设备。
-        var rssTombstoneKeys: [String: RSSSourceID] = [:]
+
+        let baseApps = try BaseLibraryStore(directory:miniAppDirectory);defer{baseApps.close()}
+        for (id,deletedAt) in try baseApps.pendingAccountDeletions(String(userID)) {
+            let key = recordKey("base_apps",id)
+            guard state.pending[key] == nil else {continue}
+            if state.records[key]?.deleted == true {try baseApps.acknowledgeAccountIntent(id,account:String(userID));continue}
+            mutations.append(try ConnorSyncChange(collection:"base_apps",recordId:id,baseVersion:state.records[key]?.version ?? 0,payload:cipher.encrypt(jsonValue(SyncTombstone(updatedAt:deletedAt)),collection:"base_apps",recordID:id),deleted:true))
+        }
+var rssTombstoneKeys: [String: RSSSourceID] = [:]
         if let rss {
             for (sourceID, deletedAt) in try await rss.pendingDeletes() {
                 let key = recordKey(SyncCollection.rssSubscriptions, sourceID.rawValue)
@@ -808,7 +938,7 @@ public actor AppAccountDataSyncCoordinator {
         var batches: [[ConnorSyncChange]] = []; var batch: [ConnorSyncChange] = []; var batchBytes = 0
         let sortedMutations = mutations.filter { mutation in
             guard let payload = projected[recordKey(mutation.collection, mutation.recordId)] else { return false }
-            return SessionChunks.parent(payload) != nil
+            return mutation.collection == "base_apps" && BaseAccountTransport.isPartID(mutation.recordId) || SessionChunks.parent(payload) != nil
         }
         let partIDs = Set(sortedMutations.map(\.mutationId))
         for mutation in sortedMutations + mutations.filter({ !partIDs.contains($0.mutationId) }) {
@@ -822,6 +952,14 @@ public actor AppAccountDataSyncCoordinator {
             var batch: [ConnorSyncChange] = []
             for mutation in proposed {
                 let key = recordKey(mutation.collection, mutation.recordId)
+                if mutation.collection == "base_apps",!mutation.deleted,let root = projected[key] {
+                    var missing = false
+                    for id in try BaseAccountTransport.partIDs(encoder.encode(root)) {
+                        let partKey = recordKey("base_apps",id)
+                        guard let part = projected[partKey],let known = state.records[partKey],known.encrypted,!known.deleted,known.hash == (try payloadHash(part)) else {missing = true;break}
+                    }
+                    if missing {state.dirtyKeys.insert(key);deferredUploadCount += 1;continue}
+                }
                 if !mutation.deleted, let payload = projected[key],
                    mutation.collection == SyncCollection.mailMessages, case .object(let root) = payload,
                    case .object(let manifest) = root[SessionChunks.manifestKey],
@@ -846,12 +984,14 @@ public actor AppAccountDataSyncCoordinator {
                 batch.append(mutation)
             }
             guard !batch.isEmpty else { continue }
+            guard let active = await identity.currentUser,String(active.id) == String(userID) else {throw CancellationError()}
             let results = try await identity.pushSyncChanges(batch)
+            guard let activeAfter = await identity.currentUser,String(activeAfter.id) == String(userID) else {throw CancellationError()}
             for mutation in batch {
                 guard let pushResult = results.first(where: { $0.mutationId == mutation.mutationId }), pushResult.applied else {
                     state.dirtyKeys.insert(recordKey(mutation.collection, mutation.recordId))
                     deferredUploadCount += 1
-                    if mutation.collection == SyncCollection.sessions || mutation.collection == SyncCollection.mailMessages,
+                    if mutation.collection == SyncCollection.sessions || mutation.collection == SyncCollection.mailMessages || mutation.collection == "base_apps",
                        results.contains(where: { $0.mutationId == mutation.mutationId && $0.version != nil }) {
                         state.repairVersion = 0
                         state.snapshotAfterID = 0
@@ -863,6 +1003,7 @@ public actor AppAccountDataSyncCoordinator {
                 let key = recordKey(mutation.collection, mutation.recordId)
                 state.records[key] = RecordState(version: pushResult.version ?? (mutation.baseVersion ?? 0) + 1, hash: try projectedHashes[key] ?? payloadHash(clear.payload), deleted: mutation.deleted, encrypted: true)
                 state.dirtyKeys.remove(key)
+                if mutation.collection == "base_apps",!BaseAccountTransport.isPartID(mutation.recordId) {try baseApps.acknowledgeAccountIntent(mutation.recordId,account:String(userID))}
                 if mutation.deleted {
                     try AccountSyncLocalDeletions(directory: settings.configDirectory).clear(key)
                 }
@@ -907,8 +1048,15 @@ public actor AppAccountDataSyncCoordinator {
         return try sharedMail.syncSnapshot(storeID: state.mailStoreID, after: state.mailRevision)
     }
 
-    private func projections(memorySnapshot: SQLiteMemoryOSStore.AccountSyncSnapshot?, mailSnapshot: MailSyncSnapshot) async throws -> [String: ConnorJSONValue] {
+    private func projections(memorySnapshot: SQLiteMemoryOSStore.AccountSyncSnapshot?, mailSnapshot: MailSyncSnapshot, baseAccount: String) async throws -> [String: ConnorJSONValue] {
         var values: [String: ConnorJSONValue] = [:]
+        let apps = try BaseLibraryStore(directory:miniAppDirectory);defer{apps.close()}
+        for (appID,snapshot) in try apps.accountSnapshots(account:baseAccount) {
+            for (id,data) in try BaseAccountTransport.project(appID:appID,snapshot:JSONSerialization.data(withJSONObject:snapshot,options:[.sortedKeys,.withoutEscapingSlashes])) {
+                values[recordKey("base_apps",id)] = try decoder.decode(ConnorJSONValue.self,from:data)
+            }
+        }
+
         for session in try sessions.loadSessions(filter: .all) {
             for (id, payload) in try SessionChunks.project(id: session.id, payload: jsonValue(ConnorPortableSession(session))) {
                 values[recordKey("sessions", id)] = payload
