@@ -194,19 +194,19 @@ struct AgentChatComposerView: View {
                     modelSelectionMenu
                         .layoutPriority(2)
 
-                    if composerState.isSubmitting {
-                        Button("打断") { submitLocalChatInput(steer: true) }.frame(minWidth: 36, minHeight: 36).disabled(!canSubmitLocalChat || isAcceptingInstruction)
-                        Button { sendComposerAction(.cancelActiveRun) } label: { Image(systemName: "stop.fill") }
-                            .frame(minWidth: 36, minHeight: 36)
-                            .accessibilityLabel("停止任务并暂停队列")
-                    }
                     AgentSendControlButton(
-                        isSubmitting: false,
-                        isDisabled: !canSubmitLocalChat || isAcceptingInstruction,
+                        isSubmitting: composerState.isSubmitting && !canSubmitLocalChat,
+                        isDisabled: (!composerState.isSubmitting && !canSubmitLocalChat) || isAcceptingInstruction,
                         action: {
-                            submitLocalChatInput()
+                            if composerState.isSubmitting && !canSubmitLocalChat {
+                                sendComposerAction(.cancelActiveRun)
+                            } else {
+                                submitLocalChatInput()
+                            }
                         }
                     )
+                    .accessibilityLabel(composerState.isSubmitting && !canSubmitLocalChat
+                        ? "停止生成" : composerState.isSubmitting ? "发送并调整当前任务" : "发送")
                     .fixedSize()
                     .layoutPriority(3)
                 }
@@ -645,7 +645,7 @@ struct AgentChatComposerView: View {
         }
     }
 
-    private func submitLocalChatInput() { submitLocalChatInput(steer: false) }
+    private func submitLocalChatInput() { submitLocalChatInput(steer: composerState.isSubmitting) }
     private func submitLocalChatInput(steer: Bool) {
         let prompt = localChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = localChatInput
